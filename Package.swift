@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "HerdrDesk",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("15.0")],
     products: [
         .library(name: "HerdrKit", targets: ["HerdrKit"]),
         .executable(name: "HerdrDesk", targets: ["HerdrDesk"]),
