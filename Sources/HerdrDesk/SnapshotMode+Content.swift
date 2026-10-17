@@ -519,10 +519,12 @@ import SwiftUI
     }
 
     /// Scrolling screens under the toolbar (dense preview, short window so each one scrolls): layout only. At the top the
-    /// content starts below the toolbar; it scrolls; the system soft scroll edge is set on its scroll area (pocket views:
-    /// soft mask shown, hard pocket hidden). Under the toolbar the content fades by the system soft edge alone, and a
-    /// window-server capture of this offscreen window does not render that edge (scrolled pictures show text under the
-    /// island; .hard does render), so the band's ink is printed for information, not checked. Real window: owner to check.
+    /// content starts below the toolbar (the window's own toolbar band: 52 pt on 26, 38 pt on 15); it scrolls.
+    /// 26: the system soft scroll edge is set on its scroll area (pocket views: soft mask shown, hard pocket hidden). The
+    /// content fades by that edge alone, and a window-server capture of this offscreen window does not render it
+    /// (scrolled pictures show text under the island; .hard does render), so the band's ink is printed for information,
+    /// not checked. Real window: owner to check. Before 26 (no soft edge): the window surface covers the band, so
+    /// scrolled content adds no ink there.
     static func scrollTop() async {
         var failures = 0
         func step(_ n: String, _ ok: Bool) { if !ok { failures += 1 }; print("scrolltop-test: \(n) \(ok ? "ok" : "FAIL")") }
@@ -545,7 +547,9 @@ import SwiftUI
                 step("\(name): scroll area found", false); continue
             }
             let inset = s.contentInsets.top, r = top(s)
-            step("\(name): content starts below the toolbar (inset \(Int(inset)), origin \(Int(s.contentView.bounds.minY)))", inset >= 44 && s.contentView.bounds.minY <= -inset + 0.5)
+            let band = win.frame.height - win.contentLayoutRect.height   // title bar and toolbar, above the layout rect
+            step("\(name): content starts below the toolbar (inset \(Int(inset)), origin \(Int(s.contentView.bounds.minY)), toolbar \(Int(band)))",
+                 band >= 30 && inset >= band - 0.5 && s.contentView.bounds.minY <= -inset + 0.5)
             let a = "\(dir)/scrolltop-\(name)-top.png", b = "\(dir)/scrolltop-\(name)-scrolled.png"
             capture(win, to: a)
             let maxY = (s.documentView?.frame.height ?? 0) + s.contentInsets.bottom - s.contentView.bounds.height
@@ -567,14 +571,20 @@ import SwiftUI
                 }
                 return n
             }
-            let atTop = ink(a, 4, 40), scrolled = ink(b, 4, 40), below = ink(b, inset + 8, inset + 60)
-            print("scrolltop-test: \(name): toolbar band ink, scrolled vs top: \(scrolled) vs \(atTop) px (information: captures do not render the soft edge)")
+            let atTop = ink(a, 4, inset), scrolled = ink(b, 4, inset), below = ink(b, inset + 8, inset + 60)
+            if LegacyLook.on {
+                step("\(name): no text in the toolbar band when scrolled (ink scrolled vs top: \(scrolled) vs \(atTop) px)", scrolled <= atTop + atTop / 50 + 20)
+            } else {
+                print("scrolltop-test: \(name): toolbar band ink, scrolled vs top: \(scrolled) vs \(atTop) px (information: captures do not render the soft edge)")
+            }
             step("\(name): content below the toolbar is drawn (\(below) ink px)", below > 500)
             func views(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(views) }
             let pocket = views(s).filter { String(describing: type(of: $0)).contains("Pocket") }
             func shown(_ n: String) -> Bool? { pocket.first { String(describing: type(of: $0)) == n }.map { !$0.isHidden } }
-            step("\(name): system soft edge active (soft mask shown \(shown("PocketMask").map(String.init) ?? "none"), hard pocket shown \(shown("NSHardPocketView").map(String.init) ?? "none"))",
-                 shown("PocketMask") == true && shown("NSHardPocketView") != true)
+            if !LegacyLook.on {
+                step("\(name): system soft edge active (soft mask shown \(shown("PocketMask").map(String.init) ?? "none"), hard pocket shown \(shown("NSHardPocketView").map(String.init) ?? "none"))",
+                     shown("PocketMask") == true && shown("NSHardPocketView") != true)
+            }
         }
         print("scrolltop-test: pictures \(dir)/scrolltop-*.png")
         print("scrolltop-test: \(failures == 0 ? "PASS" : "FAIL x\(failures)")")
