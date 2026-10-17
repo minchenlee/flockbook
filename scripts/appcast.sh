@@ -44,5 +44,9 @@ cp "$WORK/appcast.xml" "$OUT/appcast.xml"
 grep -q 'sparkle:edSignature=' "$OUT/appcast.xml" || { echo "appcast: no archive signature"; exit 1; }
 printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$TOOLS/sign_update" --ed-key-file - --verify "$OUT/appcast.xml" \
   || { echo "appcast: feed signature does not verify"; exit 1; }
+# generate_appcast copies LSMinimumSystemVersion into the feed: a Mac below it never gets offered this update.
+APP_MIN="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+grep -q "<sparkle:minimumSystemVersion>$APP_MIN</sparkle:minimumSystemVersion>" "$OUT/appcast.xml" \
+  || { echo "appcast: no sparkle:minimumSystemVersion $APP_MIN"; exit 1; }
 echo "appcast: $OUT/appcast.xml"
 grep -E '<sparkle:(version|shortVersionString|minimumSystemVersion)>|<enclosure' "$OUT/appcast.xml"

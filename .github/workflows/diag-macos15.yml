@@ -1,0 +1,53 @@
+name: Diag macOS 15
+
+# Throwaway: the same debug and release HerdrDesk on macOS 26 and 15, churn 3 times each, scrolltop both looks.
+on:
+  push:
+    branches: ['ci/macos15-diag*']
+
+permissions:
+  contents: read
+
+jobs:
+  build26:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build debug and release
+        run: |
+          swift build --product HerdrDesk
+          scripts/bundle.sh
+          BIN="$(swift build --show-bin-path)"
+          otool -l "$BIN/HerdrDesk" | grep -A2 LC_RPATH | grep path
+          tar -czf dbg.tgz -C / "${BIN#/}/HerdrDesk" "${BIN#/}/Sparkle.framework" $(cd / && ls -d "${BIN#/}"/*.bundle 2>/dev/null)
+          tar -czf app.tgz build/Flockbook.app
+          echo "BIN=$BIN" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with: { name: diag-bin, path: "*.tgz", retention-days: 3 }
+      - name: Runs on 26
+        run: scripts/diag-runs.sh "$BIN/HerdrDesk" build/Flockbook.app/Contents/MacOS/HerdrDesk 26
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: diag-26, path: "build/diag-*", retention-days: 7 }
+
+  run15:
+    needs: build26
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: diag-bin }
+      - name: Runs on 15
+        run: |
+          sw_vers
+          BIN="$(dirname "$(tar -tzf dbg.tgz | head -1)")"
+          tar -xzf dbg.tgz -C /
+          tar -xzf app.tgz
+          scripts/diag-runs.sh "/$BIN/HerdrDesk" build/Flockbook.app/Contents/MacOS/HerdrDesk 15
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: diag-15, path: "build/diag-*", retention-days: 7 }

@@ -69,12 +69,12 @@ else
   echo "icon: $ICON_SRC not found, skipped"
 fi
 
-# Light/dark app icon (macOS 26): compile the Icon Composer document into Assets.car.
+# Light/dark app icon: compile the Icon Composer document into Assets.car.
 # actool ships only with Xcode (CI has it); without it the .icns above is the only icon.
 ICON_DOC="docs/design/icon/AppIcon.icon"
 if [ -d "$ICON_DOC" ] && xcrun --find actool >/dev/null 2>&1; then
   xcrun actool "$ICON_DOC" --compile "$APP/Contents/Resources" --app-icon AppIcon \
-    --platform macosx --target-device mac --minimum-deployment-target 26.0 \
+    --platform macosx --target-device mac --minimum-deployment-target 15.0 \
     --output-partial-info-plist "$(mktemp -d)/icon.plist" --output-format human-readable-text --errors --warnings
   ICON_KEY="$ICON_KEY
   <key>CFBundleIconName</key><string>AppIcon</string>"
@@ -113,7 +113,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
 $ICON_KEY
