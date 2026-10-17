@@ -87,3 +87,118 @@ jobs:
             build/ui-checks
             build/ui-checks-real
             build/snapshots-*
+
+  # macOS 15 (the lowest supported): build on macos-26 (the only runner with Xcode 26 and Swift 6.2),
+  # then run the built binaries on a macos-15 runner. HerdrKitTests (Swift Testing) needs the toolchain: 26 only.
+  build-macos15:
+    name: Build for macOS 15
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+    outputs:
+      kit: ${{ steps.kit.outputs.ok }}
+      bin: ${{ steps.kit.outputs.bin }}
+      app: ${{ steps.app.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Package.swift, the icon's deployment target and Info.plist name the same lowest macOS.
+      - name: Lowest macOS in the sources
+        run: scripts/check-min-os.sh 15.0
+
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm15-${{ runner.os }}-xcode26.1.1-${{ hashFiles('Package.resolved') }}
+
+      # The headless checks and the agents' command come first: they also run when the app does not build.
+      - name: Build HerdrKitChecks and flockbook-notify
+        id: kit
+        run: |
+          swift build --product HerdrKitChecks
+          swift build --product flockbook-notify
+          BIN="$(swift build --show-bin-path)"
+          scripts/check-min-os.sh 15.0 "$BIN/HerdrKitChecks" "$BIN/flockbook-notify"
+          otool -L "$BIN/HerdrKitChecks" "$BIN/flockbook-notify"
+          # Archive with the build's own path: upload-artifact drops the executable bit.
+          tar -czf kit-macos15.tgz -C / "${BIN#/}/HerdrKitChecks" "${BIN#/}/flockbook-notify"
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+          echo "ok=1" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kit-macos15-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 14
+          path: kit-macos15.tgz
+
+      # Release build, ad-hoc signed (no SIGN_ID on CI).
+      - name: Bundle Flockbook.app
+        id: app
+        run: |
+          scripts/bundle.sh
+          scripts/check-min-os.sh 15.0 build/Flockbook.app build/Flockbook.app/Contents/MacOS/flockbook-notify
+          otool -L build/Flockbook.app/Contents/MacOS/HerdrDesk
+          tar -czf app-macos15.tgz build/Flockbook.app
+          echo "ok=1" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-macos15-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 14
+          path: app-macos15.tgz
+
+  test-macos15:
+    name: Run on macOS 15
+    needs: build-macos15
+    if: ${{ !cancelled() && needs.build-macos15.outputs.kit == '1' }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      # The scripts and the fixtures; nothing is built here (no Xcode 26 on this runner).
+      - uses: actions/checkout@v4
+
+      - name: System
+        run: sw_vers
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kit-macos15-${{ github.run_number }}-${{ github.run_attempt }}
+
+      # Unpacked at the build's own path (the same checkout path on both runners).
+      - name: HerdrKitChecks
+        env:
+          BIN: ${{ needs.build-macos15.outputs.bin }}
+        run: |
+          tar -xzf kit-macos15.tgz -C /
+          "$BIN/HerdrKitChecks"
+          # The agents' command loads and runs on 15: --help prints its usage and exits 0.
+          "$BIN/flockbook-notify" --help
+
+      - uses: actions/download-artifact@v4
+        if: ${{ !cancelled() && needs.build-macos15.outputs.app == '1' }}
+        with:
+          name: app-macos15-${{ github.run_number }}-${{ github.run_attempt }}
+
+      # The same offscreen checks as on 26 (preview stores, offscreen windows, no herdr server), from the bundled app.
+      - name: Offline UI checks
+        if: ${{ !cancelled() && needs.build-macos15.outputs.app == '1' }}
+        timeout-minutes: 40
+        env:
+          UI_CHECK_TIMEOUT: '180'
+          BIN: build/Flockbook.app/Contents/MacOS/HerdrDesk
+        run: |
+          tar -xzf app-macos15.tgz
+          scripts/ui-checks.sh offline build/ui-checks-macos15
+
+      - name: Upload screenshots
+        if: ${{ !cancelled() && needs.build-macos15.outputs.app == '1' }}
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-checks-macos15-${{ github.run_number }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/ui-checks-macos15
+            build/snapshots-*
