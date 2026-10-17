@@ -23,10 +23,16 @@ import SwiftUI
         func click(_ r: CGRect) async {
             guard let frame = win.contentView?.superview else { return }
             let p = NSPoint(x: r.midX, y: frame.bounds.height - r.midY)
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                              windowNumber: win.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) { win.sendEvent(e) }
+            let e = [NSEvent.EventType.leftMouseDown, .leftMouseUp].compactMap {
+                NSEvent.mouseEvent(with: $0, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: win.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
             }
+            guard e.count == 2 else { return }
+            // The up goes in the queue first: before 26 a toolbar button's mouse-down runs AppKit's tracking loop inside
+            // sendEvent, which waits there for the up (sent after it returns, the up never came and the check hung).
+            NSApp.postEvent(e[1], atStart: false)
+            win.sendEvent(e[0])
+            if let up = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: true) { win.sendEvent(up) }
             try? await Task.sleep(for: .milliseconds(400))
         }
         // Connection footer: shown only while not connected (none in the connected preview).

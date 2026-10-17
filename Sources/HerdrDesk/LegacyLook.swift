@@ -15,6 +15,16 @@ enum LegacyLook {
     }
 }
 
+/// The system sidebar's place, which the system decides, not the look: 26 floats the panel 8 pt in from the window's
+/// edges with rounded corners; before 26 it is docked at the edges, square. Our peek panel and full-screen toggle match it.
+enum SystemSidebar {
+    static var inset: CGFloat {
+        if #available(macOS 26, *) { return 8 }
+        return 0
+    }
+    static var cornerRadius: CGFloat { inset > 0 ? 22 : 0 }
+}
+
 private struct LegacyLookKey: EnvironmentKey { static let defaultValue = LegacyLook.on }
 extension EnvironmentValues {
     /// The pre-26 look. Checks set it on one view to draw both looks in one run.

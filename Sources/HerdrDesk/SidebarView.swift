@@ -100,10 +100,10 @@ struct SidebarView: View {
             return r
         } action: {
             panel = $0; ChromeProbe.panel = $0
-            // The docked panel only (the peek panel is a SidebarView too, floating), and only at rest (8 pt in from the
-            // left, as the floating panel sits): during the show/hide slide its frame moves every frame, and a value
-            // written per frame would make the full-screen toggle (FullScreenChrome) chase it instead of animating once.
-            if model.sidebarVisibility != .detailOnly, $0.minX >= 7.5, abs(model.sidebarMaxX - $0.maxX) > 0.5 { model.sidebarMaxX = $0.maxX }
+            // The docked panel only (the peek panel is a SidebarView too, floating), and only at rest (SystemSidebar.inset
+            // in from the left, where the docked panel sits): during the show/hide slide its frame moves every frame, and a
+            // value written per frame would make the full-screen toggle (FullScreenChrome) chase it instead of animating once.
+            if model.sidebarVisibility != .detailOnly, $0.minX >= SystemSidebar.inset - 0.5, abs(model.sidebarMaxX - $0.maxX) > 0.5 { model.sidebarMaxX = $0.maxX }
         }
     }
 
@@ -288,7 +288,7 @@ struct SidebarPeek: View {
                     .frame(width: 250)
                     .modifier(PeekGlass())
                     .probe { ChromeProbe.peekPanel = $0 }
-                    .padding(8)
+                    .padding(SystemSidebar.inset)   // where the docked panel sits
                     .onHover { model.setPeekHover(panel: $0) }
                     .onDisappear { ChromeProbe.peekPanel = .zero }
                     .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
@@ -304,7 +304,7 @@ struct SidebarPeek: View {
 /// lifted off the content by a hairline and a shadow (no second glass layer).
 private struct PeekGlass: ViewModifier {
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 22)
+        let shape = RoundedRectangle(cornerRadius: SystemSidebar.cornerRadius)
         content.clipShape(shape)
             .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.25), radius: 18, y: 6)

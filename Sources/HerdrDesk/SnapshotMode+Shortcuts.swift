@@ -70,7 +70,10 @@ extension ContentTests {
              (rows.count > ShortcutsPanel.searchThreshold) == textFields(in: host).contains { $0 is NSSearchField })
         let windowed = "\(dir)/shortcuts-windowed.png"
         capture(win, to: windowed)
-        step("text drawn in the panel (\(ink(windowed, f, scale: win.backingScaleFactor, height: host.bounds.height)) ink px)", ink(windowed, f, scale: win.backingScaleFactor, height: host.bounds.height) > 3000)
+        // Counted at 1x (pixels / scale²): a 1x screen (CI runners) has a quarter of a Retina screen's pixels. The panel's
+        // text gives about 3400 on 26 and 2850 on 15 (1x, light); an empty panel gives next to none.
+        let inkAt1x = ink(windowed, f, scale: win.backingScaleFactor, height: host.bounds.height) / Int(win.backingScaleFactor * win.backingScaleFactor)
+        step("text drawn in the panel (\(inkAt1x) ink px at 1x, > 1500)", inkAt1x > 1500)
 
         ChromeTests.emulateFullScreen(win, model, true)
         try? await Task.sleep(for: .seconds(1))
