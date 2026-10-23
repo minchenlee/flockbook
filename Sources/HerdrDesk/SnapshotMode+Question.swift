@@ -347,8 +347,21 @@ extension ContentTests {
         var backSent: [QuestionAnswer]?
         let (bwin, _) = window(Covered(cover: cover) { scene(items(single("q-back")), canSend: true, onSend: { backSent = $0 }) }, NSSize(width: 1200, height: 760))
         try? await Task.sleep(for: .seconds(1.2))
+        func diag(_ s: String) { print("question-diag: \(s)") }
+        func responder() -> String { bwin.firstResponder.map { "\(type(of: $0))" } ?? "nil" }
+        QuestionProbe.trace = { diag("card: \($0)") }
+        diag("before Back: key \(bwin.isKeyWindow) responder \(responder())")
         cover.on = false; try? await Task.sleep(for: .milliseconds(600))
+        diag("after Back: key \(bwin.isKeyWindow) responder \(responder())")
         await digit(bwin, 1); await returnKey(bwin)
+        diag("after keys: sent \(backSent.map { "\($0.map(\.picks))" } ?? "nothing") responder \(responder())")
+        if backSent == nil {
+            try? await Task.sleep(for: .milliseconds(300))
+            await digit(bwin, 1); await returnKey(bwin)
+            diag("0.3 s later, again: sent \(backSent.map { "\($0.map(\.picks))" } ?? "nothing") responder \(responder())")
+            backSent = nil
+        }
+        QuestionProbe.trace = nil
         step("came under Settings, after Back: 1 and Return answer (\(backSent.map { "\($0.map(\.picks))" } ?? "nothing"))", backSent == [QuestionAnswer(picks: [0])])
         bwin.orderOut(nil)
         // A send held back under the page (the screen's answer gate) is not "Sent": the card says so and keeps the picks.

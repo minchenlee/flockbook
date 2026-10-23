@@ -113,6 +113,8 @@ struct QuestionFlow: Equatable {
     static var cardFrame = CGRect.zero
     /// The pane's global frame, last reported (tests).
     static var paneFrame = CGRect.zero
+    /// DIAG (temporary): the card's focus and keys, for the macOS 15 Back check.
+    static var trace: ((String) -> Void)?
 }
 
 /// AskUserQuestion in the composer slot: number keys pick, Return goes on or sends, Esc leaves "Other" or goes back one
@@ -212,10 +214,14 @@ struct QuestionCard: View {
         .focusEffectDisabled()
         .focused($focus, equals: .card)
         .onKeyPress(phases: .down) { press in key(press) }
-        .onAppear { if !underSettings { focus = .card } }
+        .onAppear { QuestionProbe.trace?("appear under \(underSettings) focus \(String(describing: focus))"); if !underSettings { focus = .card } }
         // Came under the page: Back focuses it, after this update: the card is still disabled in it, and macOS 15
         // does not focus a disabled view (macOS 26 does).
-        .onChange(of: underSettings) { _, on in if !on { DispatchQueue.main.async { focus = .card } } }
+        .onChange(of: underSettings) { _, on in
+            QuestionProbe.trace?("underSettings -> \(on) focus \(String(describing: focus))")
+            if !on { DispatchQueue.main.async { focus = .card; QuestionProbe.trace?("async focus = card, reads \(String(describing: focus))") } }
+        }
+        .onChange(of: focus) { _, f in QuestionProbe.trace?("focus -> \(String(describing: f))") }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(agentName) asks you")
     }
@@ -349,6 +355,7 @@ struct QuestionCard: View {
     }
 
     private func key(_ press: KeyPress) -> KeyPress.Result {
+        QuestionProbe.trace?("key \(press.characters.debugDescription) under \(underSettings) focus \(String(describing: focus))")
         guard !underSettings else { return .ignored }
         guard press.modifiers.subtracting(.shift).isEmpty else { return .ignored }
         switch press.key {
