@@ -345,7 +345,7 @@ extension ContentTests {
         cwin.orderOut(nil)
         let cover = Cover()
         var backSent: [QuestionAnswer]?
-        let (bwin, _) = window(Covered(cover: cover) { scene(items(single("q-back")), canSend: true, onSend: { backSent = $0 }) }, NSSize(width: 1200, height: 760))
+        let (bwin, bhost) = window(Covered(cover: cover) { scene(items(single("q-back")), canSend: true, onSend: { backSent = $0 }) }, NSSize(width: 1200, height: 760))
         try? await Task.sleep(for: .seconds(1.2))
         func diag(_ s: String) { print("question-diag: \(s)") }
         func responder() -> String { bwin.firstResponder.map { "\(type(of: $0))" } ?? "nil" }
@@ -359,6 +359,17 @@ extension ContentTests {
             try? await Task.sleep(for: .milliseconds(300))
             await digit(bwin, 1); await returnKey(bwin)
             diag("0.3 s later, again: sent \(backSent.map { "\($0.map(\.picks))" } ?? "nothing") responder \(responder())")
+            if backSent == nil {
+                diag("makeFirstResponder(host): \(bwin.makeFirstResponder(bhost)) responder \(responder())")
+                try? await Task.sleep(for: .milliseconds(300))
+                await digit(bwin, 1); await returnKey(bwin)
+                diag("after host first responder: sent \(backSent.map { "\($0.map(\.picks))" } ?? "nothing") responder \(responder())")
+            }
+            if backSent == nil {
+                QuestionProbe.diagRefocus?(); try? await Task.sleep(for: .milliseconds(300))
+                await digit(bwin, 1); await returnKey(bwin)
+                diag("after focus nil, then card: sent \(backSent.map { "\($0.map(\.picks))" } ?? "nothing") responder \(responder())")
+            }
             backSent = nil
         }
         QuestionProbe.trace = nil

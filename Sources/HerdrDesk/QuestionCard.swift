@@ -115,6 +115,7 @@ struct QuestionFlow: Equatable {
     static var paneFrame = CGRect.zero
     /// DIAG (temporary): the card's focus and keys, for the macOS 15 Back check.
     static var trace: ((String) -> Void)?
+    static var diagRefocus: (() -> Void)?
 }
 
 /// AskUserQuestion in the composer slot: number keys pick, Return goes on or sends, Esc leaves "Other" or goes back one
@@ -210,11 +211,11 @@ struct QuestionCard: View {
         .glassCard(radius: Radius.bubble)
         .overlay(RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
-        .focusable()
+        .focusable(!underSettings)
         .focusEffectDisabled()
         .focused($focus, equals: .card)
         .onKeyPress(phases: .down) { press in key(press) }
-        .onAppear { QuestionProbe.trace?("appear under \(underSettings) focus \(String(describing: focus))"); if !underSettings { focus = .card } }
+        .onAppear { QuestionProbe.diagRefocus = { focus = nil; DispatchQueue.main.async { focus = .card } }; QuestionProbe.trace?("appear under \(underSettings) focus \(String(describing: focus))"); if !underSettings { focus = .card } }
         // Came under the page: Back focuses it, after this update: the card is still disabled in it, and macOS 15
         // does not focus a disabled view (macOS 26 does).
         .onChange(of: underSettings) { _, on in
