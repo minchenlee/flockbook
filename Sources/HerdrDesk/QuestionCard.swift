@@ -113,9 +113,6 @@ struct QuestionFlow: Equatable {
     static var cardFrame = CGRect.zero
     /// The pane's global frame, last reported (tests).
     static var paneFrame = CGRect.zero
-    /// DIAG (temporary): the card's focus and keys, for the macOS 15 Back check.
-    static var trace: ((String) -> Void)?
-    static var diagRefocus: (() -> Void)?
 }
 
 /// AskUserQuestion in the composer slot: number keys pick, Return goes on or sends, Esc leaves "Other" or goes back one
@@ -143,6 +140,7 @@ struct QuestionCard: View {
     @State private var chrome: CGFloat = 0
     @FocusState private var focus: Field?
     enum Field: Hashable { case card, other }
+    @State private var anchor = ViewAnchor()
 
     init(model: QuestionRequest, agentName: String, canSend: Bool = false, maxHeight: CGFloat = .infinity,
          onSend: @escaping ([QuestionAnswer]) async throws -> Void = { _ in },
@@ -211,18 +209,13 @@ struct QuestionCard: View {
         .glassCard(radius: Radius.bubble)
         .overlay(RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
-        .focusable(!underSettings)
+        .focusable()
         .focusEffectDisabled()
         .focused($focus, equals: .card)
         .onKeyPress(phases: .down) { press in key(press) }
-        .onAppear { QuestionProbe.diagRefocus = { focus = nil; DispatchQueue.main.async { focus = .card } }; QuestionProbe.trace?("appear under \(underSettings) focus \(String(describing: focus))"); if !underSettings { focus = .card } }
-        // Came under the page: Back focuses it, after this update: the card is still disabled in it, and macOS 15
-        // does not focus a disabled view (macOS 26 does).
-        .onChange(of: underSettings) { _, on in
-            QuestionProbe.trace?("underSettings -> \(on) focus \(String(describing: focus))")
-            if !on { DispatchQueue.main.async { focus = .card; QuestionProbe.trace?("async focus = card, reads \(String(describing: focus))") } }
-        }
-        .onChange(of: focus) { _, f in QuestionProbe.trace?("focus -> \(String(describing: f))") }
+        .onAppear { if !underSettings { focus = .card } }
+        .background(ViewAnchor.Probe(anchor: anchor))
+        .onChange(of: underSettings) { _, on in if !on { focusAfterBack() } }   // came under the page: Back focuses it
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(agentName) asks you")
     }
@@ -355,8 +348,18 @@ struct QuestionCard: View {
         }
     }
 
+    /// After this update, when the card is enabled again. On macOS 15 a focus set inside a window's content does not make
+    /// that content the first responder (macOS 26 does): the card came while the page held the keys, the window itself
+    /// is the first responder after Back, and the keys never reach the card. So the content takes it first, then the card.
+    private func focusAfterBack() {
+        DispatchQueue.main.async {
+            if let v = anchor.view, let win = v.window, let content = win.contentView, v.isDescendant(of: content),
+               win.firstResponder == nil || win.firstResponder === win { win.makeFirstResponder(content) }
+            DispatchQueue.main.async { focus = .card }
+        }
+    }
+
     private func key(_ press: KeyPress) -> KeyPress.Result {
-        QuestionProbe.trace?("key \(press.characters.debugDescription) under \(underSettings) focus \(String(describing: focus))")
         guard !underSettings else { return .ignored }
         guard press.modifiers.subtracting(.shift).isEmpty else { return .ignored }
         switch press.key {
@@ -375,6 +378,16 @@ struct QuestionCard: View {
             case .ignored: return .ignored
             }
         }
+    }
+}
+
+/// The AppKit view behind a SwiftUI view, for its window.
+private final class ViewAnchor {
+    weak var view: NSView?
+    struct Probe: NSViewRepresentable {
+        let anchor: ViewAnchor
+        func makeNSView(context: Context) -> NSView { let v = NSView(); anchor.view = v; return v }
+        func updateNSView(_ view: NSView, context: Context) {}
     }
 }
 
