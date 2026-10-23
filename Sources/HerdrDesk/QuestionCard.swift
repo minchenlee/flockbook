@@ -213,7 +213,9 @@ struct QuestionCard: View {
         .focused($focus, equals: .card)
         .onKeyPress(phases: .down) { press in key(press) }
         .onAppear { if !underSettings { focus = .card } }
-        .onChange(of: underSettings) { _, on in if !on { focus = .card } }   // came under the page: Back focuses it
+        // Came under the page: Back focuses it, after this update: the card is still disabled in it, and macOS 15
+        // does not focus a disabled view (macOS 26 does).
+        .onChange(of: underSettings) { _, on in if !on { DispatchQueue.main.async { focus = .card } } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(agentName) asks you")
     }
