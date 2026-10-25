@@ -10,7 +10,7 @@
 //! `SelectableDoc`. Adapted from rmdv (MIT): the keyed window idea (the mounted slice sits at the window's prefix
 //! position; measured heights flow back through a sink).
 
-use super::model::{Anchor, Doc, FlowSel, Measure, MeasureSink, RowId, GAP, GUTTER, PAD_BOTTOM};
+use super::model::{Anchor, Doc, FlowSel, Measure, MeasureSink, Metrics, RowId, GAP, PAD_BOTTOM};
 use super::shape::{shape, signature, Prim, Shaped};
 use crate::selectable::model::{clamp_boundary, Pos};
 use crate::theme::Tokens;
@@ -157,6 +157,7 @@ pub struct Flow<'a, M> {
     pictures: Option<&'a HashMap<RowId, iced::widget::image::Handle>>,
     tokens: Tokens,
     col_max: f32,
+    metrics: Metrics,
     offset: f32,
     pinned: bool,
     selection: Option<FlowSel>,
@@ -177,6 +178,7 @@ impl<'a, M> Flow<'a, M> {
             picture_epoch: 0,
             tokens,
             col_max: 760.0,
+            metrics: Metrics::default(),
             offset: 0.0,
             pinned: true,
             selection: None,
@@ -202,6 +204,11 @@ impl<'a, M> Flow<'a, M> {
     }
     pub fn col_max(mut self, w: f32) -> Self {
         self.col_max = w;
+        self
+    }
+    /// Text sizes, line heights and side space of the reading column.
+    pub fn metrics(mut self, m: Metrics) -> Self {
+        self.metrics = m;
         self
     }
     pub fn offset(mut self, offset: f32, pinned: bool) -> Self {
@@ -495,7 +502,7 @@ impl<'a, M> Widget<M, Theme, iced::Renderer> for Flow<'a, M> {
                 600.0
             },
         );
-        let colw = (view.width - 2.0 * GUTTER).min(self.col_max).max(120.0);
+        let colw = (view.width - 2.0 * self.metrics.gutter).min(self.col_max).max(120.0);
         state.colw = colw;
 
         let len = doc.rows.len();
@@ -510,11 +517,11 @@ impl<'a, M> Widget<M, Theme, iced::Renderer> for Flow<'a, M> {
         let mut measures: Vec<Measure> = Vec::new();
         for i in r0..r1 {
             let row = &doc.rows[i];
-            let sig = signature(row, colw, &self.tokens);
+            let sig = signature(row, colw, &self.tokens, &self.metrics);
             let shaped = match state.cache.get(&row.id) {
                 Some(s) if s.sig == sig => s.clone(),
                 _ => {
-                    let s = Arc::new(shape(row, colw, &self.tokens));
+                    let s = Arc::new(shape(row, colw, &self.tokens, &self.metrics));
                     state.cache.insert(row.id, s.clone());
                     s
                 }

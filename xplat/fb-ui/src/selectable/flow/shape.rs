@@ -1,7 +1,7 @@
 //! Turns a `Row` into shaped paragraphs and drawing primitives at one column width. Pure data: the widget draws
 //! it, hit-tests it and measures it; tests probe it.
 
-use super::model::{Chip, Row, RowKind, HEADING_SIZES};
+use super::model::{Chip, Metrics, Row, RowKind};
 use crate::fonts;
 use crate::icons::Icon;
 use crate::theme::Tokens;
@@ -75,9 +75,10 @@ pub struct Shaped {
     pub load_earlier: Option<Rectangle>,
 }
 
-pub fn signature(row: &Row, colw: f32, t: &Tokens) -> u64 {
+pub fn signature(row: &Row, colw: f32, t: &Tokens, m: &Metrics) -> u64 {
     row.sig
         ^ (colw.to_bits() as u64).rotate_left(17)
+        ^ m.hash().rotate_left(29)
         ^ if t.mode.is_dark() {
             0x9E37_79B9_7F4A_7C15
         } else {
@@ -121,7 +122,7 @@ pub fn spans_of(
             if inl.code && !mono_all {
                 sp = sp
                     .color(t.label)
-                    .size(Pixels(size * 0.92))
+                    .size(Pixels(size * 0.875))
                     .background(Background::Color(t.fill_2))
                     .border(Border {
                         radius: 4.0.into(),
@@ -233,9 +234,9 @@ fn quad(rect: Rectangle, fill: Color, bc: Color, bw: f32, radius: f32) -> Prim {
     }
 }
 
-pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
+pub fn shape(row: &Row, colw: f32, t: &Tokens, m: &Metrics) -> Shaped {
     let mut s = Shaped {
-        sig: signature(row, colw, t),
+        sig: signature(row, colw, t, m),
         colw,
         h: 0.0,
         prims: Vec::new(),
@@ -266,8 +267,8 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
         RowKind::Prose => {
             let (p, h) = part(
                 first,
-                15.0,
-                1.55,
+                m.body,
+                m.rel(),
                 colw,
                 Wrapping::WordOrGlyph,
                 Point::ORIGIN,
@@ -282,18 +283,19 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
             s.h = h;
         }
         RowKind::Heading(l) => {
-            let size = HEADING_SIZES[(*l as usize).clamp(1, 4) - 1];
+            // Swift MarkdownView: h1 bold, the rest semibold; level 4 is secondary; line 1.36 em.
+            let size = m.heading[(*l as usize).clamp(1, 4) - 1];
             let (p, h) = part(
                 first,
                 size,
-                1.3,
+                1.36,
                 colw,
                 Wrapping::WordOrGlyph,
                 Point::ORIGIN,
                 0,
-                t.label,
-                Weight::Bold,
-                true,
+                if *l >= 4 { t.label_2 } else { t.label },
+                if *l == 1 { Weight::Bold } else { Weight::Semibold },
+                false,
                 false,
                 t,
             );
@@ -301,11 +303,14 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
             s.h = h;
         }
         RowKind::ListItem { marker, depth } => {
-            let indent = 26.0 + 22.0 * (*depth as f32 - 1.0);
+            // Swift MarkdownView `item`: a marker column of max(24, 1.6 em) per level, the marker centred in it.
+            let mw = (m.body * 1.6).max(24.0);
+            let base = mw * (*depth as f32).clamp(1.0, 4.0) - mw;
+            let indent = base + mw;
             let (p, h) = part(
                 first,
-                15.0,
-                1.55,
+                m.body,
+                m.rel(),
                 colw - indent,
                 Wrapping::WordOrGlyph,
                 Point::new(indent, 0.0),
@@ -318,23 +323,30 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
             );
             s.parts.push(p);
             s.h = h;
-            let (mp, ms) = label(marker, 15.0, Weight::Normal, false, t.label_2, t);
-            // Line box of the marker equals the text's line box: both are 15 pt at line 1.3 vs 1.55, so center it.
-            let dy = (15.0 * 1.55 - ms.height) / 2.0;
+            let (mp, ms) = label(marker, m.body, Weight::Normal, false, t.label_2, t);
+            // The marker's line box is shorter than the text's line, so centre it in the first line.
+            let dy = (m.line - ms.height) / 2.0;
+            let ordered = marker.ends_with('.');
+            let mx = if ordered {
+                base + mw - 6.0 - ms.width
+            } else {
+                base + (mw - ms.width) / 2.0
+            };
             s.prims.push(Prim::Text {
                 para: mp,
-                pos: Point::new(indent - 7.0 - ms.width, dy),
+                pos: Point::new(mx, dy),
                 color: t.label_2,
             });
         }
         RowKind::Quote => {
+            // Swift: a 3 pt bar and 14 pt of space.
             let (p, h) = part(
                 first,
-                15.0,
-                1.55,
-                colw - 18.0,
+                m.body,
+                m.rel(),
+                colw - 17.0,
                 Wrapping::WordOrGlyph,
-                Point::new(18.0, 0.0),
+                Point::new(17.0, 0.0),
                 0,
                 t.label_2,
                 Weight::Normal,
@@ -366,8 +378,8 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
             }
             let (p, h) = part(
                 first,
-                13.0,
-                1.55,
+                m.code,
+                m.code_line / m.code,
                 colw - 2.0 * pad_x,
                 Wrapping::WordOrGlyph,
                 Point::new(pad_x, y),
@@ -379,7 +391,7 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
                 t,
             );
             s.parts.push(p);
-            s.h = y + h + 14.0;
+            s.h = y + h + 12.0;
             s.prims.insert(
                 0,
                 quad(
@@ -391,13 +403,13 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
                 ),
             );
         }
-        RowKind::Table { cols } => shape_table(&mut s, row, *cols, colw, t),
+        RowKind::Table { cols } => shape_table(&mut s, row, *cols, colw, t, m),
         RowKind::Bubble => {
             let maxw = (colw * 0.8 - 28.0).max(80.0);
             let (mut p, h) = part(
                 first,
-                15.0,
-                1.55,
+                m.body,
+                (m.line - 2.0) / m.body,
                 maxw,
                 Wrapping::WordOrGlyph,
                 Point::ORIGIN,
@@ -410,8 +422,9 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
             );
             let tw = p.para.min_bounds().width.ceil();
             let bw = (tw + 28.0).min(colw);
-            let bh = h + 15.0;
-            p.pos = Point::new(colw - bw + 14.0, 7.5);
+            // Swift UserBubble: padding 14 across, 10 down.
+            let bh = h + 20.0;
+            p.pos = Point::new(colw - bw + 14.0, 10.0);
             p.w = tw + 1.0;
             s.prims.push(quad(
                 Rectangle::new(Point::new(colw - bw, 0.0), Size::new(bw, bh)),
@@ -508,7 +521,7 @@ pub fn shape(row: &Row, colw: f32, t: &Tokens) -> Shaped {
     s
 }
 
-fn shape_table(s: &mut Shaped, row: &Row, cols: usize, colw: f32, t: &Tokens) {
+fn shape_table(s: &mut Shaped, row: &Row, cols: usize, colw: f32, t: &Tokens, m: &Metrics) {
     let cols = cols.max(1);
     let cells = &row.paras;
     let nrows = cells.len().div_ceil(cols);
@@ -516,8 +529,8 @@ fn shape_table(s: &mut Shaped, row: &Row, cols: usize, colw: f32, t: &Tokens) {
     // Natural widths.
     let mut natural = vec![0.0f32; cols];
     for (i, c) in cells.iter().enumerate() {
-        let spans = spans_of(c, 14.0, t, t.label, Weight::Normal, i < cols, false);
-        let p = make(&spans, f32::INFINITY, 14.0, 1.5, Wrapping::None);
+        let spans = spans_of(c, m.table, t, t.label, Weight::Normal, i < cols, false);
+        let p = make(&spans, f32::INFINITY, m.table, 1.5, Wrapping::None);
         let w = p.min_bounds().width + 2.0 * px;
         natural[i % cols] = natural[i % cols].max(w);
     }
@@ -540,7 +553,7 @@ fn shape_table(s: &mut Shaped, row: &Row, cols: usize, colw: f32, t: &Tokens) {
             let Some(cell) = cells.get(i) else { continue };
             let (p, h) = part(
                 cell,
-                14.0,
+                m.table,
                 1.5,
                 (widths[c] - 2.0 * px).max(20.0),
                 Wrapping::WordOrGlyph,
@@ -600,13 +613,10 @@ fn shape_chips(s: &mut Shaped, chips: &[Chip], colw: f32, t: &Tokens) {
     let (h, gap) = (26.0, 6.0);
     let (mut x, mut y) = (0.0f32, 0.0f32);
     for c in chips {
-        let color = if c.error {
-            t.label
-        } else {
-            Color { a: 0.72, ..t.label }
-        };
-        let (lp, ls) = label(&c.text, 12.5, Weight::Medium, false, color, t);
-        let w = 10.0 + 14.0 + 5.0 + ls.width + if c.expandable { 5.0 + 12.0 } else { 0.0 } + 10.0;
+        // Swift ChipView: padding 10, spacing 5, an 11 pt symbol, 12 pt medium text, a small chevron.
+        let color = if c.error { t.label } else { t.label_2 };
+        let (lp, ls) = label(&c.text, 12.0, Weight::Medium, false, color, t);
+        let w = 10.0 + 13.0 + 5.0 + ls.width + if c.expandable { 5.0 + 8.0 } else { 0.0 } + 10.0;
         if x > 0.0 && x + w > colw {
             x = 0.0;
             y += h + gap;
@@ -617,10 +627,10 @@ fn shape_chips(s: &mut Shaped, chips: &[Chip], colw: f32, t: &Tokens) {
             rect,
             expandable: c.expandable,
             label: lp,
-            label_pos: Point::new(x + 10.0 + 14.0 + 5.0, y + (h - ls.height) / 2.0),
+            label_pos: Point::new(x + 10.0 + 13.0 + 5.0, y + (h - ls.height) / 2.0),
             label_color: color,
             icon: c.icon,
-            icon_rect: Rectangle::new(Point::new(x + 10.0, y + 6.0), Size::new(14.0, 14.0)),
+            icon_rect: Rectangle::new(Point::new(x + 10.0, y + 6.5), Size::new(13.0, 13.0)),
             chevron: c.expandable.then(|| {
                 (
                     if c.expanded {
@@ -629,8 +639,8 @@ fn shape_chips(s: &mut Shaped, chips: &[Chip], colw: f32, t: &Tokens) {
                         Icon::ChevronRight
                     },
                     Rectangle::new(
-                        Point::new(x + w - 10.0 - 12.0, y + 7.0),
-                        Size::new(12.0, 12.0),
+                        Point::new(x + w - 10.0 - 8.0, y + 9.0),
+                        Size::new(8.0, 8.0),
                     ),
                 )
             }),

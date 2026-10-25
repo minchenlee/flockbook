@@ -29,8 +29,8 @@ pub const FONT_SIZE: f32 = 13.0;
 /// JetBrains Mono advances 0.6 em.
 pub const CELL_W: f32 = 7.8;
 pub const CELL_H: f32 = 17.0;
-/// Inner padding of the grid inside the widget.
-pub const PAD: f32 = 8.0;
+/// Inner padding of the grid inside the widget. SwiftTerm draws from the view edge (Swift `TerminalSheet`), so 0.
+pub const PAD: f32 = 0.0;
 
 /// Columns and rows that fit a widget of `w` x `h` points.
 pub fn grid_size(w: f32, h: f32) -> (usize, usize) {
@@ -489,7 +489,8 @@ mod tests {
 
     #[test]
     fn grid_size_follows_the_widget_size() {
-        assert_eq!(grid_size(600.0, 360.0), (((600.0 - 16.0) / CELL_W).floor() as usize, ((360.0 - 16.0) / CELL_H).floor() as usize));
+        // The padding is `PAD` on each side (0 since the grid draws from the edge, as SwiftTerm).
+        assert_eq!(grid_size(600.0, 360.0), (((600.0 - 2.0 * PAD) / CELL_W).floor() as usize, ((360.0 - 2.0 * PAD) / CELL_H).floor() as usize));
         assert_eq!(grid_size(10.0, 10.0), (1, 1), "never below one cell");
         let (c, r) = grid_size(880.0, 560.0);
         assert!(c >= 100 && r >= 30, "{c}x{r}");

@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fb_ui::icons::{icon, Icon, SIZE_INLINE};
+use fb_ui::icons::{icon, Icon, SIZE_DEFAULT, SIZE_INLINE};
 use fb_ui::theme::*;
 use iced::widget::{button, column, container, row, scrollable, svg, text, toggler, Space};
 use iced::{Alignment, Background, Border, Element, Length, Task};
@@ -177,6 +177,19 @@ impl SettingsState {
 
     pub fn reading_size(&self) -> ReadingSize { self.prefs.reading_size.unwrap_or_default() }
     pub fn column_width(&self) -> f32 { self.reading_size().column(self.reading_width()) }
+    /// The conversation's reading metrics (Swift `ReadingSize`, `ReadingWidth.sidePadding`).
+    pub fn flow_metrics(&self) -> fb_ui::selectable::flow::Metrics {
+        let size = self.reading_size();
+        fb_ui::selectable::flow::Metrics {
+            body: size.body(),
+            line: size.line(),
+            heading: [size.heading(1), size.heading(2), size.heading(3), size.body() - 1.0],
+            code: size.code(),
+            code_line: match size { ReadingSize::S => 18.0, ReadingSize::M => 20.0, ReadingSize::L => 21.0, ReadingSize::Xl => 23.0 },
+            table: size.table(),
+            gutter: if self.reading_width() == ReadingWidth::Full { 40.0 } else { 28.0 },
+        }
+    }
     pub fn sidebar_hidden(&self) -> bool { self.prefs.sidebar_hidden.unwrap_or(false) }
     pub fn terminal_palette(&self, tokens: &Tokens) -> fb_ui::term::TermPalette {
         if self.prefs.terminal_colors == Some(TerminalColors::Ghostty) {
@@ -477,8 +490,35 @@ pub fn page(app: &App) -> Element<'_, Message> {
 }
 
 /// The window sidebar while Settings shows (Swift `SettingsSidebar`): Back on top, then the tabs, below the title bar band.
-pub fn sidebar_list(app: &App, top: f32) -> Element<'_, Message> {
-    tab_list(app.tokens(), app.state.settings.tab, top)
+pub fn sidebar_list(app: &App, _top: f32) -> Element<'_, Message> {
+    use crate::sidebar::{row_button, PAD_LEFT, PAD_RIGHT, ROW_GAP, ROW_H};
+    let t = app.bar_tokens();
+    let selected = app.state.settings.tab;
+    // Swift `SettingsSidebar`: the window sidebar's own List (`.sidebar`), so the rows match the sidebar's: Back in the
+    // first row's place (centre 68 pt down), the "Settings" section header, then the tabs at a 32 pt pitch.
+    let line = |sym: Element<'static, Message>, label: &'static str| -> Element<'static, Message> {
+        row![container(sym).center(Length::Fixed(22.0)), BODY.text(label).color(t.label), Space::new().width(Length::Fill)].spacing(SP_8).align_y(Alignment::Center).into()
+    };
+    let back = row_button(t, false, line(local_icon(CHEVRON_LEFT, SIZE_DEFAULT, t.label_2), "Back"), Message::Settings(SettingsMsg::Close), ROW_H);
+    let header = container(text("Settings").size(11).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2))
+        .height(Length::Fixed(20.0))
+        .align_y(Alignment::Center)
+        .padding(iced::Padding { left: 4.0, ..iced::Padding::ZERO });
+    let mut tabs = column![].spacing(ROW_GAP);
+    for tab in SettingsTab::ALL {
+        tabs = tabs.push(row_button(t, tab == selected, line(tab_symbol(tab, SIZE_DEFAULT, t.label_2), tab.label()), Message::Settings(SettingsMsg::SelectTab(tab)), ROW_H));
+    }
+    container(column![
+        crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(53)),
+        back,
+        Space::new().height(13),
+        header,
+        Space::new().height(1),
+        tabs
+    ])
+    .padding(iced::Padding { left: PAD_LEFT, right: PAD_RIGHT, ..iced::Padding::ZERO })
+    .height(Length::Fill)
+    .into()
 }
 
 /// The tab's one-line summary (Swift `SettingsTab.summary`).

@@ -1,7 +1,7 @@
 //! Split readers: independent documents, selections, scroll anchors and paging tickets per pane.
 use crate::workspace_actions::{Target, WorkspaceMsg};
 use crate::{state::State, App, Message};
-use fb_ui::icons::{icon, Icon, SIZE_INLINE};
+use fb_ui::icons::{icon, Icon};
 use fb_ui::selectable::flow::Flow;
 use fb_ui::status;
 use fb_ui::theme::*;
@@ -201,10 +201,11 @@ fn pane_label<'a>(app: &'a App, pane: &'a herdr_core::Pane, active: bool) -> Ele
             (pane.label.clone().unwrap_or_else(|| "Shell".to_string()), Some(pane.cwd.clone()))
         }
     };
-    // Swift `PaneLabel`: the name is caption (11 pt) semibold, the meta caption (11 pt) regular.
+    // Swift `PaneLabel`: the name is caption (10 pt on macOS) semibold, the meta caption regular.
     left = left.push(
         CAPTION
             .text(name)
+            .size(10)
             .font(fb_ui::fonts::inter(iced::font::Weight::Semibold))
             .color(if active { t.label } else { t.label_2 })
             .wrapping(text::Wrapping::None),
@@ -214,22 +215,31 @@ fn pane_label<'a>(app: &'a App, pane: &'a herdr_core::Pane, active: bool) -> Ele
         left = left.push(
             CAPTION
                 .text(meta)
+                .size(10)
                 .font(fb_ui::fonts::inter(iced::font::Weight::Normal))
                 .color(t.label_2)
                 .wrapping(text::Wrapping::None),
         );
     }
-    // Clicking the label selects the pane; the menu button on the right is the pointer's way into the pane menu.
-    let left = mouse_area(left).on_press(Message::SelectPane(pane.id.clone()));
-    let menu = button(container(icon(Icon::Ellipsis, SIZE_INLINE, t.label_3)).center(Length::Fixed(22.0)))
+    // Swift `PaneLabel`: a click selects the pane, a double click zooms it, the pane menu is the context menu, and the
+    // right end is the zoom button (22x20, small semibold arrows, secondary).
+    let zoomed = app.state.selected_tab.as_ref().and_then(|tab| app.state.zoomed.get(tab)) == Some(&pane.id);
+    let arrows = icon(if zoomed { Icon::ArrowsCollapse } else { Icon::ArrowsExpand }, 10.0, t.label_2);
+    let zoom = button(container(arrows).center_x(Length::Fixed(22.0)).center_y(Length::Fixed(20.0)))
         .padding(0)
-        .on_press(pane_menu(&pane.id))
+        .on_press(Message::Workspace(WorkspaceMsg::Zoom(pane.id.clone())))
         .style(move |_, st| button::Style {
-            background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
+            background: matches!(st, button::Status::Hovered).then_some(Background::Color(iced::Color { a: 0.1, ..t.label })),
             border: Border { radius: 6.0.into(), ..Default::default() },
             ..Default::default()
         });
-    container(row![left, Space::new().width(Length::Fill), menu].align_y(Alignment::Center))
+    let help = if zoomed { "Restore panes (\u{21E7}\u{2318}\u{21A9})" } else { "Zoom pane (\u{21E7}\u{2318}\u{21A9})" };
+    let zoom = crate::toprow::tip(t, zoom.into(), help.into(), iced::widget::tooltip::Position::Bottom);
+    let bar = mouse_area(container(row![left, Space::new().width(Length::Fill)].align_y(Alignment::Center)).width(Length::Fill).height(Length::Fill))
+        .on_press(Message::SelectPane(pane.id.clone()))
+        .on_double_click(Message::Workspace(WorkspaceMsg::Zoom(pane.id.clone())))
+        .on_right_press(pane_menu(&pane.id));
+    container(row![bar, zoom].align_y(Alignment::Center))
         .id(label_id(&pane.id))
         .width(Length::Fill)
         .height(Length::Fixed(PANE_LABEL_H))
@@ -283,6 +293,7 @@ fn reader<'a>(app: &'a App, pane: &'a herdr_core::Pane, split: bool) -> Element<
                 message: crate::conversation::ConversationMsg::Flow(e),
             })
             .col_max(app.state.settings.column_width())
+            .metrics(app.state.settings.flow_metrics())
             .offset(cs.offset, cs.pinned)
             .selection(cs.sel.sel)
             .focused(false)

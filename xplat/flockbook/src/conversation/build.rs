@@ -81,6 +81,9 @@ fn item_sig(d: &Disp, expanded: &HashSet<String>) -> u64 {
         }
         DKind::Answered(s) => hash_str(&mut h, s),
         DKind::Chips(cs) => {
+            if let Some(f) = cs.first() {
+                expanded.contains(&format!("more:{}", f.id)).hash(&mut h);
+            }
             for c in cs {
                 hash_str(&mut h, &c.id);
                 hash_str(&mut h, &c.text);
@@ -193,7 +196,11 @@ fn specs_of(d: &Disp, expanded: &HashSet<String>) -> Vec<Spec> {
         }
         DKind::Assistant(s) => markdown::parse(s, false),
         DKind::Chips(cs) => {
-            let chips: Vec<Chip> = cs
+            // Swift ChipGroup: more than five chips show the first four and a "+N more" chip that shows them all.
+            let more_id = format!("more:{}", cs.first().map_or("", |c| c.id.as_str()));
+            let show_all = expanded.contains(&more_id);
+            let shown = if cs.len() > 5 && !show_all { 4 } else { cs.len() };
+            let mut chips: Vec<Chip> = cs[..shown]
                 .iter()
                 .map(|c| {
                     let running = c.calls.iter().any(|x| x.output.is_none());
@@ -212,13 +219,28 @@ fn specs_of(d: &Disp, expanded: &HashSet<String>) -> Vec<Spec> {
                     }
                 })
                 .collect();
+            if cs.len() > 5 {
+                chips.push(Chip {
+                    id: more_id,
+                    icon: if show_all { Icon::ChevronUp } else { Icon::Ellipsis },
+                    text: if show_all {
+                        "Show fewer".to_string()
+                    } else {
+                        format!("+{} more", cs.len() - 4)
+                    },
+                    expandable: false,
+                    expanded: false,
+                    running: false,
+                    error: false,
+                });
+            }
             let mut out = vec![Spec {
                 kind: RowKind::Chips(chips),
                 paras: vec![],
                 separator: "",
                 gap: 0.0,
             }];
-            for c in cs.iter().filter(|c| expanded.contains(&c.id)) {
+            for c in cs[..shown].iter().filter(|c| expanded.contains(&c.id)) {
                 for call in &c.calls {
                     out.push(Spec {
                         kind: RowKind::Code {

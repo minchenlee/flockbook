@@ -17,7 +17,8 @@
 //!
 //! The + button opens the system file dialog ([`FilePicker`]; live: [`NativePicker`]) and inserts the chosen paths
 //! at the caret, shell-quoted, with a trailing space (Swift `attach()`). The agent reads a path as an attachment. In
-//! read-only the button is dimmed and has no action. Files and folders have separate picker actions.
+//! read-only the button is dimmed and has no action. On macOS one panel takes files and folders; elsewhere the
+//! dialog picks files (`AttachFolder` picks folders).
 
 use crate::queued::Journal;
 use crate::{style, App, Message};
@@ -357,6 +358,13 @@ impl FilePicker for NativePicker {
         })
     }
     fn pick(&self, start: Option<PathBuf>) -> PickFuture {
+        // macOS: one modal panel for files and folders, as the Swift app (`Composer.swift:260`). `update` runs on the
+        // main thread, so the panel runs here and the future is ready.
+        #[cfg(target_os = "macos")]
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let paths = mac_open_panel(mtm, start);
+            return Box::pin(async move { paths });
+        }
         let mut dialog = rfd::AsyncFileDialog::new().set_title("Attach");
         if let Some(dir) = start.filter(|d| d.is_dir()) {
             dialog = dialog.set_directory(dir);
@@ -371,6 +379,30 @@ impl FilePicker for NativePicker {
                 .collect()
         })
     }
+}
+
+#[cfg(target_os = "macos")]
+fn mac_open_panel(mtm: objc2::MainThreadMarker, start: Option<PathBuf>) -> Vec<PathBuf> {
+    use objc2_app_kit::NSOpenPanel;
+    use objc2_foundation::{NSString, NSURL};
+    let panel = NSOpenPanel::openPanel(mtm);
+    panel.setAllowsMultipleSelection(true);
+    panel.setCanChooseFiles(true);
+    panel.setCanChooseDirectories(true);
+    if let Some(dir) = start.filter(|d| d.is_dir()) {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&dir.to_string_lossy()));
+        panel.setDirectoryURL(Some(&url));
+    }
+    // NSModalResponseOK
+    if panel.runModal() != 1 {
+        return Vec::new();
+    }
+    panel
+        .URLs()
+        .iter()
+        .filter_map(|u| u.path())
+        .map(|p| PathBuf::from(p.to_string()))
+        .collect()
 }
 
 /// A POSIX shell word, including dollar signs, backticks, newlines and Unicode scalars.
@@ -948,25 +980,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     let plus =
         iced::widget::tooltip(plus, tip_box(t, tip), iced::widget::tooltip::Position::Top).gap(6);
-    // The Swift app's `+` opens one panel that takes files and folders (`canChooseDirectories`, `Composer.swift:260`).
-    // The system dialogs behind rfd pick one kind at a time, so the folder picker is a second quiet icon next to it,
-    // and only while input is on: read-only shows `+`, branch, mic and send, like the Swift app's composer.
-    // Swift: the row is an `HStack(spacing: 10)` (`Composer.swift:214`).
+    // The Swift app's `+` opens one panel that takes files and folders (`canChooseDirectories`, `Composer.swift:260`);
+    // so does `NativePicker::pick` on macOS. Swift: the row is an `HStack(spacing: 10)` (`Composer.swift:214`).
     let mut controls = row![plus].spacing(10.0).align_y(Alignment::Center);
-    if !read_only {
-        controls = controls.push(
-            iced::widget::tooltip(
-                ghost(
-                    Icon::Folder,
-                    SIZE_DEFAULT,
-                    Message::Composer(ComposerMsg::AttachFolder),
-                ),
-                tip_box(t, "Attach folder (inserts its path)"),
-                iced::widget::tooltip::Position::Top,
-            )
-            .gap(6),
-        );
-    }
     if let Some(b) = branch_for(app) {
         controls = controls.push(
             row![

@@ -23,8 +23,8 @@ pub const GAP: f32 = BLOCK_GAP_PX;
 /// Space above the first row and below the last row.
 pub const PAD_TOP: f32 = 24.0;
 pub const PAD_BOTTOM: f32 = 24.0;
-/// Minimum space left and right of the column.
-pub const GUTTER: f32 = 24.0;
+/// Minimum space left and right of the column (Swift `ReadingWidth.sidePadding`; Full uses 40).
+pub const GUTTER: f32 = 28.0;
 
 /// A run of text with one style.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -251,6 +251,51 @@ pub fn estimate(row: &Row, index: usize, colw: f32) -> f32 {
 }
 
 pub const HEADING_SIZES: [f32; 4] = [22.0, 19.0, 17.0, 15.0];
+
+/// Reading metrics of the flow (Swift `ReadingSize`), in points. The default is size M.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    pub body: f32,
+    pub line: f32,
+    /// Heading sizes, levels 1 to 4.
+    pub heading: [f32; 4],
+    pub code: f32,
+    pub code_line: f32,
+    pub table: f32,
+    /// Space left and right of the column.
+    pub gutter: f32,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Metrics {
+            body: 16.0,
+            line: 26.0,
+            heading: [22.0, 19.0, 16.0, 15.0],
+            code: 13.0,
+            code_line: 20.0,
+            table: 14.0,
+            gutter: GUTTER,
+        }
+    }
+}
+
+impl Metrics {
+    /// Body line height relative to the body size.
+    pub fn rel(&self) -> f32 {
+        self.line / self.body
+    }
+    pub fn hash(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        for v in [self.body, self.line, self.code, self.code_line, self.table, self.gutter]
+            .iter()
+            .chain(&self.heading)
+        {
+            v.to_bits().hash(&mut h);
+        }
+        h.finish()
+    }
+}
 
 /// Where the user clicked or dragged: a row (by stable id) and a byte offset in its plain text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

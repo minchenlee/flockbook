@@ -33,4 +33,6 @@ rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSAppearance", "NSColor", "NSGraphics", "NSResponder", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", features = ["NSAppearance", "NSColor", "NSGraphics", "NSOpenPanel", "NSPanel", "NSResponder", "NSSavePanel", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace"] }
+# The composer's + panel (NSOpenPanel takes files and folders in one panel).
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
