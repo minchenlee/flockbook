@@ -51,6 +51,7 @@ pub struct Tokens {
     pub mode: Mode,
     // Neutrals.
     pub bg: Color,
+    /// The sidebar column's surface: the same as `bg`, because sidebar and content are one tone.
     pub sidebar: Color,
     pub sidebar_sel: Color,
     pub fill_1: Color,
@@ -74,6 +75,7 @@ pub struct Tokens {
     /// Text on an accent or status fill.
     pub on_accent: Color,
     // Glass variants (section 9). Use on translucent surfaces only.
+    /// The sidebar tint under glass: lighter than `content`, so the desktop shows through the sidebar (section 9).
     pub glass_side: Color,
     pub glass_bar: Color,
     pub glass_float: Color,
@@ -94,7 +96,9 @@ impl Tokens {
     pub const LIGHT: Tokens = Tokens {
         mode: Mode::Light,
         bg: hex(0xFFFFFF),
-        sidebar: hex(0xF2F2F4),
+        // Sidebar and content are one tone: the sidebar column draws the window surface again (WindowSurface), so it
+        // shows the content colour, not a lighter panel grey.
+        sidebar: hex(0xFFFFFF),
         sidebar_sel: black(0.07),
         fill_1: black(0.035),
         fill_2: black(0.06),
@@ -130,7 +134,7 @@ impl Tokens {
     pub const DARK: Tokens = Tokens {
         mode: Mode::Dark,
         bg: hex(0x1E1E1F),
-        sidebar: hex(0x262628),
+        sidebar: hex(0x1E1E1F),
         sidebar_sel: white(0.09),
         fill_1: white(0.04),
         fill_2: white(0.07),
@@ -149,7 +153,7 @@ impl Tokens {
         diff_add: hex(0x32D74B),
         diff_del: hex(0xFF453A),
         on_accent: hex(0xFFFFFF),
-        glass_side: rgba(34, 34, 38, 0.55),
+        glass_side: rgba(30, 30, 31, 0.45),
         glass_bar: rgba(38, 38, 42, 0.60),
         glass_float: rgba(48, 48, 52, 0.62),
         content: rgba(30, 30, 31, 0.90),

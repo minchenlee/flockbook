@@ -1,7 +1,8 @@
-//! Top row: one 52 pt row with the tab strip on the left and the actions on the right (DESIGN.md section 7).
+//! Top row: one 52 pt row holding the centred tab island and, right after it, the action capsule (DESIGN.md section 7).
 //!
-//! Left to right: a horizontally scrolling strip of pill tabs, the pinned All tabs and + buttons, flexible space,
-//! then the actions (Review diffstat when there is data, Split menu, Show terminal).
+//! Centre: a horizontally scrolling strip of pill tabs in a glass island, then `ACTION_GAP` and a small glass capsule
+//! with the All tabs chevron, +, Split and Show terminal buttons (Swift TopRow + TopRowActions). The empty space on
+//! either side is the window drag area.
 //!
 //! The strip is a custom widget (`Shift`): it lays its content out at full width, moves it left by the scroll
 //! offset and clips it. Hit tests are masked to the strip bounds, so a half-hidden tab never steals a click from
@@ -22,6 +23,7 @@ use herdr_core::{AgentStatus, Tab};
 use iced::advanced::{layout, mouse, overlay, renderer, widget, Clipboard, Layout, Renderer as _, Shell, Widget};
 use iced::keyboard::{self, key::Named, Key, Modifiers};
 use iced::widget::{button, column, container, mouse_area, row, stack, text, tooltip, Space};
+use iced::font::Weight;
 use iced::{gradient, time, Alignment, Background, Border, Color, Element, Event, Length, Padding, Point, Radians, Rectangle, Size, Subscription, Task, Vector};
 use std::cell::{Cell, RefCell};
 use std::time::Duration;
@@ -32,13 +34,21 @@ const MIN_TAB_W: f32 = 72.0;
 const MAX_TAB_W: f32 = 200.0;
 const FADE_L: f32 = 36.0;
 const FADE_R: f32 = 44.0;
-const BTN: f32 = 30.0;
 /// Pills are capsules and the island insets them by 3 on every side (Swift TabPill.height / TopRow.inset).
 const PILL_R: f32 = TAB_H / 2.0;
 const ISLAND_INSET: f32 = 3.0;
-const SP_6: f32 = 6.0;
-/// Horizontal room the right-hand actions need: split (44) + terminal (30) + gap.
-const ACTIONS_W: f32 = 44.0 + BTN + SP_4;
+/// Height of the action capsule next to the island: the island's height (Swift TopRow.height, 36).
+const CAPSULE_H: f32 = TAB_H + 2.0 * ISLAND_INSET;
+/// One action button inside that capsule (Swift FullScreenTopRow buttons: 36 wide, 36 tall).
+const ACTION_BTN: f32 = CAPSULE_H - 4.0;
+/// The buttons' own inset inside the capsule (Swift `.padding(.horizontal, 2)`).
+const CAPSULE_PAD: f32 = 2.0;
+/// Space between the island and the action capsule (Swift FullScreenTopRow `HStack(spacing: 10)`).
+const ACTION_GAP: f32 = 10.0;
+/// Width of the action capsule: chevron, +, split, terminal.
+const CAPSULE_W: f32 = 4.0 * ACTION_BTN + 2.0 * CAPSULE_PAD;
+/// Pill label, unselected: Swift TabPill `.callout.weight(.medium)` (TopRow.swift:213).
+const PILL_BODY: TextStyle = TextStyle { size: 13.0, line: 1.3, weight: Weight::Medium, mono: false };
 /// Window width assumed before the first `view` has measured the real one.
 const DEFAULT_STRIP_W: f32 = 480.0;
 
@@ -407,25 +417,15 @@ impl<'a> From<Shift<'a>> for Element<'a, Message> {
 // ---------------------------------------------------------------------------------------------------------------
 // Views
 
-fn icon_button<'a>(t: Tokens, ic: Icon, active: bool, msg: Message) -> Element<'a, Message> {
-    button(container(icon(ic, SIZE_DEFAULT, if active { t.label } else { t.label_2 })).center(Length::Fixed(BTN)))
+/// A button of the action capsule next to the island: a round 32 pt hit area in the capsule's height, plain icon
+/// (Swift FullScreenTopRow: `.frame(width: 36, height: 36)`, `.foregroundStyle(.secondary)`).
+fn action_button<'a>(t: Tokens, ic: Icon, active: bool, msg: Message) -> Element<'a, Message> {
+    button(container(icon(ic, SIZE_DEFAULT, if active { t.label } else { t.label_2 })).center(Length::Fixed(ACTION_BTN)))
         .padding(0)
         .on_press(msg)
         .style(move |_, st| button::Style {
             background: (active || matches!(st, button::Status::Hovered)).then_some(Background::Color(t.fill_2)),
-            border: Border { radius: R_ROW.into(), ..Default::default() },
-            ..Default::default()
-        })
-        .into()
-}
-
-fn menu_button<'a>(t: Tokens, ic: Icon, active: bool, msg: Message) -> Element<'a, Message> {
-    button(container(row![icon(ic, SIZE_DEFAULT, t.label_2), icon(Icon::ChevronDown, SIZE_INLINE - 4.0, t.label_3)].spacing(2).align_y(Alignment::Center)).center_y(Length::Fixed(BTN)).padding([0, 8]))
-        .padding(0)
-        .on_press(msg)
-        .style(move |_, st| button::Style {
-            background: (active || matches!(st, button::Status::Hovered)).then_some(Background::Color(t.fill_2)),
-            border: Border { radius: R_ROW.into(), ..Default::default() },
+            border: Border { radius: (ACTION_BTN / 2.0).into(), ..Default::default() },
             ..Default::default()
         })
         .into()
@@ -459,7 +459,7 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
     let split = tab.panes.len() > 1;
     let kind = status_kind(tab.status);
     let sym: Element<'a, Message> = if kind == fb_ui::StatusKind::Working { status::symbol_sized(kind, &t, 14.0, spin) } else { status::symbol(kind, &t) };
-    let label = if g.bold { HEADLINE.text(g.label.clone()) } else { BODY.text(g.label.clone()) };
+    let label = if g.bold { HEADLINE.text(g.label.clone()) } else { PILL_BODY.text(g.label.clone()) };
     let label = label.color(if selected || blocked { t.label } else { t.label_2 }).wrapping(text::Wrapping::None);
     let mut inner = row![sym, label].spacing(6).align_y(Alignment::Center);
     if split {
@@ -478,12 +478,13 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
     let mut r = row![main].align_y(Alignment::Center);
     if selected {
         r = r.push(
-            button(container(icon(Icon::X, SIZE_INLINE - 2.0, t.label_3)).center(Length::Fixed(22.0)))
+            // Swift TabCloseButton: a 20 pt circle, its fill only on hover.
+            button(container(icon(Icon::X, SIZE_INLINE - 2.0, t.label_3)).center(Length::Fixed(20.0)))
                 .padding(0)
                 .on_press(Message::TopRow(TopRowMsg::CloseTab(tab.id.clone())))
                 .style(move |_, st| button::Style {
-                    background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
-                    border: Border { radius: 6.0.into(), ..Default::default() },
+                    background: matches!(st, button::Status::Hovered).then_some(Background::Color(Color { a: 0.12, ..t.label })),
+                    border: Border { radius: 10.0.into(), ..Default::default() },
                     ..Default::default()
                 }),
         )
@@ -533,7 +534,7 @@ pub fn review_diffstat(_state: &State) -> Option<(usize, usize)> {
 /// (visible strip width, available width) for a top row of `width` points.
 fn strip_metrics(s: &State, width: f32, total: f32) -> (f32, f32) {
     let review_w = if review_diffstat(s).is_some() { 96.0 } else { 0.0 };
-    let avail = (width - 2.0 * SP_16 - 2.0 * BTN - 2.0 * SP_4 - ACTIONS_W - review_w - SP_16).max(DEFAULT_STRIP_W.min(width * 0.4));
+    let avail = (width - 2.0 * SP_16 - CAPSULE_W - ACTION_GAP - review_w - SP_16).max(DEFAULT_STRIP_W.min(width * 0.4));
     (total.min(avail), avail)
 }
 
@@ -615,24 +616,28 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
         .padding(ISLAND_INSET)
         .style(style::fill(t.fill_2, (TAB_H + 2.0 * ISLAND_INSET) / 2.0));
 
-    let all_tabs = tip(t, icon_button(t, Icon::ChevronDown, ts.menu == Some(MenuKind::AllTabs), Message::TopRow(TopRowMsg::ToggleMenu(MenuKind::AllTabs))), "All tabs".into(), tooltip::Position::Bottom);
-    let new_tab = tip(t, icon_button(t, Icon::Plus, false, Message::TopRow(TopRowMsg::Plus)), "New tab (\u{2318}T)".into(), tooltip::Position::Bottom);
-    let left = row![island, all_tabs, new_tab].spacing(SP_6).align_y(Alignment::Center);
+    let all_tabs = tip(t, action_button(t, Icon::ChevronDown, ts.menu == Some(MenuKind::AllTabs), Message::TopRow(TopRowMsg::ToggleMenu(MenuKind::AllTabs))), "All tabs".into(), tooltip::Position::Bottom);
+    let new_tab = tip(t, action_button(t, Icon::Plus, false, Message::TopRow(TopRowMsg::Plus)), "New tab (\u{2318}T)".into(), tooltip::Position::Bottom);
+    let split = tip(t, action_button(t, Icon::Columns2, ts.menu == Some(MenuKind::Split), Message::TopRow(TopRowMsg::ToggleMenu(MenuKind::Split))), "Split".into(), tooltip::Position::Bottom);
+    let terminal = tip(t, action_button(t, Icon::SquareTerminal, ts.terminal_on, Message::TopRow(TopRowMsg::ToggleTerminal)), "Show terminal (\u{2303}`)".into(), tooltip::Position::Bottom);
 
-    let mut right = row![].spacing(SP_4).align_y(Alignment::Center);
+    // The actions share one small capsule right after the island (Swift TopRowActions / FullScreenTopRow), not the far right.
+    let mut capsule = row![all_tabs, new_tab, split].spacing(0).align_y(Alignment::Center);
     if let Some((add, del)) = review {
-        right = right.push(
+        capsule = capsule.push(
             row![icon(Icon::FileDiff, SIZE_INLINE, t.label_2), CAPTION.text(format!("+{add}")).color(t.diff_add), CAPTION.text(format!("\u{2212}{del}")).color(t.diff_del)]
                 .spacing(4)
                 .align_y(Alignment::Center),
         );
     }
-    right = right
-        .push(tip(t, menu_button(t, Icon::Columns2, ts.menu == Some(MenuKind::Split), Message::TopRow(TopRowMsg::ToggleMenu(MenuKind::Split))), "Split".into(), tooltip::Position::Bottom))
-        .push(tip(t, icon_button(t, Icon::SquareTerminal, ts.terminal_on, Message::TopRow(TopRowMsg::ToggleTerminal)), "Show terminal (\u{2303}`)".into(), tooltip::Position::Bottom));
+    capsule = capsule.push(terminal);
+    let actions = container(capsule).height(Length::Fixed(CAPSULE_H)).padding([0.0, CAPSULE_PAD]).style(style::fill(t.fill_2, CAPSULE_H / 2.0));
 
-    let gap = crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(Length::Fixed(TOPROW_H)));
-    container(row![left, gap, right].align_y(Alignment::Center).padding([0.0, SP_16]))
+    // Island and actions centred in the content toolbar, the capsule `ACTION_GAP` after the island.
+    let group = row![island, actions].spacing(ACTION_GAP).align_y(Alignment::Center);
+    let gap_l = crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(Length::Fixed(TOPROW_H)));
+    let gap_r = crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(Length::Fixed(TOPROW_H)));
+    container(row![gap_l, group, gap_r].align_y(Alignment::Center).padding([0.0, SP_16]))
         .height(Length::Fixed(TOPROW_H))
         .width(Length::Fill)
         .align_y(Alignment::Center)
@@ -705,9 +710,28 @@ fn menu_sized(app: &App, row_width: f32) -> Element<'_, Message> {
         ),
     };
     let card = container(card).width(Length::Fixed(w)).padding(6).style(style::float_e2(t, R_MENU));
+    // Both menus hang off the centred island's action capsule: the chevron leads it, split is its third button.
+    let island_w = strip_w + 2.0 * ISLAND_INSET;
+    let group_w = island_w + ACTION_GAP + CAPSULE_W;
+    let group_left = (row_width - group_w).max(0.0) / 2.0;
+    let capsule_left = group_left + island_w + ACTION_GAP;
     let (ax, pad) = match kind {
-        MenuKind::AllTabs => (Alignment::Start, Padding { top: TOPROW_H - 8.0, left: (SIDEBAR_W + SP_16 + strip_w + SP_4).min(SIDEBAR_W + row_width - w - SP_8), right: 0.0, bottom: 0.0 }),
-        MenuKind::Split => (Alignment::End, Padding { top: TOPROW_H - 8.0, left: 0.0, right: SP_16 + BTN + SP_4, bottom: 0.0 }),
+        MenuKind::AllTabs => (
+            Alignment::Start,
+            Padding {
+                top: TOPROW_H - 8.0,
+                left: (SIDEBAR_W + capsule_left).min(SIDEBAR_W + row_width - w - SP_8),
+                right: 0.0,
+                bottom: 0.0,
+            },
+        ),
+        MenuKind::Split => {
+            let btn_left = capsule_left + CAPSULE_PAD + 2.0 * ACTION_BTN;
+            (
+                Alignment::Start,
+                Padding { top: TOPROW_H - 8.0, left: (SIDEBAR_W + btn_left + ACTION_BTN / 2.0 - w / 2.0).max(SIDEBAR_W + SP_8), right: 0.0, bottom: 0.0 },
+            )
+        }
     };
     let placed = container(card).width(Length::Fill).height(Length::Fill).align_x(ax).padding(pad);
     stack![mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::TopRow(TopRowMsg::CloseMenu)), placed].into()

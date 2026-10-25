@@ -13,7 +13,9 @@ pub fn content(t: Tokens) -> impl Fn(&Theme) -> container::Style {
     move |_| solid(t.bg)
 }
 
-/// The sidebar: opaque `sidebar`, or the `glass_side` tint under window glass.
+/// The sidebar: the content/window surface, `sidebar` (equal to `bg`), or the `glass_side` tint (equal to the `content`
+/// tint under window glass) so sidebar and content are one tone. No hairline: Swift's sidebar column draws the
+/// window surface again instead of a lighter panel with a divider.
 pub fn sidebar(t: Tokens, glass: bool) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(Background::Color(if glass { t.glass_side } else { t.sidebar })),

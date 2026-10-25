@@ -10,12 +10,12 @@ fn check(screen: Screen, mode: Mode, name: &str) {
     assert_eq!((img.width, img.height), (2560, 1704));
     let colors = distinct_colors(&img);
     assert!(colors > 40, "{name}: only {colors} distinct colors, frame looks blank");
-    // The background must not be one flat color: the sidebar and the content differ.
+    // Sidebar and content are one tone, as in Swift (SidebarView.swift:74, "sidebar and content are one tone").
     let px = |x: u32, y: u32| {
         let i = ((y * img.width + x) * 4) as usize;
         [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2]]
     };
-    assert_ne!(px(100, 900), px(2000, 900), "{name}: sidebar and content are the same color");
+    assert_eq!(px(100, 1200), px(560, 1200), "{name}: sidebar and content differ in tone");
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     write_png(&img, &dir.join(format!("{name}.png"))).unwrap();
     if std::env::var_os("FB_WRITE_EVIDENCE").is_some() {

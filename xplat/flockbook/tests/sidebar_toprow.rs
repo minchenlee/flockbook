@@ -115,9 +115,9 @@ fn blocked_badge_count_matches_demo_data() {
     let per_ws: usize = app.state.workspaces.iter().map(|w| flockbook::state::State::counts(w).blocked).sum();
     assert_eq!(per_ws, blocked);
     run(&app, (1280.0, 852.0), |sim| {
-        // The Needs you badge shows 2; Harbor and Lighthouse show 1 each.
+        // The Needs you badge shows 2. Workspace rows show one status glyph per tab, no count badge
+        // (Swift StatusColumn, SidebarView.swift:189-221).
         assert!(sim.find("2").is_ok(), "Needs you badge");
-        assert!(sim.find("1").is_ok(), "workspace badge");
     });
 }
 

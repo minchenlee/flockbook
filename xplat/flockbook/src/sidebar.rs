@@ -6,7 +6,7 @@
 use crate::state::{monogram, status_kind, Screen, State};
 use crate::{style, App, Message};
 use fb_ui::icons::{icon, Icon, SIZE_DEFAULT};
-use fb_ui::status::{self, StatusKind};
+use fb_ui::status;
 use fb_ui::theme::*;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Task};
@@ -43,26 +43,24 @@ fn step_workspace(app: &mut App, delta: isize) -> Task<Message> {
 }
 
 /// A full-width sidebar row button with the selected/hover background.
-/// Settings and Keyboard Shortcuts, bottom left (Swift: the app menu and the Help menu).
+/// Settings, pinned at the foot of the sidebar (Swift SidebarView.swift:59-67: one `navRow`
+/// "Settings" with the gearshape symbol). Keyboard shortcuts have no row there: they stay on ⌘/.
 fn footer(app: &App) -> Element<'_, Message> {
     let t = app.bar_tokens();
     let mac = cfg!(target_os = "macos");
-    let item = |ic: Icon, tip: String, msg: Message| -> Element<'_, Message> {
-        let b = button(container(icon(ic, SIZE_DEFAULT, t.label_2)).center(Length::Fixed(28.0))).padding(0).on_press(msg).style(move |_, st| button::Style {
-            background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
-            border: Border { radius: R_ROW.into(), ..Default::default() },
-            ..Default::default()
-        });
-        iced::widget::tooltip(b, container(CALLOUT.text(tip).color(t.label)).padding([5, 9]).style(style::float_e2(app.tokens(), R_ROW)), iced::widget::tooltip::Position::Top).gap(6).into()
-    };
     let key = |a| crate::shortcuts::TABLE.iter().find(|s| s.action == Some(a)).map(|s| crate::shortcuts::keys_text(s, mac)).unwrap_or_default();
-    row![
-        item(Icon::Settings2, format!("Settings ({})", key(crate::shortcuts::Action::Settings)), Message::Settings(crate::settings::SettingsMsg::Toggle)),
-        item(Icon::Keyboard, format!("Keyboard shortcuts ({})", key(crate::shortcuts::Action::Shortcuts)), Message::Shortcut(crate::shortcuts::Action::Shortcuts)),
+    let tip = format!("Settings ({})", key(crate::shortcuts::Action::Settings));
+    // The symbol sits in a 22 pt box, like the nav rows and the avatars (Swift SidebarLine.box).
+    let content = row![
+        container(icon(Icon::Settings2, SIZE_DEFAULT, t.label_2)).center(Length::Fixed(22.0)),
+        BODY.text("Settings").color(t.label),
+        Space::new().width(Length::Fill),
     ]
-    .spacing(SP_4)
-    .padding([SP_8, 0.0])
-    .into()
+    .spacing(SP_8)
+    .align_y(Alignment::Center);
+    let b = row_button(t, app.state.settings.open, content.into(), Message::Settings(crate::settings::SettingsMsg::Toggle), SIDEBAR_ROW_H + 4.0);
+    let b = iced::widget::tooltip(b, container(CALLOUT.text(tip).color(t.label)).padding([5, 9]).style(style::float_e2(app.tokens(), R_ROW)), iced::widget::tooltip::Position::Top).gap(6);
+    container(b).padding([SP_8, 0.0]).into()
 }
 
 fn row_button<'a>(t: Tokens, selected: bool, content: Element<'a, Message>, on_press: Message, height: f32) -> Element<'a, Message> {
@@ -116,27 +114,55 @@ fn monogram_chip<'a>(t: Tokens, label: &str, selected: bool) -> Element<'a, Mess
         .into()
 }
 
-/// Status summary, right-aligned, in the fixed order of the spec: done/idle dots (max 4, then +n), working arc
-/// and count, blocked badge.
-fn summary<'a>(t: Tokens, spin: f32, ws: &herdr_core::Workspace) -> Element<'a, Message> {
-    let c = State::counts(ws);
-    let mut r = row![].spacing(4).align_y(Alignment::Center);
-    let mut dots: Vec<StatusKind> = Vec::new();
-    dots.extend(std::iter::repeat(StatusKind::Done).take(c.done));
-    dots.extend(std::iter::repeat(StatusKind::Idle).take(c.idle));
-    for k in dots.iter().take(4) {
-        r = r.push(status::dot(*k, &t));
+/// Per-tab status glyphs at the end of a workspace row (Swift StatusColumn, SidebarView.swift:189-221):
+/// one glyph per tab in tab order, 12 pt with 3 pt gaps, in one right-aligned column as wide as the
+/// busiest workspace needs (at most five slots), so the glyphs line up and the name gets the rest.
+const STATUS_GLYPH: f32 = 12.0;
+const STATUS_SPACING: f32 = 3.0;
+const STATUS_SLOTS: usize = 5;
+
+/// Slots of the shared status column: the busiest workspace, at most five.
+fn status_slots(ws: &[herdr_core::Workspace]) -> usize {
+    ws.iter().map(|w| w.tabs.len()).max().unwrap_or(0).min(STATUS_SLOTS)
+}
+
+fn status_column_width(slots: usize) -> f32 {
+    slots as f32 * STATUS_GLYPH + slots.saturating_sub(1) as f32 * STATUS_SPACING
+}
+
+/// More tabs than slots: the most urgent (blocked, working, done, idle; earlier tab first on a tie) and
+/// "+N" in the last two slots (Swift StatusColumn.shown).
+fn status_shown(tabs: &[herdr_core::Tab]) -> (Vec<&herdr_core::Tab>, usize) {
+    if tabs.len() <= STATUS_SLOTS {
+        return (tabs.iter().collect(), 0);
     }
-    if dots.len() > 4 {
-        r = r.push(CAPTION.text(format!("+{}", dots.len() - 4)).color(t.label_3));
+    fn urgency(s: herdr_core::AgentStatus) -> u8 {
+        match s {
+            herdr_core::AgentStatus::Blocked => 4,
+            herdr_core::AgentStatus::Working => 3,
+            herdr_core::AgentStatus::Done => 2,
+            herdr_core::AgentStatus::Idle => 1,
+            herdr_core::AgentStatus::Unknown => 0,
+        }
     }
-    if c.working > 0 {
-        r = r.push(Space::new().width(2)).push(status::symbol_sized(StatusKind::Working, &t, 11.0, spin)).push(CAPTION.text(c.working.to_string()).color(t.label_2));
+    let keep = STATUS_SLOTS - 2;
+    let mut order: Vec<usize> = (0..tabs.len()).collect();
+    order.sort_by(|a, b| urgency(tabs[*b].status).cmp(&urgency(tabs[*a].status)).then(a.cmp(b)));
+    order.truncate(keep);
+    (tabs.iter().enumerate().filter(|(i, _)| order.contains(i)).map(|(_, tab)| tab).collect(), tabs.len() - keep)
+}
+
+fn status_column<'a>(t: Tokens, spin: f32, tabs: &[herdr_core::Tab], slots: usize) -> Element<'a, Message> {
+    let (shown, more) = status_shown(tabs);
+    let mut r = row![].spacing(STATUS_SPACING).align_y(Alignment::Center);
+    for tab in shown {
+        let phase = if tab.status == herdr_core::AgentStatus::Working { spin } else { 0.0 };
+        r = r.push(status::symbol_sized(status_kind(tab.status), &t, STATUS_GLYPH, phase));
     }
-    if c.blocked > 0 {
-        r = r.push(Space::new().width(2)).push(count_badge(t, c.blocked));
+    if more > 0 {
+        r = r.push(container(CAPTION.text(format!("+{more}")).color(t.label_3)).width(Length::Fixed(status_column_width(2))).align_x(Alignment::End));
     }
-    r.into()
+    r.width(Length::Fixed(status_column_width(slots))).into()
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -152,14 +178,20 @@ pub fn view(app: &App) -> Element<'_, Message> {
     ]
     .spacing(2);
 
+    // "Workspaces" subheadline/semibold (Swift SidebarView.swift:127) with the folder.badge.plus button
+    // (SidebarView.swift:132); the closest Lucide pair is folder + plus, the plus reading as the badge.
     let header = row![
-        CAPTION.text("Workspaces").font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2),
+        BODY.text("Workspaces").font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2),
         Space::new().width(Length::Fill),
-        button(icon(Icon::Plus, SIZE_DEFAULT, t.label_2)).padding(2).style(button::text).on_press(Message::Sidebar(SidebarMsg::AddWorkspace)),
+        button(row![icon(Icon::Folder, SIZE_DEFAULT, t.label_2), icon(Icon::Plus, 11.0, t.label_2)].spacing(1).align_y(Alignment::Center))
+            .padding(2)
+            .style(button::text)
+            .on_press(Message::Sidebar(SidebarMsg::AddWorkspace)),
     ]
     .align_y(Alignment::Center)
-    .padding([0, 8]);
+    .padding([6, 8]);
 
+    let slots = status_slots(&s.workspaces);
     let mut list = column![].spacing(2);
     for ws in &s.workspaces {
         let selected = s.screen == Screen::Conversation && s.selected_workspace.as_deref() == Some(ws.id.as_str());
@@ -167,7 +199,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let quiet = c.blocked == 0 && c.working == 0;
         let name_color = if quiet && !selected { t.label_2 } else { t.label };
         let name = if c.blocked > 0 { HEADLINE.text(ws.label.clone()) } else { BODY.text(ws.label.clone()) };
-        let content = row![monogram_chip(t, &ws.label, selected), name.color(name_color), Space::new().width(Length::Fill), summary(t, s.toprow.spin, ws)]
+        let content = row![monogram_chip(t, &ws.label, selected), name.color(name_color), Space::new().width(Length::Fill), status_column(t, s.toprow.spin, &ws.tabs, slots)]
             .spacing(SP_8)
             .align_y(Alignment::Center);
         let tip = format!("{} \u{00B7} {} tab{}{}{}", ws.label, ws.tabs.len(), if ws.tabs.len() == 1 { "" } else { "s" }, if c.working > 0 { format!(" \u{00B7} {} working", c.working) } else { String::new() }, if c.blocked > 0 { format!(" \u{00B7} {} need you", c.blocked) } else { String::new() });
@@ -176,9 +208,6 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let rowb = crate::toprow::drag_target(rowb.into(), crate::workspace_actions::Target::Workspace(ws.id.clone()));
         list = list.push(iced::widget::tooltip(rowb, container(CALLOUT.text(tip).color(t.label)).padding([5, 9]).style(style::float_e2(t, R_ROW)), iced::widget::tooltip::Position::Right).gap(6).delay(std::time::Duration::from_millis(600)));
     }
-
-    // Keep the status mapping in one place for builders.
-    let _ = status_kind;
 
     container(column![crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(52)), nav, Space::new().height(SP_24), header, Space::new().height(SP_4), scrollable(list).height(Length::Fill), footer(app)])
         .padding([0, 12])

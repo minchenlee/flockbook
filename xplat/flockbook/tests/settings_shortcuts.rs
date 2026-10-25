@@ -167,21 +167,15 @@ fn a_click_outside_closes_the_panel_and_inside_does_not() {
 #[test]
 fn the_sidebar_buttons_open_settings_and_the_panel() {
     let mut app = App::demo(Mode::Light, Screen::Conversation);
-    // The two buttons sit at the bottom left of the sidebar: gear first, then the keyboard.
-    let y = SIZE.1 - 8.0 - 14.0;
-    for (x, check) in [(12.0 + 14.0, 0), (12.0 + 28.0 + 4.0 + 14.0, 1)] {
-        let mut s = sim(&app);
-        s.point_at(Point::new(x, y));
-        s.simulate(simulator::click());
-        let msgs: Vec<Message> = s.into_messages().collect();
-        apply(&mut app, msgs);
-        if check == 0 {
-            assert!(app.state.settings.open, "the gear opens Settings");
-            let _ = app.update(Message::Settings(SettingsMsg::Close));
-        } else {
-            assert!(app.state.shortcuts.open, "the keyboard opens the panel");
-        }
-    }
+    // One "Settings" row at the foot of the sidebar (Swift SidebarView.swift:61); the panel stays on the keyboard.
+    let mut s = sim(&app);
+    s.click("Settings").expect("Settings row");
+    let msgs: Vec<Message> = s.into_messages().collect();
+    apply(&mut app, msgs);
+    assert!(app.state.settings.open, "the Settings row opens Settings");
+    let _ = app.update(Message::Settings(SettingsMsg::Close));
+    let _ = app.update(Message::Shortcut(Action::Shortcuts));
+    assert!(app.state.shortcuts.open, "the keyboard opens the panel");
 }
 
 // ------------------------------------------------------------ settings
@@ -212,16 +206,16 @@ fn cmd_comma_toggles_settings_and_closes_the_panel() {
 #[test]
 fn the_reading_width_moves_the_column_now() {
     let mut app = App::demo(Mode::Light, Screen::Conversation);
-    assert!(sim(&app).find("Text column up to 760 pt.").is_err(), "closed: nothing shows");
+    assert!(sim(&app).find("Text size: ⌘= larger, ⌘− smaller, ⌘0 reset. Width: a text column up to 760 pt.").is_err(), "closed: nothing shows");
     let _ = app.update(Message::Settings(SettingsMsg::Open));
     let mut s = sim(&app);
     s.click("Narrow").expect("Narrow");
     let msgs: Vec<Message> = s.into_messages().collect();
     apply(&mut app, msgs);
     assert_eq!(app.state.settings.reading_width(), ReadingWidth::Narrow);
-    assert!(sim(&app).find("Text column up to 600 pt.").is_ok());
+    assert!(sim(&app).find("Text size: ⌘= larger, ⌘− smaller, ⌘0 reset. Width: a text column up to 600 pt.").is_ok());
     let _ = app.update(Message::Settings(SettingsMsg::SetWidth(ReadingWidth::Full)));
-    assert!(sim(&app).find("The text fills the window.").is_ok());
+    assert!(sim(&app).find("Text size: ⌘= larger, ⌘− smaller, ⌘0 reset. Width: the text fills the window.").is_ok());
     assert_eq!(ReadingWidth::ALL.map(|w| w.points()), [600.0, 760.0, 920.0, 2400.0]);
 }
 

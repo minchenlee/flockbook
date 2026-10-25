@@ -18,9 +18,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fb_ui::icons::{icon, Icon, SIZE_DEFAULT, SIZE_INLINE};
+use fb_ui::icons::{icon, Icon, SIZE_INLINE};
 use fb_ui::theme::*;
-use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, text, toggler, Space};
+use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, svg, text, toggler, Space};
 use iced::{Alignment, Background, Border, Element, Length, Task};
 use serde::{Deserialize, Serialize};
 
@@ -373,18 +373,40 @@ fn small_button<'a>(t: Tokens, label: &'a str, on: Option<Message>) -> Element<'
         .into()
 }
 
+/// Lucide 24-grid sources for the two symbols `fb_ui::icons` has no glyph for (Swift uses SF Symbols
+/// `chevron.left` and `arrow.down.circle`). Black stroke: the SVG's style color tints it, like `fb_ui::icon`.
+const CHEVRON_LEFT: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"##;
+const ARROW_DOWN_CIRCLE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/></svg>"##;
+
+/// An icon from a local SVG source, at `size` points in `color`.
+fn local_icon<'a>(source: &'static str, size: f32, color: iced::Color) -> Element<'a, Message> {
+    let handle = svg::Handle::from_memory(source.as_bytes().to_vec());
+    svg(handle).width(Length::Fixed(size)).height(Length::Fixed(size)).style(move |_, _| svg::Style { color: Some(color) }).into()
+}
+
+/// The tab's symbol (Swift `SettingsTab.symbol`): gear, terminal, phone, arrow down in a circle.
+fn tab_symbol<'a>(tab: SettingsTab, size: f32, color: iced::Color) -> Element<'a, Message> {
+    match tab {
+        SettingsTab::General => icon(Icon::Settings2, size, color),
+        SettingsTab::Agents => icon(Icon::SquareTerminal, size, color),
+        SettingsTab::Remote => icon(Icon::Smartphone, size, color),
+        SettingsTab::Updates => local_icon(ARROW_DOWN_CIRCLE, size, color),
+    }
+}
+
 fn segmented<'a, T: Copy + PartialEq + 'a>(t: Tokens, items: &[(T, &'static str)], selected: Option<T>, on: Option<fn(T) -> Message>) -> Element<'a, Message> {
     let mut r = row![].spacing(2);
     for &(value, label) in items {
         let sel = selected == Some(value);
         let color = if on.is_none() { t.label_3 } else { t.label };
         let mut b = button(container(text(label).size(CALLOUT.size).color(color)).center_x(Length::Fixed(label_width(label)))).padding([3, 6]).style(move |_, st| button::Style {
+            // Swift's `.segmented` picker: the chosen segment is a slightly darker grey on the track, not a raised chip.
             background: if sel {
-                Some(Background::Color(t.bg))
+                Some(Background::Color(t.fill_3))
             } else {
                 matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2))
             },
-            border: Border { radius: 5.0.into(), width: if sel { 0.5 } else { 0.0 }, color: t.sep_strong },
+            border: Border { radius: 5.0.into(), ..Default::default() },
             text_color: color,
             ..Default::default()
         });
@@ -397,17 +419,12 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(t: Tokens, items: &[(T, &'static str)
 }
 
 /// The name on the left, the control on the right on the same line (Swift `SettingsRow`).
-fn setting_row<'a>(t: Tokens, title: &'a str, note: String, control: Element<'a, Message>) -> Element<'a, Message> {
+fn setting_row<'a>(t: Tokens, title: &'a str, control: Element<'a, Message>) -> Element<'a, Message> {
     container(
-        column![
-            row![BODY.text(title).color(t.label), Space::new().width(Length::Fill), control]
-                .spacing(SP_8).align_y(Alignment::Center).width(Length::Fill),
-            CAPTION.text(note).color(t.label_2),
-        ]
-        .spacing(4)
-        .width(Length::Fill),
+        row![BODY.text(title).color(t.label), Space::new().width(Length::Fill), control]
+            .spacing(SP_12).align_y(Alignment::Center).width(Length::Fill),
     )
-    .padding([8, 12])
+    .padding([8, 14])
     .into()
 }
 
@@ -416,15 +433,26 @@ fn label_width(label: &str) -> f32 {
     (label.chars().count() as f32 * 6.5 + 18.0).max(34.0)
 }
 
-fn section<'a>(t: Tokens, title: &'a str, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+/// A group of rows: a small title above, the rows on one rounded fill with a hairline between them, and the line that
+/// says what they do in more words *under* the card (Swift `SettingsGroup`).
+fn section<'a>(t: Tokens, title: &'a str, note: Option<String>, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     let mut col = column![].spacing(0);
     for (i, r) in rows.into_iter().enumerate() {
         if i > 0 {
-            col = col.push(container(Space::new()).width(Length::Fill).height(Length::Fixed(1.0)).style(style::fill(t.sep, 0.0)));
+            // Swift draws the divider inset by the row's leading padding (`Settings.swift:204`).
+            col = col.push(container(container(Space::new()).width(Length::Fill).height(Length::Fixed(1.0)).style(style::fill(t.sep, 0.0))).padding(iced::Padding { left: 14.0, ..iced::Padding::ZERO }));
         }
         col = col.push(r);
     }
-    column![container(CAPTION.text(title).color(t.label_2)).padding([0, 12]), container(col).style(style::fill(t.fill_1, R_ROW + 4.0))].spacing(6).into()
+    let mut group = column![
+        container(CALLOUT.text(title).color(t.label_2)).padding([0, 4]),
+        container(col).style(style::fill(t.fill_1, R_ROW + 4.0)),
+    ]
+    .spacing(4);
+    if let Some(note) = note {
+        group = group.push(container(CALLOUT.text(note).color(t.label_2)).padding([0, 4]));
+    }
+    group.into()
 }
 
 /// The sheet, or nothing when closed.
@@ -447,19 +475,13 @@ fn tab_summary(tab: SettingsTab) -> &'static str {
 
 /// The tab's icon in a blue rounded square, its title and one line on what it is for (Swift `SettingsView.header`).
 fn page_header(t: Tokens, tab: SettingsTab) -> Element<'static, Message> {
-    let symbol = match tab {
-        SettingsTab::General => Icon::Settings2,
-        SettingsTab::Agents => Icon::Inbox,
-        SettingsTab::Remote => Icon::Smartphone,
-        SettingsTab::Updates => Icon::Activity,
-    };
-    let badge = container(icon(symbol, SIZE_DEFAULT, iced::Color::WHITE))
+    let badge = container(tab_symbol(tab, 15.0, iced::Color::WHITE))
         .center(Length::Fixed(32.0))
         .style(style::fill(t.accent, 8.0));
     column![
         row![
             badge,
-            column![TITLE.text(tab.label()).size(20.0).color(t.label), CAPTION.text(tab_summary(tab)).color(t.label_2)].spacing(1),
+            column![TITLE.text(tab.label()).size(20.0).color(t.label), CALLOUT.text(tab_summary(tab)).color(t.label_2)].spacing(1),
         ]
         .spacing(SP_12)
         .align_y(Alignment::Center),
@@ -473,22 +495,16 @@ fn page_header(t: Tokens, tab: SettingsTab) -> Element<'static, Message> {
 /// rows on a light grey fill when chosen.
 fn tab_list(t: Tokens, selected: SettingsTab) -> Element<'static, Message> {
     let mut col = column![
-        container(row![icon(Icon::ChevronRight, SIZE_INLINE, t.label_2), BODY.text("Back").color(t.label)].spacing(SP_8).align_y(Alignment::Center))
+        container(row![local_icon(CHEVRON_LEFT, SIZE_INLINE, t.label_2), BODY.text("Back").color(t.label)].spacing(SP_8).align_y(Alignment::Center))
             .padding([6, 8])
             .width(Length::Fill),
-        container(CAPTION.text("Settings").color(t.label_2)).padding([0, 8]),
+        container(CALLOUT.text("Settings").color(t.label_2)).padding([0, 8]),
     ]
     .spacing(2);
     for tab in SettingsTab::ALL {
         let on = tab == selected;
-        let symbol = match tab {
-            SettingsTab::General => Icon::Settings2,
-            SettingsTab::Agents => Icon::Inbox,
-            SettingsTab::Remote => Icon::Smartphone,
-            SettingsTab::Updates => Icon::Activity,
-        };
         col = col.push(
-            button(container(row![icon(symbol, SIZE_INLINE, t.label_2), BODY.text(tab.label()).color(t.label)].spacing(SP_8).align_y(Alignment::Center)).padding([6, 8]).width(Length::Fill))
+            button(container(row![tab_symbol(tab, SIZE_INLINE, t.label_2), BODY.text(tab.label()).color(t.label)].spacing(SP_8).align_y(Alignment::Center)).padding([6, 8]).width(Length::Fill))
                 .padding(0)
                 .width(Length::Fill)
                 .on_press(Message::Settings(SettingsMsg::SelectTab(tab)))
@@ -503,7 +519,8 @@ fn tab_list(t: Tokens, selected: SettingsTab) -> Element<'static, Message> {
                 }),
         );
     }
-    container(col).width(Length::Fixed(LIST_W)).height(Length::Fill).padding(SP_8).into()
+    // Swift `SettingsTabList`: `.padding(.horizontal, 10).padding(.top, 12)`.
+    container(col).width(Length::Fixed(LIST_W)).height(Length::Fill).padding(iced::Padding { top: 12.0, right: 10.0, bottom: 10.0, left: 10.0 }).into()
 }
 
 fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
@@ -513,7 +530,7 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
     let (note, glass_off) = glass_note(app);
     let glass = segmented(t, &[(true, "Glass"), (false, "Opaque")], Some(glass_selected(app)), (!glass_off).then_some(|v| Message::Settings(SettingsMsg::SetGlass(v))));
     let width = s.reading_width();
-    let width_note = if width == ReadingWidth::Full { "The text fills the window.".to_string() } else { format!("Text column up to {} pt.", width.points() as u32) };
+    let width_note = if width == ReadingWidth::Full { "the text fills the window.".to_string() } else { format!("a text column up to {} pt.", width.points() as u32) };
     let widths: Vec<(ReadingWidth, &'static str)> = ReadingWidth::ALL.iter().map(|w| (*w, w.label())).collect();
     let width_picker = segmented(t, &widths, Some(width), Some(|w| Message::Settings(SettingsMsg::SetWidth(w))));
 
@@ -533,7 +550,7 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
         INPUT_OFF
     };
     let footer_color = if live { t.blocked } else { t.label_2 };
-    let footer_row = row![icon(if live { Icon::Shield } else { Icon::Eye }, SIZE_INLINE, footer_color), CAPTION.text(footer).color(t.label_2)].spacing(6).align_y(Alignment::Center);
+    let footer_row = row![icon(if live { Icon::Shield } else { Icon::Eye }, SIZE_INLINE, footer_color), CALLOUT.text(footer).color(t.label_2)].spacing(6).align_y(Alignment::Center);
 
     let sizes: Vec<_> = ReadingSize::ALL.iter().map(|v| (*v, v.label())).collect();
     let size_picker = segmented(t, &sizes, Some(s.reading_size()), Some(|v| Message::Settings(SettingsMsg::SetSize(v))));
@@ -552,21 +569,25 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
         Some(Err(reason)) => format!("{reason} Using Flockbook colors."),
         None => "Read colors from your Ghostty config. Reload after changing it.".into(),
     };
+    // Every group's line of small text goes under its card, like Swift's `SettingsGroup` footer.
     let mut body = column![page_header(t, s.tab),
-        section(t, "Appearance", vec![setting_row(t, "Window", note.to_string(), glass)]),
-        section(t, "Reading", vec![setting_row(t, "Text size", "Larger text also widens the reading column.".into(), size_picker), setting_row(t, "Width", width_note, width_picker)]),
-        section(t, "Terminal", vec![setting_row(t, "Colors", theme_note, colors_control)]),
-        section(t, "Toolbar", vec![setting_row(t, "+ button", "Keyboard New Tab always opens a tab.".into(), plus)]),
+        section(t, "Appearance", Some(note.to_string()), vec![setting_row(t, "Window", glass)]),
+        section(t, "Reading", Some(format!("Text size: ⌘= larger, ⌘− smaller, ⌘0 reset. Width: {width_note}")), vec![setting_row(t, "Text size", size_picker), setting_row(t, "Width", width_picker)]),
+        section(t, "Terminal", Some(theme_note), vec![setting_row(t, "Colors", colors_control)]),
+        section(t, "Toolbar", Some("A split splits the focused pane. ⌘T, the menu's New Tab and the sidebar's New tab always open a tab.".into()), vec![setting_row(t, "+ button", plus)]),
     ].spacing(SP_16);
     if s.tab == SettingsTab::Agents {
         body = column![page_header(t, s.tab),
-            section(t, "Input", vec![setting_row(t, "Allow sending input to agents", "Typing, Allow and Deny, new tab, close tab and split.".into(), input_toggle.into())]),
-            container(footer_row).padding([0, 12]),
-            section(t, "Status line", vec![
-                setting_row(t, "Claude Code", "Capture status tags; Off restores the original command.".into(), segmented(t, &[(true, "On"), (false, "Off")], s.status_enabled.get("claude").copied(), Some(|on| Message::Settings(SettingsMsg::SetStatusLine { agent: "claude".into(), on })))),
-                setting_row(t, "Grok Build", "Unsafe or complex TOML is refused; any error appears below.".into(), segmented(t, &[(true, "On"), (false, "Off")], s.status_enabled.get("grok").copied(), Some(|on| Message::Settings(SettingsMsg::SetStatusLine { agent: "grok".into(), on })))),
+            // Swift `SettingsGroup(footer:)`: the line under the Input card, 4 pt below it.
+            column![
+                section(t, "Input", None, vec![setting_row(t, "Allow sending input to agents", input_toggle.into())]),
+                container(footer_row).padding([0, 4]),
+            ].spacing(4),
+            section(t, "Status line", None, vec![
+                setting_row(t, "Claude Code", segmented(t, &[(true, "On"), (false, "Off")], s.status_enabled.get("claude").copied(), Some(|on| Message::Settings(SettingsMsg::SetStatusLine { agent: "claude".into(), on })))),
+                setting_row(t, "Grok Build", segmented(t, &[(true, "On"), (false, "Off")], s.status_enabled.get("grok").copied(), Some(|on| Message::Settings(SettingsMsg::SetStatusLine { agent: "grok".into(), on })))),
             ]),
-            CAPTION.text("Choose On or Off to apply setup. Highlighted choices show successful actions in this window.").color(t.label_2),
+            CALLOUT.text("Capture status tags; Off restores the original command. Unsafe or complex TOML is refused; any error appears below. Choose On or Off to apply setup.").color(t.label_2),
         ].spacing(SP_16);
     } else if s.tab == SettingsTab::Remote {
         body = column![page_header(t, s.tab), BODY.text("Remote access is outside this desktop parity release.").color(t.label), CAPTION.text("This build does not start a Hub or expose a remote input endpoint.").color(t.label_2)].spacing(SP_12);

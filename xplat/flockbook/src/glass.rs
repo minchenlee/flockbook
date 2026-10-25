@@ -8,7 +8,8 @@
 //! older Windows) falls back to opaque. The window must be created transparent for glass, so `--glass` and
 //! `FLOCKBOOK_GLASS` apply at launch.
 //!
-//! Under glass the root paints nothing. The sidebar paints `glass_side`, the top row and the Needs you list
+//! Under glass the root paints nothing. The sidebar paints `glass_side` (the `content` tint, the same surface as the
+//! main area: sidebar and content are one tone), the top row and the Needs you list
 //! `glass_bar`, and the main area `content` (almost opaque). Floating surfaces (composer, cards, menus, tooltips) stay
 //! opaque: iced cannot blur the content under them, and a thin tint over text is unreadable.
 
