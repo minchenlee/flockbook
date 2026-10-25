@@ -33,8 +33,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Height of the sheet's title row.
-pub const HEADER_H: f32 = 44.0;
+/// Height of the sheet's title row: the 28-pt close button plus the 12-pt padding above and below it
+/// (Swift `TerminalSheet`: `HStack { ... }.padding(12)` around a 28x28 close button).
+pub const HEADER_H: f32 = 52.0;
 /// How long a pty resize waits for the next size change (Swift: 150 ms).
 pub const RESIZE_DELAY: Duration = Duration::from_millis(150);
 /// How long a scroll-state answer is trusted before the wheel asks herdr again.
@@ -911,7 +912,8 @@ fn sheet_in(app: &App, window: (f32, f32)) -> Element<'_, Message> {
             border: Border { color: t.sep, width: 1.0, radius: 14.0.into() },
             ..Default::default()
         });
-    let header = container(row![title, Space::new().width(Length::Fill), close].align_y(Alignment::Center)).padding([0, 12]).height(Length::Fixed(HEADER_H)).align_y(Alignment::Center);
+    // Swift `TerminalSheet`: the title row is padded 12 on every side; the fixed height keeps the 28-pt close button centred.
+    let header = container(row![title, Space::new().width(Length::Fill), close].align_y(Alignment::Center)).padding([12, 12]).height(Length::Fixed(HEADER_H)).align_y(Alignment::Center);
     let divider = container(Space::new()).width(Length::Fill).height(Length::Fixed(1.0)).style(style::fill(t.sep, 0.0));
 
     let body: Element<Message> = match &sheet.history {
@@ -952,6 +954,8 @@ fn live_body<'a>(app: &'a App, sheet: &'a Sheet, palette: TermPalette) -> Elemen
 
 fn history_body<'a>(app: &'a App, h: &'a History, palette: TermPalette) -> Element<'a, Message> {
     let t = app.tokens();
+    // Swift `ObservedTerminal` floats this bar over the history view (`overlay(alignment: .top)`):
+    // `HStack(spacing: 10)`, `.padding(.horizontal, 12).padding(.vertical, 6)` on a material fill.
     let bar = container(
         row![
             icon(Icon::Layers, SIZE_INLINE, t.label_2),
@@ -963,7 +967,7 @@ fn history_body<'a>(app: &'a App, h: &'a History, palette: TermPalette) -> Eleme
                 ..Default::default()
             }),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center),
     )
     .padding([6, 12])
@@ -973,7 +977,12 @@ fn history_body<'a>(app: &'a App, h: &'a History, palette: TermPalette) -> Eleme
     let tall = h.snap.rows as f32 * CELL_H + 2.0 * PAD;
     let view = Terminal::new(&h.snap, palette).height(Length::Fixed(tall)).on_copy(|t| Message::Terminal(TerminalMsg::Copy(t))).on_wheel_passive(|(dy, _)| Message::Terminal(TerminalMsg::HistoryWheel { dy }));
     let list = scrollable(view).on_scroll(|v| Message::Terminal(TerminalMsg::HistoryScrolled { at_bottom: at_bottom(v.absolute_offset().y, v.content_bounds().height, v.bounds().height) })).direction(scrollable::Direction::Vertical(scrollable::Scrollbar::new().anchor(scrollable::Anchor::End))).width(Length::Fill).height(Length::Fill);
-    column![bar, list].into()
+    // The bar floats over the terminal (it does not push the text down): the history text scrolls under it.
+    stack![
+        list,
+        container(bar).width(Length::Fill).height(Length::Fill).align_y(Alignment::Start)
+    ]
+    .into()
 }
 
 fn banner<'a>(app: &'a App, sheet: &'a Sheet, reason: &str) -> Element<'a, Message> {

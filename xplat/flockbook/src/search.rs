@@ -17,8 +17,8 @@ mod matcher;
 
 pub use matcher::{Parts, Role};
 
-use crate::state::{monogram, status_kind};
-use crate::{style, App, Message};
+use crate::state::status_kind;
+use crate::{App, Message};
 use fb_ui::icons::{icon, Icon, SIZE_DEFAULT};
 use fb_ui::selectable::flow::row_id;
 use fb_ui::status;
@@ -31,8 +31,12 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-/// Widest the search column gets.
-pub const COLUMN_MAX: f32 = 720.0;
+/// Widest the search column gets (the app's screen column: 960 wide, rows inset 8 inside it).
+pub const COLUMN_MAX: f32 = 960.0;
+/// Side inset of a row inside the column.
+const ROW_INSET: f32 = 8.0;
+/// Gap that separates the tab rows from the message rows (there are no section headers).
+const GROUP_GAP: f32 = 12.0;
 /// Message hits per pane, and in all.
 pub const PER_PANE: usize = 6;
 pub const MAX_MESSAGE_HITS: usize = 40;
@@ -426,9 +430,8 @@ pub fn update(app: &mut App, msg: SearchMsg) -> Task<Message> {
 }
 
 fn scroll_to_selected(s: &SearchState) -> Task<Message> {
-    let tabs_h = if s.tabs.is_empty() { 0.0 } else { 32.0 + s.tabs.len() as f32 * TAB_ROW_H };
-    let y = if s.selected < s.tabs.len() { 32.0 + s.selected as f32 * TAB_ROW_H } else { tabs_h + 32.0 + (s.selected - s.tabs.len()) as f32 * MSG_ROW_H };
-    // Keep a few rows above the selection in view.
+    let tabs_h = s.tabs.len() as f32 * TAB_ROW_H + if s.tabs.is_empty() { 0.0 } else { GROUP_GAP };
+    let y = if s.selected < s.tabs.len() { s.selected as f32 * TAB_ROW_H } else { tabs_h + (s.selected - s.tabs.len()) as f32 * MSG_ROW_H };
     let y = (y - 120.0).max(0.0);
     iced::widget::operation::scroll_to(list_id(), scrollable::AbsoluteOffset { x: None, y: Some(y) })
 }
@@ -492,14 +495,6 @@ fn highlighted<'a>(t: Tokens, p: &Parts, base: TextStyle, color: iced::Color) ->
     rich_text(spans).size(base.size).font(base.font()).wrapping(text::Wrapping::None).into()
 }
 
-fn monogram_chip<'a>(t: Tokens, label: &str) -> Element<'a, Message> {
-    container(text(monogram(label)).size(9.5).font(HEADLINE.font()).color(t.label_2))
-        .center_x(Length::Fixed(20.0))
-        .center_y(Length::Fixed(18.0))
-        .style(style::fill(t.fill_2, R_CHIP))
-        .into()
-}
-
 fn row_button<'a>(t: Tokens, selected: bool, h: f32, content: Element<'a, Message>, msg: Message) -> Element<'a, Message> {
     button(container(content).height(Length::Fill).align_y(Alignment::Center).padding([0, 12]))
         .on_press(msg)
@@ -523,12 +518,13 @@ fn tab_row<'a>(app: &App, i: usize, h: &TabHit, needle: &[char]) -> Element<'a, 
     let t = app.tokens();
     let sel = app.state.search.selected == i;
     let label = matcher::split(&h.tab_label, needle);
-    let mut r = row![status::symbol(status_kind(h.status), &t), monogram_chip(t, &h.workspace_label), highlighted(t, &label, BODY, t.label)].spacing(SP_8).align_y(Alignment::Center);
+    // The row: status, the tab's name, its agent, then the workspace at the trailing edge (no workspace chip).
+    let mut r = row![status::symbol(status_kind(h.status), &t), highlighted(t, &label, BODY, t.label)].spacing(SP_8).align_y(Alignment::Center);
     if let Some(a) = &h.agent {
         r = r.push(highlighted(t, &matcher::split(a, needle), BODY, t.label_2));
     }
     r = r.push(Space::new().width(Length::Fill));
-    r = r.push(highlighted(t, &matcher::split(&h.workspace_label, needle), CAPTION, t.label_2));
+    r = r.push(highlighted(t, &matcher::split(&h.workspace_label, needle), BODY, t.label_2));
     row_button(t, sel, TAB_ROW_H, r.into(), Message::Search(SearchMsg::Click(i)))
 }
 
@@ -548,12 +544,8 @@ fn msg_row<'a>(app: &App, i: usize, h: &MsgHit) -> Element<'a, Message> {
     .spacing(SP_8)
     .align_y(Alignment::Center);
     let body = column![head, container(highlighted(t, &h.parts, BODY, t.label_2)).clip(true).width(Length::Fill)].spacing(3);
-    let r = row![container(status::symbol(status_kind(h.status), &t)).padding([2, 0]), monogram_chip(t, &h.workspace_label), body.width(Length::Fill)].spacing(SP_8).align_y(Alignment::Center);
+    let r = row![container(status::symbol(status_kind(h.status), &t)).padding([2, 0]), body.width(Length::Fill)].spacing(SP_8).align_y(Alignment::Center);
     row_button(t, sel, MSG_ROW_H, r.into(), Message::Search(SearchMsg::Click(i)))
-}
-
-fn section_head<'a>(t: Tokens, title: &str, n: usize) -> Element<'a, Message> {
-    row![CAPTION.text(title.to_uppercase()).color(t.label_3), CAPTION.text(n.to_string()).color(t.label_3)].spacing(6).padding([0, 12]).height(Length::Fixed(32.0)).align_y(Alignment::End).into()
 }
 
 fn field<'a>(app: &App) -> Element<'a, Message> {
@@ -590,37 +582,36 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let t = app.tokens();
     let s = &app.state.search;
     let needle = matcher::fold_query(&s.query);
+    // One flat list of rows, as the screen's list is: no section headers, only a gap between the two groups.
     let mut list = column![].spacing(0);
-    if !s.tabs.is_empty() {
-        list = list.push(section_head(t, "Tabs", s.tabs.len()));
-        for (i, h) in s.tabs.iter().enumerate() {
-            list = list.push(tab_row(app, i, h, &needle));
-        }
+    for (i, h) in s.tabs.iter().enumerate() {
+        list = list.push(tab_row(app, i, h, &needle));
     }
     if !s.messages.is_empty() {
-        list = list.push(Space::new().height(SP_8));
-        list = list.push(section_head(t, "Messages", s.messages.len()));
+        if !s.tabs.is_empty() {
+            list = list.push(Space::new().height(GROUP_GAP));
+        }
         for (k, h) in s.messages.iter().enumerate() {
             list = list.push(msg_row(app, s.tabs.len() + k, h));
         }
     }
     let body: Element<'_, Message> = if s.is_empty() && !s.searching {
         container(
-            column![icon(Icon::Search, 28.0, t.label_3), Space::new().height(SP_8), TITLE_3.text(format!("No results for \u{201c}{}\u{201d}", s.query.trim())).color(t.label_2), Space::new().height(SP_4), BODY.text("Try a tab, agent or workspace name, or words from a message.").color(t.label_3)]
+            column![icon(Icon::Search, 28.0, t.label_3), Space::new().height(SP_8), TITLE_3.text(format!("No Results for \u{201c}{}\u{201d}", s.query.trim())).color(t.label_2), Space::new().height(SP_4), BODY.text("Check the spelling or try a new search.").color(t.label_3)]
                 .align_x(Alignment::Center),
         )
         .center_x(Length::Fill)
-        .padding([60, 0])
+        .center_y(Length::Fill)
         .into()
     } else {
-        let mut c = column![scrollable(container(list).padding([0, 2])).id(list_id()).height(Length::Fill)];
+        let mut c = column![scrollable(container(list)).id(list_id()).height(Length::Fill)];
         if s.searching {
             c = c.push(container(CAPTION.text("Searching messages\u{2026}").color(t.label_3)).padding([6, 12]));
         }
         c.into()
     };
     let col = column![container(field(app)).padding(iced::Padding { top: 0.0, right: 0.0, bottom: SP_12, left: 0.0 }), body].max_width(COLUMN_MAX);
-    container(container(col).padding(iced::Padding { top: 28.0, right: 36.0, bottom: 16.0, left: 36.0 }).center_x(Length::Fill)).width(Length::Fill).height(Length::Fill).into()
+    container(container(col).padding(iced::Padding { top: 28.0, right: ROW_INSET, bottom: 16.0, left: ROW_INSET }).center_x(Length::Fill)).width(Length::Fill).height(Length::Fill).into()
 }
 
 /// Loads the conversation of every pane into `state.conversations` so message search covers all tabs. The app loads

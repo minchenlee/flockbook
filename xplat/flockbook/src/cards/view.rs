@@ -74,7 +74,8 @@ fn bottom_body(app: &App) -> Element<'_, Message> {
         Card::Approval(a) => column![keyed(app, card, slot(approval(app, a))), composer::view(app)].into(),
         Card::Question { can_send, agent, .. } => keyed(app, card, slot(question(app, agent, *can_send))),
         Card::Sent { agent } => {
-            let line = container(CALLOUT.text(format!("Sent. {agent} is continuing.")).color(t.label_2)).padding([SP_12, 0.0]).center_x(Length::Fill);
+            // `.padding(.vertical, 10)`, as Swift's sent line (`QuestionCard`, `Text("Sent. …")`).
+            let line = container(CALLOUT.text(format!("Sent. {agent} is continuing.")).color(t.label_2)).padding([10.0, 0.0]).center_x(Length::Fill);
             column![slot(line.into()), composer::view(app)].into()
         }
     };
@@ -88,7 +89,7 @@ pub fn detail(app: &App) -> Option<Element<'_, Message>> {
     let body: Element<Message> = match card {
         Card::Approval(a) => approval(app, a),
         Card::Question { can_send, agent, .. } => question(app, agent, *can_send),
-        Card::Sent { agent } => container(CALLOUT.text(format!("Sent. {agent} is continuing.")).color(t.label_2)).padding([SP_12, 0.0]).into(),
+        Card::Sent { agent } => container(CALLOUT.text(format!("Sent. {agent} is continuing.")).color(t.label_2)).padding([10.0, 0.0]).into(),
     };
     Some(keyed(app, card, body))
 }
@@ -148,7 +149,10 @@ fn mark<'a>(t: Tokens, on: bool, square: bool) -> Element<'a, Message> {
 fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
     let t = app.tokens();
     let st = &app.state.cards;
-    let tile = container(text("!").size(17).font(HEADLINE.font()).color(t.on_accent)).center(Length::Fixed(30.0)).style(style::fill(t.blocked, R_ROW));
+    // The tile's glyph is body bold (`ApprovalCard`, `.font(.body.weight(.bold))`), in a 30 pt tile of "control" radius.
+    let tile = container(text("!").size(BODY.size).font(iced::Font { weight: Weight::Bold, ..HEADLINE.font() }).color(t.on_accent))
+        .center(Length::Fixed(30.0))
+        .style(style::fill(t.blocked, R_ROW));
     // The request's own title, as Swift draws it (`ApprovalCard`, `Text(request.title)`): the conversation parser writes
     // "Wants to run a command", a prompt read from the screen its own header ("Bash command").
     let title = if a.title.trim().is_empty() { "Wants to run a command".to_string() } else { a.title.trim().to_string() };
@@ -163,7 +167,8 @@ fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
         .padding([SP_8, 10.0]).width(Length::Fill).style(style::fill(t.fill_1, R_ROW));
 
     let go = a.can_act && !st.busy;
-    let mut foot = row![].spacing(SP_12).align_y(Alignment::Center);
+    // The card's button row: an HStack with SwiftUI's default spacing 8.
+    let mut foot = row![].spacing(SP_8).align_y(Alignment::Center);
     let mut always_row: Option<Element<'a, Message>> = None;
     if let Some(al) = &a.always {
         let on = st.always;
@@ -215,7 +220,8 @@ fn option_row<'a>(t: Tokens, flow: &'a Flow, i: usize, can: bool) -> Element<'a,
         text_col = text_col.push(BODY.text(o.detail.as_str()).color(t.label_2));
     }
     let cursor = flow.moved && flow.cursor == i;
-    let b = button(row![container(mark(t, on, multi)).padding([1, 0]), text_col].spacing(SP_12))
+    // The mark sits on the label's own line, not in the middle of label and detail (`QuestionOptionRow`, `HStack(alignment: .top)`).
+    let b = button(row![container(mark(t, on, multi)).padding([1, 0]), text_col].spacing(SP_12).align_y(Alignment::Start))
         .padding([SP_8, SP_12])
         .width(Length::Fill)
         .on_press_maybe(can.then_some(msg(CardsMsg::Pick(i))))
@@ -318,13 +324,14 @@ fn question<'a>(app: &'a App, agent: &'a str, can_send: bool) -> Element<'a, Mes
         CAPTION.text(why).color(t.label_2).into()
     } else {
         let range = if n > 1 { row![keycap(t, "1"), CAPTION.text("\u{2013}").color(t.label_3), keycap(t, n.min(9).to_string())] } else { row![keycap(t, "1")] };
+        // Keycaps 4 pt apart inside a group, 6 pt between the groups and the words (`KbdGroup`, `hint`).
         row![
             range.spacing(SP_4).align_y(Alignment::Center),
             CAPTION.text(if qq.multi_select { "toggle" } else { "choose" }).color(t.label_2),
             keycap(t, "\u{21A9}"),
             CAPTION.text(if flow.is_last() { "send" } else { "next" }).color(t.label_2),
         ]
-        .spacing(SP_4)
+        .spacing(6.0)
         .align_y(Alignment::Center)
         .into()
     };

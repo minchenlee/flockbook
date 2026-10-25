@@ -745,7 +745,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     })
     .picture_scope(&cs.session_key)
     .pictures(&cs.pictures.handles)
-    .col_max(app.state.settings.reading_width().points())
+    .col_max(app.state.settings.column_width())
     .offset(cs.offset, cs.pinned)
     .selection(cs.sel.sel)
     .focused(cs.sel.focused)

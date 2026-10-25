@@ -376,6 +376,14 @@ fn small_button<'a>(t: Tokens, label: &'a str, on: Option<Message>) -> Element<'
 const CHEVRON_LEFT: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"##;
 const ARROW_DOWN_CIRCLE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/></svg>"##;
 
+/// Lucide's `settings` gear, for SF Symbols `gear` (Swift `SettingsTab.symbol`, the sidebar's Settings row).
+const GEAR: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>"##;
+
+/// The Settings gear, at `size` points in `color`.
+pub fn gear<'a>(size: f32, color: iced::Color) -> Element<'a, Message> {
+    local_icon(GEAR, size, color)
+}
+
 /// An icon from a local SVG source, at `size` points in `color`.
 fn local_icon<'a>(source: &'static str, size: f32, color: iced::Color) -> Element<'a, Message> {
     let handle = svg::Handle::from_memory(source.as_bytes().to_vec());
@@ -385,7 +393,7 @@ fn local_icon<'a>(source: &'static str, size: f32, color: iced::Color) -> Elemen
 /// The tab's symbol (Swift `SettingsTab.symbol`): gear, terminal, phone, arrow down in a circle.
 fn tab_symbol<'a>(tab: SettingsTab, size: f32, color: iced::Color) -> Element<'a, Message> {
     match tab {
-        SettingsTab::General => icon(Icon::Settings2, size, color),
+        SettingsTab::General => gear(size, color),
         SettingsTab::Agents => icon(Icon::SquareTerminal, size, color),
         SettingsTab::Remote => icon(Icon::Smartphone, size, color),
         SettingsTab::Updates => local_icon(ARROW_DOWN_CIRCLE, size, color),

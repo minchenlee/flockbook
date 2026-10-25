@@ -1100,12 +1100,22 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     body = body.push(controls);
 
+    // The card is the reading column itself, not the column plus its padding: Swift puts the 16 pt inside the card
+    // (`.padding(.horizontal, 16)`, `Sources/HerdrDesk/Composer.swift:264`) and the card is the reading column wide
+    // (`inputColumn`, `Sources/HerdrDesk/Reading.swift:96-104`), so its edge lines up with the message text.
     let card = container(body.padding([12, 16]))
         .width(Length::Fill)
-        .max_width(app.state.settings.column_width() + 32.0)
+        .max_width(app.state.settings.column_width())
         .style(style::float_e2(t, R_BUBBLE));
+    // `InputColumn`: `.padding(.bottom, 12).padding(.top, 6)` outside the column, and the width setting's 28 pt side
+    // padding around it (`Sources/HerdrDesk/Reading.swift:84-85,103`).
     container(card)
-        .padding([SP_8, SP_24])
+        .padding(iced::Padding {
+            top: 6.0,
+            right: 28.0,
+            bottom: 12.0,
+            left: 28.0,
+        })
         .width(Length::Fill)
         .align_x(Alignment::Center)
         .into()

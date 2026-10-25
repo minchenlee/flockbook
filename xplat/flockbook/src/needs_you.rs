@@ -30,6 +30,8 @@ use std::time::{Duration, Instant};
 
 pub const LIST_W: f32 = 340.0;
 const CARD_MAX_W: f32 = 560.0;
+/// The centred content column of the full-width screens (Swift `ScreenColumn.width`).
+const SCREEN_COL_W: f32 = 960.0;
 const REQUEST_TTL: Duration = Duration::from_secs(2);
 
 /// What a blocked tab asks for.
@@ -40,7 +42,8 @@ pub enum Request {
 }
 
 impl Request {
-    /// One line for the list.
+    /// One line for the list (kept for the request summary; the list rows show two lines like the Mac app).
+    #[allow(dead_code)]
     pub fn one_liner(&self) -> String {
         match self {
             Request::Permission(p) => p.command.lines().next().unwrap_or("").trim().to_string(),
@@ -50,6 +53,7 @@ impl Request {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 struct Found {
     request: Option<Request>,
     timestamp: Option<f64>,
@@ -101,6 +105,7 @@ pub fn selected_index(app: &App) -> Option<usize> {
     Some(app.state.needs_you.selected.as_deref().and_then(|id| list.iter().position(|i| i.tab.id == id)).unwrap_or(0))
 }
 
+#[allow(dead_code)]
 fn find_request(app: &App, item: &Item) -> Found {
     let Some(pane) = item.blocked_pane() else { return Found::default() };
     let ny = &app.state.needs_you;
@@ -277,24 +282,18 @@ fn avatar<'a>(t: Tokens, ws: &str, size: f32, badge: f32, selected: bool, ring: 
 
 fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, Message> {
     let t = app.bar_tokens();
-    let now = app.state.overview.clock().now;
     let head = row![TITLE_3.text("Needs you").color(t.label), TITLE_3.text(list.len().to_string()).color(t.label_3)].spacing(8).padding(iced::Padding { top: 44.0, right: 16.0, bottom: 8.0, left: 16.0 });
     let mut col = column![head];
     for (i, it) in list.iter().enumerate() {
         let sel = i == cur;
-        let found = find_request(app, it);
         let (fg, fg2) = if sel { (t.on_accent, t.on_accent.scale_alpha(0.8)) } else { (t.label, t.label_2) };
-        let age = found.timestamp.map(|ts| crate::overview::age_label(now, ts)).unwrap_or_default();
-        let mut texts = column![
-            row![HEADLINE.text(it.agent_name()).color(fg).width(Length::Fill), CAPTION.text(age).color(fg2)].align_y(Alignment::Center),
+        let texts = column![
+            HEADLINE.text(it.agent_name()).color(fg).width(Length::Fill),
             CAPTION.text(format!("{} \u{b7} {}", it.ws.label, it.tab.label)).color(fg2),
         ]
         .spacing(1)
         .width(Length::Fill);
-        if let Some(r) = &found.request {
-            texts = texts.push(CAPTION.text(r.one_liner()).color(fg2).wrapping(iced::widget::text::Wrapping::None));
-        }
-        let content = row![avatar(t, &it.ws.label, 32.0, 11.0, sel, false), texts].spacing(10).align_y(Alignment::Center);
+        let content = row![avatar(t, &it.ws.label, 30.0, 13.0, sel, false), texts].spacing(10).align_y(Alignment::Center);
         col = col.push(
             container(
                 button(content)
@@ -334,7 +333,7 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
                     .width(Length::Fill)
                     .style(style::fill(t.fill_1, R_CARD)),
             )
-            .padding(iced::Padding { top: 12.0, right: 16.0, bottom: 16.0, left: 16.0 }),
+            .padding(iced::Padding { top: 12.0, right: 16.0, bottom: 0.0, left: 16.0 }),
         );
     }
     scrollable(col).height(Length::Fill).into()
@@ -350,11 +349,13 @@ fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
     .align_y(Alignment::Center);
     let open = Message::SelectTab { workspace: it.ws.id.clone(), tab: it.tab.id.clone() };
     let body: Element<Message> = match crate::cards::detail(app) {
-        Some(card) => column![card, row![plain_button(t, "Open tab", Some(Icon::SquareTerminal), Some(open), false)]].spacing(12).into(),
-        None => column![BODY.text("The request text is not available from the session log. Open the tab to see it.").color(t.label_2), plain_button(t, "Open tab", Some(Icon::SquareTerminal), Some(open), false)].spacing(12).into(),
+        Some(card) => column![container(card).max_width(CARD_MAX_W), row![plain_button(t, "Open tab", None, Some(open), false)]].spacing(18).into(),
+        None => column![BODY.text("The request text is not available from the session log. Open the tab to see it.").color(t.label_2), plain_button(t, "Open tab", None, Some(open), false)].spacing(18).into(),
     };
-    let col = column![head, body].spacing(18).max_width(CARD_MAX_W + 40.0);
-    scrollable(container(col).padding(iced::Padding { top: 48.0, right: 32.0, bottom: 32.0, left: 32.0 })).height(Length::Fill).width(Length::Fill).into()
+    let col = column![head, body].spacing(18);
+    // At most 960 wide and centred in the detail area, like the Swift `screenColumn`.
+    let column = container(col).padding(iced::Padding { top: 48.0, right: 32.0, bottom: 32.0, left: 32.0 }).max_width(SCREEN_COL_W);
+    scrollable(container(column).width(Length::Fill).center_x(Length::Fill)).height(Length::Fill).width(Length::Fill).into()
 }
 
 fn plain_button<'a>(t: Tokens, label: &'a str, ic: Option<Icon>, on: Option<Message>, strong: bool) -> Element<'a, Message> {

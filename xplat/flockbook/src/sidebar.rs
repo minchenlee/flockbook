@@ -52,7 +52,7 @@ fn footer(app: &App) -> Element<'_, Message> {
     let tip = format!("Settings ({})", key(crate::shortcuts::Action::Settings));
     // The symbol sits in a 22 pt box, like the nav rows and the avatars (Swift SidebarLine.box).
     let content = row![
-        container(icon(Icon::Settings2, SIZE_DEFAULT, t.label_2)).center(Length::Fixed(22.0)),
+        container(crate::settings::gear(SIZE_DEFAULT, t.label_2)).center(Length::Fixed(22.0)),
         BODY.text("Settings").color(t.label),
         Space::new().width(Length::Fill),
     ]

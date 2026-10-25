@@ -49,16 +49,17 @@ impl B {
         }
         let para = Para { inlines: std::mem::take(&mut self.inl) };
         let prev_is_item = matches!(self.out.last().map(|s| &s.kind), Some(RowKind::ListItem { .. }));
-        let (kind, gap, separator) = if let Some(l) = self.heading.take() {
-            (RowKind::Heading(l), 20.0, "\n\n")
+        let (kind, separator) = if let Some(l) = self.heading.take() {
+            (RowKind::Heading(l), "\n\n")
         } else if !self.lists.is_empty() {
             let marker = self.marker.take().unwrap_or_default();
-            (RowKind::ListItem { marker, depth: self.lists.len() as u8 }, if prev_is_item { 6.0 } else { 12.0 }, if prev_is_item { "\n" } else { "\n\n" })
+            (RowKind::ListItem { marker, depth: self.lists.len() as u8 }, if prev_is_item { "\n" } else { "\n\n" })
         } else if self.quote > 0 {
-            (RowKind::Quote, 12.0, "\n\n")
+            (RowKind::Quote, "\n\n")
         } else {
-            (RowKind::Prose, 12.0, "\n\n")
+            (RowKind::Prose, "\n\n")
         };
+        let gap = gap_between(self.out.last().map(|s| &s.kind), &kind);
         self.out.push(Spec { kind, paras: vec![para], separator, gap });
     }
 
@@ -68,6 +69,49 @@ impl B {
                 t.cells.push(Para::default());
             }
         }
+    }
+}
+
+/// Blocks whose margin above and below is the wide one.
+fn heavy(k: &RowKind) -> bool {
+    matches!(k, RowKind::Code { .. } | RowKind::Table { .. } | RowKind::Quote)
+}
+
+/// The gap above a block, ported from `MarkdownView.gap` (reading.md 3): headings claim their own margins,
+/// code, quotes and tables 20, list items tighten to their depth, rules 24, anything else 14.
+fn gap_between(prev: Option<&RowKind>, cur: &RowKind) -> f32 {
+    if let RowKind::Heading(l) = cur {
+        return if *l == 1 {
+            32.0
+        } else if *l == 2 {
+            28.0
+        } else {
+            22.0
+        };
+    }
+    if let Some(RowKind::Heading(l)) = prev {
+        return if *l == 1 {
+            12.0
+        } else if *l == 2 {
+            10.0
+        } else {
+            6.0
+        };
+    }
+    if matches!(prev, Some(k) if heavy(k)) || heavy(cur) {
+        return 20.0;
+    }
+    match (prev, cur) {
+        (Some(RowKind::ListItem { depth: a, .. }), RowKind::ListItem { depth: b, .. }) => {
+            if b > a {
+                4.0
+            } else {
+                6.0
+            }
+        }
+        (Some(RowKind::ListItem { .. }), _) | (_, RowKind::ListItem { .. }) => 10.0,
+        (Some(RowKind::Rule), _) | (_, RowKind::Rule) => 24.0,
+        _ => 14.0,
     }
 }
 
@@ -139,7 +183,9 @@ pub fn parse(text: &str, preserve_breaks: bool) -> Vec<Spec> {
                 TagEnd::CodeBlock => {
                     if let Some((lang, code)) = b.code.take() {
                         let code = code.trim_end_matches('\n').to_string();
-                        b.out.push(Spec { kind: RowKind::Code { lang: lang.clone() }, paras: vec![code_para(lang.as_deref(), &code)], separator: "\n\n", gap: 14.0 });
+                        let kind = RowKind::Code { lang: lang.clone() };
+                        let gap = gap_between(b.out.last().map(|s| &s.kind), &kind);
+                        b.out.push(Spec { kind, paras: vec![code_para(lang.as_deref(), &code)], separator: "\n\n", gap });
                     }
                 }
                 TagEnd::List(_) => {
@@ -156,7 +202,9 @@ pub fn parse(text: &str, preserve_breaks: bool) -> Vec<Spec> {
                 TagEnd::TableHead | TagEnd::TableRow => b.pad_row(),
                 TagEnd::Table => {
                     if let Some(t) = b.table.take() {
-                        b.out.push(Spec { kind: RowKind::Table { cols: t.cols }, paras: t.cells, separator: "\n\n", gap: 14.0 });
+                        let kind = RowKind::Table { cols: t.cols };
+                        let gap = gap_between(b.out.last().map(|s| &s.kind), &kind);
+                        b.out.push(Spec { kind, paras: t.cells, separator: "\n\n", gap });
                     }
                 }
                 TagEnd::Emphasis => b.italic = b.italic.saturating_sub(1),
@@ -187,7 +235,9 @@ pub fn parse(text: &str, preserve_breaks: bool) -> Vec<Spec> {
             Event::HardBreak => b.push_inline("\n", false),
             Event::Rule => {
                 b.flush();
-                b.out.push(Spec { kind: RowKind::Rule, paras: vec![], separator: "\n\n", gap: 16.0 });
+                let kind = RowKind::Rule;
+                let gap = gap_between(b.out.last().map(|s| &s.kind), &kind);
+                b.out.push(Spec { kind, paras: vec![], separator: "\n\n", gap });
             }
             Event::TaskListMarker(done) => b.push_inline(if done { "\u{2611} " } else { "\u{2610} " }, false),
             _ => {}

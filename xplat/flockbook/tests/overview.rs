@@ -30,41 +30,28 @@ fn group_sizes_match_the_demo_data() {
 }
 
 #[test]
-fn cards_per_state_are_on_screen_and_calm_tabs_are_folded() {
+fn every_tab_is_a_card_under_its_state_heading() {
+    // Swift `OverviewView`: Needs you, Working, then Done and resting, all as cards (`Screens.swift:186-191`).
     let a = app(Mode::Light);
     let g = groups(&a.state.workspaces);
-    let mut s = sim(&a, 1280.0, 852.0);
-    for n in names(&g.blocked).iter().chain(names(&g.working).iter()) {
+    let mut s = sim(&a, 1280.0, 1400.0);
+    for n in names(&g.blocked).iter().chain(names(&g.working).iter()).chain(names(&g.done).iter()).chain(names(&g.idle).iter()) {
         assert!(s.find(n.as_str()).is_ok(), "card {n} missing");
     }
-    for n in names(&g.done).iter().chain(names(&g.idle).iter()) {
-        assert!(s.find(n.as_str()).is_err(), "calm card {n} should be folded");
+    for h in ["Needs you", "Working", "Done and resting"] {
+        assert!(s.find(h).is_ok(), "heading {h} missing");
     }
-    assert!(s.find("5 done").is_ok());
-    assert!(s.find("3 resting").is_ok());
     assert!(s.find("Good afternoon").is_ok());
     assert!(s.find("16 tabs \u{b7} 6 working \u{b7} 2 need you").is_ok());
 }
 
 #[test]
-fn folded_row_expands_to_all_eight_calm_cards() {
-    let mut a = app(Mode::Light);
-    let msgs: Vec<Message> = {
-        let mut s = sim(&a, 1280.0, 852.0);
-        s.click("5 done").expect("folded row");
-        s.into_messages().collect()
-    };
-    assert!(msgs.iter().any(|m| matches!(m, Message::Overview(OverviewMsg::ToggleCalm))));
-    for m in msgs {
-        let _ = a.update(m);
-    }
-    assert!(a.state.overview.calm_open);
-    let g = groups(&a.state.workspaces);
+fn a_card_shows_its_age_but_no_preview_or_state_line() {
+    let a = app(Mode::Light);
     let mut s = sim(&a, 1280.0, 1400.0);
-    let calm: Vec<String> = names(&g.done).into_iter().chain(names(&g.idle)).collect();
-    assert_eq!(calm.len(), 8);
-    for n in &calm {
-        assert!(s.find(n.as_str()).is_ok(), "calm card {n} missing after expand");
+    assert!(s.find("24m").is_ok(), "the age stays on the card");
+    for gone in ["Review", "Asks to run: ./scripts/deploy.sh --env staging"] {
+        assert!(s.find(gone).is_err(), "{gone} is not on a card");
     }
 }
 

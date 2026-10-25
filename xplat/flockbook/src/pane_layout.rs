@@ -233,7 +233,7 @@ fn pane_label<'a>(app: &'a App, pane: &'a herdr_core::Pane, active: bool) -> Ele
         .id(label_id(&pane.id))
         .width(Length::Fill)
         .height(Length::Fixed(PANE_LABEL_H))
-        .padding(Padding { left: 14.0, right: 6.0, top: 0.0, bottom: 0.0 })
+        .padding(Padding { left: 14.0, right: 14.0, top: 0.0, bottom: 0.0 })
         .into()
 }
 
@@ -246,21 +246,22 @@ fn reader<'a>(app: &'a App, pane: &'a herdr_core::Pane, split: bool) -> Element<
         col = col.push(pane_label(app, pane, active));
     }
     if pane.agent.is_none() {
+        // Swift `ShellCard`: one leading column at the top-leading corner — the pane's command line in
+        // monospaced `.callout` — with `.padding(14)` on the window surface (no card of its own).
         let compact = column![
-            BODY.text("Shell").color(t.label),
-            CAPTION.text(pane.cwd.clone()).color(t.label_2),
+            MONO.text(format!("$ cd {}", pane.cwd)).color(t.label),
+            Space::new().height(Length::Fixed(8.0)),
             button(BODY.text("Show terminal")).on_press(Message::Workspace(
                 WorkspaceMsg::OpenTerminal(pane.id.clone())
             ))
         ]
-        .spacing(8);
+        .spacing(2);
         let card = container(
-            col.push(container(compact).padding(16))
+            col.push(container(compact).padding(14).width(Length::Fill))
                 .push(Space::new().height(Length::Fill)),
         )
         .width(Length::Fill)
-        .height(Length::Fill)
-        .style(crate::style::card_e1(t, R_ROW));
+        .height(Length::Fill);
         // No label on a single-pane tab: a right-click is still the way into the pane menu (Swift puts `.paneMenu`
         // on the whole pane).
         return if split { card.into() } else { mouse_area(card).on_right_press(pane_menu(&pane.id)).into() };

@@ -8,7 +8,6 @@
 
 use crate::state::{monogram, status_kind, Screen};
 use crate::{App, Message};
-use fb_ui::icons::{self, Icon};
 use fb_ui::status;
 use fb_ui::theme::*;
 use herdr_core::{AgentStatus, ItemKind, Pane, Tab, Workspace};
@@ -60,7 +59,7 @@ pub enum GroupBy {
     Workspace,
 }
 
-/// What a card shows under the title: the last thing the agent said or asked, and when.
+/// The last thing the agent said or asked, and when. A card shows only the when, as its age.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Preview {
     pub text: String,
@@ -72,8 +71,6 @@ pub struct OverviewState {
     /// `None` = the system clock. Tests and demo snapshots inject one.
     pub clock: Option<Clock>,
     pub group: GroupBy,
-    /// The folded "done / resting" row is open.
-    pub calm_open: bool,
     /// Preview per pane id, refreshed at most every `PREVIEW_TTL` (live conversations can be large).
     cache: RefCell<HashMap<String, (Instant, Preview)>>,
 }
@@ -88,7 +85,6 @@ impl OverviewState {
 pub enum OverviewMsg {
     Open { workspace: String, tab: String },
     SetGroup(GroupBy),
-    ToggleCalm,
 }
 
 pub fn update(app: &mut App, msg: OverviewMsg) -> Task<Message> {
@@ -96,10 +92,6 @@ pub fn update(app: &mut App, msg: OverviewMsg) -> Task<Message> {
         OverviewMsg::Open { workspace, tab } => app.update(Message::SelectTab { workspace, tab }),
         OverviewMsg::SetGroup(g) => {
             app.state.overview.group = g;
-            Task::none()
-        }
-        OverviewMsg::ToggleCalm => {
-            app.state.overview.calm_open = !app.state.overview.calm_open;
             Task::none()
         }
     }
@@ -212,15 +204,6 @@ fn preview_for(app: &App, tab: &Tab) -> Preview {
     v
 }
 
-fn state_word(st: AgentStatus) -> &'static str {
-    match st {
-        AgentStatus::Blocked => "Needs you",
-        AgentStatus::Working => "Working",
-        AgentStatus::Done => "Done",
-        AgentStatus::Idle | AgentStatus::Unknown => "Idle",
-    }
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // Views
 
@@ -239,13 +222,7 @@ fn monogram_chip<'a>(t: Tokens, label: &str) -> Element<'a, Message> {
 fn card<'a>(app: &App, e: Entry<'a>, clock: Clock) -> Element<'a, Message> {
     let t = app.tokens();
     let st = e.tab.status;
-    let blocked = st == AgentStatus::Blocked;
     let pv = preview_for(app, e.tab);
-    let state_color = match st {
-        AgentStatus::Blocked => t.blocked,
-        AgentStatus::Working => t.working,
-        _ => t.label_2,
-    };
     let age = pv.timestamp.map(|ts| age_label(clock.now, ts)).unwrap_or_default();
 
     let mut title_row = row![container(HEADLINE.text(agent_name(e.tab)).color(t.label).wrapping(text::Wrapping::None)).clip(true).width(Length::Fill)]
@@ -253,31 +230,16 @@ fn card<'a>(app: &App, e: Entry<'a>, clock: Clock) -> Element<'a, Message> {
         .align_y(Alignment::Center);
     title_row = title_row.push(CAPTION.text(age).color(t.label_3));
 
-    let sub = row![
-        monogram_chip(t, &e.ws.label),
-        container(CAPTION.text(format!("{} \u{b7} {}", e.ws.label, e.tab.label)).color(t.label_2).wrapping(text::Wrapping::None)).clip(true).width(Length::Fill),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
+    // The card subtitle is plain text (workspace · tab), like Swift's `Text("\(ws.label) · \(t.label)")`;
+    // the workspace monogram belongs to the workspace section header only.
+    let sub = container(CAPTION.text(format!("{} \u{b7} {}", e.ws.label, e.tab.label)).color(t.label_2).wrapping(text::Wrapping::None))
+        .clip(true)
+        .width(Length::Fill);
 
-    let mut info = column![title_row, sub].spacing(3);
-    let state_line: Element<'a, Message> = if blocked {
-        row![
-            CAPTION.text(state_word(st)).color(state_color),
-            Space::new().width(Length::Fill),
-            container(CAPTION.text("Review").color(t.on_accent)).padding([2, 9]).style(crate::style::fill(t.accent, 100.0)),
-        ]
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        CAPTION.text(state_word(st)).color(state_color).into()
-    };
-    info = info.push(state_line);
-    if !pv.text.is_empty() {
-        info = info.push(container(CAPTION.text(pv.text).color(t.label_2).wrapping(text::Wrapping::None)).clip(true).width(Length::Fill));
-    }
+    // Two lines like Swift's card (`Screens.swift:207-214`), plus the age at the trailing edge of the name.
+    let info = column![title_row, sub].spacing(2);
 
-    let body = row![container(status::symbol_sized(status_kind(st), &t, 16.0, 0.0)).padding([2, 0]), info].spacing(SP_12).align_y(Alignment::Start);
+    let body = row![container(status::symbol_sized(status_kind(st), &t, 16.0, 0.0)), info].spacing(10.0).align_y(Alignment::Center);
     let msg = Message::Overview(OverviewMsg::Open { workspace: e.ws.id.clone(), tab: e.tab.id.clone() });
     button(container(body).padding(12).width(Length::Fill))
         .on_press(msg)
@@ -327,41 +289,6 @@ fn section<'a>(app: &App, title: &'a str, entries: &[Entry<'a>], cols: usize, cl
     }
     let t = app.tokens();
     Some(column![HEADLINE.text(title).color(t.label), grid(app, entries, cols, clock)].spacing(SP_8).into())
-}
-
-/// The folded row: "5 done  3 resting" with mini dots, one dot per tab.
-fn calm_row<'a>(app: &App, done: &[Entry<'a>], idle: &[Entry<'a>]) -> Option<Element<'a, Message>> {
-    if done.is_empty() && idle.is_empty() {
-        return None;
-    }
-    let t = app.tokens();
-    let open = app.state.overview.calm_open;
-    let mut r = row![].spacing(SP_16).align_y(Alignment::Center);
-    for (n, word, kind, list) in [(done.len(), "done", status::StatusKind::Done, done), (idle.len(), "resting", status::StatusKind::Idle, idle)] {
-        if n == 0 {
-            continue;
-        }
-        let mut dots = row![].spacing(3).align_y(Alignment::Center);
-        for _ in list.iter().take(12) {
-            dots = dots.push(status::dot(kind, &t));
-        }
-        r = r.push(row![BODY.text(format!("{n} {word}")).color(t.label_2), dots].spacing(SP_8).align_y(Alignment::Center));
-    }
-    r = r.push(Space::new().width(Length::Fill));
-    r = r.push(icons::icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, icons::SIZE_INLINE, t.label_3));
-    Some(
-        button(container(r).padding([10, 14]).width(Length::Fill))
-            .on_press(Message::Overview(OverviewMsg::ToggleCalm))
-            .padding(0)
-            .width(Length::Fill)
-            .style(move |_, status| button::Style {
-                background: Some(Background::Color(if matches!(status, button::Status::Hovered) { t.fill_2 } else { t.fill_1 })),
-                border: Border { color: t.sep, width: 1.0, radius: R_MENU.into() },
-                text_color: t.label,
-                ..Default::default()
-            })
-            .into(),
-    )
 }
 
 fn group_toggle<'a>(app: &App) -> Element<'a, Message> {
@@ -452,7 +379,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
         let head = row![
             column![LARGE_TITLE.text(clock.greeting()).color(t.label), BODY.text(sub).color(t.label_2)].spacing(6).width(Length::Fill),
-            container(group_toggle(app)).padding([6, 0]),
+            container(group_toggle(app)),
         ]
         .align_y(Alignment::Start);
 
@@ -465,12 +392,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 if let Some(x) = section(app, "Working", &g.working, cols, clock) {
                     body = body.push(x);
                 }
-                if let Some(x) = calm_row(app, &g.done, &g.idle) {
+                // Swift: done and idle tabs are ordinary cards under their own heading (`Screens.swift:191`).
+                let calm: Vec<Entry> = g.done.iter().chain(g.idle.iter()).copied().collect();
+                if let Some(x) = section(app, "Done and resting", &calm, cols, clock) {
                     body = body.push(x);
-                    if s.overview.calm_open {
-                        let calm: Vec<Entry> = g.done.iter().chain(g.idle.iter()).copied().collect();
-                        body = body.push(grid(app, &calm, cols, clock));
-                    }
                 }
             }
             GroupBy::Workspace => body = body.push(workspace_sections(app, cols, clock)),
