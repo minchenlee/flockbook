@@ -54,6 +54,9 @@ pub fn update(app: &mut App, msg: ChromeMsg) -> Task<Message> {
     }
 }
 
+/// The empty band at the top of the sidebar: the traffic lights and a window drag area.
+pub const SIDEBAR_TOP_H: f32 = 52.0;
+
 /// Makes `content` (empty space at the top of the window) act as the title bar when the native one is hidden.
 pub fn drag_area<'a>(app: &App, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     if app.state.chrome.title_bar == TitleBar::Hidden {
@@ -105,8 +108,8 @@ pub fn monogram(raw: &str) -> String {
 pub fn sidebar(app: &App) -> Element<'_, Message> {
     use fb_ui::theme::*;
     use fb_ui::icons::{icon, Icon, SIZE_INLINE};
-    use iced::widget::{button, column, container};
-    use iced::Length;
+    use iced::widget::{button, column, container, row, stack, Space};
+    use iced::{Alignment, Length};
     let t = app.tokens();
     let hidden = app.state.settings.sidebar_hidden();
     let toggle = button(icon(Icon::PanelLeft, SIZE_INLINE, t.label_2)).padding(8)
@@ -114,7 +117,10 @@ pub fn sidebar(app: &App) -> Element<'_, Message> {
     let content: Element<'_, Message> = if hidden {
         column![toggle, button(icon(Icon::Settings2, SIZE_INLINE, t.label_2)).padding(8).on_press(Message::Settings(crate::settings::SettingsMsg::Open))].padding([12, 6]).into()
     } else {
-        column![toggle, crate::sidebar::view(app)].into()
+        // The sidebar's own empty top band is the window's title bar on macOS (`sidebar::view` keeps it 52 pt tall and
+        // empty). The toggle rides on that band instead of pushing it down, so the empty part stays a drag area.
+        let band = container(row![container(toggle).padding([6, 12]), Space::new().width(Length::Fill)]).height(Length::Fixed(SIDEBAR_TOP_H));
+        stack![crate::sidebar::view(app), container(band).width(Length::Fill).align_y(Alignment::Start)].into()
     };
     container(content).width(Length::Fixed(if hidden { 48.0 } else { SIDEBAR_W })).height(Length::Fill)
         .style(crate::style::sidebar(t, app.state.glass.on)).into()

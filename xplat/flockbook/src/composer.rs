@@ -637,9 +637,13 @@ pub fn update(app: &mut App, msg: ComposerMsg) -> Task<Message> {
                         .or_default()
                         .push((text, pending.images));
                 }
-                c.error = Some(format!(
-                    "Send incomplete: {e}. Check the agent terminal before retrying."
-                ));
+                // The note belongs to the box it happened in (one composer per pane in the Swift app): a failure
+                // for a pane that is not shown must not put a note under the shown pane's draft.
+                if current {
+                    c.error = Some(format!(
+                        "Send incomplete: {e}. Check the agent terminal before retrying."
+                    ));
+                }
             } else if let Some(journal) = c
                 .sender
                 .as_ref()
@@ -675,12 +679,12 @@ pub fn update(app: &mut App, msg: ComposerMsg) -> Task<Message> {
                 })
             })
         }
-        ComposerMsg::Picked { pane, paths } => attach_paths(app, pane, paths),
+        ComposerMsg::Picked { pane, paths } => attach_paths(app, pane, paths, false),
         ComposerMsg::Attached(paths) => {
             let Some(pane) = app.state.composer.pane.clone() else {
                 return Task::none();
             };
-            attach_paths(app, pane, paths)
+            attach_paths(app, pane, paths, false)
         }
         ComposerMsg::Paste => {
             let Some(pane) = app.state.composer.pane.clone() else {
@@ -708,7 +712,7 @@ pub fn update(app: &mut App, msg: ComposerMsg) -> Task<Message> {
         } if !text.is_empty() => {
             app.state.composer.image_jobs = app.state.composer.image_jobs.saturating_sub(1);
             if let Some(paths) = clipboard_files(&text) {
-                return attach_paths(app, pane, paths);
+                return attach_paths(app, pane, paths, true);
             }
             insert_for(&mut app.state.composer, &pane, &text);
             Task::none()
@@ -724,7 +728,7 @@ pub fn update(app: &mut App, msg: ComposerMsg) -> Task<Message> {
             let Some(pane) = app.state.composer.pane.clone() else {
                 return Task::none();
             };
-            attach_paths(app, pane, vec![path])
+            attach_paths(app, pane, vec![path], true)
         }
         ComposerMsg::Images {
             pane,
@@ -1239,13 +1243,20 @@ fn image_path(path: &Path) -> bool {
         )
     })
 }
-fn attach_paths(app: &mut App, pane: String, paths: Vec<PathBuf>) -> Task<Message> {
+/// `chips`: turn image files into preview chips instead of inserting their paths. Only a drop does that. The + picker
+/// inserts every chosen path as text, images and folders included (`attach()`, `Sources/HerdrDesk/Composer.swift:260`),
+/// because the agent reads a path as an attachment.
+fn attach_paths(app: &mut App, pane: String, paths: Vec<PathBuf>, chips: bool) -> Task<Message> {
     if app.state.composer.sender.is_none() {
         return Task::none();
     }
-    let (images, files): (Vec<_>, Vec<_>) = paths
-        .into_iter()
-        .partition(|p| image_path(p) && !p.is_dir());
+    let (images, files): (Vec<_>, Vec<_>) = if chips {
+        paths
+            .into_iter()
+            .partition(|p| image_path(p) && !p.is_dir())
+    } else {
+        (Vec::new(), paths)
+    };
     if files.iter().any(|p| p.to_str().is_none()) {
         app.state.composer.error = Some("Attachment path is not valid UTF-8".into());
         return Task::none();

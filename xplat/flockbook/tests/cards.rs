@@ -319,7 +319,9 @@ fn multi_select_toggles_and_sends_picks_then_the_review_step() {
 
 #[test]
 fn other_text_sends_the_other_row_digit_text_and_enter() {
-    let mut h = H::asking(false, RecordingActions::new(&picker(false)).then(GONE).then(GONE).then(GONE));
+    // The picker stays on screen while the "Other" row is opened and typed into: every step re-reads it before its key
+    // (actions::answer_question), and the digit and the text are sent into the row, not into a closed picker.
+    let mut h = H::asking(false, RecordingActions::new(&picker(false)).then(&picker(false)).then(&picker(false)).then(GONE));
     h.click("cards-opt-0");
     h.click("cards-other-open");
     assert!(h.app.state.cards.other_active);

@@ -173,7 +173,9 @@ fn scripted_conversation(agent: &str) -> Vec<ConversationItem> {
         End::AskQuestion => v.push(item("g-q1", ItemKind::Question(demo_question()), BASE_TS + 50.0)),
         End::Ask(cmd) => v.push(item(
             "g-p1",
-            ItemKind::PermissionRequest(herdr_core::PermissionRequest { title: "Run a command".into(), command: cmd.into(), tool_name: "Bash".into(), tool_use_id: "toolu_demo".into(), state: PermState::Pending, detail: String::new(), open_calls: 1 }),
+            // The title the conversation parser writes for a pending Bash call (Swift `ConversationParser.verb`), so the
+            // demo card reads like a real one.
+            ItemKind::PermissionRequest(herdr_core::PermissionRequest { title: "Wants to run a command".into(), command: cmd.into(), tool_name: "Bash".into(), tool_use_id: "toolu_demo".into(), state: PermState::Pending, detail: String::new(), open_calls: 1 }),
             BASE_TS + 50.0,
         )),
     }

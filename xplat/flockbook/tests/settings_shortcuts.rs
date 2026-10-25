@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use fb_ui::Mode;
 use flockbook::glass::{self, Backdrop, Os};
-use flockbook::settings::{self, Prefs, ReadingWidth, SettingsMsg};
+use flockbook::settings::{self, Prefs, ReadingWidth, SettingsMsg, SettingsTab};
 use flockbook::shortcuts::{self, Action, Combo, Keys, K, TABLE};
 use flockbook::snapshot::{render_app, write_png};
 use flockbook::state::Screen;
@@ -189,7 +189,14 @@ fn cmd_comma_toggles_settings_and_closes_the_panel() {
     assert!(app.state.settings.open);
     assert!(!app.state.shortcuts.open, "one sheet at a time");
     let mut s = sim(&app);
-    for label in ["Settings", "Appearance", "Window", "Reading", "Width", "Input", "Allow sending input to agents"] {
+    for label in ["Settings", "Appearance", "Window", "Reading", "Width"] {
+        assert!(s.find(label).is_ok(), "{label}");
+    }
+    drop(s);
+    // The input row is on the Agents tab, where the Swift app keeps it (`SettingsView.page`, its `agents` page).
+    let _ = app.update(Message::Settings(SettingsMsg::SelectTab(SettingsTab::Agents)));
+    let mut s = sim(&app);
+    for label in ["Input", "Allow sending input to agents"] {
         assert!(s.find(label).is_ok(), "{label}");
     }
     drop(s);
@@ -225,6 +232,7 @@ fn turning_input_off_removes_the_write_paths_now_and_on_waits_for_a_launch() {
     assert_eq!(app.state.settings.prefs.allow_input, Some(true));
     assert!(app.state.cards.actions.is_none(), "still read-only until the next launch");
     let _ = app.update(Message::Settings(SettingsMsg::Open));
+    let _ = app.update(Message::Settings(SettingsMsg::SelectTab(SettingsTab::Agents)));
     assert!(sim(&app).find(settings::INPUT_NEXT_LAUNCH).is_ok(), "the sheet says this window is still read-only");
 }
 
@@ -234,6 +242,7 @@ fn the_input_row_never_contradicts_the_composer() {
     let mut app = App::demo(Mode::Light, Screen::Conversation);
     assert!(!flockbook::access::writes_live(&app));
     let _ = app.update(Message::Settings(SettingsMsg::Open));
+    let _ = app.update(Message::Settings(SettingsMsg::SelectTab(SettingsTab::Agents)));
     let mut s = sim(&app);
     assert!(s.find(settings::INPUT_NEXT_LAUNCH).is_ok());
     assert!(s.find(settings::INPUT_LIVE).is_err(), "never 'types into your agents' while read-only");
@@ -265,6 +274,7 @@ fn read_only_launch_keeps_the_toggle_off() {
     let _ = app.update(Message::Settings(SettingsMsg::SetAllowInput(true)));
     assert_eq!(app.state.settings.prefs.allow_input, None, "ignored");
     let _ = app.update(Message::Settings(SettingsMsg::Open));
+    let _ = app.update(Message::Settings(SettingsMsg::SelectTab(SettingsTab::Agents)));
     assert!(sim(&app).find("Launched with --read-only: the app only reads, whatever this says.").is_ok());
 }
 

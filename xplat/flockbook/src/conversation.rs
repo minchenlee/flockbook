@@ -545,9 +545,10 @@ pub fn sync_markdown(app: &mut App) {
         cs.pictures.preview = None;
         cs.pictures.preview_id = None;
     }
-    if !cs.loading_earlier {
-        cs.more_earlier = can_more;
-    }
+    // `more_earlier` belongs to the load result, as in Swift (`Conversation.swift`: `moreEarlier = more`). A poll
+    // tick must not overwrite it with a fresh guess: the source's `can_load_earlier` is the same log the worker
+    // just read, but a source that answers from its own cache would flip the button back on after a load said
+    // there is nothing older. Only a reader that changes session re-reads the log (below).
     cs.rebuilds += 1;
     let rows = build::build_rows(
         items,

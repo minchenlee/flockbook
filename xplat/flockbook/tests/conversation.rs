@@ -92,9 +92,11 @@ fn fake_app(items: Vec<ConversationItem>, earlier: usize) -> (App, Items, Rc<Cel
     let src = Fake { inner: demo, items: items.clone(), earlier: earlier.clone() };
     let mut app = App::new(Box::new(src), Mode::Light, Screen::Conversation);
     app.state.select_tab(&ws, &tab);
+    app.refresh();
+    // `refresh` installs the selected pane's own reader (each pane keeps its document, selection and probe), so the
+    // probe and the test clock go on the reader that is shown after it, never on the one it replaced.
     app.state.conversation.probe = Some(Rc::new(RefCell::new(Probe::default())));
     app.state.conversation.sel = test_clock();
-    app.refresh();
     (app, items, earlier)
 }
 
@@ -596,8 +598,8 @@ fn load_earlier_runs_off_the_ui_thread_and_stale_results_are_dropped() {
     let jobs_run = Arc::new(AtomicUsize::new(0));
     let mut app = App::new(Box::new(Paged { inner: demo, items: items.clone(), jobs_run: jobs_run.clone() }), Mode::Light, Screen::Conversation);
     app.state.select_tab(&ws, &tab);
-    app.state.conversation.probe = Some(Rc::new(RefCell::new(Probe::default())));
     app.refresh();
+    app.state.conversation.probe = Some(Rc::new(RefCell::new(Probe::default())));
     settle(&mut app);
     let pane = app.state.conversation.pane.clone().unwrap();
     assert!(app.state.conversation.more_earlier);

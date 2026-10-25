@@ -145,21 +145,13 @@ fn mark<'a>(t: Tokens, on: bool, square: bool) -> Element<'a, Message> {
 
 // ---------------------------------------------------------------- approval
 
-/// "Run a command" -> "Wants to run a command".
-fn wants(title: &str) -> String {
-    let t = title.trim();
-    let mut c = t.chars();
-    match c.next() {
-        Some(f) if f.is_uppercase() && !t.ends_with('?') => format!("Wants to {}{}", f.to_lowercase(), c.as_str()),
-        _ => t.to_string(),
-    }
-}
-
 fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
     let t = app.tokens();
     let st = &app.state.cards;
     let tile = container(text("!").size(17).font(HEADLINE.font()).color(t.on_accent)).center(Length::Fixed(28.0)).style(style::fill(t.blocked, 8.0));
-    let title = if a.title.trim().is_empty() { "Wants to run a command".to_string() } else { wants(&a.title) };
+    // The request's own title, as Swift draws it (`ApprovalCard`, `Text(request.title)`): the conversation parser writes
+    // "Wants to run a command", a prompt read from the screen its own header ("Bash command").
+    let title = if a.title.trim().is_empty() { "Wants to run a command".to_string() } else { a.title.trim().to_string() };
     let head = container(row![tile, HEADLINE.text(title).color(t.label)].spacing(SP_12).align_y(Alignment::Center)).id(HEAD_ID);
     // The description is part of what the prompt shows, so the card shows it too: nothing the owner approves is hidden.
     let mut lines = column![MONO.text(a.command.as_str()).size(app.state.settings.reading_size().code()).color(t.label)].spacing(SP_4);

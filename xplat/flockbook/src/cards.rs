@@ -16,7 +16,8 @@
 //!   running tool. The card binds only to a lone Bash call of a Claude agent (no other call still open), and the screen must show
 //!   exactly its command as a Bash prompt ([`actions::request_shows`]); else the card is `unbound` (buttons off, a
 //!   notice to open the terminal). With no [`PaneActions`] installed (read-only) the screen cannot be read: the card
-//!   shows with its buttons off.
+//!   shows with its buttons off. When the log has no pending request (the agent logs the call late, or not at all), a
+//!   prompt on screen makes the card by itself ([`actions::screen_request`], Grok's framed box), through the same binder.
 //! - Question: Claude's open picker read from the screen (`question::claude_screen`; Claude logs the call only after
 //!   the answer), else a pending question item in the log (Codex).
 //!
@@ -180,38 +181,44 @@ pub fn detect(app: &App) -> Option<Card> {
                     }));
                 }
             }
+            // A pending request in the log is the request the owner is shown. The screen only says whether that request
+            // is on screen ([`actions::request_shows`]): a screen showing a different command never binds it, and it is
+            // never replaced by a request made up from the screen. Screen-only prompts are the fallback for the modes where
+            // the agent logs the call late (or not at all).
+            let logged = match last {
+                Some(ItemKind::PermissionRequest(p)) if p.state == PermState::Pending => Some(p),
+                _ => None,
+            };
+            if let Some(p) = logged {
+                let (can_act, always) = match (&st.actions, screen) {
+                    (None, _) => (false, None),
+                    (Some(_), Some(text)) if herdr_core::screen_shows_prompt(text) => (true, actions::always_allow(text)),
+                    // Not read yet, or no prompt on screen (a running tool): no card.
+                    (Some(_), _) => return None,
+                };
+                let identity = screen.filter(|_| can_act).and_then(actions::prompt_identity);
+                // Only a lone Bash call can bind: with parallel calls the screen may show another call's prompt.
+                let bindable = agent.kind == "claude" && p.tool_name == "Bash" && p.open_calls == 1;
+                let unbound = can_act && !(bindable && identity.as_ref().is_some_and(|id| actions::request_shows(id, &p.command, &p.detail)));
+                return Some(Card::Approval(Approval {
+                    key: format!("{}:{}", pane.id, p.tool_use_id),
+                    pane: pane.id.clone(),
+                    agent: agent.name.clone(),
+                    title: p.title.clone(),
+                    command: p.command.clone(),
+                    detail: p.detail.clone(),
+                    always,
+                    identity,
+                    stale: false,
+                    unbound,
+                    can_act: can_act && !unbound,
+                }));
+            }
             if agent.kind == "claude" {
                 if let Some((p, identity)) = screen.and_then(|s| Some((actions::screen_request(s)?, actions::prompt_identity(s)?))) {
                     return Some(Card::Approval(Approval {
                         key: format!("{}:{}", pane.id, p.tool_use_id), pane: pane.id.clone(), agent: agent.name.clone(),
                         title: p.title, command: p.command, detail: p.detail, always: screen.and_then(actions::always_allow), identity: Some(identity), stale: false, unbound: false, can_act: st.actions.is_some(),
-                    }));
-                }
-            }
-            if let Some(ItemKind::PermissionRequest(p)) = last {
-                if p.state == PermState::Pending {
-                    let (can_act, always) = match (&st.actions, screen) {
-                        (None, _) => (false, None),
-                        (Some(_), Some(text)) if herdr_core::screen_shows_prompt(text) => (true, actions::always_allow(text)),
-                        // Not read yet, or no prompt on screen (a running tool): no card.
-                        (Some(_), _) => return None,
-                    };
-                    let identity = screen.filter(|_| can_act).and_then(actions::prompt_identity);
-                    // Only a lone Bash call can bind: with parallel calls the screen may show another call's prompt.
-                    let bindable = agent.kind == "claude" && p.tool_name == "Bash" && p.open_calls == 1;
-                    let unbound = can_act && !(bindable && identity.as_ref().is_some_and(|id| actions::request_shows(id, &p.command, &p.detail)));
-                    return Some(Card::Approval(Approval {
-                        key: format!("{}:{}", pane.id, p.tool_use_id),
-                        pane: pane.id.clone(),
-                        agent: agent.name.clone(),
-                        title: p.title.clone(),
-                        command: p.command.clone(),
-                        detail: p.detail.clone(),
-                        always,
-                        identity,
-                        stale: false,
-                        unbound,
-                        can_act: can_act && !unbound,
                     }));
                 }
             }
