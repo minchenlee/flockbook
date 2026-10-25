@@ -195,14 +195,29 @@ fn pane_label<'a>(app: &'a App, pane: &'a herdr_core::Pane, active: bool) -> Ele
         }
         // Swift: terminal icon + "Shell · zsh · <cwd>".
         None => {
-            left = left.push(container(icon(Icon::SquareTerminal, SIZE_INLINE, t.label_3)).center_x(Length::Fixed(12.0)));
+            // Swift `PaneLabel`: the icon is `.imageScale(.small)` (~12 pt) and primary while this pane holds the keyboard, secondary otherwise.
+            let ink = if active { t.label } else { t.label_2 };
+            left = left.push(container(icon(Icon::SquareTerminal, 12.0, ink)).center_x(Length::Fixed(12.0)));
             (pane.label.clone().unwrap_or_else(|| "Shell".to_string()), Some(pane.cwd.clone()))
         }
     };
-    left = left.push(HEADLINE.text(name).color(if active { t.label } else { t.label_2 }).wrapping(text::Wrapping::None));
+    // Swift `PaneLabel`: the name is caption (11 pt) semibold, the meta caption (11 pt) regular.
+    left = left.push(
+        CAPTION
+            .text(name)
+            .font(fb_ui::fonts::inter(iced::font::Weight::Semibold))
+            .color(if active { t.label } else { t.label_2 })
+            .wrapping(text::Wrapping::None),
+    );
     if let Some(m) = meta.filter(|m| !m.is_empty()) {
         let meta = if pane.agent.is_none() { format!("zsh \u{00B7} {m}") } else { m };
-        left = left.push(CAPTION.text(meta).color(t.label_2).wrapping(text::Wrapping::None));
+        left = left.push(
+            CAPTION
+                .text(meta)
+                .font(fb_ui::fonts::inter(iced::font::Weight::Normal))
+                .color(t.label_2)
+                .wrapping(text::Wrapping::None),
+        );
     }
     // Clicking the label selects the pane; the menu button on the right is the pointer's way into the pane menu.
     let left = mouse_area(left).on_press(Message::SelectPane(pane.id.clone()));
@@ -305,15 +320,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if panes.len() == 1 {
         return reader(app, panes[0], split);
     }
-    // Like Swift, the last requested split direction controls the reading layout.
+    // Like Swift, the last requested split direction controls the reading layout. Swift `PaneStack` puts a
+    // `Divider()` between panes (a separator line, not a gap).
+    let t = app.tokens();
     if app.state.workspace_actions.split_down {
-        let mut col = column![]
-            .spacing(1)
-            .width(Length::Fill)
-            .height(Length::Fill);
-        for p in panes {
+        let mut col = column![].width(Length::Fill).height(Length::Fill);
+        for (i, p) in panes.into_iter().enumerate() {
+            if i > 0 {
+                col = col.push(container(Space::new()).width(Length::Fill).height(Length::Fixed(1.0)).style(crate::style::fill(t.sep, 0.0)));
+            }
+            // Swift: a terminal pane in a stacked split takes at most 212 pt.
             let height = if p.agent.is_none() {
-                Length::Fixed(150.0)
+                Length::Fixed(212.0)
             } else {
                 Length::Fill
             };
@@ -321,8 +339,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
         }
         col.into()
     } else {
-        let mut r = row![].spacing(1).width(Length::Fill).height(Length::Fill);
-        for p in panes {
+        let mut r = row![].width(Length::Fill).height(Length::Fill);
+        for (i, p) in panes.into_iter().enumerate() {
+            if i > 0 {
+                r = r.push(container(Space::new()).width(Length::Fixed(1.0)).height(Length::Fill).style(crate::style::fill(t.sep, 0.0)));
+            }
             r = r.push(reader(app, p, split));
         }
         r.into()

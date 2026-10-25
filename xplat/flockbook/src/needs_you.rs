@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 pub const LIST_W: f32 = 340.0;
-const CARD_MAX_W: f32 = 640.0;
+const CARD_MAX_W: f32 = 560.0;
 const REQUEST_TTL: Duration = Duration::from_secs(2);
 
 /// What a blocked tab asks for.
@@ -278,7 +278,7 @@ fn avatar<'a>(t: Tokens, ws: &str, size: f32, badge: f32, selected: bool, ring: 
 fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, Message> {
     let t = app.bar_tokens();
     let now = app.state.overview.clock().now;
-    let head = row![TITLE_3.text("Needs you").color(t.label), TITLE_3.text(list.len().to_string()).color(t.label_3)].spacing(8).padding(iced::Padding { top: 20.0, right: 16.0, bottom: 8.0, left: 16.0 });
+    let head = row![TITLE_3.text("Needs you").color(t.label), TITLE_3.text(list.len().to_string()).color(t.label_3)].spacing(8).padding(iced::Padding { top: 44.0, right: 16.0, bottom: 8.0, left: 16.0 });
     let mut col = column![head];
     for (i, it) in list.iter().enumerate() {
         let sel = i == cur;
@@ -317,7 +317,7 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
         for (ws, tab) in working {
             let name = Item { ws, tab }.agent_name();
             col = col.push(
-                button(row![status::symbol(StatusKind::Working, &t), column![BODY.text(name).color(t.label), CAPTION.text(tab.label.clone()).color(t.label_2)]].spacing(10).align_y(Alignment::Center))
+                button(row![status::symbol(StatusKind::Working, &t), column![BODY.text(name).size(12.0).color(t.label), CAPTION.text(tab.label.clone()).color(t.label_2)]].spacing(10).align_y(Alignment::Center))
                     .padding([4, 16])
                     .width(Length::Fill)
                     .on_press(Message::SelectTab { workspace: ws.id.clone(), tab: tab.id.clone() })
@@ -343,7 +343,7 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
 fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
     let t = app.tokens();
     let head = row![
-        avatar(t, &it.ws.label, 40.0, 18.0, false, true),
+        avatar(t, &it.ws.label, 56.0, 18.0, false, true),
         column![TITLE.text(it.agent_name()).color(t.label), BODY.text(format!("{} \u{b7} {} \u{b7} Needs you", it.ws.label, it.tab.label)).color(t.label_2)].spacing(3),
     ]
     .spacing(14)
@@ -351,10 +351,10 @@ fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
     let open = Message::SelectTab { workspace: it.ws.id.clone(), tab: it.tab.id.clone() };
     let body: Element<Message> = match crate::cards::detail(app) {
         Some(card) => column![card, row![plain_button(t, "Open tab", Some(Icon::SquareTerminal), Some(open), false)]].spacing(12).into(),
-        None => column![BODY.text("The request is not on screen. Open the tab to see it.").color(t.label_2), plain_button(t, "Open tab", Some(Icon::SquareTerminal), Some(open), false)].spacing(12).into(),
+        None => column![BODY.text("The request text is not available from the session log. Open the tab to see it.").color(t.label_2), plain_button(t, "Open tab", Some(Icon::SquareTerminal), Some(open), false)].spacing(12).into(),
     };
     let col = column![head, body].spacing(18).max_width(CARD_MAX_W + 40.0);
-    scrollable(container(col).padding(iced::Padding { top: 44.0, right: 12.0, bottom: 16.0, left: 12.0 })).height(Length::Fill).width(Length::Fill).into()
+    scrollable(container(col).padding(iced::Padding { top: 48.0, right: 32.0, bottom: 32.0, left: 32.0 })).height(Length::Fill).width(Length::Fill).into()
 }
 
 fn plain_button<'a>(t: Tokens, label: &'a str, ic: Option<Icon>, on: Option<Message>, strong: bool) -> Element<'a, Message> {

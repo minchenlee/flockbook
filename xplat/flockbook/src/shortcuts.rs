@@ -14,7 +14,7 @@
 use fb_ui::icons::{icon, Icon, SIZE_INLINE};
 use fb_ui::theme::*;
 use iced::keyboard::{self, key::Named, Key, Modifiers};
-use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, Space};
+use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Subscription, Task};
 
 use crate::settings::SettingsMsg;
@@ -306,12 +306,60 @@ pub fn run(app: &mut App, action: Action) -> Task<Message> {
 // ---------------------------------------------------------------------------------------------------------- view
 
 pub const PANEL_W: f32 = 680.0;
+/// Keycap corner radius (Swift `Radius.key`).
+const R_KEY: f32 = 5.0;
+
+/// One keycap (Swift `Kbd`): 11pt secondary text, a subtle fill, a hairline edge, 20pt square.
+fn keycap(t: Tokens, cap: &str) -> Element<'static, Message> {
+    container(text(cap.to_string()).size(11.0).color(t.label_2))
+        .center(Length::Fixed(20.0))
+        .padding([0, if cap.chars().count() > 1 { 3 } else { 5 }])
+        .style(move |_| iced::widget::container::Style {
+            background: Some(Background::Color(iced::Color { a: 0.06, ..t.label })),
+            border: Border { color: iced::Color { a: 0.14, ..t.label }, width: 1.0, radius: R_KEY.into() },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// The caps one at a time; a range dash stays plain text between them (Swift `KbdGroup`).
+fn caps_view(t: Tokens, keys: &str) -> Element<'static, Message> {
+    // A range ("⌘1 … ⌘9") reads better as one line than as caps.
+    if keys.contains('…') {
+        return CALLOUT.text(keys.to_string()).color(t.label_2).into();
+    }
+    let mut r = row![].spacing(4).align_y(Alignment::Center);
+    for cap in split_caps(keys) {
+        if cap == "–" {
+            r = r.push(text(cap).size(11.0).color(t.label_3));
+        } else {
+            r = r.push(keycap(t, &cap));
+        }
+    }
+    r.into()
+}
+
+/// "⇧⌘N" -> ["⇧", "⌘", "N"]: each modifier glyph is a cap, the rest is one.
+pub fn split_caps(keys: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in keys.chars() {
+        if matches!(c, '⌃' | '⌥' | '⇧' | '⌘') {
+            out.push(c.to_string());
+        } else if let Some(last) = out.last_mut().filter(|s| c.is_ascii_alphanumeric() && s.chars().next().is_some_and(|f| f.is_ascii_alphanumeric())) {
+            last.push(c);
+        } else {
+            out.push(c.to_string());
+        }
+    }
+    out
+}
 
 fn group_view<'a>(t: Tokens, name: &'a str, rows: &[&'a Shortcut], mac: bool) -> Element<'a, Message> {
     let mut col = column![container(CAPTION.text(name).color(t.label_2)).padding([0, 4])].spacing(4);
     for s in rows {
+        let keys: Element<'_, Message> = if mac { caps_view(t, &keys_text(s, mac)) } else { CALLOUT.text(keys_text(s, mac)).color(t.label_2).into() };
         col = col.push(
-            row![BODY.text(s.label).color(t.label), Space::new().width(Length::Fill), CALLOUT.text(keys_text(s, mac)).color(t.label_2)]
+            row![BODY.text(s.label).color(t.label), Space::new().width(Length::Fill), keys]
                 .align_y(Alignment::Center)
                 .padding([2, 4]),
         );

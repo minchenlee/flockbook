@@ -277,9 +277,9 @@ fn card<'a>(app: &App, e: Entry<'a>, clock: Clock) -> Element<'a, Message> {
         info = info.push(container(CAPTION.text(pv.text).color(t.label_2).wrapping(text::Wrapping::None)).clip(true).width(Length::Fill));
     }
 
-    let body = row![container(status::symbol_sized(status_kind(st), &t, 18.0, 0.0)).padding([2, 0]), info].spacing(SP_12).align_y(Alignment::Start);
+    let body = row![container(status::symbol_sized(status_kind(st), &t, 16.0, 0.0)).padding([2, 0]), info].spacing(SP_12).align_y(Alignment::Start);
     let msg = Message::Overview(OverviewMsg::Open { workspace: e.ws.id.clone(), tab: e.tab.id.clone() });
-    button(container(body).padding([12, 14]).width(Length::Fill))
+    button(container(body).padding(12).width(Length::Fill))
         .on_press(msg)
         .padding(0)
         .width(Length::Fill)
@@ -451,7 +451,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let sub = format!("{} tabs \u{b7} {} working \u{b7} {} need you", total, g.working.len(), g.blocked.len());
 
         let head = row![
-            column![LARGE_TITLE.text(clock.greeting()).color(t.label), text(sub).size(15).font(CALLOUT.font()).color(t.label_2)].spacing(6).width(Length::Fill),
+            column![LARGE_TITLE.text(clock.greeting()).color(t.label), BODY.text(sub).color(t.label_2)].spacing(6).width(Length::Fill),
             container(group_toggle(app)).padding([6, 0]),
         ]
         .align_y(Alignment::Start);

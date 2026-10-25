@@ -205,8 +205,8 @@ pub const SP_32: f32 = 32.0;
 pub const R_CHIP: f32 = 5.0;
 pub const R_ROW: f32 = 6.0;
 pub const R_MENU: f32 = 10.0;
-pub const R_CARD: f32 = 14.0;
-pub const R_COMPOSER: f32 = 18.0;
+pub const R_CARD: f32 = 12.0;
+pub const R_COMPOSER: f32 = 16.0;
 
 // Fixed sizes from the spec.
 pub const SIDEBAR_ROW_H: f32 = 28.0;
@@ -338,6 +338,6 @@ mod tests {
         assert_eq!((READING.size, READING.line), (15.0, 1.55));
         assert_eq!((BODY.size, HEADLINE.size, CALLOUT.size, CAPTION.size, MONO.size), (13.0, 13.0, 12.0, 11.0, 12.0));
         assert_eq!([SP_4, SP_8, SP_12, SP_16, SP_24, SP_32], [4.0, 8.0, 12.0, 16.0, 24.0, 32.0]);
-        assert_eq!([R_CHIP, R_ROW, R_MENU, R_CARD, R_COMPOSER], [5.0, 6.0, 10.0, 14.0, 18.0]);
+        assert_eq!([R_CHIP, R_ROW, R_MENU, R_CARD, R_COMPOSER], [5.0, 6.0, 10.0, 12.0, 16.0]);
     }
 }

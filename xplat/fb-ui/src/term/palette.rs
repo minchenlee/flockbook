@@ -23,6 +23,9 @@ pub struct TermPalette {
     pub ansi: [Color; 16],
 }
 
+/// Swift `applyColors`: Flockbook's own selection is this teal with black text (never the accent).
+const TEAL_SELECTION: Color = Color { r: 0.0, g: 166.0 / 255.0, b: 178.0 / 255.0, a: 1.0 };
+
 const LIGHT_ANSI: [u32; 16] = [
     0x1D1D1F, 0xC41A16, 0x1E7F34, 0x8A6A00, 0x0A5FD0, 0x9B2393, 0x1B7A86, 0x8E8E93, // normal
     0x4A4A4F, 0xE0352B, 0x2A9D43, 0xA67C00, 0x007AFF, 0xB5379F, 0x2799A6, 0x3C3C43, // bright
@@ -36,7 +39,7 @@ const DARK_ANSI: [u32; 16] = [
 impl TermPalette {
     pub fn of(t: &Tokens) -> TermPalette {
         let table = if t.mode.is_dark() { &DARK_ANSI } else { &LIGHT_ANSI };
-        TermPalette { mode: t.mode, fg: over(t.label, t.bg), bg: t.bg, cursor: t.accent, on_cursor: t.on_accent, selection: Color { a: 0.32, ..t.accent }, selection_fg: None, ansi: table.map(hex) }
+        TermPalette { mode: t.mode, fg: over(t.label, t.bg), bg: t.bg, cursor: t.accent, on_cursor: t.on_accent, selection: TEAL_SELECTION, selection_fg: Some(Color::BLACK), ansi: table.map(hex) }
     }
 
     /// The color of an indexed or true color. `Default` gives `None`: the caller picks the default fg or bg.

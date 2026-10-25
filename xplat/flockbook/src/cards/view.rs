@@ -93,11 +93,11 @@ pub fn detail(app: &App) -> Option<Element<'_, Message>> {
     Some(keyed(app, card, body))
 }
 
-fn card_box<'a>(t: Tokens, inner: Element<'a, Message>) -> Element<'a, Message> {
-    container(inner).padding(SP_16).width(Length::Fill).max_width(CARD_MAX_W).style(style::float_e2(t, R_CARD)).into()
+fn card_box<'a>(t: Tokens, radius: f32, inner: Element<'a, Message>) -> Element<'a, Message> {
+    container(inner).padding(SP_16).width(Length::Fill).max_width(CARD_MAX_W).style(style::float_e2(t, radius)).into()
 }
 
-/// A pill button: `primary` = accent fill (Allow, Send), else the quiet fill.
+/// A control-size button: `primary` = accent fill (Allow, Send), else the quiet fill.
 fn pill<'a>(t: Tokens, id: &'static str, label: &'a str, primary: bool, on_press: Option<Message>) -> Element<'a, Message> {
     let enabled = on_press.is_some();
     let fg = match (primary, enabled) {
@@ -105,7 +105,7 @@ fn pill<'a>(t: Tokens, id: &'static str, label: &'a str, primary: bool, on_press
         (_, false) => t.label_3,
         _ => t.label,
     };
-    let b = button(container(MEDIUM.text(label).color(fg)).center_y(Length::Fixed(30.0)).padding([0, 16]))
+    let b = button(container(MEDIUM.text(label).color(fg)).center_y(Length::Fixed(24.0)).padding([0, 12]))
         .padding(0)
         .on_press_maybe(on_press)
         .style(move |_, status| {
@@ -115,7 +115,7 @@ fn pill<'a>(t: Tokens, id: &'static str, label: &'a str, primary: bool, on_press
                 (true, true) => if hot { Color { a: 0.88, ..t.accent } } else { t.accent },
                 (false, true) => if hot { t.fill_3 } else { t.fill_2 },
             };
-            button::Style { background: Some(Background::Color(bg)), border: Border { radius: 15.0.into(), ..Default::default() }, ..Default::default() }
+            button::Style { background: Some(Background::Color(bg)), border: Border { radius: R_ROW.into(), ..Default::default() }, ..Default::default() }
         });
     container(b).id(id).into()
 }
@@ -131,10 +131,10 @@ fn keycap<'a>(t: Tokens, s: impl text::IntoFragment<'a>) -> Element<'a, Message>
 
 /// The check or radio mark of a row.
 fn mark<'a>(t: Tokens, on: bool, square: bool) -> Element<'a, Message> {
-    let radius = if square { 5.0 } else { 9.0 };
+    let radius = if square { 4.0 } else { 10.0 };
     let inner: Element<Message> = if on { icon(Icon::Check, 12.0, t.on_accent) } else { Space::new().into() };
     container(inner)
-        .center(Length::Fixed(18.0))
+        .center(Length::Fixed(20.0))
         .style(move |_| container::Style {
             background: on.then_some(Background::Color(t.accent)),
             border: Border { color: if on { t.accent } else { t.sep_strong }, width: 1.0, radius: radius.into() },
@@ -148,11 +148,11 @@ fn mark<'a>(t: Tokens, on: bool, square: bool) -> Element<'a, Message> {
 fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
     let t = app.tokens();
     let st = &app.state.cards;
-    let tile = container(text("!").size(17).font(HEADLINE.font()).color(t.on_accent)).center(Length::Fixed(28.0)).style(style::fill(t.blocked, 8.0));
+    let tile = container(text("!").size(17).font(HEADLINE.font()).color(t.on_accent)).center(Length::Fixed(30.0)).style(style::fill(t.blocked, R_ROW));
     // The request's own title, as Swift draws it (`ApprovalCard`, `Text(request.title)`): the conversation parser writes
     // "Wants to run a command", a prompt read from the screen its own header ("Bash command").
     let title = if a.title.trim().is_empty() { "Wants to run a command".to_string() } else { a.title.trim().to_string() };
-    let head = container(row![tile, HEADLINE.text(title).color(t.label)].spacing(SP_12).align_y(Alignment::Center)).id(HEAD_ID);
+    let head = container(row![tile, HEADLINE.text(title).color(t.label)].spacing(10.0).align_y(Alignment::Center)).id(HEAD_ID);
     // The description is part of what the prompt shows, so the card shows it too: nothing the owner approves is hidden.
     let mut lines = column![MONO.text(a.command.as_str()).size(app.state.settings.reading_size().code()).color(t.label)].spacing(SP_4);
     if !a.detail.trim().is_empty() {
@@ -160,7 +160,7 @@ fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
     }
     // Bound the command body; Allow/Deny remain outside this scroll area.
     let chip = container(container(scrollable(lines).spacing(0)).max_height(approval_body_height(app.state.conversation.viewport.height)))
-        .padding([SP_8, SP_12]).width(Length::Fill).style(style::fill(t.fill_1, 8.0));
+        .padding([SP_8, 10.0]).width(Length::Fill).style(style::fill(t.fill_1, R_ROW));
 
     let go = a.can_act && !st.busy;
     let mut foot = row![].spacing(SP_12).align_y(Alignment::Center);
@@ -195,7 +195,7 @@ fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
     if let Some(p) = &st.problem {
         body = body.push(CAPTION.text(p.as_str()).color(t.blocked));
     }
-    card_box(t, body.push(foot).into())
+    card_box(t, R_CARD, body.push(foot).into())
 }
 
 // ---------------------------------------------------------------- question
@@ -296,12 +296,15 @@ fn question<'a>(app: &'a App, agent: &'a str, can_send: bool) -> Element<'a, Mes
     }
     let mut group = column![].width(Length::Fill);
     for i in 0..qq.options.len() {
-        group = group.push(option_row(t, flow, i, can)).push(container(Space::new()).height(Length::Fixed(1.0)).width(Length::Fill).style(style::fill(t.sep, 0.0)));
+        // The separator stops under the row's text, not under its mark.
+        group = group
+            .push(option_row(t, flow, i, can))
+            .push(row![Space::new().width(Length::Fixed(44.0)), container(Space::new()).height(Length::Fixed(1.0)).width(Length::Fill).style(style::fill(t.sep, 0.0))]);
     }
     group = group.push(other_row(app, flow, can));
     let group = container(group).width(Length::Fill).clip(true).style(move |_| container::Style {
         background: Some(Background::Color(t.fill_1)),
-        border: Border { color: t.sep, width: 1.0, radius: 10.0.into() },
+        border: Border { color: t.sep, width: 0.5, radius: R_CARD.into() },
         ..Default::default()
     });
     let body = scrollable(column![title, group].spacing(SP_12)).spacing(0);
@@ -339,7 +342,7 @@ fn question<'a>(app: &'a App, agent: &'a str, can_send: bool) -> Element<'a, Mes
         foot,
     ]
     .spacing(SP_16);
-    card_box(t, inner.into())
+    card_box(t, R_COMPOSER, inner.into())
 }
 
 /// Reserve space for the top row, composer, header and action buttons in a short window.

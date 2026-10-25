@@ -9,7 +9,7 @@ use fb_ui::icons::{icon, Icon, SIZE_DEFAULT};
 use fb_ui::status::{self, StatusKind};
 use fb_ui::theme::*;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
-use iced::{Alignment, Background, Border, Element, Length, Task};
+use iced::{Alignment, Background, Border, Color, Element, Length, Task};
 
 #[derive(Debug, Clone, Default)]
 pub struct SidebarState {}
@@ -87,7 +87,10 @@ fn row_button<'a>(t: Tokens, selected: bool, content: Element<'a, Message>, on_p
 fn nav_row<'a>(app: &App, ic: Icon, label: &'a str, screen: Option<Screen>, badge: usize, msg: Message) -> Element<'a, Message> {
     let t = app.bar_tokens();
     let selected = screen.is_some_and(|s| s == app.state.screen);
-    let mut r = row![icon(ic, SIZE_DEFAULT, t.label_2), BODY.text(label).color(t.label), Space::new().width(Length::Fill)].spacing(SP_12).align_y(Alignment::Center);
+    // The symbol sits in a box as wide as a workspace avatar, at the same spacing: nav titles and
+    // workspace names share one leading edge (Swift SidebarLine.box / spacing 8).
+    let sym = container(icon(ic, SIZE_DEFAULT, t.label_2)).center(Length::Fixed(22.0));
+    let mut r = row![sym, BODY.text(label).color(t.label), Space::new().width(Length::Fill)].spacing(SP_8).align_y(Alignment::Center);
     if badge > 0 {
         r = r.push(count_badge(t, badge));
     }
@@ -103,12 +106,13 @@ pub fn count_badge<'a, M: 'a>(t: Tokens, n: usize) -> Element<'a, M> {
 }
 
 fn monogram_chip<'a>(t: Tokens, label: &str, selected: bool) -> Element<'a, Message> {
-    let (bg, fg) = if selected { (t.label, t.bg) } else { (t.fill_3, t.label_2) };
+    // primary 0.1 chip with primary 0.7 letters; inverted when selected (Swift Monogram).
+    let (bg, fg) = if selected { (Color { a: 0.8, ..t.label }, t.bg) } else { (Color { a: 0.1, ..t.label }, Color { a: 0.7, ..t.label }) };
     container(text(monogram(label)).size(10).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(fg))
         .width(Length::Fixed(22.0))
         .height(Length::Fixed(22.0))
         .center(Length::Fixed(22.0))
-        .style(style::fill(bg, R_CHIP))
+        .style(style::fill(bg, 6.0))   // Radius.control
         .into()
 }
 
@@ -149,7 +153,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .spacing(2);
 
     let header = row![
-        CAPTION.text("Workspaces").color(t.label_3),
+        CAPTION.text("Workspaces").font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2),
         Space::new().width(Length::Fill),
         button(icon(Icon::Plus, SIZE_DEFAULT, t.label_2)).padding(2).style(button::text).on_press(Message::Sidebar(SidebarMsg::AddWorkspace)),
     ]

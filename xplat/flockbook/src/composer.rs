@@ -43,6 +43,9 @@ pub const MAX_LINES: usize = 8;
 pub const EDITOR_ID: &str = "composer-editor";
 /// Width cap of the card, same as the conversation column.
 pub const CARD_MAX_W: f32 = 780.0;
+/// Bubbles and the composer card: `Radius.bubble` in Swift (`Sources/HerdrDesk/Reading.swift:33`), not
+/// the 18 pt the shared token uses.
+const R_BUBBLE: f32 = 16.0;
 
 /// Delivers a composer message to a pane. `Err` carries a short reason for the owner.
 ///
@@ -948,7 +951,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // The Swift app's `+` opens one panel that takes files and folders (`canChooseDirectories`, `Composer.swift:260`).
     // The system dialogs behind rfd pick one kind at a time, so the folder picker is a second quiet icon next to it,
     // and only while input is on: read-only shows `+`, branch, mic and send, like the Swift app's composer.
-    let mut controls = row![plus].spacing(SP_8).align_y(Alignment::Center);
+    // Swift: the row is an `HStack(spacing: 10)` (`Composer.swift:214`).
+    let mut controls = row![plus].spacing(10.0).align_y(Alignment::Center);
     if !read_only {
         controls = controls.push(
             iced::widget::tooltip(
@@ -985,23 +989,39 @@ pub fn view(app: &App) -> Element<'_, Message> {
         ))
         .push(send_btn);
 
-    let mut body = column![].spacing(SP_4);
+    let mut body = column![].spacing(6.0);
     if let Some(queue) = st.pane.as_ref().and_then(|p| st.queues.get(p)) {
-        let mut strip = column![].spacing(SP_4);
+        // Faded user bubbles over the composer, right-aligned and ending where the conversation's bubbles end
+        // (`QueuedView.swift:147-187`: trailing VStack, 6 between items, 4 inside one, h14/v8 padding,
+        // primary 4% fill, 1 pt primary 22% border, at most 80% of the reading column).
+        let col = app.state.settings.column_width();
+        let mut strip = column![]
+            .spacing(6.0)
+            .width(Length::Fill)
+            .align_x(Alignment::End);
         for item in &queue.items {
+            let bubble = column![
+                CAPTION.text("Queued").size(10.0).color(t.label_3),
+                CAPTION
+                    .text(item.as_deref().unwrap_or("1 queued message"))
+                    .size(reading.body())
+                    .line_height(iced::advanced::text::LineHeight::Absolute(line_h.into()))
+                    .color(t.label_2),
+            ]
+            .spacing(SP_4);
             strip = strip.push(
-                container(
-                    CAPTION
-                        .text(format!(
-                            "Queued · {}",
-                            item.as_deref().unwrap_or("1 unread message")
-                        ))
-                        .size(reading.body())
-                        .line_height(iced::advanced::text::LineHeight::Absolute(line_h.into()))
-                        .color(t.label_2),
-                )
-                .width(Length::Fill)
-                .padding(8),
+                container(bubble)
+                    .padding([8, 14])
+                    .max_width(col * 0.8)
+                    .style(move |_| container::Style {
+                        background: Some(Background::Color(iced::Color { a: 0.04, ..t.label })),
+                        border: Border {
+                            color: iced::Color { a: 0.22, ..t.label },
+                            width: 1.0,
+                            radius: R_BUBBLE.into(),
+                        },
+                        ..Default::default()
+                    }),
             );
         }
         strip = strip.push(
@@ -1083,7 +1103,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let card = container(body.padding([12, 16]))
         .width(Length::Fill)
         .max_width(app.state.settings.column_width() + 32.0)
-        .style(style::float_e2(t, R_COMPOSER));
+        .style(style::float_e2(t, R_BUBBLE));
     container(card)
         .padding([SP_8, SP_24])
         .width(Length::Fill)

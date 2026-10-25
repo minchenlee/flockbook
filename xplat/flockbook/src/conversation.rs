@@ -757,12 +757,19 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let body = Element::from(flow);
     let body = if !cs.pinned {
+        // The count of rows below the window and the down arrow, as the Swift button's label (Conversation.swift:246).
+        let newer = cs.doc.rows.len().saturating_sub(cs.doc.window.range.1);
+        let label = if newer > 0 {
+            format!("\u{2193} Jump to latest ({newer} newer)")
+        } else {
+            "\u{2193} Jump to latest".to_string()
+        };
         let latest = container(
-            button(BODY.text("Jump to latest"))
+            button(CAPTION.text(label).color(t.label))
                 .on_press(Message::Conversation(ConversationMsg::JumpLatest)),
         )
         .padding(16)
-        .align_right(Length::Fill)
+        .align_x(Alignment::Center)
         .align_bottom(Length::Fill);
         Element::from(stack![body, latest])
     } else {

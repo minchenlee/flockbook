@@ -895,18 +895,20 @@ fn sheet_in(app: &App, window: (f32, f32)) -> Element<'_, Message> {
     let palette = app.state.settings.terminal_palette(&t);
 
     let title = {
-        let mut r = row![icon(Icon::SquareTerminal, SIZE_DEFAULT, t.label_2), HEADLINE.text(format!("Terminal \u{00b7} {}", sheet.title)).color(t.label)].spacing(8).align_y(Alignment::Center);
+        // Swift `TerminalSheet`: the icon is the regular (16 pt) symbol, the title `headline`; both in the primary label colour.
+        let mut r = row![icon(Icon::SquareTerminal, SIZE_DEFAULT, t.label), HEADLINE.text(format!("Terminal \u{00b7} {}", sheet.title)).color(t.label)].spacing(8).align_y(Alignment::Center);
         if !st.writable {
             r = r.push(CAPTION.text("read-only").color(t.label_2));
         }
         r
     };
-    let close = button(container(icon(Icon::X, SIZE_INLINE, t.label_2)).center(Length::Fixed(28.0)))
+    // Swift: `xmark` (subheadline semibold) in a 28x28 circle that always carries the island glass fill, not only on hover.
+    let close = button(container(icon(Icon::X, SIZE_INLINE, t.label)).center(Length::Fixed(28.0)))
         .padding(0)
         .on_press(Message::Terminal(TerminalMsg::Close))
         .style(move |_, status| button::Style {
-            background: matches!(status, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
-            border: Border { radius: 14.0.into(), ..Default::default() },
+            background: Some(Background::Color(if matches!(status, button::Status::Hovered) { t.fill_2 } else { t.fill_1 })),
+            border: Border { color: t.sep, width: 1.0, radius: 14.0.into() },
             ..Default::default()
         });
     let header = container(row![title, Space::new().width(Length::Fill), close].align_y(Alignment::Center)).padding([0, 12]).height(Length::Fixed(HEADER_H)).align_y(Alignment::Center);

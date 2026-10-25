@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fb_ui::icons::{icon, Icon, SIZE_INLINE};
+use fb_ui::icons::{icon, Icon, SIZE_DEFAULT, SIZE_INLINE};
 use fb_ui::theme::*;
 use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, text, toggler, Space};
 use iced::{Alignment, Background, Border, Element, Length, Task};
@@ -346,7 +346,10 @@ pub fn toggle_style(t: Tokens, status: toggler::Status) -> toggler::Style {
     }
 }
 
-pub const SHEET_W: f32 = 520.0;
+pub const SHEET_W: f32 = 900.0;
+/// The tab list beside the page, and the page's left margin (Swift `SettingsSplit.listWidth`, `SettingsView.margin`).
+const LIST_W: f32 = 196.0;
+const PAGE_MARGIN: f32 = 40.0;
 /// The tallest the sheet gets, so it never runs to the bottom of the window. Swift's settings page asks for
 /// `minHeight: 360, idealHeight: 640` (`Settings.swift`), and the page scrolls inside whenever the content is taller.
 pub const SHEET_MAX_H: f32 = 640.0;
@@ -375,7 +378,7 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(t: Tokens, items: &[(T, &'static str)
     for &(value, label) in items {
         let sel = selected == Some(value);
         let color = if on.is_none() { t.label_3 } else { t.label };
-        let mut b = button(container(text(label).size(CALLOUT.size).color(color)).center_x(Length::Fill)).width(Length::Fill).padding([3, 6]).style(move |_, st| button::Style {
+        let mut b = button(container(text(label).size(CALLOUT.size).color(color)).center_x(Length::Fixed(label_width(label)))).padding([3, 6]).style(move |_, st| button::Style {
             background: if sel {
                 Some(Background::Color(t.bg))
             } else {
@@ -393,13 +396,24 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(t: Tokens, items: &[(T, &'static str)
     container(r).padding(2).style(style::fill(t.fill_1, 7.0)).into()
 }
 
+/// The name on the left, the control on the right on the same line (Swift `SettingsRow`).
 fn setting_row<'a>(t: Tokens, title: &'a str, note: String, control: Element<'a, Message>) -> Element<'a, Message> {
     container(
-        column![BODY.text(title).color(t.label), CAPTION.text(note).color(t.label_2), control]
-            .spacing(6).width(Length::Fill),
+        column![
+            row![BODY.text(title).color(t.label), Space::new().width(Length::Fill), control]
+                .spacing(SP_8).align_y(Alignment::Center).width(Length::Fill),
+            CAPTION.text(note).color(t.label_2),
+        ]
+        .spacing(4)
+        .width(Length::Fill),
     )
-    .padding([10, 12])
+    .padding([8, 12])
     .into()
+}
+
+/// A segmented label's fixed width, so the cap stays the same across choices (Swift `.fixedSize()`).
+fn label_width(label: &str) -> f32 {
+    (label.chars().count() as f32 * 6.5 + 18.0).max(34.0)
 }
 
 fn section<'a>(t: Tokens, title: &'a str, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
@@ -419,6 +433,77 @@ pub fn layer(app: &App) -> Element<'_, Message> {
         return Space::new().into();
     }
     responsive(move |size| sheet(app, size.height)).into()
+}
+
+/// The tab's one-line summary (Swift `SettingsTab.summary`).
+fn tab_summary(tab: SettingsTab) -> &'static str {
+    match tab {
+        SettingsTab::General => "How the window, reading and terminal look; what + does.",
+        SettingsTab::Agents => "Sending input to agents, and the status line setup.",
+        SettingsTab::Remote => "Remote access to this Mac.",
+        SettingsTab::Updates => "Check for and install updates.",
+    }
+}
+
+/// The tab's icon in a blue rounded square, its title and one line on what it is for (Swift `SettingsView.header`).
+fn page_header(t: Tokens, tab: SettingsTab) -> Element<'static, Message> {
+    let symbol = match tab {
+        SettingsTab::General => Icon::Settings2,
+        SettingsTab::Agents => Icon::Inbox,
+        SettingsTab::Remote => Icon::Smartphone,
+        SettingsTab::Updates => Icon::Activity,
+    };
+    let badge = container(icon(symbol, SIZE_DEFAULT, iced::Color::WHITE))
+        .center(Length::Fixed(32.0))
+        .style(style::fill(t.accent, 8.0));
+    column![
+        row![
+            badge,
+            column![TITLE.text(tab.label()).size(20.0).color(t.label), CAPTION.text(tab_summary(tab)).color(t.label_2)].spacing(1),
+        ]
+        .spacing(SP_12)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(6)
+    .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 4.0, left: 0.0 })
+    .into()
+}
+
+/// The tabs down the left, like System Settings (Swift `SettingsTabList`): Back, a small "Settings" heading, then the
+/// rows on a light grey fill when chosen.
+fn tab_list(t: Tokens, selected: SettingsTab) -> Element<'static, Message> {
+    let mut col = column![
+        container(row![icon(Icon::ChevronRight, SIZE_INLINE, t.label_2), BODY.text("Back").color(t.label)].spacing(SP_8).align_y(Alignment::Center))
+            .padding([6, 8])
+            .width(Length::Fill),
+        container(CAPTION.text("Settings").color(t.label_2)).padding([0, 8]),
+    ]
+    .spacing(2);
+    for tab in SettingsTab::ALL {
+        let on = tab == selected;
+        let symbol = match tab {
+            SettingsTab::General => Icon::Settings2,
+            SettingsTab::Agents => Icon::Inbox,
+            SettingsTab::Remote => Icon::Smartphone,
+            SettingsTab::Updates => Icon::Activity,
+        };
+        col = col.push(
+            button(container(row![icon(symbol, SIZE_INLINE, t.label_2), BODY.text(tab.label()).color(t.label)].spacing(SP_8).align_y(Alignment::Center)).padding([6, 8]).width(Length::Fill))
+                .padding(0)
+                .width(Length::Fill)
+                .on_press(Message::Settings(SettingsMsg::SelectTab(tab)))
+                .style(move |_, st| button::Style {
+                    background: if on {
+                        Some(Background::Color(t.fill_2))
+                    } else {
+                        matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_1))
+                    },
+                    border: Border { radius: 7.0.into(), ..Default::default() },
+                    ..Default::default()
+                }),
+        );
+    }
+    container(col).width(Length::Fixed(LIST_W)).height(Length::Fill).padding(SP_8).into()
 }
 
 fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
@@ -467,14 +552,14 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
         Some(Err(reason)) => format!("{reason} Using Flockbook colors."),
         None => "Read colors from your Ghostty config. Reload after changing it.".into(),
     };
-    let mut body = column![
+    let mut body = column![page_header(t, s.tab),
         section(t, "Appearance", vec![setting_row(t, "Window", note.to_string(), glass)]),
         section(t, "Reading", vec![setting_row(t, "Text size", "Larger text also widens the reading column.".into(), size_picker), setting_row(t, "Width", width_note, width_picker)]),
         section(t, "Terminal", vec![setting_row(t, "Colors", theme_note, colors_control)]),
         section(t, "Toolbar", vec![setting_row(t, "+ button", "Keyboard New Tab always opens a tab.".into(), plus)]),
     ].spacing(SP_16);
     if s.tab == SettingsTab::Agents {
-        body = column![
+        body = column![page_header(t, s.tab),
             section(t, "Input", vec![setting_row(t, "Allow sending input to agents", "Typing, Allow and Deny, new tab, close tab and split.".into(), input_toggle.into())]),
             container(footer_row).padding([0, 12]),
             section(t, "Status line", vec![
@@ -484,9 +569,9 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
             CAPTION.text("Choose On or Off to apply setup. Highlighted choices show successful actions in this window.").color(t.label_2),
         ].spacing(SP_16);
     } else if s.tab == SettingsTab::Remote {
-        body = column![BODY.text("Remote access is outside this desktop parity release.").color(t.label), CAPTION.text("This build does not start a Hub or expose a remote input endpoint.").color(t.label_2)].spacing(SP_12);
+        body = column![page_header(t, s.tab), BODY.text("Remote access is outside this desktop parity release.").color(t.label), CAPTION.text("This build does not start a Hub or expose a remote input endpoint.").color(t.label_2)].spacing(SP_12);
     } else if s.tab == SettingsTab::Updates {
-        body = column![BODY.text("Updates are installed manually in this build.").color(t.label), CAPTION.text("Automatic update checks are outside this desktop parity release.").color(t.label_2)].spacing(SP_12);
+        body = column![page_header(t, s.tab), BODY.text("Updates are installed manually in this build.").color(t.label), CAPTION.text("Automatic update checks are outside this desktop parity release.").color(t.label_2)].spacing(SP_12);
     }
     for line in [s.pending.map(str::to_string), s.error.clone()].into_iter().flatten() {
         body = body.push(container(CAPTION.text(line).color(t.label_2)).padding([0, 12]));
@@ -498,9 +583,13 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
         ..Default::default()
     });
     let header = row![HEADLINE.text("Settings").color(t.label), Space::new().width(Length::Fill), close].align_y(Alignment::Center);
-    let tabs: Vec<_> = SettingsTab::ALL.iter().map(|v| (*v, v.label())).collect();
-    let tabs = segmented(t, &tabs, Some(s.tab), Some(|v| Message::Settings(SettingsMsg::SelectTab(v))));
-    let card = container(column![header, tabs, scrollable(body).height(Length::Fill)].spacing(SP_12))
+    let card = container(
+        row![
+            tab_list(t, s.tab),
+            container(container(scrollable(body).height(Length::Fill)).padding([16.0, PAGE_MARGIN])).width(Length::Fill).height(Length::Fill),
+        ]
+        .height(Length::Fill),
+    )
         .padding(SP_16).width(Length::Fill).max_width(SHEET_W)
         .height(Length::Fixed((available_height - TOPROW_H - 24.0).clamp(1.0, SHEET_MAX_H)))
         .style(style::float_e2(t, R_CARD));

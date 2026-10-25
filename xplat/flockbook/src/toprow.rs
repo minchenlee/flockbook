@@ -33,6 +33,10 @@ const MAX_TAB_W: f32 = 200.0;
 const FADE_L: f32 = 36.0;
 const FADE_R: f32 = 44.0;
 const BTN: f32 = 30.0;
+/// Pills are capsules and the island insets them by 3 on every side (Swift TabPill.height / TopRow.inset).
+const PILL_R: f32 = TAB_H / 2.0;
+const ISLAND_INSET: f32 = 3.0;
+const SP_6: f32 = 6.0;
 /// Horizontal room the right-hand actions need: split (44) + terminal (30) + gap.
 const ACTIONS_W: f32 = 44.0 + BTN + SP_4;
 /// Window width assumed before the first `view` has measured the real one.
@@ -467,8 +471,8 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
         .height(Length::Fill)
         .padding(0)
         .style(move |_, st| button::Style {
-            background: (!selected && matches!(st, button::Status::Hovered)).then_some(Background::Color(t.fill_1)),
-            border: Border { radius: TAB_RADIUS.into(), ..Default::default() },
+            background: (!selected && matches!(st, button::Status::Hovered)).then_some(Background::Color(Color { a: 0.05, ..t.label })),
+            border: Border { radius: PILL_R.into(), ..Default::default() },
             ..Default::default()
         });
     let mut r = row![main].align_y(Alignment::Center);
@@ -486,16 +490,12 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
         .push(Space::new().width(4));
     }
     let pill = container(r).width(Length::Fixed(g.width)).height(Length::Fixed(TAB_H));
-    let pill: Element<'a, Message> = if selected { pill.style(style::card_e1(t, TAB_RADIUS)).into() } else { pill.into() };
+    // The island is the glass; a selected pill is only a faint fill, a capsule (Swift TabPill).
+    let pill: Element<'a, Message> = if selected { pill.style(style::fill(Color { a: 0.10, ..t.label }, PILL_R)).into() } else { pill.into() };
     let pill = mouse_area(pill)
         .on_right_press(Message::Workspace(crate::workspace_actions::WorkspaceMsg::Menu(crate::workspace_actions::Target::Tab(tab.id.clone()))));
     let pill = drag_target(pill.into(), crate::workspace_actions::Target::Tab(tab.id.clone()));
     tip(t, pill, tab_tooltip(tab, position), tooltip::Position::Bottom)
-}
-
-fn divider<'a>(t: Tokens, show: bool) -> Element<'a, Message> {
-    let line: Element<'a, Message> = if show { container(Space::new()).width(1).height(14).style(style::fill(t.sep_strong, 0.0)).into() } else { Space::new().into() };
-    container(line).width(Length::Fixed(GAP)).height(Length::Fixed(TAB_H)).center(Length::Fixed(GAP)).into()
 }
 
 fn fade<'a>(t: Tokens, left: bool) -> Element<'a, Message> {
@@ -577,10 +577,6 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     let mut r = row![].align_y(Alignment::Center);
     for (i, (tab, (_, g))) in tabs.iter().zip(&lay).enumerate() {
         let sel = s.selected_tab.as_deref() == Some(tab.id.as_str());
-        if i > 0 {
-            let prev_sel = s.selected_tab.as_deref() == Some(tabs[i - 1].id.as_str());
-            r = r.push(divider(t, !sel && !prev_sel));
-        }
         r = r.push(tab_pill(t, &ws_id, tab, g, sel, i + 1, ts.spin));
     }
     let shifted: Element<Message> = Shift { content: r.into(), offset: off, width: strip_w, height: TAB_H }.into();
@@ -612,10 +608,16 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
         layers.push(container(marker(t, Edge::Right, hidden_r)).width(Length::Fill).height(Length::Fill).align_x(Alignment::End).align_y(Alignment::Center).padding([0, 4]).into());
     }
     let strip_box = container(stack(layers)).width(Length::Fixed(strip_w)).height(Length::Fixed(TAB_H));
+    // The tab island: one capsule around the pills, radius height / 2 (Swift TopRow.height / inset).
+    let island = container(strip_box)
+        .width(Length::Fixed(strip_w + 2.0 * ISLAND_INSET))
+        .height(Length::Fixed(TAB_H + 2.0 * ISLAND_INSET))
+        .padding(ISLAND_INSET)
+        .style(style::fill(t.fill_2, (TAB_H + 2.0 * ISLAND_INSET) / 2.0));
 
     let all_tabs = tip(t, icon_button(t, Icon::ChevronDown, ts.menu == Some(MenuKind::AllTabs), Message::TopRow(TopRowMsg::ToggleMenu(MenuKind::AllTabs))), "All tabs".into(), tooltip::Position::Bottom);
     let new_tab = tip(t, icon_button(t, Icon::Plus, false, Message::TopRow(TopRowMsg::Plus)), "New tab (\u{2318}T)".into(), tooltip::Position::Bottom);
-    let left = row![strip_box, all_tabs, new_tab].spacing(SP_4).align_y(Alignment::Center);
+    let left = row![island, all_tabs, new_tab].spacing(SP_6).align_y(Alignment::Center);
 
     let mut right = row![].spacing(SP_4).align_y(Alignment::Center);
     if let Some((add, del)) = review {

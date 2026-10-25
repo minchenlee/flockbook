@@ -25,10 +25,10 @@ use iced::{alignment, keyboard, window, Border, Color, Element, Event, Length, P
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
-pub const FONT_SIZE: f32 = 12.0;
+pub const FONT_SIZE: f32 = 13.0;
 /// JetBrains Mono advances 0.6 em.
-pub const CELL_W: f32 = 7.2;
-pub const CELL_H: f32 = 16.0;
+pub const CELL_W: f32 = 7.8;
+pub const CELL_H: f32 = 17.0;
 /// Inner padding of the grid inside the widget.
 pub const PAD: f32 = 8.0;
 

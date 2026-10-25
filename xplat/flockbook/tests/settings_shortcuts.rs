@@ -138,7 +138,12 @@ fn the_panel_lists_every_row() {
     let mac = cfg!(target_os = "macos");
     for row in TABLE {
         assert!(s.find(row.label).is_ok(), "label {}", row.label);
-        assert!(s.find(shortcuts::keys_text(row, mac).as_str()).is_ok(), "keys of {}", row.label);
+        // The Mac panel draws each key as its own keycap (Swift Kbd.swift:5, ShortcutsPanel.swift:256); a range stays one text.
+        let keys = shortcuts::keys_text(row, mac);
+        let caps = if mac && !keys.contains('…') { shortcuts::split_caps(&keys) } else { vec![keys.clone()] };
+        for cap in caps.iter().filter(|c| c.as_str() != "–") {
+            assert!(s.find(cap.as_str()).is_ok(), "key {cap} of {}", row.label);
+        }
     }
 }
 

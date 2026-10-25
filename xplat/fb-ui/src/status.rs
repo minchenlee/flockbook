@@ -54,9 +54,11 @@ pub fn draw_symbol(f: &mut Frame, kind: StatusKind, t: &Tokens, size: f32, phase
     let col = kind.color(t);
     match kind {
         StatusKind::Working => {
-            let w = (size * 0.13).max(1.0);
+            // 2 pt at the 14 pt symbol, like the Swift arc's `lineWidth 2`.
+            let w = (size * 0.143).max(1.0);
             let r = size / 2.0 - w / 2.0;
-            f.stroke(&Path::circle(c, r), Stroke::default().with_width(w).with_color(t.fill_3));
+            let track = Color { a: 0.15, ..t.label };
+            f.stroke(&Path::circle(c, r), Stroke::default().with_width(w).with_color(track));
             let start = phase - FRAC_PI_2;
             let arc = Path::new(|b| {
                 b.arc(canvas::path::Arc { center: c, radius: r, start_angle: start.into(), end_angle: (start + TAU * 0.28).into() });
@@ -64,8 +66,10 @@ pub fn draw_symbol(f: &mut Frame, kind: StatusKind, t: &Tokens, size: f32, phase
             f.stroke(&arc, Stroke::default().with_width(w).with_color(col).with_line_cap(canvas::LineCap::Round));
         }
         StatusKind::Idle => {
-            let w = (size * 0.1).max(1.0);
-            f.stroke(&Path::circle(c, size / 2.0 - w / 2.0), Stroke::default().with_width(w).with_color(col));
+            // The Swift hollow circle is drawn at `size - 1` in a `size` frame.
+            let d = (size - 1.0).max(1.0);
+            let w = (d * 0.09).max(1.0);
+            f.stroke(&Path::circle(c, d / 2.0 - w / 2.0), Stroke::default().with_width(w).with_color(col));
         }
         StatusKind::Blocked => {
             f.fill(&Path::circle(c, size / 2.0), col);
