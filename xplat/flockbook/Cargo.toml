@@ -15,11 +15,12 @@ name = "flockbook"
 path = "src/main.rs"
 
 [dependencies]
-iced = { workspace = true, features = ["svg", "canvas", "tiny-skia", "tokio"] }
+iced = { workspace = true, features = ["image", "svg", "canvas", "tiny-skia", "tokio"] }
 iced_test.workspace = true
 fb-ui = { path = "../fb-ui" }
 herdr-core = { path = "../herdr-core" }
 png.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json.workspace = true
 serde.workspace = true

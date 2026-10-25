@@ -77,3 +77,56 @@ pub fn window_settings(title_bar: TitleBar, settings: window::Settings) -> windo
     let _ = title_bar;
     settings
 }
+
+/// Swift WorkspaceMonogram, including its single-word fallback.
+pub fn monogram(raw: &str) -> String {
+    let stripped = if raw.starts_with('[') { raw.split_once(']').map(|(_, s)| s.trim()).unwrap_or(raw) } else { raw };
+    let s = if stripped.is_empty() { raw } else { stripped };
+    let chars: Vec<char> = s.chars().collect();
+    let s: String = chars.iter().enumerate().filter_map(|(i, &c)| {
+        let inner = matches!(c, '\'' | '’') && i > 0 && i + 1 < chars.len() && chars[i - 1].is_alphanumeric() && chars[i + 1].is_alphanumeric();
+        (!inner).then_some(c)
+    }).collect();
+    let mut words: Vec<String> = s.split(|c: char| !c.is_alphanumeric()).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+    if words.len() == 1 {
+        let mut parts = vec![];
+        let mut cur = String::new();
+        for c in words[0].chars() {
+            if c.is_uppercase() && !cur.is_empty() { parts.push(std::mem::take(&mut cur)); }
+            cur.push(c);
+        }
+        parts.push(cur); words = parts;
+    }
+    if words.len() >= 2 { words.iter().take(2).filter_map(|s| s.chars().next()).collect::<String>().to_uppercase() }
+    else { s.chars().take(2).collect::<String>().to_uppercase() }
+}
+
+/// Sidebar container for the integration host. A collapsed rail retains the restore button and Settings access.
+pub fn sidebar(app: &App) -> Element<'_, Message> {
+    use fb_ui::theme::*;
+    use fb_ui::icons::{icon, Icon, SIZE_INLINE};
+    use iced::widget::{button, column, container};
+    use iced::Length;
+    let t = app.tokens();
+    let hidden = app.state.settings.sidebar_hidden();
+    let toggle = button(icon(Icon::PanelLeft, SIZE_INLINE, t.label_2)).padding(8)
+        .on_press(Message::Settings(crate::settings::SettingsMsg::ToggleSidebar));
+    let content: Element<'_, Message> = if hidden {
+        column![toggle, button(icon(Icon::Settings2, SIZE_INLINE, t.label_2)).padding(8).on_press(Message::Settings(crate::settings::SettingsMsg::Open))].padding([12, 6]).into()
+    } else {
+        column![toggle, crate::sidebar::view(app)].into()
+    };
+    container(content).width(Length::Fixed(if hidden { 48.0 } else { SIDEBAR_W })).height(Length::Fill)
+        .style(crate::style::sidebar(t, app.state.glass.on)).into()
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+    #[test]
+    fn workspace_initials_follow_words_camel_case_and_apostrophes() {
+        for (label, want) in [("[TAG] Meadow · Migration", "MM"), ("OpenAtlas", "OA"), ("Brandon's project", "BP"), ("O’Neil", "ON"), ("hello", "HE"), ("研究 工作", "研工"), ("", "")] {
+            assert_eq!(monogram(label), want, "{label}");
+        }
+    }
+}

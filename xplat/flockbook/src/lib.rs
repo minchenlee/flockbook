@@ -57,6 +57,8 @@ pub mod state;
 pub mod style;
 pub mod terminal;
 pub mod toprow;
+pub mod workspace_actions;
+pub mod pane_layout;
 
 use fb_ui::theme::{Tokens, SIDEBAR_W};
 use fb_ui::Mode;
@@ -78,6 +80,8 @@ pub enum Message {
     /// Polls the source. Fired by the subscription in `main.rs`.
     Tick,
     Noop,
+    Workspace(workspace_actions::WorkspaceMsg),
+    PaneConversation { pane: String, message: conversation::ConversationMsg },
     // One wrapper per module.
     Sidebar(sidebar::SidebarMsg),
     TopRow(toprow::TopRowMsg),
@@ -165,17 +169,24 @@ impl App {
         needs_you::retarget(self);
         let changed = self.state.reload(self.source.as_ref());
         let pane = self.state.selected_pane().map(|p| p.id.clone());
+        pane_layout::switch_reader(&mut self.state, pane.as_deref());
         self.state.composer.switch_pane(pane.as_deref());
         // Rows are rebuilt only when the conversation changed or another pane is shown.
         if changed || self.state.conversation.pane != pane {
             conversation::sync_markdown(self);
         }
         cards::on_refresh(self);
+        pane_layout::refresh_other_readers(self);
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        if self.state.settings.open && settings::blocks_underlying(&message) { return Task::none(); }
+        composer::sync_permissions(self);
         // The sheet is a modal: the composer and the cards below it get no input and send nothing while it shows.
         if self.state.terminal.is_open() && terminal::blocks_underlying(&message) {
+            return Task::none();
+        }
+        if workspace_actions::modal(self) && terminal::blocks_underlying(&message) {
             return Task::none();
         }
         let was_open = self.state.terminal.is_open();
@@ -186,6 +197,8 @@ impl App {
         }
         // The terminal sheet follows the screen and the pane: leaving either releases it.
         terminal::after_update(self);
+        composer::sync_permissions(self);
+        pane_layout::release_hidden_pictures(&mut self.state);
         match glass::sync(self) {
             Some(g) => Task::batch([task, g]),
             None => task,
@@ -225,10 +238,16 @@ impl App {
                 Task::none()
             }
             Message::Noop => Task::none(),
+            Message::Workspace(m) => workspace_actions::update(self, m),
+            Message::PaneConversation { pane, message } => pane_layout::update_reader(self, pane, message),
             Message::Sidebar(m) => sidebar::update(self, m),
             Message::TopRow(m) => toprow::update(self, m),
             Message::Overview(m) => overview::update(self, m),
             Message::NeedsYou(m) => needs_you::update(self, m),
+            Message::Conversation(m @ conversation::ConversationMsg::EarlierLoaded { .. }) => {
+                let conversation::ConversationMsg::EarlierLoaded { ref pane, .. } = m else { unreachable!() };
+                pane_layout::update_reader(self, pane.clone(), m)
+            }
             Message::Conversation(m) => conversation::update(self, m),
             Message::Composer(m) => composer::update(self, m),
             Message::Cards(m) => cards::update(self, m),
@@ -245,23 +264,23 @@ impl App {
         let t = self.tokens();
         let ground = self.ground();
         let main: Element<Message> = match self.state.screen {
-            Screen::Conversation => column![style::with_top_fade(ground, conversation::view(self)), cards::bottom(self)].into(),
+            Screen::Conversation => pane_layout::view(self),
             Screen::Overview => style::with_top_fade(ground, overview::view(self)),
             Screen::NeedsYou => needs_you::view(self),
             Screen::Search => overview::view(self),
         };
-        let sidebar = container(sidebar::view(self)).width(Length::Fixed(SIDEBAR_W)).height(Length::Fill).style(style::sidebar(t, self.state.glass.on));
+        let sidebar = chrome::sidebar(self);
         if self.state.glass.on {
             // Window glass: each surface paints one tint over a clear root, so translucent layers never stack.
             let main = container(main).width(Length::Fill).height(Length::Fill);
             let main = if needs_you::paints_own_ground(self) { main } else { main.style(style::fill(ground, 0.0)) };
             let right = column![container(toprow::view(self)).width(Length::Fill).height(Length::Fixed(fb_ui::theme::TOPROW_H)).style(style::fill(t.glass_bar, 0.0)), main];
             let body = row![sidebar, container(right).width(Length::Fill).height(Length::Fill)];
-            return container(iced::widget::stack![body, toprow::menu_layer(self), terminal::layer(self), settings::layer(self), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).into();
+            return container(iced::widget::stack![settings::cover(iced::widget::stack![body, toprow::menu_layer(self), workspace_actions::layer(self), terminal::layer(self)], self.state.settings.open || self.state.shortcuts.open), settings::layer(self), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).into();
         }
         let right = column![container(toprow::view(self)).height(Length::Fixed(fb_ui::theme::TOPROW_H)), container(main).width(Length::Fill).height(Length::Fill)];
         let body = row![sidebar, container(right).width(Length::Fill).height(Length::Fill).style(style::content(t))];
-        container(iced::widget::stack![body, toprow::menu_layer(self), terminal::layer(self), settings::layer(self), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).style(style::content(t)).into()
+        container(iced::widget::stack![settings::cover(iced::widget::stack![body, toprow::menu_layer(self), workspace_actions::layer(self), terminal::layer(self)], self.state.settings.open || self.state.shortcuts.open), settings::layer(self), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).style(style::content(t)).into()
     }
 }
 
@@ -274,3 +293,6 @@ pub fn stub<'a>(app: &App, title: &'a str) -> Element<'a, Message> {
     .into()
 }
 
+
+pub mod pictures;
+pub mod queued;

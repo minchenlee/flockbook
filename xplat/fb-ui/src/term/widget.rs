@@ -407,7 +407,10 @@ impl<'a, M: 'a> Widget<M, Theme, iced::Renderer> for Terminal<'a, M> {
                     if cell.spacer {
                         continue;
                     }
-                    let colors = cell_colors(&self.palette, cell, on_block(self.snap, block_at, c, row));
+                    let mut colors = cell_colors(&self.palette, cell, on_block(self.snap, block_at, c, row));
+                    if sel.and_then(|s| s.row_span(row, cols)).is_some_and(|(a, b)| c >= a && c <= b) {
+                        if let Some(fg) = self.palette.selection_fg { colors.fg = fg; }
+                    }
                     let cell_w = if cell.wide { 2.0 * CELL_W } else { CELL_W };
                     let x = ox + c as f32 * CELL_W;
                     if cell.underline {

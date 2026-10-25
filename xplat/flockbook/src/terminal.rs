@@ -892,7 +892,7 @@ fn sheet_in(app: &App, window: (f32, f32)) -> Element<'_, Message> {
     let st = &app.state.terminal;
     let Some(sheet) = st.sheet.as_ref() else { return Space::new().into() };
     let size = SheetSize::clamp(st.size, window);
-    let palette = TermPalette::of(&t);
+    let palette = app.state.settings.terminal_palette(&t);
 
     let title = {
         let mut r = row![icon(Icon::SquareTerminal, SIZE_DEFAULT, t.label_2), HEADLINE.text(format!("Terminal \u{00b7} {}", sheet.title)).color(t.label)].spacing(8).align_y(Alignment::Center);
@@ -916,7 +916,7 @@ fn sheet_in(app: &App, window: (f32, f32)) -> Element<'_, Message> {
         Some(h) => history_body(app, h, palette),
         None => live_body(app, sheet, palette),
     };
-    let mut layers = vec![body];
+    let mut layers = vec![container(body).style(style::fill(palette.bg, 0.0)).into()];
     if let Some(reason) = sheet.closed.as_ref().filter(|r| r.as_str() != "detached") {
         layers.push(banner(app, sheet, reason));
     }

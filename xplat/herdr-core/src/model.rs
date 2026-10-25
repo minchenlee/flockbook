@@ -1,5 +1,47 @@
 //! Public model types (port of Models.swift). Plain data, `Clone + PartialEq`.
 
+/// Identity to pin before an asynchronous input operation. Status/title changes are not identity changes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AgentIdentity {
+    pub pane_id: String,
+    pub name: String,
+    pub kind: String,
+    pub session_id: Option<String>,
+}
+
+impl AgentIdentity {
+    pub fn for_pane(pane: &Pane) -> Option<Self> {
+        let a = pane.agent.as_ref()?;
+        Some(Self { pane_id: pane.id.clone(), name: a.name.clone(), kind: a.kind.clone(), session_id: a.session_id.clone() })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamNote {
+    pub teammate: String,
+    pub lead: Option<String>,
+}
+
+/// Pane-level state includes the reason a log is deliberately hidden.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConversationState {
+    Loading,
+    Ready,
+    Missing,
+    Failed(String),
+    WaitingForLead,
+    ShowingLead(TeamNote),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusTag {
+    pub kind: String,
+    pub text: String,
+    pub spoken: String,
+    pub percent: Option<f64>,
+    pub warn: bool,
+}
+
 /// Agent state. Rollup order: blocked > working > done > idle > unknown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentStatus {
@@ -223,6 +265,7 @@ pub enum ItemKind {
     PermissionRequest(PermissionRequest),
     Question(QuestionRequest),
     Status(String),
+    Images(Vec<crate::log_image::ImageRef>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

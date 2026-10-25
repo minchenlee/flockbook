@@ -17,6 +17,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
+pub mod lead;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -88,6 +89,7 @@ pub struct AgentRoots {
     pub cursor_projects: PathBuf,
     /// pi sessions: `PI_CODING_AGENT_SESSION_DIR`, else `<PI_CODING_AGENT_DIR>/sessions`, else `~/.pi/agent/sessions`.
     pub pi_sessions: PathBuf,
+    pub grok_sessions: PathBuf,
 }
 
 impl AgentRoots {
@@ -108,6 +110,7 @@ impl AgentRoots {
             codex_sessions: codex.join("sessions"),
             cursor_projects: home.join(".cursor").join("projects"),
             pi_sessions: pi,
+            grok_sessions: get("GROK_HOME").unwrap_or_else(|| home.join(".grok")).join("sessions"),
         }
     }
 
@@ -117,6 +120,7 @@ impl AgentRoots {
             "codex" => self.codex_sessions.clone(),
             "cursor" => self.cursor_projects.clone(),
             "pi" => self.pi_sessions.clone(),
+            "grok" => self.grok_sessions.clone(),
             _ => self.claude_projects.clone(),
         }
     }
@@ -136,6 +140,8 @@ pub fn home_dir() -> PathBuf {
 
 struct Entry {
     pid: Option<i32>,
+    start: Option<f64>,
+    need: Need,
     path: Option<PathBuf>,
     checked: f64,
 }
@@ -178,6 +184,7 @@ impl SessionResolver {
             .iter()
             .filter(|n| match self.cache.get(&n.pane_id) {
                 None => true,
+                Some(e) if e.need != **n => true,
                 Some(e) => now - e.checked >= if e.path.is_none() { self.retry } else { self.recheck },
             })
             .collect();
@@ -186,7 +193,7 @@ impl SessionResolver {
             for n in due {
                 let agent = agent_process(&n.pane_id, &self.socket_path, &procs);
                 if let Some(old) = self.cache.get_mut(&n.pane_id) {
-                    if old.path.is_some() && old.pid.is_some() && old.pid == agent.as_ref().map(|a| a.pid) {
+                    if old.path.is_some() && old.pid.is_some() && old.pid == agent.as_ref().map(|a| a.pid) && old.start == agent.as_ref().map(|a| a.start) && old.need == *n {
                         old.checked = now;
                         continue;
                     }
@@ -200,14 +207,27 @@ impl SessionResolver {
                     }
                 }
                 let path = agent.as_ref().and_then(|a| self.find(n, a, &procs, &taken, now));
-                self.cache.insert(n.pane_id.clone(), Entry { pid: agent.map(|a| a.pid), path, checked: now });
+                self.cache.insert(n.pane_id.clone(), Entry { pid: agent.as_ref().map(|a| a.pid), start: agent.as_ref().map(|a| a.start), need: n.clone(), path, checked: now });
             }
         }
         needs.iter().filter_map(|n| self.cache.get(&n.pane_id).and_then(|e| e.path.clone()).map(|p| (n.pane_id.clone(), p))).collect()
     }
 
     fn find(&self, n: &Need, agent: &Proc, procs: &[Proc], claimed: &HashSet<String>, now: f64) -> Option<PathBuf> {
-        let open = self.source.open_files(&subtree(agent.pid, procs));
+        let tree = subtree(agent.pid, procs);
+        let open = self.source.open_files(&tree);
+        if n.kind == "grok" {
+            let home = grok_home(&agent.line);
+            if let Some(p) = grok_log_path(&open, &home).filter(|p| !is_claimed(&p.to_string_lossy(), claimed)) { return Some(p); }
+            let data = std::fs::read(home.join("active_sessions.json")).ok()?;
+            let id = grok_session(&data, &tree)?;
+            let mut hits = Vec::new();
+            for cwd in std::fs::read_dir(home.join("sessions")).ok()?.flatten() {
+                let p = cwd.path().join(&id).join("updates.jsonl");
+                if p.is_file() && !is_claimed(&p.to_string_lossy(), claimed) { hits.push(p); }
+            }
+            return if hits.len() == 1 { hits.pop() } else { None };
+        }
         if let Some(p) = log_path(&open, &n.kind, &self.roots) {
             if !is_claimed(&p.to_string_lossy(), claimed) {
                 return Some(p);
@@ -313,6 +333,7 @@ pub fn subtree(pid: i32, procs: &[Proc]) -> Vec<i32> {
 
 /// The one agent log among open files, or `None` when there is none or more than one.
 pub fn log_path(open_files: &[String], kind: &str, roots: &AgentRoots) -> Option<PathBuf> {
+    if kind == "grok" { return grok_log_path(open_files, roots.grok_sessions.parent()?); }
     let hits: BTreeSet<PathBuf> = open_files
         .iter()
         .map(PathBuf::from)
@@ -345,6 +366,7 @@ pub fn is_claimed(path: &str, claimed: &HashSet<String>) -> bool {
     if claimed.contains(path) {
         return true;
     }
+    if Path::new(path).file_name().is_some_and(|n| n == "updates.jsonl") && Path::new(path).parent().and_then(Path::file_name).is_some_and(|id| claimed.contains(id.to_string_lossy().as_ref())) { return true; }
     let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     claimed.iter().any(|c| !c.is_empty() && !c.contains('/') && !c.contains('\\') && (name == format!("{c}.jsonl") || name.ends_with(&format!("-{c}.jsonl"))))
 }
@@ -460,4 +482,38 @@ pub fn codex_meta(path: &Path) -> Option<(String, f64)> {
     let cwd = p.get("cwd")?.as_str()?;
     let ts = p.get("timestamp").and_then(|v| v.as_str()).or_else(|| o.get("timestamp").and_then(|v| v.as_str()))?;
     Some((cwd.to_string(), crate::util::parse_time(ts)?))
+}
+
+pub fn grok_home(process: &str) -> PathBuf {
+    process.split_whitespace().find_map(|s| s.strip_prefix("GROK_HOME=").filter(|s| !s.is_empty()).map(PathBuf::from)).unwrap_or_else(|| home_dir().join(".grok"))
+}
+pub fn grok_log_path(open: &[String], home: &Path) -> Option<PathBuf> {
+    let root = home.join("sessions");
+    let hits: BTreeSet<_> = open.iter().map(PathBuf::from).filter_map(|p| {
+        if p.components().any(|c| c == Component::ParentDir) { return None; }
+        let rel = p.strip_prefix(&root).ok()?;
+        if rel.components().count() != 3 || !matches!(p.file_name()?.to_str()?, "events.jsonl" | "updates.jsonl") { return None; }
+        Some(p.parent()?.join("updates.jsonl"))
+    }).collect();
+    if hits.len() == 1 { hits.into_iter().next() } else { None }
+}
+pub fn grok_session(data: &[u8], pids: &[i32]) -> Option<String> {
+    let list: serde_json::Value = serde_json::from_slice(data).ok()?;
+    let ids: BTreeSet<_> = list.as_array()?.iter().filter(|v| v.get("pid").and_then(|v| v.as_i64()).is_some_and(|p| pids.contains(&(p as i32))))
+        .filter_map(|v| v.get("session_id")?.as_str().filter(|s| !s.is_empty() && !s.contains(['/', '\\']) && *s != "." && *s != "..").map(str::to_owned)).collect();
+    if ids.len() == 1 { ids.into_iter().next() } else { None }
+}
+
+#[cfg(test)]
+mod grok_resolution_tests {
+    use super::*;
+    #[test]
+    fn events_file_resolves_to_updates_and_ambiguous_sessions_are_hidden() {
+        let root = Path::new("/synthetic/grok");
+        assert_eq!(grok_log_path(&["/synthetic/grok/sessions/cwd/id/events.jsonl".into()], root), Some(root.join("sessions/cwd/id/updates.jsonl")));
+        assert!(grok_log_path(&["/synthetic/grok/sessions/cwd/id/events.jsonl".into(), "/synthetic/grok/sessions/cwd/other/events.jsonl".into()], root).is_none());
+        assert_eq!(grok_session(br#"[{"pid":4,"session_id":"one"}]"#, &[4]), Some("one".into()));
+        assert!(grok_session(br#"[{"pid":4,"session_id":"one"},{"pid":5,"session_id":"two"}]"#, &[4,5]).is_none());
+        assert!(grok_session(br#"[{"pid":4,"session_id":"../escape"}]"#, &[4]).is_none());
+    }
 }

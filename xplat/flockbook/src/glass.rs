@@ -75,6 +75,7 @@ pub struct GlassState {
     pub backdrop: Backdrop,
     /// The panels paint the glass tints and the root paints nothing. False until `install`, and after a failure.
     pub on: bool,
+    pub reduced_transparency: bool,
     pub window: Option<window::Id>,
     /// The dark flag last pushed to the window.
     applied: Option<bool>,
@@ -85,6 +86,7 @@ pub struct GlassState {
 #[derive(Debug, Clone)]
 pub enum GlassMsg {
     WindowOpened(window::Id),
+    CheckAccessibility,
     Applied(Result<(), String>),
 }
 
@@ -101,6 +103,22 @@ pub fn launch_transparent(backdrop: Backdrop) -> bool {
 
 pub fn update(app: &mut App, msg: GlassMsg) -> Task<Message> {
     match msg {
+        GlassMsg::CheckAccessibility => {
+            let reduce = macos::reduce_transparency();
+            if reduce != app.state.glass.reduced_transparency {
+                let wanted = app.state.settings.prefs.glass.unwrap_or(true);
+                let g = &mut app.state.glass;
+                g.reduced_transparency = reduce;
+                g.applied = None;
+                if reduce {
+                    g.on = false;
+                    g.error = Some("Reduce Transparency is on".into());
+                } else if g.error.as_deref() == Some("Reduce Transparency is on") {
+                    g.error = None;
+                    g.on = wanted && g.backdrop != Backdrop::Opaque;
+                }
+            }
+        }
         GlassMsg::WindowOpened(id) => {
             if app.state.glass.window.is_none() {
                 app.state.glass.window = Some(id);
@@ -110,6 +128,7 @@ pub fn update(app: &mut App, msg: GlassMsg) -> Task<Message> {
         GlassMsg::Applied(Err(e)) => {
             eprintln!("flockbook: window glass unavailable, using opaque: {e}");
             app.state.glass.on = false;
+            app.state.glass.reduced_transparency = e == "Reduce Transparency is on";
             app.state.glass.error = Some(e);
         }
     }
@@ -134,11 +153,14 @@ pub fn sync(app: &mut App) -> Option<Task<Message>> {
 
 /// The first window's id, until it is known. Only while a backdrop waits for it.
 pub fn subscription(app: &App) -> Subscription<Message> {
-    if app.state.glass.on && app.state.glass.window.is_none() {
+    let opened = if app.state.glass.on && app.state.glass.window.is_none() {
         window::open_events().map(|id| Message::Glass(GlassMsg::WindowOpened(id)))
     } else {
         Subscription::none()
-    }
+    };
+    if cfg!(target_os = "macos") && app.state.glass.backdrop != Backdrop::Opaque {
+        Subscription::batch([opened, iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::Glass(GlassMsg::CheckAccessibility))])
+    } else { opened }
 }
 
 /// The window's clear color: nothing under glass, the content color otherwise.
@@ -162,6 +184,7 @@ fn apply(backdrop: Backdrop, window: &dyn window::Window, dark: bool) -> Result<
 
 #[cfg(not(target_os = "macos"))]
 mod macos {
+    pub fn reduce_transparency() -> bool { false }
     pub fn show(_window: &dyn iced::window::Window, _dark: bool) -> Result<(), String> {
         Err("window vibrancy is macOS only".into())
     }
@@ -185,6 +208,10 @@ mod macos {
     thread_local! {
         /// The installed blur view. AppKit objects live on the main thread.
         static BLUR: RefCell<Option<Retained<NSVisualEffectView>>> = const { RefCell::new(None) };
+    }
+
+    pub fn reduce_transparency() -> bool {
+        NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
     }
 
     pub fn show(window: &dyn iced::window::Window, dark: bool) -> Result<(), String> {

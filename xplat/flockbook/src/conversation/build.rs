@@ -2,8 +2,8 @@
 //! Ports the entry rules of the Swift `ConversationView` (gaps: 32 before a user bubble, 20 after it, 8 around
 //! chips, 24 around separators, 12 before a footer).
 
-use super::markdown::{self, Spec};
 use super::icon_for_symbol;
+use super::markdown::{self, Spec};
 use chrono::{DateTime, Local, TimeZone};
 use fb_ui::icons::Icon;
 use fb_ui::selectable::flow::{row_id, Chip, Para, Row, RowKind};
@@ -41,6 +41,7 @@ enum DKind<'a> {
     Running(&'a str),
     Answered(String),
     Status(&'a str),
+    Images(&'a [herdr_core::ImageRef]),
     Nothing,
 }
 
@@ -50,7 +51,7 @@ fn tag_of(k: &DKind) -> Tag {
         DKind::Assistant(_) => Tag::Assistant,
         DKind::Chips(_) | DKind::Running(_) => Tag::Chips,
         DKind::Status(_) | DKind::Answered(_) => Tag::Status,
-        DKind::Nothing => Tag::Other,
+        DKind::Images(_) | DKind::Nothing => Tag::Other,
     }
 }
 
@@ -92,6 +93,7 @@ fn item_sig(d: &Disp, expanded: &HashSet<String>) -> u64 {
                 }
             }
         }
+        DKind::Images(rs) => rs.hash(&mut h),
         DKind::Nothing => {}
     }
     h.finish()
@@ -108,7 +110,10 @@ fn clock(ts: f64) -> String {
 }
 
 fn local(ts: f64) -> DateTime<Local> {
-    Local.timestamp_opt(ts as i64, 0).single().unwrap_or_else(Local::now)
+    Local
+        .timestamp_opt(ts as i64, 0)
+        .single()
+        .unwrap_or_else(Local::now)
 }
 
 fn duration(s: f64) -> String {
@@ -144,9 +149,19 @@ fn call_text(c: &herdr_core::ToolCall) -> String {
         if !out.is_empty() {
             let lines: Vec<&str> = out.lines().collect();
             s.push_str("\n\n");
-            s.push_str(&lines.iter().take(OUTPUT_LINES).copied().collect::<Vec<_>>().join("\n"));
+            s.push_str(
+                &lines
+                    .iter()
+                    .take(OUTPUT_LINES)
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
             if lines.len() > OUTPUT_LINES {
-                s.push_str(&format!("\n\u{2026} {} more lines", lines.len() - OUTPUT_LINES));
+                s.push_str(&format!(
+                    "\n\u{2026} {} more lines",
+                    lines.len() - OUTPUT_LINES
+                ));
             }
         }
     }
@@ -169,7 +184,12 @@ fn specs_of(d: &Disp, expanded: &HashSet<String>) -> Vec<Spec> {
             if inl.is_empty() {
                 inl.push(fb_ui::selectable::flow::Inline::plain(s.to_string()));
             }
-            vec![Spec { kind: RowKind::Bubble, paras: vec![Para { inlines: inl }], separator: "\n\n", gap: 0.0 }]
+            vec![Spec {
+                kind: RowKind::Bubble,
+                paras: vec![Para { inlines: inl }],
+                separator: "\n\n",
+                gap: 0.0,
+            }]
         }
         DKind::Assistant(s) => markdown::parse(s, false),
         DKind::Chips(cs) => {
@@ -179,7 +199,11 @@ fn specs_of(d: &Disp, expanded: &HashSet<String>) -> Vec<Spec> {
                     let running = c.calls.iter().any(|x| x.output.is_none());
                     Chip {
                         id: c.id.clone(),
-                        icon: if running { Icon::Activity } else { icon_for_symbol(&c.symbol) },
+                        icon: if running {
+                            Icon::Activity
+                        } else {
+                            icon_for_symbol(&c.symbol)
+                        },
                         text: c.text.clone(),
                         expandable: !c.calls.is_empty(),
                         expanded: expanded.contains(&c.id),
@@ -188,21 +212,75 @@ fn specs_of(d: &Disp, expanded: &HashSet<String>) -> Vec<Spec> {
                     }
                 })
                 .collect();
-            let mut out = vec![Spec { kind: RowKind::Chips(chips), paras: vec![], separator: "", gap: 0.0 }];
+            let mut out = vec![Spec {
+                kind: RowKind::Chips(chips),
+                paras: vec![],
+                separator: "",
+                gap: 0.0,
+            }];
             for c in cs.iter().filter(|c| expanded.contains(&c.id)) {
                 for call in &c.calls {
-                    out.push(Spec { kind: RowKind::Code { lang: Some(call.tool_name.clone()) }, paras: vec![Para::text(call_text(call))], separator: "\n\n", gap: 8.0 });
+                    out.push(Spec {
+                        kind: RowKind::Code {
+                            lang: Some(call.tool_name.clone()),
+                        },
+                        paras: vec![Para::text(call_text(call))],
+                        separator: "\n\n",
+                        gap: 8.0,
+                    });
                 }
             }
             out
         }
         DKind::Running(tool) => {
             let name = if tool.is_empty() { "tool" } else { tool };
-            let chip = Chip { id: format!("running-{name}"), icon: Icon::Activity, text: format!("Running {name}\u{2026}"), expandable: false, expanded: false, running: true, error: false };
-            vec![Spec { kind: RowKind::Chips(vec![chip]), paras: vec![], separator: "", gap: 0.0 }]
+            let chip = Chip {
+                id: format!("running-{name}"),
+                icon: Icon::Activity,
+                text: format!("Running {name}\u{2026}"),
+                expandable: false,
+                expanded: false,
+                running: true,
+                error: false,
+            };
+            vec![Spec {
+                kind: RowKind::Chips(vec![chip]),
+                paras: vec![],
+                separator: "",
+                gap: 0.0,
+            }]
         }
-        DKind::Answered(s) => vec![Spec { kind: RowKind::Caption { center: true, rule: false }, paras: vec![Para::text(s.clone())], separator: "", gap: 0.0 }],
-        DKind::Status(s) => vec![Spec { kind: RowKind::Caption { center: true, rule: false }, paras: vec![Para::text(s.to_string())], separator: "", gap: 0.0 }],
+        DKind::Answered(s) => vec![Spec {
+            kind: RowKind::Caption {
+                center: true,
+                rule: false,
+            },
+            paras: vec![Para::text(s.clone())],
+            separator: "",
+            gap: 0.0,
+        }],
+        DKind::Status(s) => vec![Spec {
+            kind: RowKind::Caption {
+                center: true,
+                rule: false,
+            },
+            paras: vec![Para::text(s.to_string())],
+            separator: "",
+            gap: 0.0,
+        }],
+        DKind::Images(rs) => rs
+            .iter()
+            .map(|r| Spec {
+                kind: RowKind::Picture {
+                    width: r.width,
+                    height: r.height,
+                    digest: r.digest,
+                },
+                paras: vec![],
+                separator: "",
+                gap: 8.,
+            })
+            .collect(),
         DKind::Nothing => vec![],
     }
 }
@@ -211,10 +289,15 @@ fn disp(items: &[ConversationItem]) -> Vec<Disp<'_>> {
     let mut out: Vec<Disp> = Vec::with_capacity(items.len());
     for it in items {
         let kind = match &it.kind {
+            ItemKind::Images(rs) => DKind::Images(rs),
             ItemKind::UserText(s) => DKind::User(s),
             ItemKind::AssistantText(s) => DKind::Assistant(s),
             ItemKind::ToolChips(c) => {
-                if let Some(Disp { kind: DKind::Chips(prev), .. }) = out.last_mut() {
+                if let Some(Disp {
+                    kind: DKind::Chips(prev),
+                    ..
+                }) = out.last_mut()
+                {
                     prev.extend(c.iter());
                     continue;
                 }
@@ -229,23 +312,46 @@ fn disp(items: &[ConversationItem]) -> Vec<Disp<'_>> {
             }
             ItemKind::Question(q) => match &q.state {
                 QuestionState::Pending => DKind::Nothing,
-                QuestionState::Answered(Some(a)) => DKind::Answered(format!("Answered: {}", a.iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(" \u{00B7} "))),
+                QuestionState::Answered(Some(a)) => DKind::Answered(format!(
+                    "Answered: {}",
+                    a.iter()
+                        .filter(|x| !x.is_empty())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" \u{00B7} ")
+                )),
                 QuestionState::Answered(None) => DKind::Answered("Answered".to_string()),
                 QuestionState::Declined => DKind::Answered("Declined".to_string()),
             },
             ItemKind::Status(s) => DKind::Status(s),
         };
-        out.push(Disp { id: &it.id, ts: it.timestamp, kind });
+        out.push(Disp {
+            id: &it.id,
+            ts: it.timestamp,
+            kind,
+        });
     }
     out
 }
 
 fn mk_row(id: &str, i: usize, s: Spec, gap: f32) -> Arc<Row> {
-    Arc::new(Row::new(row_id(&[id, &i.to_string()]), s.kind, s.paras, s.separator, gap))
+    Arc::new(Row::new(
+        row_id(&[id, &i.to_string()]),
+        s.kind,
+        s.paras,
+        s.separator,
+        gap,
+    ))
 }
 
 /// Builds all rows. `cache` keeps rows per item so a refresh only parses what changed.
-pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache: &mut RowCache, more_earlier: bool, loading: bool) -> Vec<Arc<Row>> {
+pub fn build_rows(
+    items: &[ConversationItem],
+    expanded: &HashSet<String>,
+    cache: &mut RowCache,
+    more_earlier: bool,
+    loading: bool,
+) -> Vec<Arc<Row>> {
     let disps = disp(items);
     let mut rows: Vec<Arc<Row>> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
@@ -258,20 +364,47 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
     let mut last_id: Option<&str> = None;
 
     if more_earlier {
-        rows.push(Arc::new(Row::new(row_id(&["load-earlier"]), RowKind::LoadEarlier { loading }, vec![], "", 0.0)));
+        rows.push(Arc::new(Row::new(
+            row_id(&["load-earlier"]),
+            RowKind::LoadEarlier { loading },
+            vec![],
+            "",
+            0.0,
+        )));
     }
 
     macro_rules! push_caption {
         ($id:expr, $text:expr, $center:expr, $rule:expr, $tag:expr) => {{
-            let g = if rows.is_empty() { 0.0 } else { gap(prev_tag.unwrap_or(Tag::Other), $tag) };
-            let spec = Spec { kind: RowKind::Caption { center: $center, rule: $rule }, paras: vec![Para::text($text)], separator: "", gap: g };
+            let g = if rows.is_empty() {
+                0.0
+            } else {
+                gap(prev_tag.unwrap_or(Tag::Other), $tag)
+            };
+            let spec = Spec {
+                kind: RowKind::Caption {
+                    center: $center,
+                    rule: $rule,
+                },
+                paras: vec![Para::text($text)],
+                separator: "",
+                gap: g,
+            };
             rows.push(mk_row($id, 0, spec, g));
             prev_tag = Some($tag);
         }};
     }
 
-    let close_turn = |rows: &mut Vec<Arc<Row>>, prev_tag: &mut Option<Tag>, start: Option<f64>, end: Option<f64>, tools: usize, has_reply: bool, last: Option<&str>, prev_row_tag: Option<Tag>| {
-        let (Some(end), Some(last), true) = (end, last, has_reply) else { return };
+    let close_turn = |rows: &mut Vec<Arc<Row>>,
+                      prev_tag: &mut Option<Tag>,
+                      start: Option<f64>,
+                      end: Option<f64>,
+                      tools: usize,
+                      has_reply: bool,
+                      last: Option<&str>,
+                      prev_row_tag: Option<Tag>| {
+        let (Some(end), Some(last), true) = (end, last, has_reply) else {
+            return;
+        };
         let mut parts = vec![clock(end)];
         if let Some(s) = start {
             if end - s >= 1.0 {
@@ -283,7 +416,15 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
         }
         let _ = prev_row_tag;
         let g = gap(prev_tag.unwrap_or(Tag::Other), Tag::Footer);
-        let spec = Spec { kind: RowKind::Caption { center: false, rule: false }, paras: vec![Para::text(parts.join(" \u{00B7} "))], separator: "", gap: g };
+        let spec = Spec {
+            kind: RowKind::Caption {
+                center: false,
+                rule: false,
+            },
+            paras: vec![Para::text(parts.join(" \u{00B7} "))],
+            separator: "",
+            gap: g,
+        };
         rows.push(mk_row(&format!("f-{last}"), 0, spec, g));
         *prev_tag = Some(Tag::Footer);
     };
@@ -291,7 +432,16 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
     for d in &disps {
         let tag = tag_of(&d.kind);
         if tag == Tag::User {
-            close_turn(&mut rows, &mut prev_tag, turn_start, turn_end, tools, has_reply, last_id, prev_row_tag);
+            close_turn(
+                &mut rows,
+                &mut prev_tag,
+                turn_start,
+                turn_end,
+                tools,
+                has_reply,
+                last_id,
+                prev_row_tag,
+            );
             turn_start = d.ts;
             turn_end = None;
             tools = 0;
@@ -302,7 +452,13 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
                 let new_day = local(t).date_naive() != local(p).date_naive();
                 if t - p >= 900.0 || new_day {
                     // A separator ends the turn's footer logic only through the next user message, as in Swift.
-                    push_caption!(&format!("s-{}", d.id), separator_text(t), true, true, Tag::Sep);
+                    push_caption!(
+                        &format!("s-{}", d.id),
+                        separator_text(t),
+                        true,
+                        true,
+                        Tag::Sep
+                    );
                 }
             }
             prev_time = Some(t);
@@ -319,7 +475,11 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
         }
         // The gap before the item's first row.
         let first_gap = if rows.is_empty() || (rows.len() == 1 && more_earlier) {
-            if more_earlier { 20.0 } else { 0.0 }
+            if more_earlier {
+                20.0
+            } else {
+                0.0
+            }
         } else if prev_tag == Some(Tag::Footer) {
             gap(prev_row_tag.unwrap_or(Tag::Other), tag)
         } else {
@@ -327,15 +487,22 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
         };
         let sig = item_sig(d, expanded);
         seen.insert(d.id);
-        let reuse = cache.get(d.id).filter(|(s, g, _)| *s == sig && (*g - first_gap).abs() < 0.01).map(|(_, _, r)| r.clone());
+        let reuse = cache
+            .get(d.id)
+            .filter(|(s, g, _)| *s == sig && (*g - first_gap).abs() < 0.01)
+            .map(|(_, _, r)| r.clone());
         let item_rows = match reuse {
             Some(r) => r,
             None => {
                 let specs = specs_of(d, expanded);
-                let r: Vec<Arc<Row>> = specs.into_iter().enumerate().map(|(i, s)| {
-                    let g = if i == 0 { first_gap } else { s.gap };
-                    mk_row(d.id, i, s, g)
-                }).collect();
+                let r: Vec<Arc<Row>> = specs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let g = if i == 0 { first_gap } else { s.gap };
+                        mk_row(d.id, i, s, g)
+                    })
+                    .collect();
                 cache.insert(d.id.to_string(), (sig, first_gap, r.clone()));
                 r
             }
@@ -348,7 +515,16 @@ pub fn build_rows(items: &[ConversationItem], expanded: &HashSet<String>, cache:
         prev_row_tag = Some(tag);
         last_id = Some(d.id);
     }
-    close_turn(&mut rows, &mut prev_tag, turn_start, turn_end, tools, has_reply, last_id, prev_row_tag);
+    close_turn(
+        &mut rows,
+        &mut prev_tag,
+        turn_start,
+        turn_end,
+        tools,
+        has_reply,
+        last_id,
+        prev_row_tag,
+    );
     cache.retain(|k, _| seen.contains(k.as_str()));
     rows
 }
@@ -359,11 +535,27 @@ mod tests {
     use herdr_core::{ToolCall, ToolChip};
 
     fn item(id: &str, kind: ItemKind, ts: f64) -> ConversationItem {
-        ConversationItem { id: id.into(), kind, timestamp: Some(ts) }
+        ConversationItem {
+            id: id.into(),
+            kind,
+            timestamp: Some(ts),
+        }
     }
 
     fn chip(id: &str) -> ToolChip {
-        ToolChip { id: id.into(), symbol: "terminal".into(), text: "Ran a command".into(), calls: vec![ToolCall { id: "c".into(), tool_name: "Bash".into(), summary: "ls".into(), input: "ls".into(), output: Some("a\nb".into()), is_error: false }] }
+        ToolChip {
+            id: id.into(),
+            symbol: "terminal".into(),
+            text: "Ran a command".into(),
+            calls: vec![ToolCall {
+                id: "c".into(),
+                tool_name: "Bash".into(),
+                summary: "ls".into(),
+                input: "ls".into(),
+                output: Some("a\nb".into()),
+                is_error: false,
+            }],
+        }
     }
 
     #[test]
@@ -372,16 +564,26 @@ mod tests {
             item("u", ItemKind::UserText("hi".into()), 1000.0),
             item("c1", ItemKind::ToolChips(vec![chip("a")]), 1010.0),
             item("c2", ItemKind::ToolChips(vec![chip("b")]), 1011.0),
-            item("a", ItemKind::AssistantText("hello\n\nworld".into()), 1100.0),
+            item(
+                "a",
+                ItemKind::AssistantText("hello\n\nworld".into()),
+                1100.0,
+            ),
         ];
         let mut cache = RowCache::new();
         let rows = build_rows(&items, &HashSet::new(), &mut cache, false, false);
-        let kinds: Vec<_> = rows.iter().map(|r| std::mem::discriminant(&r.kind)).collect();
+        let kinds: Vec<_> = rows
+            .iter()
+            .map(|r| std::mem::discriminant(&r.kind))
+            .collect();
         assert_eq!(kinds.len(), 5, "bubble, one chip row, two prose, footer");
         assert!(matches!(&rows[1].kind, RowKind::Chips(c) if c.len() == 2));
         assert_eq!(rows[0].gap_before, 0.0);
         assert_eq!(rows[1].gap_before, 20.0);
-        assert!(matches!(rows[4].kind, RowKind::Caption { center: false, .. }));
+        assert!(matches!(
+            rows[4].kind,
+            RowKind::Caption { center: false, .. }
+        ));
         assert!(rows[4].paras[0].plain().contains("Worked 1m 40s"));
         assert!(rows[4].paras[0].plain().contains("2 tools"));
         // A second build reuses the cached rows.
@@ -394,7 +596,13 @@ mod tests {
         let items = vec![item("c1", ItemKind::ToolChips(vec![chip("a")]), 1000.0)];
         let mut cache = RowCache::new();
         let closed = build_rows(&items, &HashSet::new(), &mut cache, false, false);
-        let open = build_rows(&items, &["a".to_string()].into_iter().collect(), &mut cache, false, false);
+        let open = build_rows(
+            &items,
+            &["a".to_string()].into_iter().collect(),
+            &mut cache,
+            false,
+            false,
+        );
         assert_eq!(closed.len(), 1);
         assert_eq!(open.len(), 2);
         assert!(matches!(&open[1].kind, RowKind::Code { lang } if lang.as_deref() == Some("Bash")));
@@ -403,9 +611,14 @@ mod tests {
 
     #[test]
     fn long_pauses_get_a_separator() {
-        let items = vec![item("a", ItemKind::AssistantText("one".into()), 1000.0), item("b", ItemKind::AssistantText("two".into()), 1000.0 + 3600.0)];
+        let items = vec![
+            item("a", ItemKind::AssistantText("one".into()), 1000.0),
+            item("b", ItemKind::AssistantText("two".into()), 1000.0 + 3600.0),
+        ];
         let mut cache = RowCache::new();
         let rows = build_rows(&items, &HashSet::new(), &mut cache, false, false);
-        assert!(rows.iter().any(|r| matches!(r.kind, RowKind::Caption { rule: true, .. })));
+        assert!(rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::Caption { rule: true, .. })));
     }
 }

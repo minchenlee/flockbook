@@ -191,7 +191,9 @@ pub(crate) fn answered(answers: Vec<Option<String>>) -> QuestionState {
 
 /// Text that is on screen only while the agent's question picker is open.
 pub fn markers(agent: &str) -> &'static [&'static str] {
-    if agent == "codex" {
+    if agent == "grok" {
+        &["Shift+x:dismiss"]
+    } else if agent == "codex" {
         &["enter to submit"]
     } else {
         &["Chat about this", "Review your answers"]
@@ -250,6 +252,7 @@ fn is_tab_bar(l: &str) -> bool {
 /// down. Text above it (the user's own prompt often repeats the question) must not count. `None` = no picker.
 pub fn picker_region(agent: &str, screen: &str) -> Option<String> {
     let lines: Vec<&str> = screen.split('\n').collect();
+    if agent == "grok" { return grok_region(screen); }
     let start = if agent == "codex" {
         static R: OnceLock<Regex> = OnceLock::new();
         let r = re(&R, r"^\s*Question \d+/\d+");
@@ -267,6 +270,7 @@ pub fn picker_shown(q: &QuestionRequest, screen: &str) -> bool {
 
 /// The picker is open and shows the first question.
 pub fn screen_shows(q: &QuestionRequest, screen: &str) -> bool {
+    if q.agent == "grok" { return grok_exact(q, 0, screen); }
     let Some(first) = q.questions.first() else { return false };
     picker_region(&q.agent, screen).is_some_and(|r| r.contains(&needle(first)))
 }
@@ -287,7 +291,7 @@ pub fn steps(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Result<Vec<Step
             return Err(Failure::Unsupported(format!("question {}: option out of range", k + 1)));
         }
         let other = a.other.as_deref().unwrap_or("").trim();
-        if other.contains('\n') || other.contains('\r') {
+        if other.chars().any(char::is_control) {
             return Err(Failure::Unsupported(format!("question {}: line break in the text", k + 1)));
         }
         if a.picks.is_empty() && other.is_empty() {
@@ -297,7 +301,9 @@ pub fn steps(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Result<Vec<Step
             return Err(Failure::Unsupported(format!("question {}: one choice only", k + 1)));
         }
     }
-    if q.agent == "codex" {
+    if q.agent == "grok" {
+        grok_steps(q, answers)
+    } else if q.agent == "codex" {
         codex_steps(q, answers)
     } else {
         Ok(claude_steps(q, answers))
@@ -466,4 +472,101 @@ pub fn claude_screen(screen: &str) -> Option<ScreenQuestion> {
         headers,
         question: Question { id: q.clone(), header, text: q, options, multi_select: multi },
     })
+}
+
+pub(crate) fn grok(id: &str, input: &Map<String, Value>) -> Option<QuestionRequest> {
+    let mut q = claude(id, input)?;
+    q.agent = "grok".into();
+    for (question, raw) in q.questions.iter_mut().zip(input.get("questions")?.as_array()?) {
+        question.multi_select = raw.get("multi_select").and_then(Value::as_bool).unwrap_or(question.multi_select);
+    }
+    Some(q)
+}
+
+pub(crate) fn grok_state(q: &QuestionRequest, failed: bool, output: Option<&Value>, text: &str) -> QuestionState {
+    if failed { return QuestionState::Declined; }
+    if let Some(list) = output.and_then(|v| v.pointer("/UserAnswered/answers")).and_then(Value::as_array) {
+        return answered(q.questions.iter().map(|question| {
+            let a = list.iter().find(|a| a.get("question").and_then(Value::as_str) == Some(question.text.as_str()))?;
+            let mut parts: Vec<&str> = a.get("picked").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+            if let Some(t) = a.get("typed").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) { parts.push(t.trim()); }
+            Some(parts.join(", "))
+        }).collect());
+    }
+    if text.starts_with("User has answered") { claude_state(q, false, None, text) } else { QuestionState::Declined }
+}
+
+fn grok_steps(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Result<Vec<Step>, Failure> {
+    let mut out = Vec::new();
+    for (k, (question, a)) in q.questions.iter().zip(answers).enumerate() {
+        if question.multi_select || other_text(a).is_some() {
+            return Err(Failure::Unsupported("Grok free text and multi-choice require the terminal".into()));
+        }
+        out.push(Step::Text((a.picks[0] + 1).to_string()));
+        if k + 1 < q.questions.len() { out.push(Step::WaitFor(needle(&q.questions[k + 1]))); }
+    }
+    Ok(out)
+}
+
+fn grok_body(screen: &str) -> Option<Vec<String>> {
+    let lines: Vec<_> = screen.lines().collect();
+    let end = lines.iter().rposition(|l| l.trim_start().starts_with('┃'))?;
+    let mut start = end;
+    while start > 0 && lines[start - 1].trim_start().starts_with('┃') { start -= 1; }
+    Some(lines[start..=end].iter().map(|l| l.trim_start().trim_start_matches('┃').trim_end_matches(|c: char| c == '█' || c.is_whitespace()).trim().to_string()).filter(|l| !l.is_empty()).collect())
+}
+fn grok_region(screen: &str) -> Option<String> {
+    let body = grok_body(screen)?.join("\n");
+    body.contains("Shift+x:dismiss").then(|| flat(&body))
+}
+/// Exact untouched Grok picker. A selected row, edited field or changed option disables input.
+pub fn grok_exact(q: &QuestionRequest, k: usize, screen: &str) -> bool {
+    if q.agent != "grok" || q.tool_use_id.starts_with("screen-") { return false; }
+    let Some(want) = q.questions.get(k).filter(|q| !q.multi_select) else { return false };
+    let Some(body) = grok_body(screen) else { return false };
+    if grok_region(screen).is_none() { return false; }
+    let bare = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    let Some(first) = body.iter().position(|l| l.starts_with("1 (○) ")) else { return false };
+    if first == 0 || body.len() != first + want.options.len() + 2 || bare(&body[..first].join("")) != bare(&want.text) { return false; }
+    for (i, o) in want.options.iter().enumerate() {
+        let Some(label) = body[first + i].strip_prefix(&format!("{} (○) ", i + 1)) else { return false };
+        let labels = std::iter::once(o.label.clone()).chain(RECOMMENDED_SUFFIXES.iter().filter(|_| o.recommended).map(|s| format!("{}{s}", o.label)));
+        if !labels.into_iter().any(|l| bare(label) == bare(&format!("{l}{}", o.detail))) { return false; }
+    }
+    if body[first + want.options.len()] != "z (○) Type your answer here" { return false; }
+    let foot = body.last().unwrap();
+    let count = foot.starts_with(&format!("[{}/{}] ", k + 1, q.questions.len())) || (q.questions.len() == 1 && !foot.starts_with('['));
+    count && foot.ends_with(if k + 1 == q.questions.len() { "Enter:submit" } else { "Enter:select" })
+}
+
+#[cfg(test)]
+mod grok_tests {
+    use super::*;
+    #[test]
+    fn grok_picker_requires_exact_untouched_rows() {
+        let mut q = QuestionRequest::new("q", vec![Question::new("", "Pick?", vec![QOption::new("A")], false)]);
+        q.agent = "grok".into();
+        let screen = "┃ Pick?\n┃ 1 (○) A\n┃ z (○) Type your answer here\n┃ Shift+x:dismiss Enter:submit";
+        assert!(grok_exact(&q, 0, screen));
+        assert!(!grok_exact(&q, 0, &screen.replace("○) A", "●) A")));
+        assert!(!grok_exact(&q, 0, &screen.replace("Pick?", "Changed?")));
+    }
+}
+
+/// Revalidated before every mutating step. Grok requires its exact untouched layout.
+pub fn question_on_screen(q: &QuestionRequest, k: usize, screen: &str) -> bool {
+    if q.agent == "grok" { return grok_exact(q, k, screen); }
+    let Some(want) = q.questions.get(k) else { return false };
+    let Some(region) = picker_region(&q.agent, screen) else { return false };
+    region.contains(&flat(&want.text)) && want.options.iter().all(|o| region.contains(&flat(&o.label)))
+}
+
+pub fn review_on_screen(q: &QuestionRequest, answers: &[QuestionAnswer], screen: &str) -> bool {
+    if q.agent != "claude" || answers.len() != q.questions.len() { return false; }
+    let Some(region) = picker_region(&q.agent, screen) else { return false };
+    region.contains("Review your answers") && q.headers.iter().all(|h| region.contains(h))
+        && q.questions.iter().zip(answers).all(|(question, a)| {
+            region.contains(&flat(&question.text)) && a.picks.iter().all(|i| question.options.get(*i).is_some_and(|o| region.contains(&flat(&o.label))))
+                && a.other.as_ref().is_none_or(|s| region.contains(&flat(s)))
+        })
 }

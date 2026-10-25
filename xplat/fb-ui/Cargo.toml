@@ -7,7 +7,7 @@ publish.workspace = true
 description = "Reusable iced widgets, theme tokens, fonts and icons for Flockbook"
 
 [dependencies]
-iced = { workspace = true, features = ["svg", "canvas", "tiny-skia"] }
+iced = { workspace = true, features = ["image", "svg", "canvas", "tiny-skia"] }
 unicode-segmentation = "1"
 # The script groups of the CJK fallback (already in the tree through cosmic-text).
 unicode-script = "0.5"

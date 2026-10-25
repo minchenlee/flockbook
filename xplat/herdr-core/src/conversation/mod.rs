@@ -3,6 +3,7 @@
 //! Feed lines in order, read `items()`. Understands Claude Code, Codex rollouts, Cursor transcripts and pi sessions;
 //! the format is detected per line.
 
+mod grok;
 mod cursor;
 mod pi;
 
@@ -49,6 +50,7 @@ pub struct ConversationParser {
     /// AskUserQuestion tool_use id -> index in `done`
     question_at: HashMap<String, usize>,
     pi: pi::PiState,
+    grok: grok::GrokState,
     /// Counter that gives Codex/Cursor lines an id when no byte offset is known.
     codex_seq: u64,
     /// Counter for Claude lines that carry no uuid.
@@ -136,6 +138,19 @@ impl ConversationParser {
     pub fn feed_at(&mut self, line: &str, offset: Option<u64>) {
         let Ok(Value::Object(o)) = serde_json::from_str::<Value>(line) else { return };
         self.line_ts = s_of(&o, "timestamp").and_then(parse_time);
+        if o.get("isSidechain").and_then(Value::as_bool) == Some(true) { return; }
+        if o.get("isMeta").and_then(Value::as_bool) != Some(true) {
+            let refs = crate::log_image::refs(&Value::Object(o.clone()), offset);
+            if !refs.is_empty() {
+                self.flush();
+                let id = offset.map(|n| format!("images@{n}")).unwrap_or_else(|| {
+                    self.anon_seq += 1;
+                    format!("images-{}", self.anon_seq)
+                });
+                self.done.push(ConversationItem { id, kind: ItemKind::Images(refs.into_iter().map(|(_, r)| r).collect()), timestamp: self.line_ts });
+            }
+        }
+        if grok::is_grok(&o) { self.feed_grok(&o, offset); return; }
         if let Some(Value::Object(payload)) = o.get("payload") {
             self.feed_codex(s_of(&o, "type"), payload, offset);
             return;

@@ -37,6 +37,7 @@ pub fn describe(items: &[ConversationItem]) -> Vec<String> {
             ItemKind::PermissionRequest(p) => format!("perm:{}", p.command),
             ItemKind::Question(q) => format!("q:{}", q.questions.iter().map(|q| q.header.as_str()).collect::<Vec<_>>().join("|")),
             ItemKind::Status(_) => "status".to_string(),
+            ItemKind::Images(r) => format!("images:{}", r.len()),
         })
         .collect()
 }

@@ -72,10 +72,14 @@ pub struct TopRowState {
     pub spin: f32,
     /// "Show terminal" pressed state. `terminal.rs` sets it when the sheet opens or closes.
     pub terminal_on: bool,
+    pub dragging: Option<(String, Point)>,
 }
 
 #[derive(Debug, Clone)]
 pub enum TopRowMsg {
+    Plus,
+    DragStart { tab: String, at: Point },
+    Drop { target: crate::workspace_actions::Target, at: Point },
     NewTab,
     ToggleTerminal,
     CloseTab(String),
@@ -99,10 +103,38 @@ pub enum TopRowMsg {
 
 pub fn update(app: &mut App, msg: TopRowMsg) -> Task<Message> {
     match msg {
-        // Mutating herdr calls belong to a later step; this step only reads.
-        TopRowMsg::NewTab | TopRowMsg::CloseTab(_) | TopRowMsg::Split(_) => {
-            app.state.toprow.menu = None;
+        TopRowMsg::DragStart { tab, at } => {
+            app.state.toprow.dragging = Some((tab, at));
             Task::none()
+        }
+        TopRowMsg::Drop { target, at } => {
+            let Some((id, start)) = app.state.toprow.dragging.take() else { return Task::none() };
+            if (at.x - start.x).hypot(at.y - start.y) < 6.0 { return Task::none() }
+            let destination = match target {
+                crate::workspace_actions::Target::Tab(tab) if tab != id => app.state.workspaces.iter().find_map(|w| w.tabs.iter().position(|t| t.id == tab).map(|i| (w.id.clone(), i))),
+                crate::workspace_actions::Target::Workspace(ws) => app.state.workspace(&ws).map(|w| (ws, w.tabs.len())),
+                _ => None,
+            };
+            let Some((ws, index)) = destination else { return Task::none() };
+            let same = app.state.workspaces.iter().any(|w| w.id == ws && w.tabs.iter().any(|t| t.id == id));
+            crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::Run(herdr_core::client::WorkspaceAction::MoveTab { id, workspace: (!same).then_some(ws), index }))
+        }
+        TopRowMsg::NewTab => {
+            app.state.toprow.menu = None;
+            crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::NewTab)
+        }
+        TopRowMsg::Plus => {
+            app.state.toprow.menu = None;
+            crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::Plus)
+        }
+        TopRowMsg::CloseTab(id) => {
+            app.state.toprow.menu = None;
+            crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::Run(herdr_core::client::WorkspaceAction::CloseTab { id }))
+        }
+        TopRowMsg::Split(dir) => {
+            app.state.toprow.menu = None;
+            let Some(pane) = app.state.selected_pane() else { return Task::none() };
+            crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::Run(herdr_core::client::WorkspaceAction::Split { pane: pane.id.clone(), down: dir == SplitDir::Down }))
         }
         TopRowMsg::ToggleTerminal => {
             // The sheet is the state: the button shows it. Without a terminal backend nothing opens.
@@ -134,7 +166,11 @@ pub fn update(app: &mut App, msg: TopRowMsg) -> Task<Message> {
             Task::none()
         }
         TopRowMsg::CloseMenu => {
+            app.state.toprow.dragging = None;
             app.state.toprow.menu = None;
+            if crate::workspace_actions::modal(app) {
+                return crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::Dismiss);
+            }
             Task::none()
         }
         TopRowMsg::PickTab { workspace, tab } => {
@@ -451,6 +487,9 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
     }
     let pill = container(r).width(Length::Fixed(g.width)).height(Length::Fixed(TAB_H));
     let pill: Element<'a, Message> = if selected { pill.style(style::card_e1(t, TAB_RADIUS)).into() } else { pill.into() };
+    let pill = mouse_area(pill)
+        .on_right_press(Message::Workspace(crate::workspace_actions::WorkspaceMsg::Menu(crate::workspace_actions::Target::Tab(tab.id.clone()))));
+    let pill = drag_target(pill.into(), crate::workspace_actions::Target::Tab(tab.id.clone()));
     tip(t, pill, tab_tooltip(tab, position), tooltip::Position::Bottom)
 }
 
@@ -575,7 +614,7 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     let strip_box = container(stack(layers)).width(Length::Fixed(strip_w)).height(Length::Fixed(TAB_H));
 
     let all_tabs = tip(t, icon_button(t, Icon::ChevronDown, ts.menu == Some(MenuKind::AllTabs), Message::TopRow(TopRowMsg::ToggleMenu(MenuKind::AllTabs))), "All tabs".into(), tooltip::Position::Bottom);
-    let new_tab = tip(t, icon_button(t, Icon::Plus, false, Message::TopRow(TopRowMsg::NewTab)), "New tab (\u{2318}T)".into(), tooltip::Position::Bottom);
+    let new_tab = tip(t, icon_button(t, Icon::Plus, false, Message::TopRow(TopRowMsg::Plus)), "New tab (\u{2318}T)".into(), tooltip::Position::Bottom);
     let left = row![strip_box, all_tabs, new_tab].spacing(SP_4).align_y(Alignment::Center);
 
     let mut right = row![].spacing(SP_4).align_y(Alignment::Center);
@@ -670,4 +709,49 @@ fn menu_sized(app: &App, row_width: f32) -> Element<'_, Message> {
     };
     let placed = container(card).width(Length::Fill).height(Length::Fill).align_x(ax).padding(pad);
     stack![mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::TopRow(TopRowMsg::CloseMenu)), placed].into()
+}
+
+/// Observe pointer boundaries before child buttons capture them. This is also used for workspace drop targets.
+pub fn drag_target(content: Element<'_, Message>, target: crate::workspace_actions::Target) -> Element<'_, Message> {
+    Element::new(DragTarget { content, target })
+}
+struct DragTarget<'a> { content: Element<'a, Message>, target: crate::workspace_actions::Target }
+impl Widget<Message, iced::Theme, iced::Renderer> for DragTarget<'_> {
+    fn tag(&self) -> widget::tree::Tag { self.content.as_widget().tag() }
+    fn state(&self) -> widget::tree::State { self.content.as_widget().state() }
+    fn children(&self) -> Vec<widget::Tree> { self.content.as_widget().children() }
+    fn diff(&self, tree: &mut widget::Tree) { self.content.as_widget().diff(tree); }
+    fn size(&self) -> Size<Length> { self.content.as_widget().size() }
+    fn layout(&mut self, tree: &mut widget::Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+        self.content.as_widget_mut().layout(tree, renderer, limits)
+    }
+    fn operate(&mut self, tree: &mut widget::Tree, layout: Layout<'_>, renderer: &iced::Renderer, op: &mut dyn widget::Operation) {
+        self.content.as_widget_mut().operate(tree, layout, renderer, op);
+    }
+    fn update(&mut self, tree: &mut widget::Tree, event: &Event, layout: Layout<'_>, cursor: mouse::Cursor, renderer: &iced::Renderer, clipboard: &mut dyn Clipboard, shell: &mut Shell<'_, Message>, viewport: &Rectangle) {
+        let over = layout.bounds().intersection(viewport).is_some_and(|r| cursor.is_over(r));
+        if over {
+            if let Some(at) = cursor.position() {
+                match event {
+                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                        if let crate::workspace_actions::Target::Tab(tab) = &self.target { shell.publish(Message::TopRow(TopRowMsg::DragStart { tab: tab.clone(), at })); }
+                    }
+                    Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                        shell.publish(Message::TopRow(TopRowMsg::Drop { target: self.target.clone(), at }));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.content.as_widget_mut().update(tree, event, layout, cursor, renderer, clipboard, shell, viewport);
+    }
+    fn mouse_interaction(&self, tree: &widget::Tree, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle, renderer: &iced::Renderer) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(tree, layout, cursor, viewport, renderer)
+    }
+    fn draw(&self, tree: &widget::Tree, renderer: &mut iced::Renderer, theme: &iced::Theme, style: &renderer::Style, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle) {
+        self.content.as_widget().draw(tree, renderer, theme, style, layout, cursor, viewport);
+    }
+    fn overlay<'b>(&'b mut self, tree: &'b mut widget::Tree, layout: Layout<'b>, renderer: &iced::Renderer, viewport: &Rectangle, translation: Vector) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        self.content.as_widget_mut().overlay(tree, layout, renderer, viewport, translation)
+    }
 }

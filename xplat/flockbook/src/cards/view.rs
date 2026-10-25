@@ -52,9 +52,10 @@ pub fn map_key(first_step: bool, e: &keyboard::Event, field_focused: bool) -> Op
 
 /// Wraps the question card so it takes its keys. Every other card is returned as is: no keys.
 fn keyed<'a>(app: &App, card: &Card, inner: Element<'a, Message>) -> Element<'a, Message> {
+    let covered = app.state.settings.open || app.state.shortcuts.open;
     let Card::Question { key, .. } = card else { return inner };
     let first_step = app.state.cards.flow().is_none_or(|f| f.step == 0);
-    catch(inner, key.clone(), true, move |e, field| map_key(first_step, e, field)).into()
+    catch(inner, key.clone(), true, move |e, field| if covered { None } else { map_key(first_step, e, field) }).into()
 }
 
 fn slot<'a>(inner: Element<'a, Message>) -> Element<'a, Message> {
@@ -63,6 +64,10 @@ fn slot<'a>(inner: Element<'a, Message>) -> Element<'a, Message> {
 
 /// The bottom of the conversation column: the composer, with the approval card above it, or the question card in its place.
 pub fn bottom(app: &App) -> Element<'_, Message> {
+    column![crate::settings::status_tags::view(app), bottom_body(app)].into()
+}
+
+fn bottom_body(app: &App) -> Element<'_, Message> {
     let Some(card) = &app.state.cards.card else { return composer::view(app) };
     let t = app.tokens();
     let body: Element<Message> = match card {
@@ -157,11 +162,13 @@ fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
     let title = if a.title.trim().is_empty() { "Wants to run a command".to_string() } else { wants(&a.title) };
     let head = container(row![tile, HEADLINE.text(title).color(t.label)].spacing(SP_12).align_y(Alignment::Center)).id(HEAD_ID);
     // The description is part of what the prompt shows, so the card shows it too: nothing the owner approves is hidden.
-    let mut lines = column![MONO.text(a.command.as_str()).color(t.label)].spacing(SP_4);
+    let mut lines = column![MONO.text(a.command.as_str()).size(app.state.settings.reading_size().code()).color(t.label)].spacing(SP_4);
     if !a.detail.trim().is_empty() {
         lines = lines.push(CAPTION.text(a.detail.as_str()).color(t.label_2));
     }
-    let chip = container(lines).padding([SP_8, SP_12]).width(Length::Fill).style(style::fill(t.fill_1, 8.0));
+    // Bound the command body; Allow/Deny remain outside this scroll area.
+    let chip = container(container(scrollable(lines).spacing(0)).max_height(approval_body_height(app.state.conversation.viewport.height)))
+        .padding([SP_8, SP_12]).width(Length::Fill).style(style::fill(t.fill_1, 8.0));
 
     let go = a.can_act && !st.busy;
     let mut foot = row![].spacing(SP_12).align_y(Alignment::Center);
@@ -170,7 +177,7 @@ fn approval<'a>(app: &'a App, a: &'a Approval) -> Element<'a, Message> {
         let on = st.always;
         always_row = Some(
             container(
-                button(row![mark(t, on, true), CAPTION.text(al.label.as_str()).color(t.label_2).wrapping(text::Wrapping::None)].spacing(SP_8).align_y(Alignment::Center))
+                button(row![mark(t, on, true), CAPTION.text(al.label.as_str()).color(t.label_2)].spacing(SP_8).align_y(Alignment::Center))
                     .padding(0)
                     .on_press_maybe(go.then_some(msg(CardsMsg::Always(!on))))
                     .style(|_, _| button::Style::default()),
@@ -291,7 +298,7 @@ fn question<'a>(app: &'a App, agent: &'a str, can_send: bool) -> Element<'a, Mes
         head = head.push(CALLOUT.text(format!("{} of {}", flow.step + 1, flow.total())).color(t.label_2));
     }
 
-    let mut title = column![TITLE_3.text(qq.text.as_str()).color(t.label)].spacing(SP_4);
+    let mut title = column![TITLE_3.text(qq.text.as_str()).size(app.state.settings.reading_size().heading(3)).color(t.label)].spacing(SP_4);
     if qq.multi_select {
         title = title.push(BODY.text("Choose any.").color(t.label_2));
     }
@@ -336,9 +343,24 @@ fn question<'a>(app: &'a App, agent: &'a str, can_send: bool) -> Element<'a, Mes
 
     let inner = column![
         head,
-        container(body).max_height(MAX_BODY_H),
+        container(body).max_height(question_body_height(app.state.conversation.viewport.height)),
         foot,
     ]
     .spacing(SP_16);
     card_box(t, inner.into())
+}
+
+/// Reserve space for the top row, composer, header and action buttons in a short window.
+fn approval_body_height(viewport: f32) -> f32 { (viewport * 0.3).clamp(48.0, 180.0) }
+fn question_body_height(viewport: f32) -> f32 { (viewport * 0.5).clamp(80.0, MAX_BODY_H) }
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    #[test]
+    fn prompt_bodies_are_bounded_and_shrink_in_short_windows() {
+        assert_eq!(approval_body_height(10000.0), 180.0);
+        assert!(approval_body_height(300.0) < approval_body_height(800.0));
+        assert_eq!(question_body_height(10000.0), MAX_BODY_H);
+    }
 }

@@ -68,6 +68,13 @@ pub struct State {
     seen: HashMap<String, Seen>,
     pub connected: bool,
     pub session_label: String,
+    pub workspace_actions: crate::workspace_actions::WorkspaceActionsState,
+    /// Only inactive reading states live here; the active state remains in `conversation`.
+    pub pane_readers: HashMap<String, crate::conversation::ConversationState>,
+    pub zoomed: HashMap<String, String>,
+    pub pending_workspace: Option<String>,
+    pub pending_tab: Option<String>,
+    reader_identities: HashMap<String, (Option<herdr_core::model::AgentIdentity>, Option<std::path::PathBuf>)>,
 
     // One field per module. A builder adds its own state struct in its own file and registers it here.
     pub sidebar: crate::sidebar::SidebarState,
@@ -98,6 +105,12 @@ impl State {
             seen: HashMap::new(),
             connected: false,
             session_label: String::new(),
+            workspace_actions: Default::default(),
+            pane_readers: HashMap::new(),
+            zoomed: HashMap::new(),
+            pending_workspace: None,
+            pending_tab: None,
+            reader_identities: HashMap::new(),
             sidebar: Default::default(),
             toprow: Default::default(),
             overview: Default::default(),
@@ -194,21 +207,58 @@ impl State {
     pub fn reload(&mut self, source: &dyn DataSource) -> bool {
         self.workspaces = source.workspaces();
         self.connected = source.connected();
+        if let Some(id) = self.pending_workspace.clone() {
+            if self.workspace(&id).is_some() { self.select_workspace(&id); self.pending_workspace = None; }
+        }
+        if let Some(id) = self.pending_tab.clone() {
+            if let Some(ws) = self.workspaces.iter().find(|w| w.tabs.iter().any(|t| t.id == id)).map(|w| w.id.clone()) {
+                self.select_tab(&ws, &id); self.pending_tab = None;
+            }
+        }
+        let live: std::collections::HashSet<String> = self.workspaces.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).map(|p| p.id.clone()).collect();
+        self.conversations.retain(|id, _| live.contains(id));
+        self.seen.retain(|id, _| live.contains(id));
+        self.reader_identities.retain(|id, _| live.contains(id));
+        self.pane_readers.retain(|id, _| live.contains(id));
+        self.zoomed.retain(|tab, pane| live.contains(pane) && self.workspaces.iter().flat_map(|w| &w.tabs).any(|t| &t.id == tab && t.panes.iter().any(|p| &p.id == pane)));
+        if self.selected_pane.as_ref().is_some_and(|p| !live.contains(p)) { self.selected_pane = None; }
         let valid = self.selected_tab().is_some();
         if !valid {
             let first = self.selected_workspace.clone().filter(|id| self.workspace(id).is_some()).or_else(|| self.workspaces.first().map(|w| w.id.clone()));
             if let Some(id) = first {
                 self.select_workspace(&id);
+            } else {
+                self.selected_workspace = None; self.selected_tab = None; self.selected_pane = None;
             }
         }
         let Some(p) = self.selected_pane().cloned() else { return false };
-        let rev = source.revision(&p);
+        self.reload_pane(source, &p)
+    }
+
+    /// Refreshes one visible split pane, sharing the same revision bookkeeping as the active reader.
+    pub fn reload_pane(&mut self, source: &dyn DataSource, p: &Pane) -> bool {
+        let identity = (herdr_core::model::AgentIdentity::for_pane(p), source.log_path(p));
+        if self.reader_identities.get(&p.id).is_some_and(|old| old != &identity) {
+            self.seen.remove(&p.id);
+            if let Some(old) = self.pane_readers.remove(&p.id) {
+                let mut fresh = crate::conversation::ConversationState::default();
+                fresh.earlier_seq = old.earlier_seq.wrapping_add(1);
+                self.pane_readers.insert(p.id.clone(), fresh);
+            }
+            if self.conversation.pane.as_deref() == Some(&p.id) {
+                let seq = self.conversation.earlier_seq;
+                self.conversation = Default::default();
+                self.conversation.earlier_seq = seq.wrapping_add(1);
+            }
+        }
+        self.reader_identities.insert(p.id.clone(), identity);
+        let rev = source.revision(p);
         if let (Some(r), Some(Seen::Rev(old))) = (rev, self.seen.get(&p.id)) {
             if *old == r && self.conversations.contains_key(&p.id) {
                 return false;
             }
         }
-        let items = source.conversation(&p);
+        let items = source.conversation(p);
         let now = match rev {
             Some(r) => Seen::Rev(r),
             None => Seen::Tail { len: items.len(), first: items.first().map(|i| i.id.clone()), last: items.last().cloned() },
@@ -218,12 +268,12 @@ impl State {
         if same {
             return false;
         }
-        self.conversations.insert(p.id, Arc::new(items));
+        self.conversations.insert(p.id.clone(), Arc::new(items));
         true
     }
 }
 
-/// Monogram for a workspace chip: the first two letters, upper case.
+/// Workspace monograms share the chrome's Swift-compatible rules.
 pub fn monogram(label: &str) -> String {
-    label.chars().filter(|c| c.is_alphanumeric()).take(2).collect::<String>().to_uppercase()
+    crate::chrome::monogram(label)
 }

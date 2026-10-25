@@ -18,6 +18,9 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
 
 fn main() -> iced::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(agent) = arg_value(&args, "--flockbook-statusline") {
+        std::process::exit(herdr_core::status_line::wrapper(&agent));
+    }
 
     if let Some(out) = arg_value(&args, "--snapshot") {
         let screen = arg_value(&args, "--screen").and_then(|s| Screen::parse(&s)).unwrap_or(Screen::Conversation);
@@ -70,7 +73,7 @@ fn main() -> iced::Result {
         .title(App::title)
         .theme(|app: &App| -> Theme { app.theme() })
         .style(|app: &App, theme: &Theme| iced::theme::Style { background_color: flockbook::glass::root_color(app), text_color: theme.palette().text })
-        .subscription(|app: &App| -> Subscription<Message> { Subscription::batch([time::every(Duration::from_millis(800)).map(|_| Message::Tick), flockbook::toprow::subscription(app), flockbook::needs_you::subscription(app), flockbook::conversation::subscription(app), flockbook::search::subscription(app), flockbook::terminal::subscription(app), flockbook::glass::subscription(app), flockbook::shortcuts::subscription(app)]) })
+        .subscription(|app: &App| -> Subscription<Message> { Subscription::batch([time::every(Duration::from_millis(800)).map(|_| Message::Tick), flockbook::toprow::subscription(app), flockbook::needs_you::subscription(app), flockbook::conversation::subscription(app), flockbook::search::subscription(app), flockbook::terminal::subscription(app), flockbook::glass::subscription(app), flockbook::shortcuts::subscription(app), flockbook::composer::subscription(app)]) })
         .font(fb_ui::fonts::BUNDLED[0])
         .font(fb_ui::fonts::BUNDLED[1])
         .font(fb_ui::fonts::BUNDLED[2])
@@ -99,6 +102,9 @@ fn boot(demo: bool, args: &[String], backdrop: flockbook::glass::Backdrop, setti
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     app.state.settings.read_only_launch = !flockbook::access::writes_enabled(args, &env, Some(true));
     app.state.settings.prefs = prefs;
+    if app.state.settings.prefs.terminal_colors == Some(flockbook::settings::TerminalColors::Ghostty) {
+        app.state.settings.ghostty = Some(flockbook::settings::ghostty_theme::load_current());
+    }
     app.state.settings.path = settings_path;
     // A real window opens links in the system browser. Snapshots and tests keep the recording opener.
     app.opener = Box::new(flockbook::links::SystemOpener);
@@ -127,6 +133,7 @@ fn live_app(args: &[String], allow_input: Option<bool>) -> App {
     let session = herdr_core::HerdrSession::resolve(args, &env, &home);
     // The terminal sheet is always available. It opens in Observe mode (no input path) when writes are off.
     flockbook::terminal::install_live(&mut app, &session);
+    flockbook::composer::install_observer(&mut app, &session);
     // Read-only: no sender and no pane actions are installed at all.
     if !writes_enabled(args, allow_input) {
         return app;
@@ -135,6 +142,7 @@ fn live_app(args: &[String], allow_input: Option<bool>) -> App {
     flockbook::composer::install_live(&mut app, &session);
     // Allow, Deny and question answers send keys to a pane: live path only.
     flockbook::cards::install_live(&mut app, &session);
+    flockbook::workspace_actions::install_live(&mut app, &session);
     app
 }
 

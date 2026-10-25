@@ -167,6 +167,7 @@ pub fn texts_of(pane: &str, it: &ConversationItem) -> Vec<Entry> {
             vec![mk(Role::Other, t.join(" "))]
         }
         ItemKind::Status(s) => vec![mk(Role::Other, s.clone())],
+        ItemKind::Images(_) => Vec::new(),
     }
 }
 

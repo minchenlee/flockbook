@@ -136,6 +136,9 @@ struct StoreState {
     last_raw: Vec<Workspace>,
     /// pane id -> log path found by the resolver.
     resolved: HashMap<String, String>,
+    resolver: Option<crate::resolver::SessionResolver>,
+    leads: crate::resolver::lead::LeadResolver,
+    team_notes: HashMap<String, TeamNote>,
 }
 
 #[derive(Default)]
@@ -221,7 +224,33 @@ impl<C: Connector + 'static> Shared<C> {
     fn apply_snapshot(&self, raw: Vec<Workspace>) -> bool {
         let mut st = self.state.lock().unwrap();
         st.last_raw = raw.clone();
-        let ws = with_resolved(raw, &st.resolved);
+        let claimed = raw.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).filter_map(|p| p.agent.as_ref()?.session_id.clone()).collect();
+        let needs: Vec<_> = raw.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).filter_map(|p| {
+            let a = p.agent.as_ref()?;
+            a.session_id.is_none().then(|| crate::resolver::Need { pane_id: p.id.clone(), kind: a.kind.clone(), cwd: p.cwd.clone() })
+        }).collect();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs_f64();
+        let resolver = st.resolver.get_or_insert_with(|| crate::resolver::SessionResolver::for_host(&self.session.socket_path));
+        let found = resolver.resolve(&needs, &claimed, now);
+        let mut resolved = st.resolved.clone();
+        resolved.extend(found.into_iter().map(|(k, p)| (k, p.to_string_lossy().into_owned())));
+        let mut ws = with_resolved(raw, &resolved);
+        let asks: Vec<_> = ws.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).filter_map(|p| {
+            let a = p.agent.as_ref()?;
+            (a.kind == "claude").then(|| a.session_id.clone().map(|id| (p.id.clone(), id))).flatten()
+        }).collect();
+        let other_claimed = ws.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes)
+            .filter_map(|p| p.agent.as_ref().filter(|a| a.kind != "claude")?.session_id.clone()).collect();
+        let root = st.projects_dir.clone().unwrap_or_else(|| crate::resolver::AgentRoots::from_process().claude_projects);
+        let selection = st.leads.select(&asks, &root, &other_claimed);
+        let old_notes = st.team_notes.clone();
+        st.team_notes.clear();
+        for p in ws.iter_mut().flat_map(|w| &mut w.tabs).flat_map(|t| &mut t.panes) {
+            if let Some((path, note)) = selection.get(&p.id) {
+                if let Some(a) = &mut p.agent { a.session_id = path.as_ref().map(|p| p.to_string_lossy().into_owned()); }
+                if let Some(note) = note { st.team_notes.insert(p.id.clone(), note.clone()); }
+            }
+        }
         let live: std::collections::HashSet<String> =
             ws.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).filter_map(|p| p.agent.as_ref()?.session_id.clone()).collect();
         st.logs.retain(|id, e| {
@@ -235,7 +264,7 @@ impl<C: Connector + 'static> Shared<C> {
             st.workspaces = ws;
             return true;
         }
-        false
+        old_notes != st.team_notes
     }
 
     /// The first event refreshes at once; events that arrive while that refresh runs (or within 50 ms after it) are
@@ -498,6 +527,28 @@ impl<C: Connector + 'static> HerdrStore<C> {
         }
         let snap = st.logs[id].snap.lock().unwrap().clone();
         snap.map(|s| s.load).unwrap_or(ConversationLoadState::Loading)
+    }
+
+    pub fn can_load_earlier(&self, session_id: Option<&str>) -> bool {
+        let st = self.shared.state.lock().unwrap();
+        session_id.and_then(|id| st.logs.get(id)).is_some_and(|e| e.log.can_load_earlier())
+    }
+
+    pub fn log_path(&self, session_id: Option<&str>) -> Option<PathBuf> {
+        let st = self.shared.state.lock().unwrap();
+        st.logs.get(session_id?)?.log.path()
+    }
+
+    pub fn pane_conversation_state(&self, pane: &Pane) -> ConversationState {
+        if let Some(note) = self.shared.state.lock().unwrap().team_notes.get(&pane.id).cloned() {
+            return if note.lead.is_some() { ConversationState::ShowingLead(note) } else { ConversationState::WaitingForLead };
+        }
+        match self.conversation_state(pane.agent.as_ref().and_then(|a| a.session_id.as_deref())) {
+            ConversationLoadState::Loading => ConversationState::Loading,
+            ConversationLoadState::Ready => ConversationState::Ready,
+            ConversationLoadState::Missing => ConversationState::Missing,
+            ConversationLoadState::Failed(e) => ConversationState::Failed(e),
+        }
     }
 
     /// Loads an older segment of that session's log. True while older content remains. False for an unknown session.

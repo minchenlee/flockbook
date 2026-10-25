@@ -27,7 +27,7 @@ pub const PROMPT_MARKER: &str = "Do you want";
 
 /// Does the pane's visible screen show a permission prompt? Only the screen tells a prompt from a running tool.
 pub fn screen_shows_prompt(screen_text: &str) -> bool {
-    screen_text.contains(PROMPT_MARKER)
+    screen_text.contains(PROMPT_MARKER) || approval::grok_box(screen_text).is_some()
 }
 
 pub mod approval;
@@ -37,3 +37,14 @@ pub mod terminal;
 pub mod resolver;
 pub mod session_log;
 pub use terminal::TerminalFrame;
+
+pub mod log_image;
+pub use log_image::{ImageFormat, ImageRef};
+
+pub mod status_line;
+pub mod grok_status_line;
+
+pub mod shell_quote;
+pub mod image_paste;
+pub mod message_send;
+pub mod queued_input;

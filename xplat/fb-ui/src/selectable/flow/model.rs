@@ -41,7 +41,10 @@ pub struct Inline {
 
 impl Inline {
     pub fn plain(text: impl Into<String>) -> Inline {
-        Inline { text: text.into(), ..Default::default() }
+        Inline {
+            text: text.into(),
+            ..Default::default()
+        }
     }
 }
 
@@ -53,7 +56,9 @@ pub struct Para {
 
 impl Para {
     pub fn text(s: impl Into<String>) -> Para {
-        Para { inlines: vec![Inline::plain(s)] }
+        Para {
+            inlines: vec![Inline::plain(s)],
+        }
     }
     pub fn plain(&self) -> String {
         self.inlines.iter().map(|i| i.text.as_str()).collect()
@@ -79,22 +84,40 @@ pub struct Chip {
 pub enum RowKind {
     /// Agent prose.
     Prose,
+    /// Fixed-size picture placeholder. Decoded handles live only in the viewport owner.
+    Picture {
+        width: u32,
+        height: u32,
+        digest: u64,
+    },
     Heading(u8),
     /// A list item. The marker is drawn in the gutter and is not part of the copied text.
-    ListItem { marker: String, depth: u8 },
+    ListItem {
+        marker: String,
+        depth: u8,
+    },
     Quote,
     /// Code card. `lang` is the label above the code.
-    Code { lang: Option<String> },
+    Code {
+        lang: Option<String>,
+    },
     /// A table: `paras` are the cells, row-major, the first `cols` are the header.
-    Table { cols: usize },
+    Table {
+        cols: usize,
+    },
     /// The user's right-aligned bubble.
     Bubble,
     /// Footer, status line or time separator. Not selectable.
-    Caption { center: bool, rule: bool },
+    Caption {
+        center: bool,
+        rule: bool,
+    },
     Rule,
     Chips(Vec<Chip>),
     /// "Show earlier" at the top of the list.
-    LoadEarlier { loading: bool },
+    LoadEarlier {
+        loading: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -113,8 +136,21 @@ pub struct Row {
 }
 
 impl Row {
-    pub fn new(id: RowId, kind: RowKind, paras: Vec<Para>, separator: &'static str, gap_before: f32) -> Row {
-        let selectable = !matches!(kind, RowKind::Caption { .. } | RowKind::Rule | RowKind::Chips(_) | RowKind::LoadEarlier { .. });
+    pub fn new(
+        id: RowId,
+        kind: RowKind,
+        paras: Vec<Para>,
+        separator: &'static str,
+        gap_before: f32,
+    ) -> Row {
+        let selectable = !matches!(
+            kind,
+            RowKind::Picture { .. }
+                | RowKind::Caption { .. }
+                | RowKind::Rule
+                | RowKind::Chips(_)
+                | RowKind::LoadEarlier { .. }
+        );
         let plain = if !selectable {
             String::new()
         } else if let RowKind::Table { cols } = &kind {
@@ -131,7 +167,15 @@ impl Row {
         };
         let mut h = DefaultHasher::new();
         format!("{kind:?}{paras:?}{gap_before}").hash(&mut h);
-        Row { id, kind, paras, plain, separator, gap_before, sig: h.finish() }
+        Row {
+            id,
+            kind,
+            paras,
+            plain,
+            separator,
+            gap_before,
+            sig: h.finish(),
+        }
     }
 
     pub fn selectable(&self) -> bool {
@@ -160,20 +204,47 @@ pub fn row_id(parts: &[&str]) -> RowId {
 
 /// Height estimate of a row's slot (lead included), for rows that are not laid out yet.
 pub fn estimate(row: &Row, index: usize, colw: f32) -> f32 {
-    let width = |s: &str| s.chars().map(|c| if crate::fonts::is_cjk_char(c) { 2.0 } else { 1.0 }).sum::<f32>();
-    let lines = |s: &str, cpl: f32| s.split('\n').map(|l| (width(l) / cpl.max(8.0)).ceil().max(1.0)).sum::<f32>();
+    let width = |s: &str| {
+        s.chars()
+            .map(|c| {
+                if crate::fonts::is_cjk_char(c) {
+                    2.0
+                } else {
+                    1.0
+                }
+            })
+            .sum::<f32>()
+    };
+    let lines = |s: &str, cpl: f32| {
+        s.split('\n')
+            .map(|l| (width(l) / cpl.max(8.0)).ceil().max(1.0))
+            .sum::<f32>()
+    };
     let cpl = colw / 7.6;
     let body = 15.0 * 1.55;
     let content = match &row.kind {
         RowKind::Prose | RowKind::Quote => lines(&row.plain, cpl) * body,
         RowKind::ListItem { depth, .. } => lines(&row.plain, cpl - 3.0 * *depth as f32) * body,
-        RowKind::Heading(l) => lines(&row.plain, cpl * 0.8) * (HEADING_SIZES[(*l as usize).clamp(1, 4) - 1] * 1.3),
+        RowKind::Heading(l) => {
+            lines(&row.plain, cpl * 0.8) * (HEADING_SIZES[(*l as usize).clamp(1, 4) - 1] * 1.3)
+        }
         RowKind::Bubble => lines(&row.plain, cpl * 0.78) * body + 14.0,
-        RowKind::Code { lang } => lines(&row.plain, colw / 7.4) * 20.2 + 28.0 + if lang.is_some() { 20.0 } else { 0.0 },
+        RowKind::Code { lang } => {
+            lines(&row.plain, colw / 7.4) * 20.2 + 28.0 + if lang.is_some() { 20.0 } else { 0.0 }
+        }
         RowKind::Table { cols } => ((row.paras.len() / (*cols).max(1)) as f32) * 31.0 + 2.0,
         RowKind::Caption { .. } => 14.3,
         RowKind::Rule => 1.0,
-        RowKind::Chips(c) => ((c.len() as f32 * 130.0 / colw).ceil().max(1.0)) * 26.0 + 6.0 * ((c.len() as f32 * 130.0 / colw).ceil() - 1.0).max(0.0),
+        RowKind::Picture { width, height, .. } => {
+            let k = 1f32
+                .min(colw.min(480.) / (*width).max(1) as f32)
+                .min(640. / (*height).max(1) as f32);
+            (*height as f32 * k).round().max(1.)
+        }
+        RowKind::Chips(c) => {
+            ((c.len() as f32 * 130.0 / colw).ceil().max(1.0)) * 26.0
+                + 6.0 * ((c.len() as f32 * 130.0 / colw).ceil() - 1.0).max(0.0)
+        }
         RowKind::LoadEarlier { .. } => 22.0,
     };
     row.lead(index) + content
@@ -202,14 +273,22 @@ impl FlowSel {
 
     /// `(start, end)` in document order, as row indexes. `None` when a row is gone from the document.
     pub fn resolve(&self, index: &HashMap<RowId, usize>) -> Option<(Pos, Pos)> {
-        let a = Pos { block: *index.get(&self.anchor.id)?, offset: self.anchor.offset };
-        let f = Pos { block: *index.get(&self.focus.id)?, offset: self.focus.offset };
+        let a = Pos {
+            block: *index.get(&self.anchor.id)?,
+            offset: self.anchor.offset,
+        };
+        let f = Pos {
+            block: *index.get(&self.focus.id)?,
+            offset: self.focus.offset,
+        };
         Some(if a <= f { (a, f) } else { (f, a) })
     }
 
     /// The selected plain text, built from the model. Rows join by their separators; rows without text are skipped.
     pub fn text(&self, rows: &[Arc<Row>], index: &HashMap<RowId, usize>) -> String {
-        let Some((start, end)) = self.resolve(index) else { return String::new() };
+        let Some((start, end)) = self.resolve(index) else {
+            return String::new();
+        };
         let mut out = String::new();
         let mut first = true;
         for i in start.block..=end.block.min(rows.len().saturating_sub(1)) {
@@ -218,7 +297,14 @@ impl FlowSel {
                 continue;
             }
             let from = clamp_boundary(&row.plain, if i == start.block { start.offset } else { 0 });
-            let to = clamp_boundary(&row.plain, if i == end.block { end.offset } else { row.plain.len() });
+            let to = clamp_boundary(
+                &row.plain,
+                if i == end.block {
+                    end.offset
+                } else {
+                    row.plain.len()
+                },
+            );
             if !first {
                 out.push_str(row.separator);
             }
@@ -275,13 +361,24 @@ pub struct Doc {
 
 impl Default for Doc {
     fn default() -> Self {
-        Doc { rows: Vec::new(), index: HashMap::new(), window: VirtWindow::new(), colw: 760.0, measured: HashMap::new() }
+        Doc {
+            rows: Vec::new(),
+            index: HashMap::new(),
+            window: VirtWindow::new(),
+            colw: 760.0,
+            measured: HashMap::new(),
+        }
     }
 }
 
 impl Doc {
     fn reindex(&mut self) {
-        self.index = self.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
+        self.index = self
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.id, i))
+            .collect();
     }
 
     fn rebuild_window(&mut self) {
@@ -307,7 +404,11 @@ impl Doc {
         if same_ids {
             let changed = rows.iter().zip(&self.rows).any(|(a, b)| a.sig != b.sig);
             self.rows = rows;
-            return if changed { Change::Replaced } else { Change::Same };
+            return if changed {
+                Change::Replaced
+            } else {
+                Change::Same
+            };
         }
         if append {
             for (i, r) in rows.iter().enumerate().skip(old) {
@@ -318,13 +419,26 @@ impl Doc {
             return Change::Appended(self.rows.len() - old);
         }
         // Prepend: the old first row sits at some index k and the old list is the tail.
-        let prepended = old > 0 && rows.first().map(|f| f.id) != self.rows.first().map(|f| f.id) && {
-            let k = rows.iter().position(|r| r.id == self.rows[0].id);
-            k.is_some_and(|k| k > 0 && rows.len() - k >= old && rows[k..k + old].iter().zip(&self.rows).all(|(a, b)| a.id == b.id))
+        let prepended =
+            old > 0 && rows.first().map(|f| f.id) != self.rows.first().map(|f| f.id) && {
+                let k = rows.iter().position(|r| r.id == self.rows[0].id);
+                k.is_some_and(|k| {
+                    k > 0
+                        && rows.len() - k >= old
+                        && rows[k..k + old]
+                            .iter()
+                            .zip(&self.rows)
+                            .all(|(a, b)| a.id == b.id)
+                })
+            };
+        let count = if prepended {
+            rows.iter().position(|r| r.id == self.rows[0].id).unwrap()
+        } else {
+            0
         };
-        let count = if prepended { rows.iter().position(|r| r.id == self.rows[0].id).unwrap() } else { 0 };
         self.rows = rows;
         self.reindex();
+        self.measured.retain(|id, _| self.index.contains_key(id));
         self.rebuild_window();
         if prepended {
             Change::Prepended(count)
@@ -436,7 +550,9 @@ impl SelState {
 
     /// Range of `unit` around `at`.
     fn unit_range(doc: &Doc, at: Anchor, unit: Unit) -> (Anchor, Anchor) {
-        let Some(&i) = doc.index.get(&at.id) else { return (at, at) };
+        let Some(&i) = doc.index.get(&at.id) else {
+            return (at, at);
+        };
         let row = &doc.rows[i];
         let off = clamp_boundary(&row.plain, at.offset);
         let (s, e) = match unit {
@@ -448,12 +564,24 @@ impl SelState {
                 _ => (0, row.plain.len()),
             },
         };
-        (Anchor { id: at.id, offset: s }, Anchor { id: at.id, offset: e })
+        (
+            Anchor {
+                id: at.id,
+                offset: s,
+            },
+            Anchor {
+                id: at.id,
+                offset: e,
+            },
+        )
     }
 
     /// A state that reads the time from `clock` (tests).
     pub fn with_clock(clock: Clock) -> SelState {
-        SelState { clock, ..Default::default() }
+        SelState {
+            clock,
+            ..Default::default()
+        }
     }
 
     /// The clock this state reads, to keep it when the state is replaced.
@@ -469,17 +597,37 @@ impl SelState {
 
     /// Mouse press at time `now`. A second press within `MULTI_CLICK` and `MULTI_CLICK_PX` of the first, on the same
     /// row, selects a word; a third the paragraph. Shift extends.
-    pub fn press_at(&mut self, doc: &Doc, at: Anchor, point: iced::Point, shift: bool, now: std::time::Instant) {
+    pub fn press_at(
+        &mut self,
+        doc: &Doc,
+        at: Anchor,
+        point: iced::Point,
+        shift: bool,
+        now: std::time::Instant,
+    ) {
         self.focused = true;
         let count = match self.last_click {
-            Some((t, prev, p, n)) if now.saturating_duration_since(t) <= MULTI_CLICK && prev.id == at.id && p.distance(point) <= MULTI_CLICK_PX => n % 3 + 1,
+            Some((t, prev, p, n))
+                if now.saturating_duration_since(t) <= MULTI_CLICK
+                    && prev.id == at.id
+                    && p.distance(point) <= MULTI_CLICK_PX =>
+            {
+                n % 3 + 1
+            }
             _ => 1,
         };
         self.last_click = Some((now, at, point, count));
         if shift && count == 1 {
             if let Some(sel) = self.sel {
-                self.sel = Some(FlowSel { anchor: sel.anchor, focus: at });
-                self.drag = Some(Drag { lo: sel.anchor, hi: sel.anchor, unit: Unit::Char });
+                self.sel = Some(FlowSel {
+                    anchor: sel.anchor,
+                    focus: at,
+                });
+                self.drag = Some(Drag {
+                    lo: sel.anchor,
+                    hi: sel.anchor,
+                    unit: Unit::Char,
+                });
                 return;
             }
         }
@@ -490,13 +638,22 @@ impl SelState {
         };
         let (lo, hi) = Self::unit_range(doc, at, unit);
         self.drag = Some(Drag { lo, hi, unit });
-        self.sel = if lo == hi { None } else { Some(FlowSel { anchor: lo, focus: hi }) };
+        self.sel = if lo == hi {
+            None
+        } else {
+            Some(FlowSel {
+                anchor: lo,
+                focus: hi,
+            })
+        };
     }
 
     /// The pointer moved to `at` with the button down.
     pub fn drag_to(&mut self, doc: &Doc, at: Anchor) {
         let Some(d) = self.drag else { return };
-        let (Some(&li), Some(&ai)) = (doc.index.get(&at.id), doc.index.get(&d.lo.id)) else { return };
+        let (Some(&li), Some(&ai)) = (doc.index.get(&at.id), doc.index.get(&d.lo.id)) else {
+            return;
+        };
         let _ = (li, ai);
         let before = |a: Anchor, b: Anchor| -> bool {
             let ia = doc.index.get(&a.id).copied().unwrap_or(0);
@@ -504,13 +661,22 @@ impl SelState {
             (ia, a.offset) < (ib, b.offset)
         };
         let next = if d.unit == Unit::Char {
-            FlowSel { anchor: d.lo, focus: at }
+            FlowSel {
+                anchor: d.lo,
+                focus: at,
+            }
         } else {
             let (s, e) = Self::unit_range(doc, at, d.unit);
             if before(s, d.lo) {
-                FlowSel { anchor: d.hi, focus: s }
+                FlowSel {
+                    anchor: d.hi,
+                    focus: s,
+                }
             } else {
-                FlowSel { anchor: d.lo, focus: e }
+                FlowSel {
+                    anchor: d.lo,
+                    focus: e,
+                }
             }
         };
         self.sel = if next.is_empty() { None } else { Some(next) };
@@ -521,8 +687,22 @@ impl SelState {
     }
 
     pub fn select_all(&mut self, doc: &Doc) {
-        let (Some(first), Some(last)) = (doc.rows.iter().find(|r| r.selectable()), doc.rows.iter().rev().find(|r| r.selectable())) else { return };
-        self.sel = Some(FlowSel { anchor: Anchor { id: first.id, offset: 0 }, focus: Anchor { id: last.id, offset: last.plain.len() } });
+        let (Some(first), Some(last)) = (
+            doc.rows.iter().find(|r| r.selectable()),
+            doc.rows.iter().rev().find(|r| r.selectable()),
+        ) else {
+            return;
+        };
+        self.sel = Some(FlowSel {
+            anchor: Anchor {
+                id: first.id,
+                offset: 0,
+            },
+            focus: Anchor {
+                id: last.id,
+                offset: last.plain.len(),
+            },
+        });
         self.focused = true;
     }
 
@@ -551,7 +731,13 @@ mod tests {
     const P0: iced::Point = iced::Point::ORIGIN;
 
     fn prose(id: u64, text: &str) -> Arc<Row> {
-        Arc::new(Row::new(id, RowKind::Prose, vec![Para::text(text)], "\n\n", 12.0))
+        Arc::new(Row::new(
+            id,
+            RowKind::Prose,
+            vec![Para::text(text)],
+            "\n\n",
+            12.0,
+        ))
     }
 
     fn doc_of(rows: Vec<Arc<Row>>) -> Doc {
@@ -562,7 +748,10 @@ mod tests {
 
     #[test]
     fn double_click_selects_a_word_and_triple_the_paragraph() {
-        let doc = doc_of(vec![prose(1, "alpha beta gamma"), prose(2, "second paragraph")]);
+        let doc = doc_of(vec![
+            prose(1, "alpha beta gamma"),
+            prose(2, "second paragraph"),
+        ]);
         let mut s = SelState::default();
         let t0 = Instant::now();
         let at = Anchor { id: 1, offset: 7 };
@@ -586,7 +775,14 @@ mod tests {
         (SelState::with_clock(Clock::new(move || c.get())), now)
     }
 
-    fn click(s: &mut SelState, now: &Rc<std::cell::Cell<Instant>>, doc: &Doc, after_ms: u64, at: Anchor, p: iced::Point) {
+    fn click(
+        s: &mut SelState,
+        now: &Rc<std::cell::Cell<Instant>>,
+        doc: &Doc,
+        after_ms: u64,
+        at: Anchor,
+        p: iced::Point,
+    ) {
         now.set(now.get() + Duration::from_millis(after_ms));
         s.press(doc, at, p, false);
         s.release();
@@ -614,20 +810,36 @@ mod tests {
         // Exactly at the interval still counts.
         let (mut s, now) = clocked();
         click(&mut s, &now, &doc, 0, at, iced::Point::ORIGIN);
-        click(&mut s, &now, &doc, MULTI_CLICK.as_millis() as u64, at, iced::Point::ORIGIN);
+        click(
+            &mut s,
+            &now,
+            &doc,
+            MULTI_CLICK.as_millis() as u64,
+            at,
+            iced::Point::ORIGIN,
+        );
         assert_eq!(s.text(&doc).as_deref(), Some("beta"));
     }
 
     #[test]
     fn shift_click_extends_from_the_anchor() {
-        let doc = doc_of(vec![prose(1, "alpha beta gamma"), prose(2, "second paragraph")]);
+        let doc = doc_of(vec![
+            prose(1, "alpha beta gamma"),
+            prose(2, "second paragraph"),
+        ]);
         let mut s = SelState::default();
         let t0 = Instant::now();
         s.press_at(&doc, Anchor { id: 1, offset: 6 }, P0, false, t0);
         s.drag_to(&doc, Anchor { id: 1, offset: 10 });
         s.release();
         assert_eq!(s.text(&doc).as_deref(), Some("beta"));
-        s.press_at(&doc, Anchor { id: 2, offset: 6 }, P0, true, t0 + Duration::from_secs(3));
+        s.press_at(
+            &doc,
+            Anchor { id: 2, offset: 6 },
+            P0,
+            true,
+            t0 + Duration::from_secs(3),
+        );
         s.release();
         assert_eq!(s.text(&doc).as_deref(), Some("beta gamma\n\nsecond"));
     }
@@ -660,9 +872,16 @@ mod tests {
     #[test]
     fn selection_survives_a_prepend_because_it_keys_on_ids() {
         let mut doc = doc_of(vec![prose(2, "second"), prose(3, "third")]);
-        let sel = FlowSel { anchor: Anchor { id: 2, offset: 0 }, focus: Anchor { id: 3, offset: 5 } };
+        let sel = FlowSel {
+            anchor: Anchor { id: 2, offset: 0 },
+            focus: Anchor { id: 3, offset: 5 },
+        };
         assert_eq!(sel.text(&doc.rows, &doc.index), "second\n\nthird");
-        let change = doc.set_rows(vec![prose(1, "first"), prose(2, "second"), prose(3, "third")]);
+        let change = doc.set_rows(vec![
+            prose(1, "first"),
+            prose(2, "second"),
+            prose(3, "third"),
+        ]);
         assert_eq!(change, Change::Prepended(1));
         assert_eq!(sel.text(&doc.rows, &doc.index), "second\n\nthird");
     }
@@ -671,16 +890,28 @@ mod tests {
     fn append_keeps_measurements() {
         let mut doc = doc_of(vec![prose(1, "a"), prose(2, "b")]);
         let colw = doc.colw;
-        assert!(doc.apply_measure(Measure { id: 1, h: 100.0, colw }).is_some());
+        assert!(doc
+            .apply_measure(Measure {
+                id: 1,
+                h: 100.0,
+                colw
+            })
+            .is_some());
         let h = doc.window.block_height(0);
-        assert_eq!(doc.set_rows(vec![prose(1, "a"), prose(2, "b"), prose(3, "c")]), Change::Appended(1));
+        assert_eq!(
+            doc.set_rows(vec![prose(1, "a"), prose(2, "b"), prose(3, "c")]),
+            Change::Appended(1)
+        );
         assert_eq!(doc.window.block_height(0), h);
         assert_eq!(doc.window.len(), 3);
     }
 
     #[test]
     fn table_plain_is_tsv() {
-        let cells = ["a", "b", "c", "d"].iter().map(|s| Para::text(*s)).collect();
+        let cells = ["a", "b", "c", "d"]
+            .iter()
+            .map(|s| Para::text(*s))
+            .collect();
         let r = Row::new(1, RowKind::Table { cols: 2 }, cells, "\n\n", 12.0);
         assert_eq!(r.plain, "a\tb\nc\td");
     }
@@ -694,7 +925,12 @@ mod empty_tests {
     fn empty_doc_never_panics_in_the_selection_state() {
         let doc = Doc::default();
         let mut s = SelState::default();
-        s.press(&doc, Anchor { id: 1, offset: 0 }, iced::Point::ORIGIN, false);
+        s.press(
+            &doc,
+            Anchor { id: 1, offset: 0 },
+            iced::Point::ORIGIN,
+            false,
+        );
         s.drag_to(&doc, Anchor { id: 1, offset: 5 });
         s.release();
         s.select_all(&doc);

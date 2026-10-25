@@ -22,7 +22,7 @@ use fb_ui::status;
 use fb_ui::theme::*;
 use fb_ui::StatusKind;
 use herdr_core::{AgentStatus, ItemKind, PermState, PermissionRequest, QuestionRequest, QuestionState, Tab, Workspace};
-use iced::widget::{button, column, container, row, scrollable, stack, text, Space};
+use iced::widget::{button, column, container, responsive, row, scrollable, stack, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Subscription, Task};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -202,7 +202,7 @@ pub fn key_message(event: iced::keyboard::Event) -> Option<Message> {
 
 /// Keys, only while the screen is shown.
 pub fn subscription(app: &App) -> Subscription<Message> {
-    if app.state.screen == Screen::NeedsYou && !items(app).is_empty() && !matches!(app.state.cards.card, Some(crate::cards::Card::Question { .. })) {
+    if !app.state.settings.open && !app.state.shortcuts.open && app.state.screen == Screen::NeedsYou && !items(app).is_empty() && !matches!(app.state.cards.card, Some(crate::cards::Card::Question { .. })) {
         iced::keyboard::listen().filter_map(key_message)
     } else {
         Subscription::none()
@@ -223,8 +223,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if list.is_empty() {
         return empty(app);
     }
+    responsive(move |size| layout(app, size.width, size.height)).into()
+}
+
+fn layout(app: &App, width: f32, height: f32) -> Element<'_, Message> {
+    let list = items(app);
+    if list.is_empty() { return empty(app); }
     let cur = selected_index(app).unwrap_or(0);
     let t = app.tokens();
+    if width < LIST_W + 380.0 {
+        return column![container(list_column(app, &list, cur)).height(Length::Fixed((height * 0.3).clamp(80.0, 200.0))), detail(app, list[cur])].into();
+    }
     let mut list_box = container(list_column(app, &list, cur)).width(Length::Fixed(LIST_W)).height(Length::Fill);
     let mut detail_box = container(detail(app, list[cur])).width(Length::Fill).height(Length::Fill);
     if app.state.glass.on {
@@ -334,7 +343,7 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
 fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
     let t = app.tokens();
     let head = row![
-        avatar(t, &it.ws.label, 56.0, 18.0, false, true),
+        avatar(t, &it.ws.label, 40.0, 18.0, false, true),
         column![TITLE.text(it.agent_name()).color(t.label), BODY.text(format!("{} \u{b7} {} \u{b7} Needs you", it.ws.label, it.tab.label)).color(t.label_2)].spacing(3),
     ]
     .spacing(14)
@@ -345,7 +354,7 @@ fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
         None => column![BODY.text("The request is not on screen. Open the tab to see it.").color(t.label_2), plain_button(t, "Open tab", Some(Icon::SquareTerminal), Some(open), false)].spacing(12).into(),
     };
     let col = column![head, body].spacing(18).max_width(CARD_MAX_W + 40.0);
-    scrollable(container(col).padding(iced::Padding { top: 44.0, right: 32.0, bottom: 32.0, left: 32.0 })).height(Length::Fill).width(Length::Fill).into()
+    scrollable(container(col).padding(iced::Padding { top: 44.0, right: 12.0, bottom: 16.0, left: 12.0 })).height(Length::Fill).width(Length::Fill).into()
 }
 
 fn plain_button<'a>(t: Tokens, label: &'a str, ic: Option<Icon>, on: Option<Message>, strong: bool) -> Element<'a, Message> {

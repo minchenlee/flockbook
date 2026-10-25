@@ -15,6 +15,11 @@ fn config_dir(home: &Path) -> String {
 }
 
 impl HerdrSession {
+    /// Phase-one topology writes are confined to the isolated input-test session.
+    pub fn allows_workspace_writes(&self) -> bool {
+        self.name.as_deref() == Some("c9-input-test")
+            && self.socket_path.ends_with("/sessions/c9-input-test/herdr.sock")
+    }
     pub fn default_session(home: &Path) -> Self {
         HerdrSession { name: None, socket_path: format!("{}/herdr.sock", config_dir(home)) }
     }

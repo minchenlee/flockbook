@@ -43,6 +43,9 @@ pub trait PaneActions: Send + Sync {
     fn send_text(&self, pane_id: &str, text: &str) -> Result<(), String>;
     /// MUTATING. Named keys such as "Enter", "Down", "Escape", "Tab".
     fn send_keys(&self, pane_id: &str, keys: &[String]) -> Result<(), String>;
+    /// Fresh snapshot identity. Fakes may return None; live implementations must return the current occupant.
+    fn requires_identity(&self) -> bool { false }
+    fn agent_identity(&self, _pane_id: &str) -> Result<Option<herdr_core::AgentIdentity>, String> { Ok(None) }
     fn pacing(&self) -> Pacing {
         Pacing::LIVE
     }
@@ -67,6 +70,12 @@ impl LiveActions {
 
 #[cfg(unix)]
 impl PaneActions for LiveActions {
+    fn requires_identity(&self) -> bool { true }
+    fn agent_identity(&self, pane_id: &str) -> Result<Option<herdr_core::AgentIdentity>, String> {
+        let ws = self.client.snapshot().map_err(|e| e.to_string())?;
+        let pane = ws.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).find(|p| p.id == pane_id);
+        Ok(pane.filter(|p| p.agent.as_ref().is_some_and(|a| a.status == herdr_core::AgentStatus::Blocked)).and_then(herdr_core::AgentIdentity::for_pane))
+    }
     fn read_screen(&self, pane_id: &str) -> Result<String, String> {
         let data = self
             .client
@@ -538,11 +547,28 @@ pub fn answer_question(actions: &dyn PaneActions, pane: &str, q: &QuestionReques
         return Err(problem_text(&Failure::NotOnScreen));
     }
     let pace = actions.pacing();
+    let mut current = 0;
+    let mut review = false;
+    let shown = |current, review, screen: &str| {
+        if review { question::review_on_screen(q, answers, screen) }
+        else { question::question_on_screen(q, current, screen) }
+    };
     for step in &steps {
+        if matches!(step, Step::Text(_) | Step::Keys(_)) {
+            let fresh = actions.read_screen(pane)?;
+            if !shown(current, review, &fresh) { return Err(PROMPT_CHANGED.into()); }
+        }
         match step {
             Step::Text(s) => actions.send_text(pane, s)?,
-            Step::Keys(k) => actions.send_keys(pane, k)?,
+            Step::Keys(keys) => {
+                for key in keys {
+                    if !shown(current, review, &actions.read_screen(pane)?) { return Err(PROMPT_CHANGED.into()); }
+                    actions.send_keys(pane, &[key.clone()])?;
+                    std::thread::sleep(pace.step_delay);
+                }
+            }
             Step::WaitFor(s) => {
+                if s == "Review your answers" { review = true; } else { current += 1; }
                 let agent = q.agent.clone();
                 if !wait_screen(actions, pane, pace.next_question, |scr| question::picker_region(&agent, scr).is_some_and(|r| r.contains(s.as_str())))? {
                     return Err(problem_text(&Failure::Stuck(s.clone())));
@@ -836,5 +862,97 @@ mod tests {
     fn text_between_the_question_and_its_options_is_refused() {
         let screen = " Bash command\n\n   npm test\n\n Do you want to proceed?\n Would you like to bypass all permissions?\n \u{276F} 1. Yes\n   2. No\n";
         assert!(!allowed(screen, "npm test", ""));
+    }
+}
+
+/// Pins the raw Herdr occupant identity, independently of the displayed lead log.
+/// Every screen read and every write revalidates it; an identity error never falls back to input.
+pub struct GuardedActions {
+    inner: std::sync::Arc<dyn PaneActions>,
+    expected: Option<herdr_core::AgentIdentity>,
+}
+impl GuardedActions {
+    pub fn capture(inner: std::sync::Arc<dyn PaneActions>, pane: &str) -> Result<Self, String> {
+        let expected = inner.agent_identity(pane)?;
+        if expected.is_none() && inner.requires_identity() { return Err("The agent is no longer blocked — review again".into()); }
+        Ok(Self { inner, expected })
+    }
+    pub fn pinned(inner: std::sync::Arc<dyn PaneActions>, pane: &str, expected: Option<herdr_core::AgentIdentity>) -> Result<Self, String> {
+        if expected.is_none() && inner.requires_identity() { return Err("No reviewed agent identity — review again".into()); }
+        let result = Self { inner, expected };
+        result.check(pane)?;
+        Ok(result)
+    }
+    fn check(&self, pane: &str) -> Result<(), String> {
+        if self.inner.agent_identity(pane)? != self.expected { return Err("The agent changed — review again".into()); }
+        Ok(())
+    }
+}
+impl PaneActions for GuardedActions {
+    fn read_screen(&self, pane: &str) -> Result<String, String> { self.check(pane)?; self.inner.read_screen(pane) }
+    fn send_text(&self, pane: &str, text: &str) -> Result<(), String> { self.check(pane)?; self.inner.send_text(pane, text) }
+    fn send_keys(&self, pane: &str, keys: &[String]) -> Result<(), String> { self.check(pane)?; self.inner.send_keys(pane, keys) }
+    fn pacing(&self) -> Pacing { self.inner.pacing() }
+}
+
+/// A screen-only Claude Bash request still goes through the same strict command/frame binder.
+pub fn screen_request(screen: &str) -> Option<herdr_core::PermissionRequest> {
+    let id = prompt_identity(screen)?;
+    if is_trust_dialog(&id) { return None; }
+    let lines: Vec<_> = id.request.lines().collect();
+    let header = lines.iter().rposition(|l| *l == "Bash command")?;
+    let question = lines.iter().rposition(|l| l.contains(herdr_core::PROMPT_MARKER))?;
+    if question <= header { return None; }
+    let command = lines[header + 1..question].join("\n").trim().to_string();
+    if command.is_empty() || !request_shows(&id, &command, "") { return None; }
+    Some(herdr_core::PermissionRequest { title: "Bash command".into(), command, tool_name: "Bash".into(), tool_use_id: screen_key(&format!("{:?}", id)), state: herdr_core::PermState::Pending, detail: String::new(), open_calls: 1 })
+}
+pub fn screen_key(text: &str) -> String {
+    let hash = text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    format!("screen-{hash:x}")
+}
+pub fn grok_identity(screen: &str) -> Option<PromptIdentity> {
+    let b = herdr_core::approval::grok_box(screen)?;
+    Some(PromptIdentity { request: b.lines.join("\n"), indents: Vec::new(), options: b.rows, more_below: false })
+}
+pub fn respond_grok(actions: &dyn PaneActions, pane: &str, allow: bool, seen: &PromptIdentity) -> Result<(), String> {
+    for _ in 0..2 {
+        let screen = actions.read_screen(pane)?;
+        if grok_identity(&screen).as_ref() != Some(seen) { return Err(PROMPT_CHANGED.into()); }
+        let b = herdr_core::approval::grok_box(&screen).ok_or(PROMPT_CHANGED)?;
+        let key = b.next_key(allow).ok_or(PROMPT_CHANGED)?;
+        actions.send_keys(pane, &[key.into()])?;
+        if key == "Enter" { return Ok(()); }
+        std::thread::sleep(actions.pacing().step_delay);
+    }
+    Err(PROMPT_CHANGED.into())
+}
+
+#[cfg(test)]
+mod identity_step_tests {
+    use super::*;
+    use herdr_core::{AgentIdentity, QOption, Question};
+    struct Replaced { calls: Mutex<usize> }
+    impl PaneActions for Replaced {
+        fn read_screen(&self, _: &str) -> Result<String, String> { Ok(String::new()) }
+        fn agent_identity(&self, _: &str) -> Result<Option<AgentIdentity>, String> {
+            let mut n = self.calls.lock().unwrap(); *n += 1;
+            Ok(Some(AgentIdentity { pane_id: "p".into(), name: "agent".into(), kind: "claude".into(), session_id: Some(if *n == 1 { "first" } else { "replacement" }.into()) }))
+        }
+        fn send_text(&self, _: &str, _: &str) -> Result<(), String> { panic!("changed identity must never write") }
+        fn send_keys(&self, _: &str, _: &[String]) -> Result<(), String> { panic!("changed identity must never write") }
+    }
+    #[test]
+    fn replacement_after_capture_stops_input() {
+        let a = GuardedActions::capture(std::sync::Arc::new(Replaced { calls: Mutex::new(0) }), "p").unwrap();
+        assert!(a.send_text("p", "1").is_err());
+    }
+    #[test]
+    fn changed_question_between_pick_and_tab_stops_remaining_keys() {
+        let q = QuestionRequest::new("q", vec![Question::new("Choice", "Pick one?", vec![QOption::new("A")], true)]);
+        let screen = "← ☐ Choice ✔ Submit →\nPick one?\n1. A\n2. Type something.\nChat about this";
+        let actions = RecordingActions::new(screen).then(&screen.replace("Pick one?", "Changed prompt?"));
+        assert!(answer_question(&actions, "p", &q, &[QuestionAnswer { picks: vec![0], other: None }]).is_err());
+        assert_eq!(actions.mutations(), vec![Call::Text("p".into(), "1".into())]);
     }
 }

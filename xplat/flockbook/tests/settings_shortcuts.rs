@@ -314,7 +314,7 @@ fn settings_save_and_load_back() {
     let _ = app.update(Message::Settings(SettingsMsg::SetAllowInput(false)));
     assert!(app.state.settings.error.is_none(), "{:?}", app.state.settings.error);
     let loaded = Prefs::load(&path);
-    assert_eq!(loaded, Prefs { glass: None, reading_width: Some(ReadingWidth::Wide), allow_input: Some(false) });
+    assert_eq!(loaded, Prefs { glass: None, reading_width: Some(ReadingWidth::Wide), allow_input: Some(false), ..Prefs::default() });
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("\"reading_width\": \"wide\""), "{text}");
 }

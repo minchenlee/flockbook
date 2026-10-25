@@ -41,3 +41,61 @@ impl<C: Connector> HerdrClient<C> {
         o.pointer("/result/read/text").and_then(Value::as_str).map(screen_shows_prompt).unwrap_or(false)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrokBox {
+    pub title: String,
+    pub command: String,
+    pub rows: Vec<String>,
+    pub focus: usize,
+    pub lines: Vec<String>,
+}
+impl GrokBox {
+    pub fn next_key(&self, allow: bool) -> Option<&'static str> {
+        let yes = self.rows.iter().position(|r| r == "Yes, proceed")?;
+        if allow { return (self.focus == yes).then_some("Enter"); }
+        let no = self.rows.iter().position(|r| r == "No, reject (type to add feedback)")?;
+        if self.focus == no { Some("Enter") } else if self.focus == yes && no == yes + 1 { Some("Down") } else { None }
+    }
+}
+/// Only Grok's last framed permission dialog, with its own footer and exactly one focused row.
+pub fn grok_box(screen: &str) -> Option<GrokBox> {
+    let raw: Vec<_> = screen.lines().collect();
+    let end = raw.iter().rposition(|l| l.trim_start().starts_with('┃'))?;
+    let mut start = end;
+    while start > 0 && raw[start - 1].trim_start().starts_with('┃') { start -= 1; }
+    let footer = raw[end + 1..].iter().find(|l| !l.trim().is_empty())?.trim();
+    if !footer.starts_with("1/") || !footer.contains(":select") || !footer.contains("Ctrl+c:cancel") { return None; }
+    let mut title = None; let mut command = Vec::new(); let mut rows = Vec::new(); let mut focus = Vec::new(); let mut lines = Vec::new();
+    for raw in &raw[start..=end] {
+        let t = raw.trim_start().strip_prefix('┃')?.trim_end_matches(|c: char| c == '█' || c.is_whitespace()).trim();
+        if t.is_empty() { continue; }
+        if let Some((n, rest)) = t.split_once(" (") {
+            if let Ok(n) = n.parse::<usize>() {
+                if n != rows.len() + 1 { return None; }
+                let (mark, row) = rest.split_once(") ")?;
+                if mark == "●" { focus.push(rows.len()); } else if mark != "○" { return None; }
+                rows.push(row.to_string()); lines.push(format!("{n} {row}")); continue;
+            }
+        }
+        if !rows.is_empty() { return None; }
+        if title.is_none() && t.starts_with('›') { title = Some(t.trim_start_matches('›').trim().to_string()); }
+        else if let Some(c) = t.strip_prefix('│') { command.push(c.trim().to_string()); }
+        lines.push(t.to_string());
+    }
+    if focus.len() != 1 || !rows.iter().any(|r| r == "Yes, proceed") || !rows.iter().any(|r| r.starts_with("No, reject")) { return None; }
+    Some(GrokBox { title: title?, command: command.join("\n"), rows, focus: focus[0], lines })
+}
+
+#[cfg(test)]
+mod grok_tests {
+    use super::*;
+    #[test]
+    fn deny_moves_only_to_the_plain_reject_row() {
+        let s = "┃ › Run command\n┃ │ pwd\n┃ 1 (●) Yes, proceed\n┃ 2 (○) No, reject (type to add feedback)\n1/2:select Ctrl+c:cancel";
+        let b = grok_box(s).unwrap();
+        assert_eq!(b.next_key(true), Some("Enter"));
+        assert_eq!(b.next_key(false), Some("Down"));
+        assert!(grok_box(&s.replace("1 (●)", "1 (○)")).is_none());
+    }
+}

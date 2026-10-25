@@ -54,6 +54,7 @@ const POLL: Duration = Duration::from_millis(1500);
 pub struct ScreenRead {
     pub pane: String,
     pub text: String,
+    pub identity: Option<herdr_core::AgentIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +111,7 @@ pub struct CardsState {
     pub pinned: Option<(String, actions::PromptIdentity)>,
     /// The "Other" field has the keyboard: digits and arrows type instead of pick.
     pub other_active: bool,
+    pub agent_pin: Option<(String, herdr_core::AgentIdentity)>,
 }
 
 impl CardsState {
@@ -170,6 +172,22 @@ pub fn detect(app: &App) -> Option<Card> {
     let screen = st.screen.as_ref().filter(|s| s.pane == pane.id).map(|s| s.text.as_str());
     let card = (|| {
         if agent.status == AgentStatus::Blocked {
+            if agent.kind == "grok" {
+                if let Some((b, identity)) = screen.and_then(|s| Some((herdr_core::approval::grok_box(s)?, actions::grok_identity(s)?))) {
+                    return Some(Card::Approval(Approval {
+                        key: format!("{}:{}", pane.id, actions::screen_key(&identity.request)), pane: pane.id.clone(), agent: agent.name.clone(),
+                        title: b.title, command: b.command, detail: String::new(), always: None, identity: Some(identity), stale: false, unbound: false, can_act: st.actions.is_some(),
+                    }));
+                }
+            }
+            if agent.kind == "claude" {
+                if let Some((p, identity)) = screen.and_then(|s| Some((actions::screen_request(s)?, actions::prompt_identity(s)?))) {
+                    return Some(Card::Approval(Approval {
+                        key: format!("{}:{}", pane.id, p.tool_use_id), pane: pane.id.clone(), agent: agent.name.clone(),
+                        title: p.title, command: p.command, detail: p.detail, always: screen.and_then(actions::always_allow), identity: Some(identity), stale: false, unbound: false, can_act: st.actions.is_some(),
+                    }));
+                }
+            }
             if let Some(ItemKind::PermissionRequest(p)) = last {
                 if p.state == PermState::Pending {
                     let (can_act, always) = match (&st.actions, screen) {
@@ -263,6 +281,12 @@ pub fn recompute(app: &mut App) {
     if !matches!(card, Some(Card::Approval(_))) {
         st.always = false;
     }
+    if let Some(c) = &card {
+        let key = card_key(c);
+        if st.agent_pin.as_ref().map(|(k, _)| k.as_str()) != Some(key) {
+            st.agent_pin = st.screen.as_ref().and_then(|s| s.identity.clone()).map(|id| (key.to_string(), id));
+        }
+    } else { st.agent_pin = None; }
     if st.card != card {
         if st.card.as_ref().map(card_key) != card.as_ref().map(card_key) {
             // Another request: its "always allow" starts unticked, whatever the owner chose on the last card.
@@ -295,16 +319,20 @@ pub fn on_refresh(app: &mut App) {
             }
             if actions.instant() {
                 if let Ok(text) = actions.read_screen(id) {
-                    st.screen = Some(ScreenRead { pane: id.clone(), text });
+                    st.screen = Some(ScreenRead { pane: id.clone(), text, identity: actions.agent_identity(id).ok().flatten() });
                 }
             } else if !st.inflight.load(Ordering::SeqCst) && st.last_poll.is_none_or(|t| t.elapsed() >= POLL) {
                 st.last_poll = Some(Instant::now());
                 st.inflight.store(true, Ordering::SeqCst);
                 let (inbox, inflight, id) = (st.inbox.clone(), st.inflight.clone(), id.clone());
                 std::thread::spawn(move || {
+                    let identity = actions.agent_identity(&id).ok().flatten();
                     if let Ok(text) = actions.read_screen(&id) {
-                        if let Ok(mut g) = inbox.lock() {
-                            *g = Some(ScreenRead { pane: id, text });
+                        let after = actions.agent_identity(&id).ok().flatten();
+                        if identity == after {
+                          if let Ok(mut g) = inbox.lock() {
+                            *g = Some(ScreenRead { pane: id, text, identity });
+                          }
                         }
                     }
                     inflight.store(false, Ordering::SeqCst);
@@ -329,7 +357,7 @@ pub fn read_now(app: &mut App) {
     let Some(id) = app.state.selected_pane().map(|p| p.id.clone()) else { return };
     if let Some(a) = app.state.cards.actions.clone() {
         if let Ok(text) = a.read_screen(&id) {
-            app.state.cards.screen = Some(ScreenRead { pane: id, text });
+            app.state.cards.screen = Some(ScreenRead { pane: id.clone(), text, identity: a.agent_identity(&id).ok().flatten() });
         }
     }
     recompute(app);
@@ -468,6 +496,7 @@ fn on_key(app: &mut App, k: CardKey) -> Task<Message> {
 }
 
 fn approve(app: &mut App, allow: bool) -> Task<Message> {
+    let grok = app.state.selected_pane().and_then(|p| p.agent.as_ref()).is_some_and(|a| a.kind == "grok");
     let st = &mut app.state.cards;
     let (Some(Card::Approval(a)), Some(actions)) = (st.card.clone(), st.actions.clone()) else { return Task::none() };
     let Some(seen) = a.identity.clone() else { return Task::none() };
@@ -476,9 +505,14 @@ fn approve(app: &mut App, allow: bool) -> Task<Message> {
     }
     st.busy = true;
     st.problem = None;
+    let expected = st.agent_pin.as_ref().filter(|(k, _)| k == &a.key).map(|(_, id)| id.clone());
     let always = (allow && st.always).then(|| a.always.clone()).flatten();
     let (pane, key, command, detail) = (a.pane.clone(), a.key.clone(), a.command.clone(), a.detail.clone());
-    spawn_send(key, move || actions::respond(actions.as_ref(), &pane, allow, always.as_ref(), &seen, &command, &detail))
+    spawn_send(key, move || {
+        let guarded = actions::GuardedActions::pinned(actions, &pane, expected)?;
+        if grok { actions::respond_grok(&guarded, &pane, allow, &seen) }
+        else { actions::respond(&guarded, &pane, allow, always.as_ref(), &seen, &command, &detail) }
+    })
 }
 
 fn submit(app: &mut App) -> Task<Message> {
@@ -489,9 +523,13 @@ fn submit(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     let answers = flow.values();
+    let expected = st.agent_pin.as_ref().filter(|(k, _)| k == &key).map(|(_, id)| id.clone());
     st.busy = true;
     st.problem = None;
-    spawn_send(key, move || actions::answer_question(actions.as_ref(), &pane, &q, &answers))
+    spawn_send(key, move || {
+        let guarded = actions::GuardedActions::pinned(actions, &pane, expected)?;
+        actions::answer_question(&guarded, &pane, &q, &answers)
+    })
 }
 
 /// Runs a blocking send on its own thread and reports back as `CardsMsg::Done`.

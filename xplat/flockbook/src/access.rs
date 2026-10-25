@@ -28,6 +28,7 @@ pub fn writes_live(app: &App) -> bool {
 
 /// Takes every write path away from `app` (the composer's sender, the cards' pane actions) and redraws the cards.
 pub fn make_read_only(app: &mut App) {
+    if let Some(sender) = &app.state.composer.sender { sender.revoke(); }
     app.state.composer.sender = None;
     app.state.cards.actions = None;
     // Terminals open in Observe mode from now on; an open control sheet is released.

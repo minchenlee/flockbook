@@ -18,6 +18,8 @@ pub struct TermPalette {
     pub on_cursor: Color,
     /// Selected cells: the accent, translucent, drawn under the text.
     pub selection: Color,
+    /// Ghostty can choose selected text separately; None preserves each cell color.
+    pub selection_fg: Option<Color>,
     pub ansi: [Color; 16],
 }
 
@@ -34,7 +36,7 @@ const DARK_ANSI: [u32; 16] = [
 impl TermPalette {
     pub fn of(t: &Tokens) -> TermPalette {
         let table = if t.mode.is_dark() { &DARK_ANSI } else { &LIGHT_ANSI };
-        TermPalette { mode: t.mode, fg: over(t.label, t.bg), bg: t.bg, cursor: t.accent, on_cursor: t.on_accent, selection: Color { a: 0.32, ..t.accent }, ansi: table.map(hex) }
+        TermPalette { mode: t.mode, fg: over(t.label, t.bg), bg: t.bg, cursor: t.accent, on_cursor: t.on_accent, selection: Color { a: 0.32, ..t.accent }, selection_fg: None, ansi: table.map(hex) }
     }
 
     /// The color of an indexed or true color. `Default` gives `None`: the caller picks the default fg or bg.

@@ -182,6 +182,7 @@ pub fn preview_of(items: &[herdr_core::ConversationItem]) -> Preview {
             ItemKind::UserText(s) => format!("You: {}", first_line(s)),
             ItemKind::ToolChips(chips) => chips.last().map(|c| c.text.clone()).unwrap_or_default(),
             ItemKind::Status(s) => first_line(s),
+            ItemKind::Images(refs) => if refs.len() == 1 { "Image".to_string() } else { format!("{} images", refs.len()) },
         };
         if !text.is_empty() {
             return Preview { text, timestamp: it.timestamp };

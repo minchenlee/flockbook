@@ -9,12 +9,12 @@
 //! Cmd means the platform's command key: Cmd on macOS, Ctrl elsewhere (`Modifiers::command`). The panel shows the
 //! macOS symbols on macOS and "Ctrl+Shift+K" style text elsewhere.
 //!
-//! Not ported yet (no feature behind them here): Zoom pane, Move tab, Toggle sidebar and the text size keys.
+//! Pane zoom and tab move routes belong to workspace actions.
 
 use fb_ui::icons::{icon, Icon, SIZE_INLINE};
 use fb_ui::theme::*;
 use iced::keyboard::{self, key::Named, Key, Modifiers};
-use iced::widget::{button, column, container, mouse_area, row, stack, Space};
+use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, Space};
 use iced::{Alignment, Background, Border, Element, Length, Subscription, Task};
 
 use crate::settings::SettingsMsg;
@@ -25,6 +25,10 @@ use crate::{style, App, Message};
 /// What a shortcut of this module does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    ToggleSidebar,
+    LargerText,
+    SmallerText,
+    ActualTextSize,
     NewTab,
     NewWorkspace,
     CloseTab,
@@ -188,6 +192,10 @@ pub const TABLE: &[Shortcut] = &[
     row_of("File", "New Tab", cmd("t"), Some(Action::NewTab)),
     row_of("File", "New Workspace", cmd_shift("n", "N"), Some(Action::NewWorkspace)),
     row_of("File", "Close Tab", cmd("w"), Some(Action::CloseTab)),
+    row_of("View", "Toggle Sidebar", cmd("b"), Some(Action::ToggleSidebar)),
+    row_of("View", "Larger Text", cmd("="), Some(Action::LargerText)),
+    row_of("View", "Smaller Text", cmd("-"), Some(Action::SmallerText)),
+    row_of("View", "Actual Text Size", cmd("0"), Some(Action::ActualTextSize)),
     row_of("View", "Show Terminal", CTRL_BACKTICK, None),
     row_of("View", "Show in Overview", cmd_shift("\\", "|"), Some(Action::Overview)),
     row_of("View", "Search", cmd("k"), Some(Action::Search)),
@@ -254,7 +262,14 @@ pub struct ShortcutsState {
 
 /// Runs an action through the same messages the buttons send.
 pub fn run(app: &mut App, action: Action) -> Task<Message> {
+    if app.state.settings.open && !matches!(action, Action::Dismiss | Action::Settings | Action::Shortcuts) {
+        return Task::none();
+    }
     let msg = match action {
+        Action::ToggleSidebar => Message::Settings(SettingsMsg::ToggleSidebar),
+        Action::LargerText => Message::Settings(SettingsMsg::SetSize(app.state.settings.reading_size().larger())),
+        Action::SmallerText => Message::Settings(SettingsMsg::SetSize(app.state.settings.reading_size().smaller())),
+        Action::ActualTextSize => Message::Settings(SettingsMsg::SetSize(crate::settings::ReadingSize::M)),
         Action::NewTab => Message::TopRow(TopRowMsg::NewTab),
         Action::NewWorkspace => Message::Sidebar(crate::sidebar::SidebarMsg::AddWorkspace),
         Action::CloseTab => match app.state.selected_tab.clone() {
@@ -309,6 +324,10 @@ pub fn layer(app: &App) -> Element<'_, Message> {
     if !app.state.shortcuts.open {
         return Space::new().into();
     }
+    responsive(move |size| panel(app, size.width, size.height)).into()
+}
+
+fn panel(app: &App, width: f32, height: f32) -> Element<'_, Message> {
     let t = app.tokens();
     let mac = cfg!(target_os = "macos");
     // Two columns, the groups split where the row counts come closest to even.
@@ -331,7 +350,10 @@ pub fn layer(app: &App) -> Element<'_, Message> {
         ..Default::default()
     });
     let header = row![HEADLINE.text("Keyboard Shortcuts").color(t.label), Space::new().width(Length::Fill), close].align_y(Alignment::Center);
-    let card = container(column![header, row![left, right].spacing(SP_24)].spacing(SP_12)).padding(SP_16).width(Length::Fixed(PANEL_W)).style(style::float_e2(t, R_CARD));
+    let groups: Element<'_, Message> = if width < 600.0 { column![left, right].spacing(SP_16).into() } else { row![left, right].spacing(SP_24).into() };
+    let card = container(column![header, scrollable(groups).height(Length::Fill)].spacing(SP_12)).padding(SP_16)
+        .width(Length::Fill).max_width(PANEL_W).height(Length::Fixed((height - TOPROW_H - 24.0).max(1.0)))
+        .style(style::float_e2(t, R_CARD));
     let card = mouse_area(card).on_press(Message::Noop);
     let scrim = mouse_area(container(Space::new()).width(Length::Fill).height(Length::Fill).style(style::fill(iced::Color { a: 0.18, ..iced::Color::BLACK }, 0.0))).on_press(Message::Shortcut(Action::Dismiss));
     let placed = container(card).width(Length::Fill).height(Length::Fill).align_x(Alignment::Center).padding(iced::Padding { top: TOPROW_H + 24.0, ..iced::Padding::ZERO });

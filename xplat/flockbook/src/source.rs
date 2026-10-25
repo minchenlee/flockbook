@@ -6,6 +6,10 @@
 use herdr_core::{ConversationItem, Pane, Workspace};
 
 pub trait DataSource {
+    fn conversation_state(&self, _pane: &Pane) -> herdr_core::ConversationState { herdr_core::ConversationState::Ready }
+    fn status_tags(&self, _pane: &Pane) -> Vec<herdr_core::StatusTag> { Vec::new() }
+    fn log_path(&self, _pane: &Pane) -> Option<std::path::PathBuf> { None }
+
     /// Short label for the title or a status line, e.g. "demo" or a session name.
     fn label(&self) -> String;
     fn workspaces(&self) -> Vec<Workspace>;
@@ -69,6 +73,16 @@ mod live {
     }
 
     impl DataSource for LiveSource {
+        fn conversation_state(&self, pane: &Pane) -> herdr_core::ConversationState { self.store.pane_conversation_state(pane) }
+        fn log_path(&self, pane: &Pane) -> Option<std::path::PathBuf> {
+            self.store.log_path(pane.agent.as_ref().and_then(|a| a.session_id.as_deref()))
+        }
+        fn status_tags(&self, pane: &Pane) -> Vec<herdr_core::StatusTag> {
+            let Some(a) = &pane.agent else { return Vec::new() };
+            let Some(id) = &a.session_id else { return Vec::new() };
+            herdr_core::status_line::read_tags(&a.kind, id)
+        }
+
         fn load_earlier_job(&self, pane: &Pane) -> Option<super::EarlierJob> {
             let id = pane.agent.as_ref().and_then(|a| a.session_id.clone())?;
             let store = self.store.clone();
@@ -90,7 +104,7 @@ mod live {
             self.store.conversation(pane.agent.as_ref().and_then(|a| a.session_id.as_deref()))
         }
         fn can_load_earlier(&self, pane: &Pane) -> bool {
-            pane.agent.as_ref().is_some_and(|a| a.session_id.is_some())
+            self.store.can_load_earlier(pane.agent.as_ref().and_then(|a| a.session_id.as_deref()))
         }
         fn load_earlier(&self, pane: &Pane) -> bool {
             // Reads an older part of the session log file: no herdr call.

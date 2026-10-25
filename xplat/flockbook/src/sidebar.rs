@@ -8,7 +8,7 @@ use crate::{style, App, Message};
 use fb_ui::icons::{icon, Icon, SIZE_DEFAULT};
 use fb_ui::status::{self, StatusKind};
 use fb_ui::theme::*;
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Task};
 
 #[derive(Debug, Clone, Default)]
@@ -25,8 +25,8 @@ pub enum SidebarMsg {
 
 pub fn update(app: &mut App, msg: SidebarMsg) -> Task<Message> {
     match msg {
-        // Mutating herdr calls belong to a later step; this step only reads.
-        SidebarMsg::NewTab | SidebarMsg::AddWorkspace => Task::none(),
+        SidebarMsg::NewTab => crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::NewTab),
+        SidebarMsg::AddWorkspace => crate::workspace_actions::update(app, crate::workspace_actions::WorkspaceMsg::Edit(crate::workspace_actions::Editor::CreateWorkspace)),
         SidebarMsg::NextWorkspace => step_workspace(app, 1),
         SidebarMsg::PrevWorkspace => step_workspace(app, -1),
     }
@@ -167,7 +167,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .spacing(SP_8)
             .align_y(Alignment::Center);
         let tip = format!("{} \u{00B7} {} tab{}{}{}", ws.label, ws.tabs.len(), if ws.tabs.len() == 1 { "" } else { "s" }, if c.working > 0 { format!(" \u{00B7} {} working", c.working) } else { String::new() }, if c.blocked > 0 { format!(" \u{00B7} {} need you", c.blocked) } else { String::new() });
-        let rowb = row_button(t, selected, content.into(), Message::SelectWorkspace(ws.id.clone()), WORKSPACE_ROW_H);
+        let rowb = mouse_area(row_button(t, selected, content.into(), Message::SelectWorkspace(ws.id.clone()), WORKSPACE_ROW_H))
+            .on_right_press(Message::Workspace(crate::workspace_actions::WorkspaceMsg::Menu(crate::workspace_actions::Target::Workspace(ws.id.clone()))));
+        let rowb = crate::toprow::drag_target(rowb.into(), crate::workspace_actions::Target::Workspace(ws.id.clone()));
         list = list.push(iced::widget::tooltip(rowb, container(CALLOUT.text(tip).color(t.label)).padding([5, 9]).style(style::float_e2(t, R_ROW)), iced::widget::tooltip::Position::Right).gap(6).delay(std::time::Duration::from_millis(600)));
     }
 
