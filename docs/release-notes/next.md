@@ -10,3 +10,4 @@ One short line: what this release is about.
 ### 🐛 Bug Fixes
 
 ### ⚙️ Changes
+- Cross-platform preview: screens, reading column, Settings and the shortcuts panel now match the Mac layout.

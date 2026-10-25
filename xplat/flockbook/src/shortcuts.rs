@@ -11,10 +11,10 @@
 //!
 //! Pane zoom and tab move routes belong to workspace actions.
 
-use fb_ui::icons::{icon, Icon, SIZE_INLINE};
+
 use fb_ui::theme::*;
 use iced::keyboard::{self, key::Named, Key, Modifiers};
-use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, text, Space};
+use iced::widget::{column, container, mouse_area, responsive, row, scrollable, stack, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Subscription, Task};
 
 use crate::settings::SettingsMsg;
@@ -311,9 +311,16 @@ const R_KEY: f32 = 5.0;
 
 /// One keycap (Swift `Kbd`): 11pt secondary text, a subtle fill, a hairline edge, 20pt square.
 fn keycap(t: Tokens, cap: &str) -> Element<'static, Message> {
-    container(text(cap.to_string()).size(11.0).color(t.label_2))
-        .center(Length::Fixed(20.0))
-        .padding([0, if cap.chars().count() > 1 { 3 } else { 5 }])
+    // Swift Kbd: ⎋ reads as a refresh arrow, so the cap says "esc"; 11 pt medium.
+    let label = if cap == "\u{238B}" { "esc".to_string() } else { cap.to_string() };
+    // `minWidth: 20`: one-character caps stay 20 square, longer ones ("esc") grow with their text and 5 pt sides.
+    let width = if label.chars().count() > 1 { Length::Shrink } else { Length::Fixed(20.0) };
+    container(text(label).size(11.0).font(fb_ui::fonts::inter(iced::font::Weight::Medium)).color(t.label_2))
+        .width(width)
+        .height(Length::Fixed(20.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding([0, 5])
         .style(move |_| iced::widget::container::Style {
             background: Some(Background::Color(iced::Color { a: 0.06, ..t.label })),
             border: Border { color: iced::Color { a: 0.14, ..t.label }, width: 1.0, radius: R_KEY.into() },
@@ -354,17 +361,41 @@ pub fn split_caps(keys: &str) -> Vec<String> {
     out
 }
 
+/// Swift `ShortcutsPanelView.group`: the menu name in caption semibold (10 pt), then a row per shortcut: callout
+/// title, keycaps at the trailing edge, rows 4 apart.
 fn group_view<'a>(t: Tokens, name: &'a str, rows: &[&'a Shortcut], mac: bool) -> Element<'a, Message> {
-    let mut col = column![container(CAPTION.text(name).color(t.label_2)).padding([0, 4])].spacing(4);
+    let mut col = column![text(name).size(10).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2)].spacing(4);
     for s in rows {
         let keys: Element<'_, Message> = if mac { caps_view(t, &keys_text(s, mac)) } else { CALLOUT.text(keys_text(s, mac)).color(t.label_2).into() };
         col = col.push(
-            row![BODY.text(s.label).color(t.label), Space::new().width(Length::Fill), keys]
-                .align_y(Alignment::Center)
-                .padding([2, 4]),
+            row![CALLOUT.text(s.label).font(fb_ui::fonts::inter(iced::font::Weight::Normal)).color(t.label).wrapping(text::Wrapping::None), Space::new().width(Length::Fill), keys]
+                .spacing(12)
+                .height(Length::Fixed(20.0))
+                .align_y(Alignment::Center),
         );
     }
     col.into()
+}
+
+/// Swift `ShortcutList.columns`: each group to the shortest column so far, counting rows + 2 for its header.
+fn columns(gs: &[(&'static str, Vec<&'static Shortcut>)]) -> [Vec<usize>; 2] {
+    let (mut cols, mut h) = ([Vec::new(), Vec::new()], [0usize; 2]);
+    for (i, (_, rows)) in gs.iter().enumerate() {
+        let c = if h[1] < h[0] { 1 } else { 0 };
+        cols[c].push(i);
+        h[c] += rows.len() + 2;
+    }
+    cols
+}
+
+/// Height of the panel's content at full size: the header, then the taller column.
+fn content_height(gs: &[(&'static str, Vec<&'static Shortcut>)]) -> f32 {
+    let col_h = |ix: &Vec<usize>| -> f32 {
+        let groups: f32 = ix.iter().map(|&i| 13.0 + 4.0 + gs[i].1.len() as f32 * 24.0).sum();
+        groups + 16.0 * (ix.len().saturating_sub(1)) as f32
+    };
+    let cols = columns(gs);
+    20.0 + 14.0 + col_h(&cols[0]).max(col_h(&cols[1]))
 }
 
 /// The panel, or nothing when closed.
@@ -378,32 +409,27 @@ pub fn layer(app: &App) -> Element<'_, Message> {
 fn panel(app: &App, width: f32, height: f32) -> Element<'_, Message> {
     let t = app.tokens();
     let mac = cfg!(target_os = "macos");
-    // Two columns, the groups split where the row counts come closest to even.
+    // Swift `ShortcutsPanelView`: 680 wide, padding 20, the title and the two columns 14 apart, columns 28 apart and
+    // groups 16 apart. As tall as its rows, at most the window less 64; centred on the whole window. The search field
+    // shows only past 30 rows, and there is no close button: Esc or a click outside closes it.
     let gs = groups();
-    let total: usize = gs.iter().map(|(_, r)| r.len() + 1).sum();
-    let (mut left, mut right) = (column![].spacing(SP_16).width(Length::Fill), column![].spacing(SP_16).width(Length::Fill));
-    let mut seen = 0;
-    for (name, rows) in &gs {
-        let el = group_view(t, name, rows, mac);
-        if seen * 2 < total {
-            left = left.push(el);
-        } else {
-            right = right.push(el);
+    let cols = columns(&gs);
+    let column_of = |ix: &Vec<usize>| {
+        let mut c = column![].spacing(SP_16).width(Length::Fill);
+        for &i in ix {
+            c = c.push(group_view(t, gs[i].0, &gs[i].1, mac));
         }
-        seen += rows.len() + 1;
-    }
-    let close = button(container(icon(Icon::X, SIZE_INLINE, t.label_2)).center(Length::Fixed(28.0))).padding(0).on_press(Message::Shortcut(Action::Dismiss)).style(move |_, st| button::Style {
-        background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
-        border: Border { radius: 14.0.into(), ..Default::default() },
-        ..Default::default()
-    });
-    let header = row![HEADLINE.text("Keyboard Shortcuts").color(t.label), Space::new().width(Length::Fill), close].align_y(Alignment::Center);
-    let groups: Element<'_, Message> = if width < 600.0 { column![left, right].spacing(SP_16).into() } else { row![left, right].spacing(SP_24).into() };
-    let card = container(column![header, scrollable(groups).height(Length::Fill)].spacing(SP_12)).padding(SP_16)
-        .width(Length::Fill).max_width(PANEL_W).height(Length::Fixed((height - TOPROW_H - 24.0).max(1.0)))
+        c
+    };
+    let (left, right) = (column_of(&cols[0]), column_of(&cols[1]));
+    let header = row![TITLE_3.text("Keyboard Shortcuts").size(15.0).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label), Space::new().width(Length::Fill)].align_y(Alignment::Center);
+    let groups: Element<'_, Message> = if width < 600.0 { column![left, right].spacing(SP_16).into() } else { row![left, right].spacing(28.0).into() };
+    let h = (content_height(&gs) + 40.0).min((height - 64.0).max(1.0));
+    let card = container(column![header, scrollable(groups).height(Length::Fill)].spacing(14.0)).padding(20.0)
+        .width(Length::Fill).max_width(PANEL_W).height(Length::Fixed(h))
         .style(style::float_e2(t, R_CARD));
     let card = mouse_area(card).on_press(Message::Noop);
-    let scrim = mouse_area(container(Space::new()).width(Length::Fill).height(Length::Fill).style(style::fill(iced::Color { a: 0.18, ..iced::Color::BLACK }, 0.0))).on_press(Message::Shortcut(Action::Dismiss));
-    let placed = container(card).width(Length::Fill).height(Length::Fill).align_x(Alignment::Center).padding(iced::Padding { top: TOPROW_H + 24.0, ..iced::Padding::ZERO });
-    stack![scrim, placed].into()
+    let outside = mouse_area(container(Space::new()).width(Length::Fill).height(Length::Fill)).on_press(Message::Shortcut(Action::Dismiss));
+    let placed = container(card).width(Length::Fill).height(Length::Fill).align_x(Alignment::Center).align_y(Alignment::Center);
+    stack![outside, placed].into()
 }

@@ -142,7 +142,9 @@ fn the_panel_lists_every_row() {
         let keys = shortcuts::keys_text(row, mac);
         let caps = if mac && !keys.contains('…') { shortcuts::split_caps(&keys) } else { vec![keys.clone()] };
         for cap in caps.iter().filter(|c| c.as_str() != "–") {
-            assert!(s.find(cap.as_str()).is_ok(), "key {cap} of {}", row.label);
+            // The ⎋ cap says "esc", as the Swift `Kbd` draws it (Kbd.swift:21).
+            let cap = if cap == "\u{238B}" { "esc" } else { cap.as_str() };
+            assert!(s.find(cap).is_ok(), "key {cap} of {}", row.label);
         }
     }
 }
