@@ -1,8 +1,7 @@
 //! Overview screen (plus the Needs you and Search stubs, which share this file's `view`).
 //!
-//! Port of the Swift `OverviewView`: a large greeting, a one-line summary, then cards grouped by state (blocked
-//! first with an accent action, then working). Done and idle tabs fold into one gray row ("5 done · 3 resting") with
-//! mini status dots; the row expands to cards on click. A second grouping shows one section per workspace.
+//! Port of the Swift `OverviewView`: a large greeting, a one-line summary and the Group by pop-up, then cards
+//! grouped by state (Needs you, Working, Done and resting). A second grouping shows one section per workspace.
 //!
 //! The clock is injectable (`OverviewState::clock`) so snapshots and tests are deterministic.
 
@@ -17,7 +16,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Minimum card width. Columns = how many fit in the content column (at most `COLUMN_MAX` wide).
+/// Minimum card width. Columns = how many fit in the content column (at most `COLUMN_MAX` wide, its 36 pt side
+/// padding inside, as Swift pads before `screenColumn`).
 pub const CARD_MIN_W: f32 = 260.0;
 pub const GRID_GAP: f32 = 10.0;
 pub const COLUMN_MAX: f32 = 960.0;
@@ -57,6 +57,19 @@ pub enum GroupBy {
     #[default]
     Status,
     Workspace,
+}
+
+impl GroupBy {
+    const ALL: [GroupBy; 2] = [GroupBy::Status, GroupBy::Workspace];
+}
+
+impl std::fmt::Display for GroupBy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            GroupBy::Status => "Status",
+            GroupBy::Workspace => "Workspace",
+        })
+    }
 }
 
 /// The last thing the agent said or asked, and when. A card shows only the when, as its age.
@@ -134,7 +147,7 @@ pub fn groups(workspaces: &[Workspace]) -> Groups<'_> {
 
 /// Columns for a content area `width` wide: as many `CARD_MIN_W` cards as fit, at least one.
 pub fn columns_for(width: f32) -> usize {
-    let w = (width - 2.0 * SIDE_PAD).clamp(0.0, COLUMN_MAX);
+    let w = (width.min(COLUMN_MAX) - 2.0 * SIDE_PAD).max(0.0);
     (((w + GRID_GAP) / (CARD_MIN_W + GRID_GAP)).floor() as usize).max(1)
 }
 
@@ -211,24 +224,23 @@ fn with_alpha(c: Color, a: f32) -> Color {
     Color { a, ..c }
 }
 
+/// Swift Monogram (StatusViews.swift:98-109): caption2 semibold, primary 0.7 on primary 0.1, 22 pt, Radius.control.
 fn monogram_chip<'a>(t: Tokens, label: &str) -> Element<'a, Message> {
-    container(text(monogram(label)).size(8.5).font(HEADLINE.font()).color(t.label_2))
-        .center_x(Length::Fixed(18.0))
-        .center_y(Length::Fixed(16.0))
-        .style(crate::style::fill(t.fill_2, R_CHIP))
+    container(text(monogram(label)).size(10).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(with_alpha(t.label, 0.7)))
+        .center(Length::Fixed(22.0))
+        .style(crate::style::fill(with_alpha(t.label, 0.1), 6.0))
         .into()
 }
 
 fn card<'a>(app: &App, e: Entry<'a>, clock: Clock) -> Element<'a, Message> {
     let t = app.tokens();
     let st = e.tab.status;
+    // The age at the name's trailing edge is the iced app's own (the Swift card has none); tests keep it.
     let pv = preview_for(app, e.tab);
     let age = pv.timestamp.map(|ts| age_label(clock.now, ts)).unwrap_or_default();
-
-    let mut title_row = row![container(HEADLINE.text(agent_name(e.tab)).color(t.label).wrapping(text::Wrapping::None)).clip(true).width(Length::Fill)]
+    let title_row = row![container(HEADLINE.text(agent_name(e.tab)).color(t.label).wrapping(text::Wrapping::None)).clip(true).width(Length::Fill), CAPTION.text(age).color(t.label_3)]
         .spacing(SP_8)
         .align_y(Alignment::Center);
-    title_row = title_row.push(CAPTION.text(age).color(t.label_3));
 
     // The card subtitle is plain text (workspace · tab), like Swift's `Text("\(ws.label) · \(t.label)")`;
     // the workspace monogram belongs to the workspace section header only.
@@ -236,7 +248,7 @@ fn card<'a>(app: &App, e: Entry<'a>, clock: Clock) -> Element<'a, Message> {
         .clip(true)
         .width(Length::Fill);
 
-    // Two lines like Swift's card (`Screens.swift:207-214`), plus the age at the trailing edge of the name.
+    // Two lines, as Swift's card (`Screens.swift:216-221`): the name and the place, nothing else.
     let info = column![title_row, sub].spacing(2);
 
     let body = row![container(status::symbol_sized(status_kind(st), &t, 16.0, 0.0)), info].spacing(10.0).align_y(Alignment::Center);
@@ -258,14 +270,15 @@ fn card<'a>(app: &App, e: Entry<'a>, clock: Clock) -> Element<'a, Message> {
         .into()
 }
 
-/// Card fill and hairline per state (DESIGN.md: cards inside the content take a plain `fill`, not a white box).
-/// Needs you: a light orange tint (about 8%) with an orange hairline. Working: `fill_2`. Done and resting: `fill_1`.
+/// Card fill and hairline (Swift Screens.swift:225-226): one fill for every state, the control background (white in
+/// light mode, a step above the window in dark), and a primary 0.09 hairline, orange at 0.5 for Needs you.
 pub fn card_colors(t: &Tokens, st: AgentStatus, hover: bool) -> (Color, Color) {
-    match st {
-        AgentStatus::Blocked => (with_alpha(t.blocked, if hover { 0.12 } else { 0.08 }), with_alpha(t.blocked, 0.5)),
-        AgentStatus::Working => (if hover { t.fill_3 } else { t.fill_2 }, t.sep),
-        _ => (if hover { t.fill_2 } else { t.fill_1 }, t.sep),
-    }
+    let fill = match (t.mode.is_dark(), hover) {
+        (false, false) => t.bg,
+        (false, true) | (true, false) => t.fill_1,
+        (true, true) => t.fill_2,
+    };
+    (fill, if st == AgentStatus::Blocked { with_alpha(t.blocked, 0.5) } else { t.sep })
 }
 
 fn grid<'a>(app: &App, entries: &[Entry<'a>], cols: usize, clock: Clock) -> Element<'a, Message> {
@@ -291,31 +304,38 @@ fn section<'a>(app: &App, title: &'a str, entries: &[Entry<'a>], cols: usize, cl
     Some(column![HEADLINE.text(title).color(t.label), grid(app, entries, cols, clock)].spacing(SP_8).into())
 }
 
+/// "Group by" with a pop-up button (Swift Screens.swift:155-159: a `.menu` Picker, fixed size): the label, then the
+/// chosen value and an up-down chevron in a quiet rounded field.
 fn group_toggle<'a>(app: &App) -> Element<'a, Message> {
+    use iced::widget::{pick_list, stack};
     let t = app.tokens();
     let cur = app.state.overview.group;
-    let seg = move |label: &'static str, g: GroupBy| {
-        let on = cur == g;
-        button(CALLOUT.text(label).color(if on { t.label } else { t.label_2 }))
-            .padding([3, 10])
-            .on_press(Message::Overview(OverviewMsg::SetGroup(g)))
-            .style(move |_, _| button::Style {
-                background: Some(Background::Color(if on { t.bg } else { Color::TRANSPARENT })),
-                border: Border { color: if on { t.sep } else { Color::TRANSPARENT }, width: 1.0, radius: R_ROW.into() },
-                shadow: if on { shadow_e1(&t) } else { Default::default() },
-                text_color: t.label,
-                ..Default::default()
-            })
-    };
-    row![
-        CALLOUT.text("Group by").color(t.label_2),
-        container(row![seg("Status", GroupBy::Status), seg("Workspace", GroupBy::Workspace)].spacing(2).align_y(Alignment::Center))
-            .padding(2)
-            .style(crate::style::fill(t.fill_1, R_ROW + 2.0)),
-    ]
-    .spacing(SP_8)
-    .align_y(Alignment::Center)
-    .into()
+    let field = pick_list(GroupBy::ALL, Some(cur), |g| Message::Overview(OverviewMsg::SetGroup(g)))
+        .handle(pick_list::Handle::None)
+        .text_size(BODY.size)
+        .font(BODY.font())
+        .padding(iced::Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 28.0 })
+        .width(Length::Fixed(115.0))
+        .style(move |_, st| pick_list::Style {
+            text_color: t.label,
+            placeholder_color: t.label_2,
+            handle_color: t.label,
+            background: Background::Color(if matches!(st, pick_list::Status::Hovered | pick_list::Status::Opened { .. }) { t.fill_3 } else { t.fill_2 }),
+            border: Border { radius: R_ROW.into(), ..Default::default() },
+        })
+        .menu_style(move |_| iced::overlay::menu::Style {
+            background: Background::Color(t.bg),
+            border: Border { color: t.sep, width: 1.0, radius: R_ROW.into() },
+            text_color: t.label,
+            selected_text_color: t.on_accent,
+            selected_background: Background::Color(t.accent),
+            shadow: shadow_e2(&t),
+        });
+    let chevron = container(fb_ui::icons::icon(fb_ui::icons::Icon::ChevronsUpDown, 12.0, t.label)).height(Length::Fill).width(Length::Fixed(115.0)).align_x(Alignment::End).align_y(Alignment::Center).padding(iced::Padding { right: 8.0, ..iced::Padding::ZERO });
+    row![BODY.text("Group by").color(t.label), stack![field, chevron]]
+        .spacing(SP_8)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 fn workspace_sections<'a>(app: &'a App, cols: usize, clock: Clock) -> Element<'a, Message> {
@@ -401,7 +421,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             GroupBy::Workspace => body = body.push(workspace_sections(app, cols, clock)),
         }
 
-        let col = column![head, body].spacing(SP_24).max_width(COLUMN_MAX);
+        let col = column![head, body].spacing(SP_24).max_width(COLUMN_MAX - 2.0 * SIDE_PAD);
         let centered = container(col).padding(iced::Padding { top: 36.0, right: SIDE_PAD, bottom: 36.0, left: SIDE_PAD }).center_x(Length::Fill);
         scrollable(centered).height(Length::Fill).into()
     })
@@ -414,13 +434,14 @@ mod card_tests {
 
     #[test]
     fn card_fills_follow_the_design() {
+        // Swift Screens.swift:225-226: one fill for every state, an orange 0.5 hairline only for Needs you.
         for t in [Tokens::LIGHT, Tokens::DARK] {
             let (bg, edge) = card_colors(&t, AgentStatus::Blocked, false);
-            assert!((bg.a - 0.08).abs() < 1e-6 && bg.r == t.blocked.r, "needs-you is an 8% orange tint");
             assert!((edge.a - 0.5).abs() < 1e-6 && edge.g == t.blocked.g, "orange hairline");
-            assert_eq!(card_colors(&t, AgentStatus::Working, false), (t.fill_2, t.sep));
-            assert_eq!(card_colors(&t, AgentStatus::Done, false).0, t.fill_1);
-            assert_ne!(card_colors(&t, AgentStatus::Working, true).0, t.fill_2, "hover is stronger");
+            assert_eq!(card_colors(&t, AgentStatus::Working, false), (bg, t.sep));
+            assert_eq!(card_colors(&t, AgentStatus::Done, false).0, bg);
+            assert_ne!(card_colors(&t, AgentStatus::Working, true).0, bg, "hover is stronger");
         }
+        assert_eq!(card_colors(&Tokens::LIGHT, AgentStatus::Idle, false).0, Tokens::LIGHT.bg, "white, as controlBackgroundColor");
     }
 }

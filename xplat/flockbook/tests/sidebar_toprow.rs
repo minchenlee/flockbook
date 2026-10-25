@@ -216,7 +216,7 @@ fn visible(app: &App, tab_id: &str) -> bool {
         if t.id == tab_id {
             return x >= ts.offset.get() - 0.5 && x + w <= ts.offset.get() + ts.strip_w.get() + 0.5;
         }
-        x += w + 4.0;
+        x += w + flockbook::toprow::GAP;
     }
     false
 }
@@ -259,7 +259,7 @@ fn wheel_scroll_is_clamped_and_marker_jumps_to_blocked_tab() {
     let mut app = many(Mode::Light, "tab0");
     render(&app);
     let msgs = run(&app, (1000.0, 400.0), |sim| {
-        sim.click("!").expect("blocked edge marker");
+        sim.click(flockbook::toprow::marker_id(Edge::Right)).expect("blocked edge marker");
     });
     let revealed = msgs.iter().any(|m| matches!(m, Message::TopRow(TopRowMsg::RevealBlocked(Edge::Right))));
     assert!(revealed, "marker click should emit RevealBlocked(Right): {msgs:?}");

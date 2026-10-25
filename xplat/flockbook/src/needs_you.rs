@@ -15,7 +15,7 @@
 //! the conversation uses. Every send goes through `actions::PaneActions` (installed only on the live path in
 //! `main.rs`; tests use a recording fake). With a question card shown, Up/Down/Enter belong to the card.
 
-use crate::state::{monogram, Screen};
+use crate::state::Screen;
 use crate::{style, App, Message};
 use fb_ui::icons::{icon, Icon};
 use fb_ui::status;
@@ -264,9 +264,25 @@ fn empty(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn avatar<'a>(t: Tokens, ws: &str, size: f32, badge: f32, selected: bool, ring: bool) -> Element<'a, Message> {
-    let (bg, fg) = if selected { (t.on_accent.scale_alpha(0.22), t.on_accent) } else { (t.fill_3, t.label_2) };
-    let circle = container(text(monogram(ws)).size(size * 0.32).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(fg))
+/// The agent's role symbol, from the last part of its name (Swift `role(for:)`, StatusViews.swift:129-138).
+fn role_icon(agent: &str) -> Icon {
+    match agent.rsplit('-').next().unwrap_or("") {
+        "orch" => Icon::Sparkles,
+        "dev" => Icon::Code,
+        "rev" => Icon::Eye,
+        "res" => Icon::BookOpen,
+        "des" => Icon::PenTool,
+        _ => Icon::CircleUserRound,
+    }
+}
+
+/// The role symbol in a circle with the blocked glyph at its foot (Swift InboxView: list 30 pt, symbol at body size,
+/// white 0.22 when selected else primary 0.08, the glyph on a window-coloured disc; detail 56 pt, symbol at title size,
+/// an orange 2 pt ring, the glyph 18 pt).
+fn avatar<'a>(t: Tokens, agent: &str, size: f32, badge: f32, selected: bool, ring: bool) -> Element<'a, Message> {
+    let (bg, fg) = if selected { (t.on_accent.scale_alpha(0.22), t.on_accent) } else { (t.label.scale_alpha(0.08), t.label) };
+    let glyph = if ring { 24.0 } else { 15.0 };
+    let circle = container(icon(role_icon(agent), glyph, fg))
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
         .center(Length::Fixed(size))
@@ -275,14 +291,21 @@ fn avatar<'a>(t: Tokens, ws: &str, size: f32, badge: f32, selected: bool, ring: 
             border: Border { color: if ring { t.blocked } else { iced::Color::TRANSPARENT }, width: if ring { 2.0 } else { 0.0 }, radius: (size / 2.0).into() },
             ..Default::default()
         });
-    let pad = 1.0;
-    let b = container(status::symbol_sized(StatusKind::Blocked, &t, badge, 0.0)).padding(pad).style(style::fill(if selected { t.accent } else { t.bg }, 100.0));
+    let b: Element<'a, Message> = if ring {
+        status::symbol_sized(StatusKind::Blocked, &t, badge, 0.0)
+    } else {
+        container(status::symbol_sized(StatusKind::Blocked, &t, badge, 0.0)).padding(1).style(style::fill(if selected { t.accent } else { t.bg }, 100.0)).into()
+    };
     container(stack![circle, container(b).align_right(Length::Fill).align_bottom(Length::Fill)]).width(Length::Fixed(size + 4.0)).height(Length::Fixed(size + 4.0)).into()
 }
 
 fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, Message> {
     let t = app.bar_tokens();
-    let head = row![TITLE_3.text("Needs you").color(t.label), TITLE_3.text(list.len().to_string()).color(t.label_3)].spacing(8).padding(iced::Padding { top: 44.0, right: 16.0, bottom: 8.0, left: 16.0 });
+    // title3 semibold (15 pt), the count at body size, tertiary (Screens.swift:31-35).
+    let head = row![text("Needs you").size(15).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label), BODY.text(list.len().to_string()).color(t.label_3)]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .padding(iced::Padding { top: 44.0, right: 16.0, bottom: 8.0, left: 16.0 });
     let mut col = column![head];
     for (i, it) in list.iter().enumerate() {
         let sel = i == cur;
@@ -293,7 +316,7 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
         ]
         .spacing(1)
         .width(Length::Fill);
-        let content = row![avatar(t, &it.ws.label, 30.0, 13.0, sel, false), texts].spacing(10).align_y(Alignment::Center);
+        let content = row![avatar(t, &it.agent_name(), 30.0, 13.0, sel, false), texts].spacing(10).align_y(Alignment::Center);
         col = col.push(
             container(
                 button(content)
@@ -312,11 +335,12 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
     // Working tabs: quiet rows, one click opens the conversation.
     let working: Vec<(&Workspace, &Tab)> = app.state.workspaces.iter().flat_map(|w| w.tabs.iter().filter(|x| x.status == AgentStatus::Working).map(move |x| (w, x))).collect();
     if !working.is_empty() {
-        col = col.push(container(CAPTION.text("WORKING \u{b7} NO ACTION NEEDED").color(t.label_3)).padding(iced::Padding { top: 18.0, right: 16.0, bottom: 4.0, left: 16.0 }));
+        // caption2 semibold, tertiary (Screens.swift:60).
+        col = col.push(container(text("WORKING \u{b7} NO ACTION NEEDED").size(10).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_3)).padding(iced::Padding { top: 18.0, right: 16.0, bottom: 4.0, left: 16.0 }));
         for (ws, tab) in working {
             let name = Item { ws, tab }.agent_name();
             col = col.push(
-                button(row![status::symbol(StatusKind::Working, &t), column![BODY.text(name).size(12.0).color(t.label), CAPTION.text(tab.label.clone()).color(t.label_2)]].spacing(10).align_y(Alignment::Center))
+                button(row![status::symbol_sized(StatusKind::Working, &t, 14.0, app.state.toprow.spin), column![BODY.text(name).size(12.0).color(t.label), CAPTION.text(tab.label.clone()).color(t.label_2)]].spacing(10).align_y(Alignment::Center))
                     .padding([4, 16])
                     .width(Length::Fill)
                     .on_press(Message::SelectTab { workspace: ws.id.clone(), tab: tab.id.clone() })
@@ -328,7 +352,8 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
     if resting > 0 {
         col = col.push(
             container(
-                container(row![status::symbol(StatusKind::Done, &t), BODY.text(format!("{resting} agents resting")).color(t.label_2)].spacing(8).align_y(Alignment::Center))
+                // Callout for the glyph and the text (Screens.swift:76-80).
+                container(row![status::symbol_sized(StatusKind::Done, &t, 13.0, 0.0), BODY.text(format!("{resting} agents resting")).size(12.0).color(t.label_2)].spacing(8).align_y(Alignment::Center))
                     .padding([10, 12])
                     .width(Length::Fill)
                     .style(style::fill(t.fill_1, R_CARD)),
@@ -342,15 +367,16 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
 fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
     let t = app.tokens();
     let head = row![
-        avatar(t, &it.ws.label, 56.0, 18.0, false, true),
+        avatar(t, &it.agent_name(), 56.0, 18.0, false, true),
         column![TITLE.text(it.agent_name()).color(t.label), BODY.text(format!("{} \u{b7} {} \u{b7} Needs you", it.ws.label, it.tab.label)).color(t.label_2)].spacing(3),
     ]
     .spacing(14)
     .align_y(Alignment::Center);
     let open = Message::SelectTab { workspace: it.ws.id.clone(), tab: it.tab.id.clone() };
+    // The card alone when there is one; Open tab only with the fallback text (Screens.swift:120-129).
     let body: Element<Message> = match crate::cards::detail(app) {
-        Some(card) => column![container(card).max_width(CARD_MAX_W), row![plain_button(t, "Open tab", None, Some(open), false)]].spacing(18).into(),
-        None => column![BODY.text("The request text is not available from the session log. Open the tab to see it.").color(t.label_2), plain_button(t, "Open tab", None, Some(open), false)].spacing(18).into(),
+        Some(card) => container(card).max_width(CARD_MAX_W).into(),
+        None => column![BODY.text("The request text is not available from the session log. Open the tab to see it.").color(t.label_2), row![prominent_button(t, "Open tab", open)]].spacing(18).into(),
     };
     let col = column![head, body].spacing(18);
     // At most 960 wide and centred in the detail area, like the Swift `screenColumn`.
@@ -358,22 +384,16 @@ fn detail<'a>(app: &'a App, it: Item<'a>) -> Element<'a, Message> {
     scrollable(container(column).width(Length::Fill).center_x(Length::Fill)).height(Length::Fill).width(Length::Fill).into()
 }
 
-fn plain_button<'a>(t: Tokens, label: &'a str, ic: Option<Icon>, on: Option<Message>, strong: bool) -> Element<'a, Message> {
-    let off = on.is_none();
-    let fg = if off { t.label_3 } else { t.label };
-    let mut r = row![].spacing(8).align_y(Alignment::Center);
-    if let Some(i) = ic {
-        r = r.push(icon(i, 15.0, fg));
-    }
-    r = r.push(if strong { HEADLINE.text(label) } else { BODY.text(label) }.size(14).color(fg));
-    let mut b = button(r).padding([6, 14]).style(move |_, status| {
-        let bg = if matches!(status, button::Status::Hovered) { t.fill_3 } else { t.fill_2 };
-        button::Style { background: Some(Background::Color(bg)), text_color: fg, border: Border { radius: 8.0.into(), ..Default::default() }, ..Default::default() }
-    });
-    if let Some(m) = on {
-        b = b.on_press(m);
-    }
-    b.into()
+/// A `.borderedProminent` push button at the regular size: body text, white on the accent, 24 pt tall.
+fn prominent_button<'a>(t: Tokens, label: &'a str, on: Message) -> Element<'a, Message> {
+    button(BODY.text(label).color(t.on_accent))
+        .padding(iced::Padding { top: 3.5, bottom: 3.5, left: 14.0, right: 14.0 })
+        .on_press(on)
+        .style(move |_, status| {
+            let bg = if matches!(status, button::Status::Pressed) { iced::Color { a: 0.85, ..t.accent } } else { t.accent };
+            button::Style { background: Some(Background::Color(bg)), text_color: t.on_accent, border: Border { radius: R_ROW.into(), ..Default::default() }, ..Default::default() }
+        })
+        .into()
 }
 
 #[cfg(test)]

@@ -58,13 +58,22 @@ fn footer(app: &App) -> Element<'_, Message> {
     ]
     .spacing(SP_8)
     .align_y(Alignment::Center);
-    let b = row_button(t, app.state.settings.open, content.into(), Message::Settings(crate::settings::SettingsMsg::Toggle), SIDEBAR_ROW_H + 4.0);
+    let b = row_button(t, app.state.settings.open, content.into(), Message::Settings(crate::settings::SettingsMsg::Toggle), ROW_H);
     let b = iced::widget::tooltip(b, container(CALLOUT.text(tip).color(t.label)).padding([5, 9]).style(style::float_e2(app.tokens(), R_ROW)), iced::widget::tooltip::Position::Top).gap(6);
-    container(b).padding([SP_8, 0.0]).into()
+    // Its centre 36 pt above the window's foot, as the Mac's pinned list puts it.
+    container(b).padding(iced::Padding { top: SP_8, bottom: 21.0, ..iced::Padding::ZERO }).into()
 }
 
-fn row_button<'a>(t: Tokens, selected: bool, content: Element<'a, Message>, on_press: Message, height: f32) -> Element<'a, Message> {
-    button(container(content).height(Length::Fill).align_y(Alignment::Center).padding([0, 8]))
+/// Row pitch of the Mac's sidebar list: 30 pt rows (the selection fill), 2 pt apart.
+pub const ROW_H: f32 = 30.0;
+pub const ROW_GAP: f32 = 2.0;
+/// The sidebar's padding: rows run from 18 pt off the window's left edge to 10 pt before the sidebar's end (the Mac's
+/// panel sits 8 pt in from the window and its list insets rows by 10 more).
+pub const PAD_LEFT: f32 = 18.0;
+pub const PAD_RIGHT: f32 = 10.0;
+
+pub fn row_button<'a>(t: Tokens, selected: bool, content: Element<'a, Message>, on_press: Message, height: f32) -> Element<'a, Message> {
+    button(container(content).height(Length::Fill).align_y(Alignment::Center).padding([0, 6]))
         .on_press(on_press)
         .width(Length::Fill)
         .height(Length::Fixed(height))
@@ -92,13 +101,16 @@ fn nav_row<'a>(app: &App, ic: Icon, label: &'a str, screen: Option<Screen>, badg
     if badge > 0 {
         r = r.push(count_badge(t, badge));
     }
-    row_button(t, selected, r.into(), msg, SIDEBAR_ROW_H + 4.0)
+    row_button(t, selected, r.into(), msg, ROW_H)
 }
 
-/// The orange blocked badge with a count.
+/// The orange blocked badge with a count (Swift BlockedBadge, StatusViews.swift:87-95: caption semibold, white,
+/// 6 pt sides, at least 18 x 18, a capsule).
 pub fn count_badge<'a, M: 'a>(t: Tokens, n: usize) -> Element<'a, M> {
-    container(CAPTION.text(n.to_string()).color(t.on_accent).font(fb_ui::fonts::inter(iced::font::Weight::Bold)))
-        .padding([1, 7])
+    container(text(n.to_string()).size(10).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.on_accent))
+        .padding([0, 6])
+        .height(Length::Fixed(18.0))
+        .align_y(Alignment::Center)
         .style(style::fill(t.blocked, 100.0))
         .into()
 }
@@ -160,7 +172,8 @@ fn status_column<'a>(t: Tokens, spin: f32, tabs: &[herdr_core::Tab], slots: usiz
         r = r.push(status::symbol_sized(status_kind(tab.status), &t, STATUS_GLYPH, phase));
     }
     if more > 0 {
-        r = r.push(container(CAPTION.text(format!("+{more}")).color(t.label_3)).width(Length::Fixed(status_column_width(2))).align_x(Alignment::End));
+        // caption2 medium (10 pt), secondary (SidebarView.swift:213).
+        r = r.push(container(text(format!("+{more}")).size(10).font(fb_ui::fonts::inter(iced::font::Weight::Medium)).color(t.label_2)).width(Length::Fixed(status_column_width(2))).align_x(Alignment::End));
     }
     r.width(Length::Fixed(status_column_width(slots))).into()
 }
@@ -176,12 +189,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
         nav_row(app, Icon::LayoutGrid, "Overview", Some(Screen::Overview), 0, Message::Navigate(Screen::Overview)),
         nav_row(app, Icon::Search, "Search", Some(Screen::Search), 0, Message::Search(crate::search::SearchMsg::Open)),
     ]
-    .spacing(2);
+    .spacing(ROW_GAP);
 
-    // "Workspaces" subheadline/semibold (Swift SidebarView.swift:127) with the folder.badge.plus button
-    // (SidebarView.swift:132); the closest Lucide pair is folder + plus, the plus reading as the badge.
+    // "Workspaces" subheadline/semibold (Swift SidebarView.swift:127; subheadline is 11 pt) with the folder.badge.plus
+    // button (SidebarView.swift:132); the closest Lucide pair is folder + plus, the plus reading as the badge. A row of
+    // the list on the Mac: the rows' edges, 28 pt tall.
     let header = row![
-        BODY.text("Workspaces").font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2),
+        text("Workspaces").size(11).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2),
         Space::new().width(Length::Fill),
         button(row![icon(Icon::Folder, SIZE_DEFAULT, t.label_2), icon(Icon::Plus, 11.0, t.label_2)].spacing(1).align_y(Alignment::Center))
             .padding(2)
@@ -189,28 +203,31 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .on_press(Message::Sidebar(SidebarMsg::AddWorkspace)),
     ]
     .align_y(Alignment::Center)
-    .padding([6, 8]);
+    .height(Length::Fixed(28.0))
+    .padding(iced::Padding { left: 6.0, right: 4.0, ..iced::Padding::ZERO });
 
     let slots = status_slots(&s.workspaces);
-    let mut list = column![].spacing(2);
+    let mut list = column![].spacing(ROW_GAP);
     for ws in &s.workspaces {
         let selected = s.screen == Screen::Conversation && s.selected_workspace.as_deref() == Some(ws.id.as_str());
         let c = State::counts(ws);
         let quiet = c.blocked == 0 && c.working == 0;
         let name_color = if quiet && !selected { t.label_2 } else { t.label };
-        let name = if c.blocked > 0 { HEADLINE.text(ws.label.clone()) } else { BODY.text(ws.label.clone()) };
+        // One weight for every name; quiet workspaces are secondary (SidebarView.swift:260-261).
+        let name = BODY.text(ws.label.clone()).wrapping(text::Wrapping::None);
         let content = row![monogram_chip(t, &ws.label, selected), name.color(name_color), Space::new().width(Length::Fill), status_column(t, s.toprow.spin, &ws.tabs, slots)]
             .spacing(SP_8)
             .align_y(Alignment::Center);
         let tip = format!("{} \u{00B7} {} tab{}{}{}", ws.label, ws.tabs.len(), if ws.tabs.len() == 1 { "" } else { "s" }, if c.working > 0 { format!(" \u{00B7} {} working", c.working) } else { String::new() }, if c.blocked > 0 { format!(" \u{00B7} {} need you", c.blocked) } else { String::new() });
-        let rowb = mouse_area(row_button(t, selected, content.into(), Message::SelectWorkspace(ws.id.clone()), WORKSPACE_ROW_H))
+        let rowb = mouse_area(row_button(t, selected, content.into(), Message::SelectWorkspace(ws.id.clone()), ROW_H))
             .on_right_press(Message::Workspace(crate::workspace_actions::WorkspaceMsg::Menu(crate::workspace_actions::Target::Workspace(ws.id.clone()))));
         let rowb = crate::toprow::drag_target(rowb.into(), crate::workspace_actions::Target::Workspace(ws.id.clone()));
         list = list.push(iced::widget::tooltip(rowb, container(CALLOUT.text(tip).color(t.label)).padding([5, 9]).style(style::float_e2(t, R_ROW)), iced::widget::tooltip::Position::Right).gap(6).delay(std::time::Duration::from_millis(600)));
     }
 
-    container(column![crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(52)), nav, Space::new().height(SP_24), header, Space::new().height(SP_4), scrollable(list).height(Length::Fill), footer(app)])
-        .padding([0, 12])
+    // The first row's centre 68 pt down, as under the Mac's toolbar; the header 19 pt after the nav rows.
+    container(column![crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(53)), nav, Space::new().height(19), header, scrollable(list).height(Length::Fill), footer(app)])
+        .padding(iced::Padding { left: PAD_LEFT, right: PAD_RIGHT, ..iced::Padding::ZERO })
         .height(Length::Fill)
         .into()
 }

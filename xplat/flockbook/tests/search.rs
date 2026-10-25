@@ -290,8 +290,9 @@ fn clicking_a_row_opens_it() {
     input(&mut a, "bench");
     let msgs: Vec<Message> = {
         let mut s = sim(&a, 1280.0, 852.0);
-        // First tab row: below the top row (52) and the field block (28 + 40 + 12). The Mac list has no group headers.
-        s.point_at(iced::Point::new(700.0, 52.0 + 28.0 + 52.0 + 20.0));
+        // First tab row: below the top row (52) and the list's top inset (7); rows are 32 tall. The field is in the
+        // toolbar, as on the Mac. The Mac list has no group headers.
+        s.point_at(iced::Point::new(700.0, 52.0 + 7.0 + 16.0));
         s.simulate(iced_test::simulator::click());
         s.into_messages().collect()
     };

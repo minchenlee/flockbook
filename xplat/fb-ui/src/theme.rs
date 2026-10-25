@@ -219,7 +219,7 @@ pub const TOPROW_H: f32 = 52.0;
 pub const TAB_H: f32 = 30.0;
 pub const TAB_RADIUS: f32 = 8.0;
 pub const PANE_LABEL_H: f32 = 28.0;
-pub const SIDEBAR_W: f32 = 248.0;
+pub const SIDEBAR_W: f32 = 258.0;
 
 /// One entry of the type scale.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -18,8 +18,8 @@ mod matcher;
 pub use matcher::{Parts, Role};
 
 use crate::state::status_kind;
-use crate::{App, Message};
-use fb_ui::icons::{icon, Icon, SIZE_DEFAULT};
+use crate::{style, App, Message};
+use fb_ui::icons::{icon, Icon, SIZE_DEFAULT, SIZE_INLINE};
 use fb_ui::selectable::flow::row_id;
 use fb_ui::status;
 use fb_ui::theme::*;
@@ -33,8 +33,10 @@ use std::sync::Arc;
 
 /// Widest the search column gets (the app's screen column: 960 wide, rows inset 8 inside it).
 pub const COLUMN_MAX: f32 = 960.0;
-/// Side inset of a row inside the column.
-const ROW_INSET: f32 = 8.0;
+/// Space between the list and the detail area's edges (Swift `.listStyle(.sidebar)` row inset).
+const LIST_INSET: f32 = 10.0;
+/// Width of the toolbar search field (Swift `.searchable(placement: .toolbar)`).
+pub const FIELD_W: f32 = 250.0;
 /// Gap that separates the tab rows from the message rows (there are no section headers).
 const GROUP_GAP: f32 = 12.0;
 /// Message hits per pane, and in all.
@@ -42,7 +44,8 @@ pub const PER_PANE: usize = 6;
 pub const MAX_MESSAGE_HITS: usize = 40;
 /// Corpora up to this many chars are searched inline; bigger ones on a worker thread.
 pub const INLINE_CHARS: usize = 150_000;
-const TAB_ROW_H: f32 = 40.0;
+/// Swift sidebar-style list row: 32 tall.
+const TAB_ROW_H: f32 = 32.0;
 const MSG_ROW_H: f32 = 58.0;
 
 fn field_id() -> iced::widget::Id {
@@ -495,8 +498,8 @@ fn highlighted<'a>(t: Tokens, p: &Parts, base: TextStyle, color: iced::Color) ->
     rich_text(spans).size(base.size).font(base.font()).wrapping(text::Wrapping::None).into()
 }
 
-fn row_button<'a>(t: Tokens, selected: bool, h: f32, content: Element<'a, Message>, msg: Message) -> Element<'a, Message> {
-    button(container(content).height(Length::Fill).align_y(Alignment::Center).padding([0, 12]))
+fn row_button<'a>(t: Tokens, selected: bool, h: f32, pad: f32, content: Element<'a, Message>, msg: Message) -> Element<'a, Message> {
+    button(container(content).height(Length::Fill).align_y(Alignment::Center).padding([0.0, pad]))
         .on_press(msg)
         .width(Length::Fill)
         .height(Length::Fixed(h))
@@ -514,7 +517,7 @@ fn row_button<'a>(t: Tokens, selected: bool, h: f32, content: Element<'a, Messag
         .into()
 }
 
-fn tab_row<'a>(app: &App, i: usize, h: &TabHit, needle: &[char]) -> Element<'a, Message> {
+fn tab_row<'a>(app: &App, i: usize, h: &TabHit, needle: &[char], pad: f32) -> Element<'a, Message> {
     let t = app.tokens();
     let sel = app.state.search.selected == i;
     let label = matcher::split(&h.tab_label, needle);
@@ -525,10 +528,10 @@ fn tab_row<'a>(app: &App, i: usize, h: &TabHit, needle: &[char]) -> Element<'a, 
     }
     r = r.push(Space::new().width(Length::Fill));
     r = r.push(highlighted(t, &matcher::split(&h.workspace_label, needle), BODY, t.label_2));
-    row_button(t, sel, TAB_ROW_H, r.into(), Message::Search(SearchMsg::Click(i)))
+    row_button(t, sel, TAB_ROW_H, pad, r.into(), Message::Search(SearchMsg::Click(i)))
 }
 
-fn msg_row<'a>(app: &App, i: usize, h: &MsgHit) -> Element<'a, Message> {
+fn msg_row<'a>(app: &App, i: usize, h: &MsgHit, pad: f32) -> Element<'a, Message> {
     let t = app.tokens();
     let sel = app.state.search.selected == i;
     let who = match h.role {
@@ -545,18 +548,20 @@ fn msg_row<'a>(app: &App, i: usize, h: &MsgHit) -> Element<'a, Message> {
     .align_y(Alignment::Center);
     let body = column![head, container(highlighted(t, &h.parts, BODY, t.label_2)).clip(true).width(Length::Fill)].spacing(3);
     let r = row![container(status::symbol(status_kind(h.status), &t)).padding([2, 0]), body.width(Length::Fill)].spacing(SP_8).align_y(Alignment::Center);
-    row_button(t, sel, MSG_ROW_H, r.into(), Message::Search(SearchMsg::Click(i)))
+    row_button(t, sel, MSG_ROW_H, pad, r.into(), Message::Search(SearchMsg::Click(i)))
 }
 
-fn field<'a>(app: &App) -> Element<'a, Message> {
+/// The search field in the toolbar's trailing end, shown on the Search screen (Swift `SearchView`:
+/// `.searchable(text:, placement: .toolbar)`): a capsule as tall as the tab island.
+pub fn field<'a>(app: &App, height: f32) -> Element<'a, Message> {
     let t = app.tokens();
     let q = &app.state.search.query;
     let input = text_input("Search tabs, agents and messages", q)
         .id(field_id())
         .on_input(|s| Message::Search(SearchMsg::Input(s)))
         .on_submit(Message::Search(SearchMsg::Activate))
-        .size(15)
-        .font(READING.font())
+        .size(13)
+        .font(BODY.font())
         .padding(0)
         .style(move |_, _| text_input::Style {
             background: Background::Color(iced::Color::TRANSPARENT),
@@ -568,31 +573,40 @@ fn field<'a>(app: &App) -> Element<'a, Message> {
         });
     let mut r = row![icon(Icon::Search, SIZE_DEFAULT, t.label_2), input].spacing(SP_8).align_y(Alignment::Center);
     if !q.is_empty() {
-        r = r.push(button(icon(Icon::X, SIZE_DEFAULT, t.label_2)).padding(2).style(button::text).on_press(Message::Search(SearchMsg::Clear)));
+        r = r.push(button(icon(Icon::X, SIZE_INLINE, t.label_2)).padding(2).style(button::text).on_press(Message::Search(SearchMsg::Clear)));
     }
-    container(r).padding([0, 14]).height(Length::Fixed(40.0)).align_y(Alignment::Center).width(Length::Fill).style(move |_| container::Style {
-        background: Some(Background::Color(t.fill_2)),
-        border: Border { color: t.sep, width: 1.0, radius: R_MENU.into() },
-        ..Default::default()
-    })
-    .into()
+    container(r)
+        .padding([0, 12])
+        .width(Length::Fixed(FIELD_W))
+        .height(Length::Fixed(height))
+        .align_y(Alignment::Center)
+        .style(style::fill(t.fill_2, height / 2.0))
+        .into()
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    iced::widget::responsive(move |size| view_sized(app, size.width)).into()
+}
+
+/// The list spans the detail area (inset 10); the rows' content sits in the centred 960 column, 8 in from it
+/// (Swift `SearchView`: `listRowInsets(leading: ScreenColumn.margin(area.width) + 8)`).
+fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     let t = app.tokens();
+    let pad = ((width - COLUMN_MAX) / 2.0).max(0.0) + 8.0 - LIST_INSET;
+    let pad = pad.max(8.0);
     let s = &app.state.search;
     let needle = matcher::fold_query(&s.query);
     // One flat list of rows, as the screen's list is: no section headers, only a gap between the two groups.
     let mut list = column![].spacing(0);
     for (i, h) in s.tabs.iter().enumerate() {
-        list = list.push(tab_row(app, i, h, &needle));
+        list = list.push(tab_row(app, i, h, &needle, pad));
     }
     if !s.messages.is_empty() {
         if !s.tabs.is_empty() {
             list = list.push(Space::new().height(GROUP_GAP));
         }
         for (k, h) in s.messages.iter().enumerate() {
-            list = list.push(msg_row(app, s.tabs.len() + k, h));
+            list = list.push(msg_row(app, s.tabs.len() + k, h, pad));
         }
     }
     let body: Element<'_, Message> = if s.is_empty() && !s.searching {
@@ -610,8 +624,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         }
         c.into()
     };
-    let col = column![container(field(app)).padding(iced::Padding { top: 0.0, right: 0.0, bottom: SP_12, left: 0.0 }), body].max_width(COLUMN_MAX);
-    container(container(col).padding(iced::Padding { top: 28.0, right: ROW_INSET, bottom: 16.0, left: ROW_INSET }).center_x(Length::Fill)).width(Length::Fill).height(Length::Fill).into()
+    container(body).padding(iced::Padding { top: 7.0, right: LIST_INSET, bottom: 16.0, left: LIST_INSET }).width(Length::Fill).height(Length::Fill).into()
 }
 
 /// Loads the conversation of every pane into `state.conversations` so message search covers all tabs. The app loads

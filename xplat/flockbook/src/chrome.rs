@@ -138,7 +138,8 @@ pub fn sidebar(app: &App) -> Element<'_, Message> {
     } else {
         // The sidebar's own empty top band is the window's title bar on macOS (`sidebar::view` keeps it 52 pt tall and
         // empty). The toggle rides on that band instead of pushing it down, so the empty part stays a drag area.
-        let band = container(row![container(toggle).padding([6, 12]), Space::new().width(Length::Fill)]).height(Length::Fixed(SIDEBAR_TOP_H));
+        // The toggle sits at the sidebar's trailing end, level with the traffic lights (the Mac's toolbar item there).
+        let band = container(row![Space::new().width(Length::Fill), toggle]).height(Length::Fixed(SIDEBAR_TOP_H)).align_y(Alignment::Center).padding([0, 9]);
         // While Settings shows, the sidebar holds Back and the tabs instead (Swift `SidebarView`: `SettingsSidebar`).
         let list = if app.state.settings.open { crate::settings::sidebar_list(app, SIDEBAR_TOP_H) } else { crate::sidebar::view(app) };
         stack![list, container(band).width(Length::Fill).align_y(Alignment::Start)].into()
