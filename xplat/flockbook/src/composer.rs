@@ -943,17 +943,26 @@ pub fn view(app: &App) -> Element<'_, Message> {
     } else {
         "Attach file (inserts its path)"
     };
-    let plus = iced::widget::tooltip(
-        plus,
-        container(CALLOUT.text(tip).color(t.label))
-            .padding([5, 9])
-            .style(style::float_e2(t, R_ROW)),
-        iced::widget::tooltip::Position::Top,
-    )
-    .gap(6);
-    let folder = button(CAPTION.text("Folder"))
-        .on_press_maybe((!read_only).then_some(Message::Composer(ComposerMsg::AttachFolder)));
-    let mut controls = row![plus, folder].spacing(SP_8).align_y(Alignment::Center);
+    let plus =
+        iced::widget::tooltip(plus, tip_box(t, tip), iced::widget::tooltip::Position::Top).gap(6);
+    // The Swift app's `+` opens one panel that takes files and folders (`canChooseDirectories`, `Composer.swift:260`).
+    // The system dialogs behind rfd pick one kind at a time, so the folder picker is a second quiet icon next to it,
+    // and only while input is on: read-only shows `+`, branch, mic and send, like the Swift app's composer.
+    let mut controls = row![plus].spacing(SP_8).align_y(Alignment::Center);
+    if !read_only {
+        controls = controls.push(
+            iced::widget::tooltip(
+                ghost(
+                    Icon::Folder,
+                    SIZE_DEFAULT,
+                    Message::Composer(ComposerMsg::AttachFolder),
+                ),
+                tip_box(t, "Attach folder (inserts its path)"),
+                iced::widget::tooltip::Position::Top,
+            )
+            .gap(6),
+        );
+    }
     if let Some(b) = branch_for(app) {
         controls = controls.push(
             row![
@@ -1005,17 +1014,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 .color(t.label_3),
         );
         if queue.agent == "claude" {
-            strip = strip.push(
-                button(CAPTION.text(if st.pulling {
-                    "Pulling…"
+            strip = strip.push(quiet(
+                t,
+                if st.pulling {
+                    "Pulling…".into()
                 } else {
-                    "Pull back to edit"
-                }))
-                .on_press_maybe(
-                    (!read_only && queue.pullable && !st.pulling && !st.sending)
-                        .then_some(Message::Composer(ComposerMsg::Pull)),
-                ),
-            );
+                    "Pull back to edit".into()
+                },
+                !read_only && queue.pullable && !st.pulling && !st.sending,
+                Message::Composer(ComposerMsg::Pull),
+            ));
         } else {
             strip = strip.push(
                 CAPTION
@@ -1038,8 +1046,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 iced::widget::image(attachment.preview.clone())
                     .width(48)
                     .height(48),
-                button(CAPTION.text("Remove"))
-                    .on_press(Message::Composer(ComposerMsg::RemoveImage(i)))
+                quiet(
+                    t,
+                    "Remove".into(),
+                    true,
+                    Message::Composer(ComposerMsg::RemoveImage(i))
+                )
             ]);
         }
         body = body.push(
@@ -1056,10 +1068,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
     });
     body = body.push(editor);
     if st.pane.as_ref().is_some_and(|p| st.failed.contains_key(p)) {
-        body = body.push(
-            button(CAPTION.text("Restore previous unsent draft"))
-                .on_press(Message::Composer(ComposerMsg::RecoverFailed)),
-        );
+        body = body.push(quiet(
+            t,
+            "Restore previous unsent draft".into(),
+            true,
+            Message::Composer(ComposerMsg::RecoverFailed),
+        ));
     }
     if let Some(e) = &st.error {
         body = body.push(CAPTION.text(e.clone()).color(t.blocked));
@@ -1075,6 +1089,39 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .width(Length::Fill)
         .align_x(Alignment::Center)
         .into()
+}
+
+/// A tooltip's label box, the same float the rest of the app uses for tips.
+fn tip_box<'a>(t: Tokens, text: &'a str) -> Element<'a, Message> {
+    container(CALLOUT.text(text).color(t.label))
+        .padding([5, 9])
+        .style(style::float_e2(t, R_ROW))
+        .into()
+}
+
+/// A small secondary button inside the card: hairline border, quiet fill only on hover. This is the Swift app's
+/// `.controlSize(.small)` button (`Sources/HerdrDesk/QueuedView.swift:152`), not iced's filled accent default.
+fn quiet<'a>(t: Tokens, label: String, enabled: bool, msg: Message) -> Element<'a, Message> {
+    button(
+        CAPTION
+            .text(label)
+            .color(if enabled { t.label_2 } else { t.label_3 }),
+    )
+    .padding([3, 9])
+    .on_press_maybe(enabled.then_some(msg))
+    .style(move |_, status| button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then(|| Background::Color(t.fill_2)),
+        border: Border {
+            radius: 6.0.into(),
+            width: 1.0,
+            color: t.sep,
+            ..Default::default()
+        },
+        text_color: if enabled { t.label_2 } else { t.label_3 },
+        ..Default::default()
+    })
+    .into()
 }
 
 /// The card surface the icons sit on (the svg renderer drops icon alpha, so colors are blended by hand).
@@ -1579,6 +1626,56 @@ fn clipboard_files(text: &str) -> Option<Vec<PathBuf>> {
         out.push(path);
     }
     (!out.is_empty()).then_some(out)
+}
+
+#[cfg(test)]
+mod visual_state_tests {
+    use super::*;
+    use fb_ui::Mode;
+
+    struct Sender;
+    impl MessageSender for Sender {
+        fn send(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// The queue strip and the failed-send recovery use quiet buttons, not iced's filled accent default. Writes the
+    /// shot to the test temp dir, and to `evidence/` with `FB_WRITE_EVIDENCE=1` like the other snapshots.
+    #[test]
+    fn queue_and_failed_rows_render_quiet_buttons() {
+        let mut app = App::demo(Mode::Light, crate::state::Screen::Conversation);
+        app.state.composer.sender = Some(Arc::new(Sender));
+        let pane = app.state.selected_pane().unwrap().id.clone();
+        app.state.composer.pane = Some(pane.clone());
+        app.state.composer.queues.insert(
+            pane.clone(),
+            QueuedInput {
+                agent: "claude".into(),
+                items: vec![Some("also run the bench on the new decay".into())],
+                pullable: true,
+            },
+        );
+        app.state
+            .composer
+            .failed
+            .insert(pane, vec![("an earlier draft".into(), vec![])]);
+        let img = crate::snapshot::render_app(&app, (1280, 852));
+        let dir = std::env::var_os("CARGO_TARGET_TMPDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        crate::snapshot::write_png(&img, &dir.join("composer-queue-light.png")).unwrap();
+        if std::env::var_os("FB_WRITE_EVIDENCE").is_some() {
+            crate::snapshot::write_png(
+                &img,
+                &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("evidence")
+                    .join("composer-queue-light.png"),
+            )
+            .unwrap();
+        }
+        assert!(crate::snapshot::distinct_colors(&img) > 40);
+    }
 }
 
 #[cfg(test)]

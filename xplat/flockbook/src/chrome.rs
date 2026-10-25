@@ -104,18 +104,37 @@ pub fn monogram(raw: &str) -> String {
     else { s.chars().take(2).collect::<String>().to_uppercase() }
 }
 
+/// A quiet icon button, the one the sidebar footer and the top row use: an icon on the sidebar, a hover fill, never
+/// the accent. `tip` is the tooltip, as Swift gives each chrome button ("Hide sidebar" / "Show sidebar").
+fn quiet_icon<'a>(t: fb_ui::theme::Tokens, ic: fb_ui::icons::Icon, size: f32, msg: Message, tip: &str) -> Element<'a, Message> {
+    use iced::widget::{button, container, tooltip};
+    use iced::{Background, Border, Length};
+    let b = button(container(fb_ui::icons::icon(ic, size, t.label_2)).center(Length::Fixed(30.0)))
+        .padding(0)
+        .on_press(msg)
+        .style(move |_, st| button::Style {
+            background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
+            border: Border { radius: fb_ui::theme::R_ROW.into(), ..Default::default() },
+            ..Default::default()
+        });
+    tooltip(b, container(fb_ui::theme::CALLOUT.text(tip.to_string()).color(t.label)).padding([5, 9]).style(crate::style::float_e2(t, fb_ui::theme::R_ROW)), tooltip::Position::Bottom)
+        .gap(6)
+        .into()
+}
+
 /// Sidebar container for the integration host. A collapsed rail retains the restore button and Settings access.
 pub fn sidebar(app: &App) -> Element<'_, Message> {
     use fb_ui::theme::*;
-    use fb_ui::icons::{icon, Icon, SIZE_INLINE};
-    use iced::widget::{button, column, container, row, stack, Space};
+    use fb_ui::icons::{Icon, SIZE_DEFAULT};
+    use iced::widget::{container, row, stack, Space};
     use iced::{Alignment, Length};
     let t = app.tokens();
     let hidden = app.state.settings.sidebar_hidden();
-    let toggle = button(icon(Icon::PanelLeft, SIZE_INLINE, t.label_2)).padding(8)
-        .on_press(Message::Settings(crate::settings::SettingsMsg::ToggleSidebar));
+    let toggle = quiet_icon(t, Icon::PanelLeft, SIZE_DEFAULT, Message::Settings(crate::settings::SettingsMsg::ToggleSidebar), if hidden { "Show sidebar" } else { "Hide sidebar" });
     let content: Element<'_, Message> = if hidden {
-        column![toggle, button(icon(Icon::Settings2, SIZE_INLINE, t.label_2)).padding(8).on_press(Message::Settings(crate::settings::SettingsMsg::Open))].padding([12, 6]).into()
+        // The rail: restore, then Settings. Quiet icons, as in Swift's toolbar toggle.
+        let settings = quiet_icon(t, Icon::Settings2, SIZE_DEFAULT, Message::Settings(crate::settings::SettingsMsg::Open), "Settings (\u{2318},)");
+        iced::widget::column![iced::widget::row![toggle].spacing(SP_4), iced::widget::row![settings].spacing(SP_4)].spacing(SP_4).padding([10, 9]).into()
     } else {
         // The sidebar's own empty top band is the window's title bar on macOS (`sidebar::view` keeps it 52 pt tall and
         // empty). The toggle rides on that band instead of pushing it down, so the empty part stays a drag area.

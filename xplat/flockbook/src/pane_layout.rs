@@ -1,10 +1,12 @@
 //! Split readers: independent documents, selections, scroll anchors and paging tickets per pane.
 use crate::workspace_actions::{Target, WorkspaceMsg};
 use crate::{state::State, App, Message};
+use fb_ui::icons::{icon, Icon, SIZE_INLINE};
 use fb_ui::selectable::flow::Flow;
+use fb_ui::status;
 use fb_ui::theme::*;
-use iced::widget::{button, column, container, mouse_area, row, Space};
-use iced::{Element, Length, Task};
+use iced::widget::{button, column, container, mouse_area, row, text, Space};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Task};
 
 /// Move (never clone) the active reader into its pane's slot when selection changes.
 pub fn switch_reader(s: &mut State, pane: Option<&str>) {
@@ -156,25 +158,78 @@ pub fn update_reader(
     task
 }
 
-fn reader<'a>(app: &'a App, pane: &'a herdr_core::Pane) -> Element<'a, Message> {
+/// The label's widget id: one per pane, so a test can tell "no label" from "a label".
+pub fn label_id(pane: &str) -> iced::widget::Id {
+    iced::widget::Id::from(format!("pane-label-{pane}"))
+}
+
+/// The pane's own menu: rename, split, zoom, close pane, terminal (Swift `.paneMenu`).
+fn pane_menu(id: &str) -> Message {
+    Message::Workspace(WorkspaceMsg::Menu(Target::Pane(id.to_string())))
+}
+
+/// Swift's `AgentStatus.label` (`Sources/HerdrDesk/StatusViews.swift:5-13`).
+fn status_label(s: herdr_core::AgentStatus) -> &'static str {
+    use herdr_core::AgentStatus::*;
+    match s {
+        Idle => "Idle",
+        Working => "Working",
+        Blocked => "Needs you",
+        Done => "Done",
+        Unknown => "Unknown",
+    }
+}
+
+/// The 28-pt label a SPLIT tab puts over each pane ("Split tabs only", DESIGN.md §3 Panes; Swift `PaneView`'s
+/// `labelShown = tab.isSplit`). A single-pane tab has none: the agent, its state and the age are in the tab's
+/// tooltip there (`toprow::tab_tooltip`). Focus shows in the text, not a rule: the name is `label` while this pane
+/// holds the keyboard and `label_2` otherwise (Swift `PaneLabel`: "Focus shows in the text (primary vs secondary),
+/// not as a coloured rule"). The row is a bar, never a filled button.
+fn pane_label<'a>(app: &'a App, pane: &'a herdr_core::Pane, active: bool) -> Element<'a, Message> {
+    let t = app.tokens();
+    let mut left = row![].spacing(6).align_y(Alignment::Center);
+    let (name, meta) = match &pane.agent {
+        Some(a) => {
+            left = left.push(container(status::symbol_sized(crate::state::status_kind(a.status), &t, 12.0, 0.0)).width(12.0).height(12.0));
+            (pane.label.clone().unwrap_or_else(|| a.name.clone()), Some(status_label(a.status).to_string()))
+        }
+        // Swift: terminal icon + "Shell · zsh · <cwd>".
+        None => {
+            left = left.push(container(icon(Icon::SquareTerminal, SIZE_INLINE, t.label_3)).center_x(Length::Fixed(12.0)));
+            (pane.label.clone().unwrap_or_else(|| "Shell".to_string()), Some(pane.cwd.clone()))
+        }
+    };
+    left = left.push(HEADLINE.text(name).color(if active { t.label } else { t.label_2 }).wrapping(text::Wrapping::None));
+    if let Some(m) = meta.filter(|m| !m.is_empty()) {
+        let meta = if pane.agent.is_none() { format!("zsh \u{00B7} {m}") } else { m };
+        left = left.push(CAPTION.text(meta).color(t.label_2).wrapping(text::Wrapping::None));
+    }
+    // Clicking the label selects the pane; the menu button on the right is the pointer's way into the pane menu.
+    let left = mouse_area(left).on_press(Message::SelectPane(pane.id.clone()));
+    let menu = button(container(icon(Icon::Ellipsis, SIZE_INLINE, t.label_3)).center(Length::Fixed(22.0)))
+        .padding(0)
+        .on_press(pane_menu(&pane.id))
+        .style(move |_, st| button::Style {
+            background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
+            border: Border { radius: 6.0.into(), ..Default::default() },
+            ..Default::default()
+        });
+    container(row![left, Space::new().width(Length::Fill), menu].align_y(Alignment::Center))
+        .id(label_id(&pane.id))
+        .width(Length::Fill)
+        .height(Length::Fixed(PANE_LABEL_H))
+        .padding(Padding { left: 14.0, right: 6.0, top: 0.0, bottom: 0.0 })
+        .into()
+}
+
+/// One pane of the selected tab. `split`: this tab has more than one pane, so it carries a label.
+fn reader<'a>(app: &'a App, pane: &'a herdr_core::Pane, split: bool) -> Element<'a, Message> {
     let active = app.state.selected_pane().is_some_and(|p| p.id == pane.id);
     let t = app.tokens();
-    let label = pane
-        .label
-        .clone()
-        .or_else(|| pane.agent.as_ref().map(|a| a.name.clone()))
-        .unwrap_or_else(|| "Shell".into());
-    let header = mouse_area(row![
-        button(BODY.text(label))
-            .on_press(Message::SelectPane(pane.id.clone()))
-            .width(Length::Fill),
-        button(BODY.text("⋯")).on_press(Message::Workspace(WorkspaceMsg::Menu(Target::Pane(
-            pane.id.clone()
-        )))),
-    ])
-    .on_right_press(Message::Workspace(WorkspaceMsg::Menu(Target::Pane(
-        pane.id.clone(),
-    ))));
+    let mut col = column![];
+    if split {
+        col = col.push(pane_label(app, pane, active));
+    }
     if pane.agent.is_none() {
         let compact = column![
             BODY.text("Shell").color(t.label),
@@ -184,15 +239,16 @@ fn reader<'a>(app: &'a App, pane: &'a herdr_core::Pane) -> Element<'a, Message> 
             ))
         ]
         .spacing(8);
-        return container(column![
-            header,
-            container(compact).padding(16),
-            Space::new().height(Length::Fill)
-        ])
+        let card = container(
+            col.push(container(compact).padding(16))
+                .push(Space::new().height(Length::Fill)),
+        )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(crate::style::card_e1(t, R_ROW))
-        .into();
+        .style(crate::style::card_e1(t, R_ROW));
+        // No label on a single-pane tab: a right-click is still the way into the pane menu (Swift puts `.paneMenu`
+        // on the whole pane).
+        return if split { card.into() } else { mouse_area(card).on_right_press(pane_menu(&pane.id)).into() };
     }
     let content = if active {
         let id = pane.id.clone();
@@ -222,18 +278,16 @@ fn reader<'a>(app: &'a App, pane: &'a herdr_core::Pane) -> Element<'a, Message> 
             .pictures(&cs.pictures.handles),
         )
     } else {
-        container(BODY.text("Loading conversation…").color(t.label_2))
+        container(BODY.text("Loading conversation\u{2026}").color(t.label_2))
             .center(Length::Fill)
             .into()
     };
-    let mut col = column![header, container(content).height(Length::Fill)];
+    col = col.push(container(content).height(Length::Fill));
     if active {
         col = col.push(crate::cards::bottom(app));
     }
-    container(col)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    let body = container(col).width(Length::Fill).height(Length::Fill);
+    if split { body.into() } else { mouse_area(body).on_right_press(pane_menu(&pane.id)).into() }
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -241,13 +295,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
         return crate::conversation::view(app);
     };
     let zoom = app.state.zoomed.get(&tab.id);
+    // Swift's `showLabel = tab.isSplit`: a split tab keeps its pane labels even while one pane is zoomed.
+    let split = tab.panes.len() > 1;
     let panes: Vec<_> = tab
         .panes
         .iter()
         .filter(|p| zoom.is_none_or(|id| id == &p.id))
         .collect();
     if panes.len() == 1 {
-        return reader(app, panes[0]);
+        return reader(app, panes[0], split);
     }
     // Like Swift, the last requested split direction controls the reading layout.
     if app.state.workspace_actions.split_down {
@@ -261,13 +317,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
             } else {
                 Length::Fill
             };
-            col = col.push(container(reader(app, p)).height(height));
+            col = col.push(container(reader(app, p, split)).height(height));
         }
         col.into()
     } else {
         let mut r = row![].spacing(1).width(Length::Fill).height(Length::Fill);
         for p in panes {
-            r = r.push(reader(app, p));
+            r = r.push(reader(app, p, split));
         }
         r.into()
     }
@@ -406,6 +462,32 @@ mod tests {
         release_hidden_pictures(&mut app.state);
         assert!(app.state.pane_readers["w1:p2"].pictures.near.is_empty());
     }
+    fn simulator(app: &App) -> iced_test::Simulator<'_, Message> {
+        std::env::set_var("ICED_TEST_BACKEND", "tiny-skia");
+        let settings = iced::Settings {
+            fonts: fb_ui::fonts::bytes(),
+            default_font: fb_ui::fonts::default_font(),
+            ..iced::Settings::default()
+        };
+        iced_test::Simulator::with_size(settings, iced::Size::new(1000.0, 700.0), app.view())
+    }
+
+    #[test]
+    fn only_a_split_tab_labels_its_panes() {
+        // Two panes: a 28-pt label over each (Swift `PaneView`'s `labelShown = tab.isSplit`).
+        let (mut app, tree) = synthetic();
+        {
+            let mut s = simulator(&app);
+            assert!(s.find(label_id("w1:p1")).is_ok(), "a split tab labels its first pane");
+            assert!(s.find(label_id("w1:p2")).is_ok(), "a split tab labels its second pane");
+        }
+        // One pane: no label at all (DESIGN.md §3 Panes: "no header for a single-pane tab").
+        tree.lock().unwrap()[0].tabs[0].panes.truncate(1);
+        app.refresh();
+        let mut s = simulator(&app);
+        assert!(s.find(label_id("w1:p1")).is_err(), "a single-pane tab has no pane label");
+    }
+
     #[test]
     fn switching_restores_reader_anchor_and_selection_state() {
         let mut app = App::demo(fb_ui::Mode::Light, crate::state::Screen::Conversation);

@@ -347,6 +347,28 @@ pub fn toggle_style(t: Tokens, status: toggler::Status) -> toggler::Style {
 }
 
 pub const SHEET_W: f32 = 520.0;
+/// The tallest the sheet gets, so it never runs to the bottom of the window. Swift's settings page asks for
+/// `minHeight: 360, idealHeight: 640` (`Settings.swift`), and the page scrolls inside whenever the content is taller.
+pub const SHEET_MAX_H: f32 = 640.0;
+
+/// A small secondary button (Swift's `.controlSize(.small)`): quiet fill, a hairline border, never the accent.
+fn small_button<'a>(t: Tokens, label: &'a str, on: Option<Message>) -> Element<'a, Message> {
+    let enabled = on.is_some();
+    let fg = if enabled { t.label } else { t.label_3 };
+    button(container(CALLOUT.text(label).color(fg)).padding([2, 10]))
+        .padding(0)
+        .on_press_maybe(on)
+        .style(move |_, st| button::Style {
+            background: Some(Background::Color(match st {
+                button::Status::Hovered | button::Status::Pressed if enabled => t.fill_3,
+                _ => t.bg,
+            })),
+            border: Border { color: t.sep_strong, width: 1.0, radius: R_ROW.into() },
+            text_color: fg,
+            ..Default::default()
+        })
+        .into()
+}
 
 fn segmented<'a, T: Copy + PartialEq + 'a>(t: Tokens, items: &[(T, &'static str)], selected: Option<T>, on: Option<fn(T) -> Message>) -> Element<'a, Message> {
     let mut r = row![].spacing(2);
@@ -430,7 +452,15 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
 
     let sizes: Vec<_> = ReadingSize::ALL.iter().map(|v| (*v, v.label())).collect();
     let size_picker = segmented(t, &sizes, Some(s.reading_size()), Some(|v| Message::Settings(SettingsMsg::SetSize(v))));
-    let colors = segmented(t, &[(TerminalColors::Flockbook, "Flockbook"), (TerminalColors::Ghostty, "Ghostty")], Some(s.prefs.terminal_colors.unwrap_or_default()), Some(|v| Message::Settings(SettingsMsg::SetTerminalColors(v))));
+    let colors_on = s.prefs.terminal_colors.unwrap_or_default();
+    let colors = segmented(t, &[(TerminalColors::Flockbook, "Flockbook"), (TerminalColors::Ghostty, "Ghostty")], Some(colors_on), Some(|v| Message::Settings(SettingsMsg::SetTerminalColors(v))));
+    // Like Swift (`SettingsView.general`): "Reload" is a small button beside the picker, and only while Ghostty supplies
+    // the colors it would reload.
+    let colors_control: Element<'_, Message> = if colors_on == TerminalColors::Ghostty {
+        row![colors, small_button(t, "Reload", Some(Message::Settings(SettingsMsg::ReloadGhostty)))].spacing(SP_8).align_y(Alignment::Center).into()
+    } else {
+        colors
+    };
     let plus = segmented(t, &[(PlusAction::NewTab, "New tab"), (PlusAction::SplitRight, "Split right"), (PlusAction::SplitDown, "Split down")], Some(s.prefs.plus_action.unwrap_or_default()), Some(|v| Message::Settings(SettingsMsg::SetPlusAction(v))));
     let theme_note = match &s.ghostty {
         Some(Ok(themes)) => format!("Light: {} · Dark: {}. {} skipped color lines.", themes.light.name, themes.dark.name, themes.skipped.len()),
@@ -440,7 +470,7 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
     let mut body = column![
         section(t, "Appearance", vec![setting_row(t, "Window", note.to_string(), glass)]),
         section(t, "Reading", vec![setting_row(t, "Text size", "Larger text also widens the reading column.".into(), size_picker), setting_row(t, "Width", width_note, width_picker)]),
-        section(t, "Terminal", vec![setting_row(t, "Colors", theme_note, colors), button(CALLOUT.text("Reload Ghostty colors")).on_press(Message::Settings(SettingsMsg::ReloadGhostty)).into()]),
+        section(t, "Terminal", vec![setting_row(t, "Colors", theme_note, colors_control)]),
         section(t, "Toolbar", vec![setting_row(t, "+ button", "Keyboard New Tab always opens a tab.".into(), plus)]),
     ].spacing(SP_16);
     if s.tab == SettingsTab::Agents {
@@ -472,7 +502,7 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
     let tabs = segmented(t, &tabs, Some(s.tab), Some(|v| Message::Settings(SettingsMsg::SelectTab(v))));
     let card = container(column![header, tabs, scrollable(body).height(Length::Fill)].spacing(SP_12))
         .padding(SP_16).width(Length::Fill).max_width(SHEET_W)
-        .height(Length::Fixed((available_height - TOPROW_H - 24.0).max(1.0)))
+        .height(Length::Fixed((available_height - TOPROW_H - 24.0).clamp(1.0, SHEET_MAX_H)))
         .style(style::float_e2(t, R_CARD));
     // The card swallows its own clicks; the scrim around it closes the sheet.
     let card = mouse_area(card).on_press(Message::Noop);

@@ -356,6 +356,54 @@ fn shot(app: &App, name: &str) {
     }
 }
 
+/// A synthetic Ghostty theme pair for snapshots and tests: never reads the user's own Ghostty config.
+fn ghostty_themes() -> flockbook::settings::ghostty_theme::GhosttyThemes {
+    use flockbook::settings::ghostty_theme::{color, GhosttyThemes, TerminalTheme};
+    let c = |s: &str| color(s).expect("hex color");
+    let theme = |name: &str, bg: &str, fg: &str| TerminalTheme {
+        name: name.into(),
+        background: c(bg),
+        foreground: c(fg),
+        ansi: [
+            c("#1a1a1a"), c("#c0392b"), c("#27ae60"), c("#c9a227"), c("#2f6fb0"), c("#8e44ad"), c("#1f9aa6"), c("#d0d0d0"),
+            c("#5a5a5a"), c("#e74c3c"), c("#2ecc71"), c("#f1c40f"), c("#5dade2"), c("#af7ac5"), c("#48c9b0"), c("#f2f2f2"),
+        ],
+        cursor: c(fg),
+        cursor_text: c(bg),
+        selection_background: c(fg),
+        selection_foreground: c(bg),
+    };
+    GhosttyThemes { light: theme("Parity Light", "#ffffff", "#202020"), dark: theme("Parity Dark", "#141414", "#e8e8e8"), skipped: Vec::new() }
+}
+
+/// The Reload button exists only while Ghostty supplies the colors (Swift puts it in the Colors row then).
+#[test]
+fn reload_is_offered_only_while_ghostty_supplies_the_colors() {
+    use flockbook::settings::TerminalColors;
+    let mut app = App::demo(Mode::Light, Screen::Conversation);
+    let _ = app.update(Message::Settings(SettingsMsg::Open));
+    assert!(sim(&app).find("Reload").is_err(), "Flockbook colors: nothing to reload");
+    app.state.settings.prefs.terminal_colors = Some(TerminalColors::Ghostty);
+    app.state.settings.ghostty = Some(Ok(ghostty_themes()));
+    let mut s = sim(&app);
+    assert!(s.find("Reload").is_ok(), "Ghostty colors: a small Reload button beside the picker");
+    assert!(s.find("Reload Ghostty colors").is_err(), "the old full-width row is gone");
+}
+
+/// The collapsed sidebar (Cmd+B) is a narrow rail: the restore button still works and the icons stay quiet.
+#[test]
+fn the_collapsed_rail_still_restores_the_sidebar() {
+    let mut app = App::demo(Mode::Light, Screen::Conversation);
+    let _ = app.update(Message::Settings(SettingsMsg::ToggleSidebar));
+    assert!(app.state.settings.sidebar_hidden());
+    let mut s = sim(&app);
+    s.point_at(Point::new(24.0, 25.0));
+    s.simulate(simulator::click());
+    let msgs: Vec<Message> = s.into_messages().collect();
+    apply(&mut app, msgs.clone());
+    assert!(!app.state.settings.sidebar_hidden(), "the rail's restore button brings the sidebar back: {msgs:?}");
+}
+
 #[test]
 fn snapshots_of_the_panel_and_the_sheet() {
     for mode in [Mode::Light, Mode::Dark] {
@@ -368,5 +416,14 @@ fn snapshots_of_the_panel_and_the_sheet() {
         shot(&app, &format!("settings-{suffix}"));
         app.state.settings.read_only_launch = true;
         shot(&app, &format!("settings-read-only-launch-{suffix}"));
+        // Ghostty colors: the Colors row carries the small Reload button.
+        app.state.settings.read_only_launch = false;
+        app.state.settings.prefs.terminal_colors = Some(flockbook::settings::TerminalColors::Ghostty);
+        app.state.settings.ghostty = Some(Ok(ghostty_themes()));
+        shot(&app, &format!("settings-ghostty-{suffix}"));
+        // The collapsed rail: quiet restore and Settings icons, the same as the sidebar's footer.
+        let _ = app.update(Message::Settings(SettingsMsg::Close));
+        let _ = app.update(Message::Settings(SettingsMsg::ToggleSidebar));
+        shot(&app, &format!("sidebar-rail-{suffix}"));
     }
 }
