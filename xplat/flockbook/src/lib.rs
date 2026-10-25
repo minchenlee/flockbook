@@ -60,7 +60,7 @@ pub mod toprow;
 pub mod workspace_actions;
 pub mod pane_layout;
 
-use fb_ui::theme::{Tokens, SIDEBAR_W};
+use fb_ui::theme::Tokens;
 use fb_ui::Mode;
 use iced::widget::{column, container, row, Space};
 use iced::{Element, Length, Task, Theme};
@@ -269,18 +269,24 @@ impl App {
             Screen::NeedsYou => needs_you::view(self),
             Screen::Search => overview::view(self),
         };
+        // Settings is a page of the window (Swift `SettingsPage`): it takes the detail column and leaves the screen it was
+        // opened from in place, hidden and inert, for Back. No tab row while it shows: it is not about a workspace.
+        let on_settings = self.state.settings.open;
+        let main = iced::widget::stack![settings::hide(main, on_settings), settings::page(self)];
+        let bar: Element<Message> = if on_settings { Space::new().width(Length::Fill).into() } else { toprow::view(self) };
         let sidebar = chrome::sidebar(self);
+        let covered = self.state.shortcuts.open;
         if self.state.glass.on {
             // Window glass: each surface paints one tint over a clear root, so translucent layers never stack.
             let main = container(main).width(Length::Fill).height(Length::Fill);
-            let main = if needs_you::paints_own_ground(self) { main } else { main.style(style::fill(ground, 0.0)) };
-            let right = column![container(toprow::view(self)).width(Length::Fill).height(Length::Fixed(fb_ui::theme::TOPROW_H)).style(style::fill(t.glass_bar, 0.0)), main];
+            let main = if needs_you::paints_own_ground(self) && !on_settings { main } else { main.style(style::fill(ground, 0.0)) };
+            let right = column![container(bar).width(Length::Fill).height(Length::Fixed(fb_ui::theme::TOPROW_H)).style(style::fill(t.glass_bar, 0.0)), main];
             let body = row![sidebar, container(right).width(Length::Fill).height(Length::Fill)];
-            return container(iced::widget::stack![settings::cover(iced::widget::stack![body, toprow::menu_layer(self), workspace_actions::layer(self), terminal::layer(self)], self.state.settings.open || self.state.shortcuts.open), settings::layer(self), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).into();
+            return container(iced::widget::stack![settings::cover(iced::widget::stack![body, settings::hide(toprow::menu_layer(self), on_settings), settings::hide(workspace_actions::layer(self), on_settings), settings::hide(terminal::layer(self), on_settings)], covered), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).into();
         }
-        let right = column![container(toprow::view(self)).height(Length::Fixed(fb_ui::theme::TOPROW_H)), container(main).width(Length::Fill).height(Length::Fill)];
+        let right = column![container(bar).height(Length::Fixed(fb_ui::theme::TOPROW_H)), container(main).width(Length::Fill).height(Length::Fill)];
         let body = row![sidebar, container(right).width(Length::Fill).height(Length::Fill).style(style::content(t))];
-        container(iced::widget::stack![settings::cover(iced::widget::stack![body, toprow::menu_layer(self), workspace_actions::layer(self), terminal::layer(self)], self.state.settings.open || self.state.shortcuts.open), settings::layer(self), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).style(style::content(t)).into()
+        container(iced::widget::stack![settings::cover(iced::widget::stack![body, settings::hide(toprow::menu_layer(self), on_settings), settings::hide(workspace_actions::layer(self), on_settings), settings::hide(terminal::layer(self), on_settings)], covered), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).style(style::content(t)).into()
     }
 }
 

@@ -1,8 +1,8 @@
 //! Settings (port of Swift `SettingsView`): window glass, reading width, and "Allow sending input to agents".
 //!
-//! Swift opens a separate fixed-size window; here it is a sheet over the app (one window). It opens with Cmd+,
-//! (Ctrl+, on Windows and Linux) and from the gear at the bottom of the sidebar. Esc, the close button or a click
-//! outside closes it.
+//! Like Swift's `SettingsPage`, it is a page of the main window: the sidebar holds Back and the tabs, the detail column
+//! the form, and the tab row is gone. It opens with Cmd+, (Ctrl+, on Windows and Linux) and from the Settings row at the
+//! foot of the sidebar. Esc or Back returns to the screen it was opened from.
 //!
 //! The values live in `settings.json` in the user's config folder. Tests and snapshots keep them in memory only
 //! (`path` is `None`), so they never touch the real file.
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use fb_ui::icons::{icon, Icon, SIZE_INLINE};
 use fb_ui::theme::*;
-use iced::widget::{button, column, container, mouse_area, responsive, row, scrollable, stack, svg, text, toggler, Space};
+use iced::widget::{button, column, container, row, scrollable, svg, text, toggler, Space};
 use iced::{Alignment, Background, Border, Element, Length, Task};
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ pub mod ghostty_theme;
 pub mod status_tags;
 #[path = "settings_cover.rs"]
 mod settings_cover;
-pub use settings_cover::cover;
+pub use settings_cover::{cover, hide};
 
 use crate::access;
 use crate::glass::{Backdrop, Os};
@@ -346,13 +346,11 @@ pub fn toggle_style(t: Tokens, status: toggler::Status) -> toggler::Style {
     }
 }
 
-pub const SHEET_W: f32 = 900.0;
-/// The tab list beside the page, and the page's left margin (Swift `SettingsSplit.listWidth`, `SettingsView.margin`).
+/// The tab list beside the page, the page's margins and the widest its rows get (Swift `SettingsSplit.listWidth`,
+/// `SettingsView.margin`, `SettingsView.column`).
 const LIST_W: f32 = 196.0;
 const PAGE_MARGIN: f32 = 40.0;
-/// The tallest the sheet gets, so it never runs to the bottom of the window. Swift's settings page asks for
-/// `minHeight: 360, idealHeight: 640` (`Settings.swift`), and the page scrolls inside whenever the content is taller.
-pub const SHEET_MAX_H: f32 = 640.0;
+const PAGE_COLUMN: f32 = 760.0;
 
 /// A small secondary button (Swift's `.controlSize(.small)`): quiet fill, a hairline border, never the accent.
 fn small_button<'a>(t: Tokens, label: &'a str, on: Option<Message>) -> Element<'a, Message> {
@@ -455,12 +453,24 @@ fn section<'a>(t: Tokens, title: &'a str, note: Option<String>, rows: Vec<Elemen
     group.into()
 }
 
-/// The sheet, or nothing when closed.
-pub fn layer(app: &App) -> Element<'_, Message> {
+/// The page in the detail column, or nothing when closed. With the window sidebar hidden the page brings the tab list
+/// itself, a hairline to its right (Swift `SettingsPage`: `list: own`).
+pub fn page(app: &App) -> Element<'_, Message> {
     if !app.state.settings.open {
         return Space::new().into();
     }
-    responsive(move |size| sheet(app, size.height)).into()
+    let t = app.tokens();
+    let form = container(scrollable(container(form(app)).width(Length::Fill)).height(Length::Fill)).width(Length::Fill).height(Length::Fill);
+    if !app.state.settings.sidebar_hidden() {
+        return form.into();
+    }
+    let rule = container(Space::new()).width(Length::Fixed(1.0)).height(Length::Fill).style(style::fill(t.sep, 0.0));
+    row![tab_list(t, app.state.settings.tab, 12.0), rule, form].height(Length::Fill).into()
+}
+
+/// The window sidebar while Settings shows (Swift `SettingsSidebar`): Back on top, then the tabs, below the title bar band.
+pub fn sidebar_list(app: &App, top: f32) -> Element<'_, Message> {
+    tab_list(app.tokens(), app.state.settings.tab, top)
 }
 
 /// The tab's one-line summary (Swift `SettingsTab.summary`).
@@ -492,13 +502,21 @@ fn page_header(t: Tokens, tab: SettingsTab) -> Element<'static, Message> {
 }
 
 /// The tabs down the left, like System Settings (Swift `SettingsTabList`): Back, a small "Settings" heading, then the
-/// rows on a light grey fill when chosen.
-fn tab_list(t: Tokens, selected: SettingsTab) -> Element<'static, Message> {
+/// rows on a light grey fill when chosen. Back returns to the screen Settings was opened from.
+fn tab_list(t: Tokens, selected: SettingsTab, top: f32) -> Element<'static, Message> {
+    let back = button(container(row![local_icon(CHEVRON_LEFT, SIZE_INLINE, t.label_2), BODY.text("Back").color(t.label)].spacing(SP_8).align_y(Alignment::Center)).padding([6, 8]).width(Length::Fill))
+        .padding(0)
+        .width(Length::Fill)
+        .on_press(Message::Settings(SettingsMsg::Close))
+        .style(move |_, st| button::Style {
+            background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_1)),
+            border: Border { radius: 7.0.into(), ..Default::default() },
+            ..Default::default()
+        });
+    // Swift: Back `.padding(.bottom, 6)`, the heading `.subheadline.weight(.semibold)` `.padding(.bottom, 2)`.
     let mut col = column![
-        container(row![local_icon(CHEVRON_LEFT, SIZE_INLINE, t.label_2), BODY.text("Back").color(t.label)].spacing(SP_8).align_y(Alignment::Center))
-            .padding([6, 8])
-            .width(Length::Fill),
-        container(CALLOUT.text("Settings").color(t.label_2)).padding([0, 8]),
+        container(back).padding(iced::Padding { bottom: 6.0, ..iced::Padding::ZERO }),
+        container(CALLOUT.text("Settings").font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(t.label_2)).padding(iced::Padding { top: 0.0, right: 8.0, bottom: 2.0, left: 8.0 }),
     ]
     .spacing(2);
     for tab in SettingsTab::ALL {
@@ -520,10 +538,11 @@ fn tab_list(t: Tokens, selected: SettingsTab) -> Element<'static, Message> {
         );
     }
     // Swift `SettingsTabList`: `.padding(.horizontal, 10).padding(.top, 12)`.
-    container(col).width(Length::Fixed(LIST_W)).height(Length::Fill).padding(iced::Padding { top: 12.0, right: 10.0, bottom: 10.0, left: 10.0 }).into()
+    container(col).width(Length::Fixed(LIST_W)).height(Length::Fill).padding(iced::Padding { top, right: 10.0, bottom: 10.0, left: 10.0 }).into()
 }
 
-fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
+/// The form: header and groups, at most `PAGE_COLUMN` wide and kept to the left (Swift `SettingsView.page`).
+fn form(app: &App) -> Element<'_, Message> {
     let t = app.tokens();
     let s = &app.state.settings;
 
@@ -598,27 +617,8 @@ fn sheet(app: &App, available_height: f32) -> Element<'_, Message> {
         body = body.push(container(CAPTION.text(line).color(t.label_2)).padding([0, 12]));
     }
 
-    let close = button(container(icon(Icon::X, SIZE_INLINE, t.label_2)).center(Length::Fixed(28.0))).padding(0).on_press(Message::Settings(SettingsMsg::Close)).style(move |_, st| button::Style {
-        background: matches!(st, button::Status::Hovered).then_some(Background::Color(t.fill_2)),
-        border: Border { radius: 14.0.into(), ..Default::default() },
-        ..Default::default()
-    });
-    let header = row![HEADLINE.text("Settings").color(t.label), Space::new().width(Length::Fill), close].align_y(Alignment::Center);
-    let card = container(
-        row![
-            tab_list(t, s.tab),
-            container(container(scrollable(body).height(Length::Fill)).padding([16.0, PAGE_MARGIN])).width(Length::Fill).height(Length::Fill),
-        ]
-        .height(Length::Fill),
-    )
-        .padding(SP_16).width(Length::Fill).max_width(SHEET_W)
-        .height(Length::Fixed((available_height - TOPROW_H - 24.0).clamp(1.0, SHEET_MAX_H)))
-        .style(style::float_e2(t, R_CARD));
-    // The card swallows its own clicks; the scrim around it closes the sheet.
-    let card = mouse_area(card).on_press(Message::Noop);
-    let scrim = mouse_area(container(Space::new()).width(Length::Fill).height(Length::Fill).style(style::fill(iced::Color { a: 0.18, ..iced::Color::BLACK }, 0.0))).on_press(Message::Settings(SettingsMsg::Close));
-    let placed = container(card).width(Length::Fill).height(Length::Fill).align_x(Alignment::Center).padding(iced::Padding { top: TOPROW_H + 24.0, ..iced::Padding::ZERO });
-    stack![scrim, placed].into()
+    // Swift: `.frame(maxWidth: column)`, leading and trailing margin 40, top 16, bottom 24.
+    container(body).max_width(PAGE_COLUMN + 2.0 * PAGE_MARGIN).padding(iced::Padding { top: 16.0, right: PAGE_MARGIN, bottom: 24.0, left: PAGE_MARGIN }).into()
 }
 
 #[cfg(test)]

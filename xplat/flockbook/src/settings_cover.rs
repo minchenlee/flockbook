@@ -1,13 +1,18 @@
-//! Keeps the reader's widget state/focus while a settings sheet covers it, without delivering input underneath.
+//! Keeps the reader's widget state/focus while Settings covers it, without delivering input underneath.
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Operation, Tree};
 use iced::advanced::{mouse, overlay, renderer, Clipboard, Shell, Widget};
 use iced::{Element, Event, Length, Rectangle, Size, Vector};
 
 pub fn cover<'a, M: 'a>(content: impl Into<Element<'a, M>>, covered: bool) -> Element<'a, M> {
-    Element::new(Cover { content: content.into(), covered })
+    Element::new(Cover { content: content.into(), covered, hidden: false })
 }
-struct Cover<'a, M> { content: Element<'a, M>, covered: bool }
+/// Covered and not drawn: the screen the Settings page replaces stays laid out (scroll, focus) for Back, like Swift's
+/// `.opacity(0)` on the screen under `SettingsPage` (`HerdrDeskApp.swift`).
+pub fn hide<'a, M: 'a>(content: impl Into<Element<'a, M>>, hidden: bool) -> Element<'a, M> {
+    Element::new(Cover { content: content.into(), covered: hidden, hidden })
+}
+struct Cover<'a, M> { content: Element<'a, M>, covered: bool, hidden: bool }
 impl<M> Widget<M, iced::Theme, iced::Renderer> for Cover<'_, M> {
     fn size(&self) -> Size<Length> { self.content.as_widget().size() }
     fn size_hint(&self) -> Size<Length> { self.content.as_widget().size_hint() }
@@ -17,6 +22,7 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Cover<'_, M> {
         self.content.as_widget_mut().layout(&mut tree.children[0], renderer, limits)
     }
     fn draw(&self, tree: &Tree, renderer: &mut iced::Renderer, theme: &iced::Theme, style: &renderer::Style, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle) {
+        if self.hidden { return; }
         self.content.as_widget().draw(&tree.children[0], renderer, theme, style, layout, if self.covered { mouse::Cursor::Unavailable } else { cursor }, viewport);
     }
     fn operate(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &iced::Renderer, operation: &mut dyn Operation) {
