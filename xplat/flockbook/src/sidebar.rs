@@ -115,9 +115,10 @@ pub fn count_badge<'a, M: 'a>(t: Tokens, n: usize) -> Element<'a, M> {
         .into()
 }
 
-fn monogram_chip<'a>(t: Tokens, label: &str, selected: bool) -> Element<'a, Message> {
-    // primary 0.1 chip with primary 0.7 letters; inverted when selected (Swift Monogram).
-    let (bg, fg) = if selected { (Color { a: 0.8, ..t.label }, t.bg) } else { (Color { a: 0.1, ..t.label }, Color { a: 0.7, ..t.label }) };
+fn monogram_chip<'a>(t: Tokens, label: &str) -> Element<'a, Message> {
+    // primary 0.1 chip with primary 0.7 letters (Swift Monogram). The sidebar never inverts it: the selected row's own
+    // fill marks the selection (SidebarView `Monogram(text:)`, no `inverted`).
+    let (bg, fg) = (Color { a: 0.1, ..t.label }, Color { a: 0.7, ..t.label });
     container(text(monogram(label)).size(10).font(fb_ui::fonts::inter(iced::font::Weight::Semibold)).color(fg))
         .width(Length::Fixed(22.0))
         .height(Length::Fixed(22.0))
@@ -214,7 +215,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let name_color = if quiet && !selected { t.label_2 } else { t.label };
         // One weight for every name; quiet workspaces are secondary (SidebarView.swift:260-261).
         let name = BODY.text(ws.label.clone()).wrapping(text::Wrapping::None);
-        let content = row![monogram_chip(t, &ws.label, selected), name.color(name_color), Space::new().width(Length::Fill), status_column(t, s.toprow.spin_frame(), &ws.tabs, slots)]
+        let content = row![monogram_chip(t, &ws.label), name.color(name_color), Space::new().width(Length::Fill), status_column(t, s.toprow.spin_frame(), &ws.tabs, slots)]
             .spacing(SP_8)
             .align_y(Alignment::Center);
         let tip = format!("{} \u{00B7} {} tab{}{}{}", ws.label, ws.tabs.len(), if ws.tabs.len() == 1 { "" } else { "s" }, if c.working > 0 { format!(" \u{00B7} {} working", c.working) } else { String::new() }, if c.blocked > 0 { format!(" \u{00B7} {} need you", c.blocked) } else { String::new() });
