@@ -16,8 +16,7 @@
 
 use crate::state::{status_kind, Screen, State};
 use crate::{style, App, Message};
-use fb_ui::fonts::is_cjk_char;
-use fb_ui::icons::{icon, Icon, SIZE_DEFAULT, SIZE_INLINE};
+use fb_ui::icons::{icon, Icon, SIZE_INLINE};
 use fb_ui::status;
 use fb_ui::theme::*;
 use herdr_core::{AgentStatus, Tab};
@@ -42,17 +41,28 @@ const ISLAND_INSET: f32 = 3.0;
 const CAPSULE_H: f32 = TAB_H + 2.0 * ISLAND_INSET;
 /// One action button inside that capsule (Swift FullScreenTopRow buttons: 36 wide, 36 tall).
 const ACTION_BTN: f32 = 36.0;
-/// The buttons' own inset inside the capsule (Swift `.padding(.horizontal, 2)`).
-const CAPSULE_PAD: f32 = 2.0;
+/// The buttons' own inset. None: with no capsule around them they sit as the Mac toolbar's do (the full-screen copy's
+/// `.padding(.horizontal, 2)` belongs to its glass capsule).
+const CAPSULE_PAD: f32 = 0.0;
 /// Space between the island and the action capsule (Swift FullScreenTopRow `HStack(spacing: 10)`).
 const ACTION_GAP: f32 = 10.0;
-/// Width of the action capsule: + and terminal.
+/// The action icons: the Mac's 15 pt medium symbols draw a 14 pt plus and a 20 pt terminal with a thin stroke. Lucide's
+/// stroke grows with the box, so 20 pt is the closest match in both size and weight.
+const ACTION_ICON: f32 = 20.0;
+/// Width of the action buttons: + and terminal.
 const CAPSULE_W: f32 = 2.0 * ACTION_BTN + 2.0 * CAPSULE_PAD;
 /// Pill label: Swift TabPill `.callout`, medium, semibold when selected or blocked (TopRow.swift:213). Callout is 12 pt.
 const PILL_BODY: TextStyle = TextStyle { size: 12.0, line: 1.3, weight: Weight::Medium, mono: false };
 const PILL_BOLD: TextStyle = TextStyle { size: 12.0, line: 1.3, weight: Weight::Semibold, mono: false };
 /// The pill's status glyph (Swift TabPill: `StatusGlyph(size: 13)`).
 const PILL_GLYPH: f32 = 13.0;
+/// The slot a still status symbol takes: SF Symbols at 13 pt are about 16 pt wide with the glyph centred (measured on
+/// the Mac's screenshot); the working arc keeps its 13 pt frame (StatusGlyph `SpinnerArc ... .frame(width: size)`).
+const PILL_SLOT_STILL: f32 = 16.0;
+
+fn glyph_slot(status: AgentStatus) -> f32 {
+    if status == AgentStatus::Working { PILL_GLYPH } else { PILL_SLOT_STILL }
+}
 /// Window width assumed before the first `view` has measured the real one.
 const DEFAULT_STRIP_W: f32 = 480.0;
 
@@ -274,29 +284,46 @@ pub fn subscription(_app: &App) -> Subscription<Message> {
 // ---------------------------------------------------------------------------------------------------------------
 // Tab geometry
 
-/// Estimated label width at the pill's 12 pt (the table is for 13 pt).
+/// Label width at the pill's 12 pt, shaped with the pill's own font (an estimate from a glyph table came out a few
+/// points short, so labels ran into the next pill). Kept per label: `view` asks for every tab on every frame.
 fn text_w(s: &str, bold: bool) -> f32 {
-    let w: f32 = 12.0 / 13.0 * s
-        .chars()
-        .map(|c| match c {
-            c if is_cjk_char(c) => 13.0,
-            'i' | 'l' | 'j' | 't' | 'f' | 'r' | 'I' | '.' | ',' | '\'' | ';' | ':' | ' ' | '!' | '|' | '-' => 4.4,
-            'm' | 'w' | 'M' | 'W' => 10.6,
-            c if c.is_uppercase() => 8.2,
-            _ => 6.9,
-        })
-        .sum::<f32>();
-    if bold {
-        w * 1.04
-    } else {
-        w
+    use iced::advanced::graphics::text::Paragraph;
+    use iced::advanced::text::{self as atext, paragraph::Paragraph as _};
+    thread_local! {
+        static WIDTHS: RefCell<std::collections::HashMap<(String, bool), f32>> = RefCell::new(std::collections::HashMap::new());
     }
+    if let Some(w) = WIDTHS.with(|m| m.borrow().get(&(s.to_string(), bold)).copied()) {
+        return w;
+    }
+    // A width taken before the app's fonts are in would be the fallback font's and stay in the cache: load them first.
+    static FONTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    FONTS.get_or_init(|| {
+        let mut system = iced::advanced::graphics::text::font_system().write().expect("font system lock");
+        for bytes in fb_ui::fonts::bytes() {
+            system.load_font(bytes);
+        }
+    });
+    let style = if bold { PILL_BOLD } else { PILL_BODY };
+    let p = Paragraph::with_text(atext::Text {
+        content: s,
+        bounds: Size::INFINITE,
+        size: iced::Pixels(style.size),
+        line_height: atext::LineHeight::Relative(style.line),
+        font: fb_ui::fonts::inter(style.weight),
+        align_x: atext::Alignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: atext::Shaping::Advanced,
+        wrapping: atext::Wrapping::None,
+    });
+    let w = p.min_bounds().width.ceil();
+    WIDTHS.with(|m| m.borrow_mut().insert((s.to_string(), bold), w));
+    w
 }
 
 /// Fixed chrome around the label: padding, symbol, gaps, split glyph, close button (Swift TabPill: leading 10, glyph
 /// 13, spacing 6; closable: spacing 4, the 20 pt ×, trailing 5; else trailing 10).
-fn chrome(is_split: bool, selected: bool) -> f32 {
-    10.0 + PILL_GLYPH + 6.0 + if is_split { 6.0 + 11.0 } else { 0.0 } + if selected { 4.0 + 20.0 + 5.0 } else { 10.0 }
+fn chrome(status: AgentStatus, is_split: bool, selected: bool) -> f32 {
+    10.0 + glyph_slot(status) + 6.0 + if is_split { 6.0 + 11.0 } else { 0.0 } + if selected { 4.0 + 20.0 + 5.0 } else { 10.0 }
 }
 
 struct TabGeom {
@@ -315,7 +342,7 @@ fn tab_geom(tab: &Tab, selected: bool) -> TabGeom {
     let blocked = tab.status == AgentStatus::Blocked;
     let bold = selected || blocked;
     let split = tab.panes.len() > 1;
-    let ch = chrome(split, selected);
+    let ch = chrome(tab.status, split, selected);
     let natural = ch + text_w(&tab.label, bold);
     if blocked || natural <= MAX_TAB_W {
         return TabGeom { width: natural.max(MIN_TAB_W), label: tab.label.clone(), bold };
@@ -432,10 +459,11 @@ impl<'a> From<Shift<'a>> for Element<'a, Message> {
 // ---------------------------------------------------------------------------------------------------------------
 // Views
 
-/// A button of the action capsule next to the island: a round 32 pt hit area in the capsule's height, plain icon
-/// (Swift FullScreenTopRow: `.frame(width: 36, height: 36)`, `.foregroundStyle(.secondary)`).
+/// A button next to the island: a round 36 pt hit area, a plain icon at the Mac's glyph size (Swift FullScreenTopRow:
+/// `.frame(width: 36, height: 36)`, 15 pt medium symbols, `.foregroundStyle(.secondary)`, which on the toolbar's glass
+/// reads as light as our tertiary label).
 fn action_button<'a>(t: Tokens, ic: Icon, active: bool, msg: Message) -> Element<'a, Message> {
-    button(container(icon(ic, SIZE_DEFAULT, if active { t.label } else { t.label_2 })).center(Length::Fixed(ACTION_BTN)))
+    button(container(icon(ic, ACTION_ICON, if active { t.label } else { t.label_3 })).center(Length::Fixed(ACTION_BTN)))
         .padding(0)
         .on_press(msg)
         .style(move |_, st| button::Style {
@@ -474,6 +502,7 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
     let split = tab.panes.len() > 1;
     let kind = status_kind(tab.status);
     let sym = status::symbol_live(kind, &t, PILL_GLYPH, animate);
+    let sym = container(sym).center_x(Length::Fixed(glyph_slot(tab.status)));
     let label = if g.bold { PILL_BOLD.text(g.label.clone()) } else { PILL_BODY.text(g.label.clone()) };
     let label = label.color(if selected || blocked { t.label } else { t.label_2 }).wrapping(text::Wrapping::None);
     let mut inner = row![sym, label].spacing(6).align_y(Alignment::Center);
@@ -665,10 +694,15 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
         );
     }
     capsule = capsule.push(terminal);
-    let actions = container(capsule).height(Length::Fixed(CAPSULE_H)).padding([0.0, CAPSULE_PAD]).style(style::fill(t.fill_2, CAPSULE_H / 2.0));
+    // Plain icons with no capsule of their own, as on the Mac (the owner's call, as for the island).
+    let actions = container(capsule).height(Length::Fixed(CAPSULE_H)).padding([0.0, CAPSULE_PAD]);
+    // A short hairline in the gap before them, as the Mac toolbar draws between the island and its buttons.
+    let rule = container(container(Space::new()).width(Length::Fixed(ACTION_GAP - 2.0)).height(Length::Fixed(1.0)).style(style::fill(t.sep, 0.0)))
+        .width(Length::Fixed(ACTION_GAP))
+        .center_x(Length::Fixed(ACTION_GAP));
 
-    // Island and actions centred in the content toolbar, the capsule `ACTION_GAP` after the island.
-    let group = row![island, actions].spacing(ACTION_GAP).align_y(Alignment::Center);
+    // Island and actions centred in the content toolbar, the buttons `ACTION_GAP` after the island.
+    let group = row![island, rule, actions].align_y(Alignment::Center);
     let gap_l = crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(Length::Fixed(TOPROW_H)));
     let gap_r = crate::chrome::drag_area(app, Space::new().width(Length::Fill).height(Length::Fixed(TOPROW_H)));
     let bar: Element<Message> = container(row![gap_l, group, gap_r].align_y(Alignment::Center).padding([0.0, SP_16]))
