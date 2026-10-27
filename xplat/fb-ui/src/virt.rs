@@ -92,6 +92,15 @@ impl VirtWindow {
         self.prefix.push(last + estimate + BLOCK_GAP_PX);
     }
 
+    /// Keep the first `len` items (and their measured corrections); drop the rest. The caller re-windows after.
+    pub fn truncate(&mut self, len: usize) {
+        if len >= self.len() {
+            return;
+        }
+        self.prefix.truncate(len + 1);
+        self.adjustments.retain(|i, _| *i < len);
+    }
+
     fn adjustment_before(&self, index: usize) -> f32 {
         self.adjustments.range(..index).map(|(_, d)| *d).sum()
     }

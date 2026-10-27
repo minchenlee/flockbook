@@ -481,6 +481,25 @@ impl Doc {
         } else {
             0
         };
+        // Same head, new tail (a streaming turn moves its footer caption, chips merge): the head keeps its slots and
+        // measurements, only the tail is estimated. Estimating every row is the cost of a long conversation.
+        let keep = rows.iter().zip(&self.rows).take_while(|(a, b)| a.id == b.id).count();
+        if !prepended && keep > 0 {
+            self.window.truncate(keep);
+            for (i, r) in rows.iter().enumerate().skip(keep) {
+                self.window.push(estimate(r, i, self.colw));
+            }
+            self.rows = rows;
+            self.reindex();
+            self.measured.retain(|id, _| self.index.contains_key(id));
+            for i in keep..self.rows.len() {
+                if let Some(m) = self.measured.get(&self.rows[i].id) {
+                    let cur = self.window.block_height(i);
+                    self.window.apply_height_delta(i, m - cur);
+                }
+            }
+            return Change::Replaced;
+        }
         self.rows = rows;
         self.reindex();
         self.measured.retain(|id, _| self.index.contains_key(id));
@@ -949,6 +968,30 @@ mod tests {
         );
         assert_eq!(doc.window.block_height(0), h);
         assert_eq!(doc.window.len(), 3);
+    }
+
+    #[test]
+    fn a_new_tail_keeps_the_head_and_reapplies_measurements_by_id() {
+        // A streaming turn: a new reply goes in before the turn's footer (row 3), so the old rows are no prefix.
+        let mut doc = doc_of(vec![prose(1, "a"), prose(2, "b"), prose(3, "footer")]);
+        let colw = doc.colw;
+        doc.apply_measure(Measure { id: 1, h: 100.0, colw });
+        doc.apply_measure(Measure { id: 3, h: 40.0, colw });
+        let rows = vec![prose(1, "a"), prose(2, "b"), prose(4, "new reply"), prose(3, "footer")];
+        let new_est = estimate(&rows[2], 2, colw);
+        assert_eq!(doc.set_rows(rows.clone()), Change::Replaced);
+        assert_eq!(doc.window.len(), 4);
+        assert_eq!(doc.window.block_height(0), 100.0);
+        assert_eq!(doc.window.block_height(2), new_est);
+        assert_eq!(doc.window.block_height(3), 40.0);
+        // The same heights as a window rebuilt from scratch with those measurements.
+        let mut fresh = doc_of(rows);
+        fresh.apply_measure(Measure { id: 1, h: 100.0, colw });
+        fresh.apply_measure(Measure { id: 3, h: 40.0, colw });
+        for i in 0..4 {
+            assert_eq!(doc.window.block_top(i), fresh.window.block_top(i), "row {i}");
+        }
+        assert_eq!(doc.total_height(), fresh.total_height());
     }
 
     #[test]
