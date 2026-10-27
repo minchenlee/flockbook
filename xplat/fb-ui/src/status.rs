@@ -6,8 +6,21 @@
 use crate::theme::Tokens;
 use iced::mouse;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::{Color, Element, Length, Point, Rectangle, Renderer, Theme};
+use iced::{window, Color, Element, Event, Length, Point, Rectangle, Renderer, Theme};
 use std::f32::consts::{FRAC_PI_2, TAU};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+/// Time between two steps of a turning arc.
+pub const SPIN_FRAME: Duration = Duration::from_millis(60);
+
+/// The arc's angle at `now`: one turn a second, clockwise (Swift `SpinnerArc`: `duration = 1`). Every arc reads the
+/// same clock, so they turn together.
+pub fn spin_phase(now: Instant) -> f32 {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    let t = now.saturating_duration_since(*EPOCH.get_or_init(|| now)).as_secs_f32();
+    t.fract() * TAU
+}
 
 pub const SYMBOL_SIZE: f32 = 14.0;
 pub const DOT_SIZE: f32 = 6.0;
@@ -34,16 +47,27 @@ impl StatusKind {
 struct Symbol {
     kind: StatusKind,
     tokens: Tokens,
-    /// Arc rotation in radians (0 = starts at 12 o'clock). The app may animate it.
+    /// Arc rotation in radians (0 = starts at 12 o'clock), when it does not turn by itself.
     phase: f32,
+    /// The working arc turns by itself: it asks for its own redraws, so turning costs no message, no `update` and
+    /// no `view` (Swift runs it in Core Animation for the same reason).
+    animate: bool,
 }
 
 impl<M> canvas::Program<M> for Symbol {
     type State = ();
 
+    fn update(&self, _: &mut (), event: &Event, _: Rectangle, _: mouse::Cursor) -> Option<canvas::Action<M>> {
+        match event {
+            Event::Window(window::Event::RedrawRequested(now)) if self.animate && self.kind == StatusKind::Working => Some(canvas::Action::request_redraw_at(*now + SPIN_FRAME)),
+            _ => None,
+        }
+    }
+
     fn draw(&self, _: &(), renderer: &Renderer, _: &Theme, bounds: Rectangle, _: mouse::Cursor) -> Vec<Geometry> {
         let mut f = Frame::new(renderer, bounds.size());
-        draw_symbol(&mut f, self.kind, &self.tokens, bounds.width.min(bounds.height), self.phase);
+        let phase = if self.animate { spin_phase(Instant::now()) } else { self.phase };
+        draw_symbol(&mut f, self.kind, &self.tokens, bounds.width.min(bounds.height), phase);
         vec![f.into_geometry()]
     }
 }
@@ -103,7 +127,13 @@ pub fn symbol<'a, M: 'a>(kind: StatusKind, t: &Tokens) -> Element<'a, M> {
 
 /// A status symbol of any size, with the arc rotated by `phase` radians.
 pub fn symbol_sized<'a, M: 'a>(kind: StatusKind, t: &Tokens, size: f32, phase: f32) -> Element<'a, M> {
-    Canvas::new(Symbol { kind, tokens: *t, phase }).width(Length::Fixed(size)).height(Length::Fixed(size)).into()
+    Canvas::new(Symbol { kind, tokens: *t, phase, animate: false }).width(Length::Fixed(size)).height(Length::Fixed(size)).into()
+}
+
+/// A status symbol whose working arc turns while `animate` is on (a real window); off, it stands still at 12 o'clock
+/// (snapshots and tests).
+pub fn symbol_live<'a, M: 'a>(kind: StatusKind, t: &Tokens, size: f32, animate: bool) -> Element<'a, M> {
+    Canvas::new(Symbol { kind, tokens: *t, phase: 0.0, animate }).width(Length::Fixed(size)).height(Length::Fixed(size)).into()
 }
 
 struct Dot {

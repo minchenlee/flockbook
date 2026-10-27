@@ -114,6 +114,8 @@ fn boot(demo: bool, args: &[String], backdrop: flockbook::glass::Backdrop, setti
     }
     flockbook::glass::install(&mut app, backdrop);
     app.state.chrome.title_bar = flockbook::chrome::choose(flockbook::glass::Os::current());
+    // A real window: working arcs turn (snapshots and tests draw them still).
+    app.state.toprow.animate = true;
     (app, Task::none())
 }
 

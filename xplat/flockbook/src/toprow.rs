@@ -25,7 +25,7 @@ use iced::advanced::{layout, mouse, overlay, renderer, widget, Clipboard, Layout
 use iced::keyboard::{self, key::Named, Key, Modifiers};
 use iced::widget::{button, column, container, mouse_area, row, stack, text, tooltip, Space};
 use iced::font::Weight;
-use iced::{gradient, time, Alignment, Background, Border, Color, Element, Event, Length, Padding, Point, Radians, Rectangle, Size, Subscription, Task, Vector};
+use iced::{gradient, Alignment, Background, Border, Color, Element, Event, Length, Padding, Point, Radians, Rectangle, Size, Subscription, Task, Vector};
 use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
@@ -86,8 +86,9 @@ pub struct TopRowState {
     seen: RefCell<Option<(String, String)>>,
     /// The open menu, if any.
     pub menu: Option<MenuKind>,
-    /// Working-arc rotation in radians, advanced by `TopRowMsg::Spin`. The sidebar reads it too.
-    pub spin: f32,
+    /// Working arcs turn (a real window, set by `main.rs`). Off in snapshots and tests: the arcs stand still. The
+    /// sidebar and Needs you read it too.
+    pub animate: bool,
     /// "Show terminal" pressed state. `terminal.rs` sets it when the sheet opens or closes.
     pub terminal_on: bool,
     pub dragging: Option<(String, Point)>,
@@ -115,8 +116,6 @@ pub enum TopRowMsg {
     PickTab { workspace: String, tab: String },
     ShowOverview,
     Split(SplitDir),
-    /// Advances the working-arc animation.
-    Spin,
 }
 
 pub fn update(app: &mut App, msg: TopRowMsg) -> Task<Message> {
@@ -199,11 +198,6 @@ pub fn update(app: &mut App, msg: TopRowMsg) -> Task<Message> {
             app.state.toprow.menu = None;
             app.update(Message::Navigate(crate::state::Screen::Overview))
         }
-        TopRowMsg::Spin => {
-            let s = &mut app.state.toprow;
-            s.spin = (s.spin + 0.42) % std::f32::consts::TAU;
-            Task::none()
-        }
     }
 }
 
@@ -248,18 +242,13 @@ fn tab_digit(c: &str) -> Option<usize> {
     (chars.next().is_none() && (1..=9).contains(&n)).then_some(n)
 }
 
-/// Subscriptions of this module: keys, and the working-arc tick while any tab works.
-pub fn subscription(app: &App) -> Subscription<Message> {
+/// Subscriptions of this module: keys. Working arcs turn by themselves (`status::symbol_live`), with no tick.
+pub fn subscription(_app: &App) -> Subscription<Message> {
     let keys = keyboard::listen().filter_map(|e| match e {
         keyboard::Event::KeyPressed { key, modifiers, .. } => on_key(key, modifiers),
         _ => None,
     });
-    let working = app.state.workspaces.iter().any(|w| w.tabs.iter().any(|t| t.status == AgentStatus::Working));
-    if working {
-        Subscription::batch([keys, time::every(Duration::from_millis(60)).map(|_| Message::TopRow(TopRowMsg::Spin))])
-    } else {
-        keys
-    }
+    keys
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -460,11 +449,11 @@ pub(crate) fn tip<'a>(t: Tokens, content: Element<'a, Message>, label: String, p
     tooltip(content, container(CALLOUT.text(label).color(t.label)).padding([5, 9]).style(style::float_e2(t, R_ROW)), pos).gap(6).delay(Duration::from_millis(450)).into()
 }
 
-fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: bool, position: usize, spin: f32) -> Element<'a, Message> {
+fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: bool, position: usize, animate: bool) -> Element<'a, Message> {
     let blocked = tab.status == AgentStatus::Blocked;
     let split = tab.panes.len() > 1;
     let kind = status_kind(tab.status);
-    let sym = status::symbol_sized(kind, &t, PILL_GLYPH, if kind == fb_ui::StatusKind::Working { spin } else { 0.0 });
+    let sym = status::symbol_live(kind, &t, PILL_GLYPH, animate);
     let label = if g.bold { PILL_BOLD.text(g.label.clone()) } else { PILL_BODY.text(g.label.clone()) };
     let label = label.color(if selected || blocked { t.label } else { t.label_2 }).wrapping(text::Wrapping::None);
     let mut inner = row![sym, label].spacing(6).align_y(Alignment::Center);
@@ -605,7 +594,7 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     let mut r = row![].align_y(Alignment::Center);
     for (i, (tab, (_, g))) in tabs.iter().zip(&lay).enumerate() {
         let sel = s.selected_tab.as_deref() == Some(tab.id.as_str());
-        r = r.push(tab_pill(t, &ws_id, tab, g, sel, i + 1, ts.spin));
+        r = r.push(tab_pill(t, &ws_id, tab, g, sel, i + 1, ts.animate));
     }
     let shifted: Element<Message> = Shift { content: r.into(), offset: off, width: strip_w, height: TAB_H }.into();
     let strip = mouse_area(shifted).on_scroll(|d| {
