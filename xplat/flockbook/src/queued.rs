@@ -162,7 +162,9 @@ pub fn log_snapshot(path: Option<&Path>) -> Result<ClaudeQueueLog, String> {
     if let Some(end) = feed.pending.iter().rposition(|b| *b == b'\n') {
         let rest = feed.pending.split_off(end + 1);
         let complete = std::mem::replace(&mut feed.pending, rest);
-        for line in complete.split(|b| *b == b'\n') {
+        // Only queue operations count: skip parsing the other lines (logs reach hundreds of MB).
+        const OP: &[u8] = b"queue-operation";
+        for line in complete.split(|b| *b == b'\n').filter(|l| l.windows(OP.len()).any(|w| w == OP)) {
             if let Ok(value) = serde_json::from_slice(line) {
                 feed.log.feed(&value);
             }
@@ -172,4 +174,30 @@ pub fn log_snapshot(path: Option<&Path>) -> Result<ClaudeQueueLog, String> {
         return Err("Queue log is catching up; exact pull is not available yet".into());
     }
     Ok(feed.log.clone())
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn the_queue_comes_from_queue_operations_only_and_follows_appends() {
+        let path = std::env::temp_dir().join(format!("fb-queue-log-{}.jsonl", std::process::id()));
+        let big = "x".repeat(4096);
+        let mut text = String::new();
+        for i in 0..50 {
+            text.push_str(&format!("{{\"type\":\"assistant\",\"message\":{{\"content\":\"{big} {i}\"}}}}\n"));
+        }
+        text.push_str("{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"content\":\"first\"}\n");
+        text.push_str("{\"type\":\"user\",\"message\":{\"content\":\"mentions queue-operation in passing\"}}\n");
+        text.push_str("{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"content\":\"second\"}\n");
+        std::fs::write(&path, &text).unwrap();
+        assert_eq!(log_snapshot(Some(&path)).unwrap().items, vec![Some("first".into()), Some("second".into())]);
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"{\"type\":\"queue-operation\",\"operation\":\"dequeue\"}\n").unwrap();
+        drop(f);
+        assert_eq!(log_snapshot(Some(&path)).unwrap().items, vec![Some("second".into())]);
+        let _ = std::fs::remove_file(&path);
+    }
 }
