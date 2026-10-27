@@ -7,6 +7,8 @@ use std::io::{BufRead, BufReader};
 pub struct LeadResolver {
     last: HashMap<String, PathBuf>,
     verdicts: HashMap<PathBuf, Verdict>,
+    /// Log path per session id. Checked in place on each refresh; the project folders are scanned only when it is gone.
+    found: HashMap<String, PathBuf>,
 }
 struct Verdict {
     file: u128,
@@ -26,9 +28,18 @@ impl LeadResolver {
     ) -> HashMap<String, (Option<PathBuf>, Option<TeamNote>)> {
         let ids: HashSet<_> = asks.iter().map(|(id, _)| id.clone()).collect();
         self.last.retain(|id, _| ids.contains(id));
+        let sessions: HashSet<&String> = asks.iter().map(|(_, s)| s).collect();
+        self.found.retain(|s, p| sessions.contains(s) && p.is_file());
+        for (_, session) in asks {
+            if !self.found.contains_key(session) {
+                if let Some(p) = crate::session_log::locate("claude", session, root) {
+                    self.found.insert(session.clone(), p);
+                }
+            }
+        }
         let mut leads = HashMap::new();
         for (pane, session) in asks {
-            let path = crate::session_log::locate("claude", session, root);
+            let path = self.found.get(session).cloned();
             if let Some(p) = path.filter(|p| judge(&mut self.verdicts, p) == Some(false)) {
                 self.last.insert(pane.clone(), p.clone());
                 leads.insert(pane.clone(), p);
@@ -38,7 +49,7 @@ impl LeadResolver {
         shown.extend(leads.values().map(|p| p.to_string_lossy().into_owned()));
         let wanted: HashSet<PathBuf> = asks
             .iter()
-            .filter_map(|(_, session)| crate::session_log::locate("claude", session, root))
+            .filter_map(|(_, session)| self.found.get(session).cloned())
             .chain(self.last.values().cloned())
             .collect();
         self.verdicts.retain(|p, _| wanted.contains(p));
@@ -229,5 +240,35 @@ mod selection_tests {
         assert!(r.select(&asks(&mate), &root, &HashSet::new())["pane"]
             .0
             .is_none());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod locate_cache_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A refresh runs on every herdr event; scanning every project folder for each Claude pane each time cost
+    /// thousands of `stat` calls a second. A found log is checked in place; the folders are scanned only when it is gone.
+    #[test]
+    fn a_found_log_is_checked_in_place_without_scanning_the_projects() {
+        let root = std::env::temp_dir().join(format!("fb-lead-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("project")).unwrap();
+        let log = root.join("project").join("abc123.jsonl");
+        std::fs::write(&log, "{\"type\":\"user\",\"message\":{}}\n").unwrap();
+        let asks = vec![("pane".to_string(), "abc123".to_string())];
+        let mut r = LeadResolver::default();
+        assert_eq!(r.select(&asks, &root, &HashSet::new())["pane"].0, Some(log.clone()));
+        // The projects folder can no longer be listed; a known path still resolves.
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o100)).unwrap();
+        let again = r.select(&asks, &root, &HashSet::new())["pane"].clone();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(again.0, Some(log.clone()));
+        assert!(again.1.is_none(), "found as the pane's own log, not the last-lead fallback");
+        // Gone: the next refresh scans again and finds nothing.
+        std::fs::remove_file(&log).unwrap();
+        assert!(r.select(&asks, &root, &HashSet::new())["pane"].0.is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
