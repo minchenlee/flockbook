@@ -230,10 +230,13 @@ pub fn handle(icon: Icon) -> svg::Handle {
 
 /// An icon at `size` points in `color` (alpha is kept).
 pub fn icon<'a, M: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a, M> {
+    // The SVG tint takes the color without its alpha, so a translucent label (secondary, tertiary) drew solid black or
+    // white; the alpha goes to the widget's opacity instead.
     svg(handle(icon))
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
-        .style(move |_, _| svg::Style { color: Some(color) })
+        .opacity(color.a)
+        .style(move |_, _| svg::Style { color: Some(Color { a: 1.0, ..color }) })
         .into()
 }
 
