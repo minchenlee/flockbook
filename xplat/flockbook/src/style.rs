@@ -69,6 +69,23 @@ pub fn with_top_fade<'a, M: 'a>(ground: Color, content: Element<'a, M>) -> Eleme
     stack![content, column![fade, Space::new().height(Length::Fill)]].into()
 }
 
+/// The same fade upward: transparent at the top, the content color `c` over its last 30%, so a line the edge cuts is
+/// gone before the edge rather than a faint half line on it.
+pub fn fade_up(c: Color) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let g = iced::gradient::Linear::new(Radians(std::f32::consts::PI)).add_stop(0.0, Color { a: 0.0, ..c }).add_stop(0.7, c).add_stop(1.0, c);
+        container::Style { background: Some(Background::Gradient(iced::Gradient::Linear(g))), ..Default::default() }
+    }
+}
+
+/// Puts a `FADE_H` soft fade over the bottom of `content`, the Mac's scroll edge under the status line and the composer:
+/// a line the edge cuts fades out instead of ending half drawn against them. The conversation's bottom inset (24 pt)
+/// keeps its last row at rest above the fade. The fade ignores the pointer.
+pub fn with_bottom_fade<'a, M: 'a>(ground: Color, content: Element<'a, M>) -> Element<'a, M> {
+    let fade = container(Space::new()).width(Length::Fill).height(Length::Fixed(FADE_H)).style(fade_up(ground));
+    stack![content, column![Space::new().height(Length::Fill), fade]].into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

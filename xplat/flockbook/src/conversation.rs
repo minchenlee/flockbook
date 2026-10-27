@@ -19,7 +19,7 @@ use fb_ui::selectable::flow::{
 };
 use fb_ui::theme::*;
 use iced::widget::{button, column, container, image, stack, Space};
-use iced::{Alignment, Element, Length, Size, Subscription, Task};
+use iced::{Alignment, Element, Length, Padding, Size, Subscription, Task};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -756,7 +756,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(p) = &cs.probe {
         flow = flow.probe(p.clone());
     }
-    let body = Element::from(flow);
+    let body = crate::style::with_bottom_fade(app.ground(), Element::from(flow));
     let body = if !cs.pinned {
         // The count of rows below the window and the down arrow, as the Swift button's label (Conversation.swift:246).
         let newer = cs.doc.rows.len().saturating_sub(cs.doc.window.range.1);
@@ -765,8 +765,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         } else {
             "\u{2193} Jump to latest".to_string()
         };
-        // Swift `.buttonStyle(.bordered).controlSize(.small)`, centred under the rows; over the rows it floats, so it
-        // takes the floating surface and the e1 shadow.
+        // Swift `.buttonStyle(.bordered).controlSize(.small)`, centred under the rows (Conversation.swift:244). Its own
+        // strip under the conversation, over the status line: floating over the rows it sat on their text.
         let latest = container(
             button(CAPTION.text(label).color(t.label))
                 .padding([3.0, 10.0])
@@ -788,11 +788,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 })
                 .on_press(Message::Conversation(ConversationMsg::JumpLatest)),
         )
-        .padding(16)
+        .padding(Padding { top: SP_8, bottom: 2.0, left: 0.0, right: 0.0 })
         .width(Length::Fill)
-        .align_x(Alignment::Center)
-        .align_bottom(Length::Fill);
-        Element::from(stack![body, latest])
+        .align_x(Alignment::Center);
+        Element::from(column![body, latest])
     } else {
         body
     };

@@ -1,13 +1,13 @@
 //! Conversation view tests: headless, through `iced_test::Simulator` (tiny-skia). No window opens.
 
-use fb_ui::selectable::flow::{Anchor, FlowEvent, Probe};
+use fb_ui::selectable::flow::{Anchor, FlowEvent, Probe, RowKind};
 use fb_ui::Mode;
 use flockbook::conversation::ConversationMsg;
 use flockbook::state::Screen;
 use flockbook::{App, Message};
 use herdr_core::{ConversationItem, ItemKind, Pane, Workspace};
 use flockbook::source::{DataSource, DemoSource};
-use iced::{keyboard, mouse, window, Event, Point, Settings, Size};
+use iced::{keyboard, mouse, window, Event, Point, Rectangle, Settings, Size};
 use std::cell::Cell;
 use iced_test::Simulator;
 use std::cell::RefCell;
@@ -505,6 +505,67 @@ fn scrolled_up_with_a_status_line() {
             let img = flockbook::snapshot::render_app(&app, (1280, 852));
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("evidence/app-conversation-scrolled-{name}.png"));
             flockbook::snapshot::write_png(&img, &path).unwrap();
+        }
+    }
+}
+
+#[test]
+fn scrolled_up_nothing_sits_on_the_text() {
+    STATUS_TAGS.with(|c| c.set(true));
+    let (mut app, _, _) = fake_app(chat(400), 0);
+    settle(&mut app);
+    let total = probe(&app).total;
+    let _ = app.update(Message::Conversation(ConversationMsg::Flow(FlowEvent::ScrollTo(total / 2.0))));
+    settle(&mut app);
+    // The middle of a prose row on the conversation's bottom edge: the case where the edge cuts a line.
+    let p = probe(&app);
+    let cut = p
+        .placed
+        .iter()
+        .find(|pl| pl.y > p.eff + p.view.height / 2.0 && matches!(app.state.conversation.doc.rows[pl.idx].kind, RowKind::Prose))
+        .expect("a prose row in the lower half");
+    let (idx, to) = (cut.idx, cut.y + cut.h / 2.0 - p.view.height);
+    let _ = app.update(Message::Conversation(ConversationMsg::Flow(FlowEvent::ScrollTo(to))));
+    settle(&mut app);
+    assert!(!app.state.conversation.pinned);
+    let p = probe(&app);
+    let flow = Rectangle::new(p.origin, p.view);
+    let bottom = flow.y + flow.height;
+    let cut = p.placed.iter().find(|pl| pl.idx == idx).expect("the row stays mounted");
+    let top = p.origin.y + cut.y - p.eff;
+    assert!(top < bottom && top + cut.h > bottom, "row {idx} crosses the bottom edge: {top} + {} vs {bottom}", cut.h);
+
+    let rows: Vec<Rectangle> = p
+        .placed
+        .iter()
+        .filter_map(|pl| Rectangle::new(Point::new(p.origin.x + p.col_x, p.origin.y + pl.y - p.eff), Size::new(p.colw, pl.h)).intersection(&flow))
+        .collect();
+    let cs = &app.state.conversation;
+    let newer = cs.doc.rows.len().saturating_sub(cs.doc.window.range.1);
+    let label = if newer > 0 { format!("\u{2193} Jump to latest ({newer} newer)") } else { "\u{2193} Jump to latest".to_string() };
+    let mut s = sim(&app);
+    let jump = s.find(label.as_str()).expect("the jump button shows").visible_bounds().expect("visible");
+    let status = s.find("Model 1").expect("the status line shows").visible_bounds().expect("visible");
+    drop(s);
+    for r in &rows {
+        assert!(!jump.intersects(r), "Jump to latest {jump:?} sits on a row {r:?}");
+    }
+    assert!(status.y >= bottom - 0.5, "the status line {status:?} starts under the rows (bottom {bottom})");
+
+    // The line the edge cuts fades out: the last points of the conversation are the ground, not half a line of text.
+    let img = flockbook::snapshot::render_app(&app, (W as u32, H as u32));
+    if std::env::var_os("FB_WRITE_EVIDENCE").is_some() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("evidence/app-conversation-cut-light.png");
+        flockbook::snapshot::write_png(&img, &path).unwrap();
+    }
+    let g = app.ground();
+    let ground = [g.r, g.g, g.b].map(|c| (c * 255.0).round() as i32);
+    let (x0, x1) = (((flow.x + p.col_x) * 2.0) as u32, ((flow.x + p.col_x + p.colw) * 2.0) as u32);
+    for y in ((bottom - 2.0) * 2.0) as u32..(bottom * 2.0) as u32 {
+        for x in x0..x1 {
+            let i = ((y * img.width + x) * 4) as usize;
+            let px = [img.rgba[i] as i32, img.rgba[i + 1] as i32, img.rgba[i + 2] as i32];
+            assert!(px.iter().zip(ground).all(|(a, b)| (a - b).abs() <= 8), "text at the bottom edge ({x}, {y}): {px:?} vs ground {ground:?}");
         }
     }
 }
