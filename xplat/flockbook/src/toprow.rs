@@ -645,12 +645,12 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
         layers.push(container(marker(t, Edge::Right, hidden_r)).width(Length::Fill).height(Length::Fill).align_x(Alignment::End).align_y(Alignment::Center).padding([0, 4]).into());
     }
     let strip_box = container(stack(layers)).width(Length::Fixed(strip_w)).height(Length::Fixed(TAB_H));
-    // The tab island: one capsule around the pills, radius height / 2 (Swift TopRow.height / inset).
+    // The tab island keeps the Swift geometry (TopRow.height / inset) but no fill of its own: only the selected pill
+    // has a ground (the owner's call over the Mac's island capsule).
     let island = container(strip_box)
         .width(Length::Fixed(strip_w + 2.0 * ISLAND_INSET))
         .height(Length::Fixed(TAB_H + 2.0 * ISLAND_INSET))
-        .padding(ISLAND_INSET)
-        .style(style::fill(t.fill_2, (TAB_H + 2.0 * ISLAND_INSET) / 2.0));
+        .padding(ISLAND_INSET);
 
     let new_tab = tip(t, action_button(t, Icon::Plus, false, Message::TopRow(TopRowMsg::Plus)), "New tab (\u{2318}T)".into(), tooltip::Position::Bottom);
     let terminal = tip(t, action_button(t, Icon::SquareTerminal, ts.terminal_on, Message::TopRow(TopRowMsg::ToggleTerminal)), "Show terminal (\u{2303}`)".into(), tooltip::Position::Bottom);

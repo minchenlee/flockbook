@@ -12,3 +12,4 @@ One short line: what this release is about.
 ### ⚙️ Changes
 - Cross-platform preview: screens, reading column, Settings and the shortcuts panel now match the Mac layout.
 - Cross-platform preview: less CPU while agents work and in long conversations; status arcs turn slower while the window is in the background.
+- Cross-platform preview: the status line sits right over the composer; Jump to latest, the hidden sidebar, its toolbar toggle and the tab island look as on the Mac.

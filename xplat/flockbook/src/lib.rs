@@ -275,6 +275,7 @@ impl App {
         let main = iced::widget::stack![settings::hide(main, on_settings), settings::page(self)];
         let bar: Element<Message> = if on_settings { Space::new().width(Length::Fill).into() } else { toprow::view(self) };
         let sidebar = chrome::sidebar(self);
+        let toggle = chrome::sidebar_toggle(self);
         let covered = self.state.shortcuts.open;
         if self.state.glass.on {
             // Window glass: each surface paints one tint over a clear root, so translucent layers never stack.
@@ -282,10 +283,12 @@ impl App {
             let main = if needs_you::paints_own_ground(self) && !on_settings { main } else { main.style(style::fill(ground, 0.0)) };
             let right = column![container(bar).width(Length::Fill).height(Length::Fixed(fb_ui::theme::TOPROW_H)).style(style::fill(t.glass_bar, 0.0)), main];
             let body = row![sidebar, container(right).width(Length::Fill).height(Length::Fill)];
+            let body: Element<Message> = match toggle { Some(toggle) => iced::widget::stack![body, toggle].into(), None => body.into() };
             return container(iced::widget::stack![settings::cover(iced::widget::stack![body, settings::hide(toprow::menu_layer(self), on_settings), settings::hide(workspace_actions::layer(self), on_settings), settings::hide(terminal::layer(self), on_settings)], covered), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).into();
         }
         let right = column![container(bar).height(Length::Fixed(fb_ui::theme::TOPROW_H)), container(main).width(Length::Fill).height(Length::Fill)];
         let body = row![sidebar, container(right).width(Length::Fill).height(Length::Fill).style(style::content(t))];
+        let body: Element<Message> = match toggle { Some(toggle) => iced::widget::stack![body, toggle].into(), None => body.into() };
         container(iced::widget::stack![settings::cover(iced::widget::stack![body, settings::hide(toprow::menu_layer(self), on_settings), settings::hide(workspace_actions::layer(self), on_settings), settings::hide(terminal::layer(self), on_settings)], covered), shortcuts::layer(self)]).width(Length::Fill).height(Length::Fill).style(style::content(t)).into()
     }
 }

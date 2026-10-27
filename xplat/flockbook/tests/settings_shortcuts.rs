@@ -391,9 +391,9 @@ fn reload_is_offered_only_while_ghostty_supplies_the_colors() {
     assert!(s.find("Reload Ghostty colors").is_err(), "the old full-width row is gone");
 }
 
-/// The collapsed sidebar (Cmd+B) is a narrow rail: the restore button still works and the icons stay quiet.
+/// The hidden sidebar (Cmd+B) leaves nothing at the edge: the toggle sits at the toolbar's leading end and brings it back.
 #[test]
-fn the_collapsed_rail_still_restores_the_sidebar() {
+fn the_toolbar_toggle_restores_the_hidden_sidebar() {
     let mut app = App::demo(Mode::Light, Screen::Conversation);
     let _ = app.update(Message::Settings(SettingsMsg::ToggleSidebar));
     assert!(app.state.settings.sidebar_hidden());
@@ -402,7 +402,7 @@ fn the_collapsed_rail_still_restores_the_sidebar() {
     s.simulate(simulator::click());
     let msgs: Vec<Message> = s.into_messages().collect();
     apply(&mut app, msgs.clone());
-    assert!(!app.state.settings.sidebar_hidden(), "the rail's restore button brings the sidebar back: {msgs:?}");
+    assert!(!app.state.settings.sidebar_hidden(), "the toolbar toggle brings the sidebar back: {msgs:?}");
 }
 
 #[test]
@@ -422,9 +422,11 @@ fn snapshots_of_the_panel_and_the_sheet() {
         app.state.settings.prefs.terminal_colors = Some(flockbook::settings::TerminalColors::Ghostty);
         app.state.settings.ghostty = Some(Ok(ghostty_themes()));
         shot(&app, &format!("settings-ghostty-{suffix}"));
-        // The collapsed rail: quiet restore and Settings icons, the same as the sidebar's footer.
+        // The hidden sidebar: nothing at the edge, the quiet toggle at the toolbar's leading end; and the Settings page then.
         let _ = app.update(Message::Settings(SettingsMsg::Close));
         let _ = app.update(Message::Settings(SettingsMsg::ToggleSidebar));
-        shot(&app, &format!("sidebar-rail-{suffix}"));
+        shot(&app, &format!("sidebar-hidden-{suffix}"));
+        let _ = app.update(Message::Settings(SettingsMsg::Open));
+        shot(&app, &format!("settings-sidebar-hidden-{suffix}"));
     }
 }

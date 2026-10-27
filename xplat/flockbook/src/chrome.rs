@@ -122,30 +122,44 @@ fn quiet_icon<'a>(t: fb_ui::theme::Tokens, ic: fb_ui::icons::Icon, size: f32, ms
         .into()
 }
 
-/// Sidebar container for the integration host. A collapsed rail retains the restore button and Settings access.
+/// The sidebar, or nothing while it is hidden (Swift: the split view's sidebar slides out completely; the toggle stays
+/// in the toolbar, `sidebar_toggle`).
 pub fn sidebar(app: &App) -> Element<'_, Message> {
     use fb_ui::theme::*;
-    use fb_ui::icons::{Icon, SIZE_DEFAULT};
     use iced::widget::{container, row, stack, Space};
     use iced::{Alignment, Length};
+    if app.state.settings.sidebar_hidden() {
+        return Space::new().width(0).height(0).into();
+    }
     let t = app.tokens();
-    let hidden = app.state.settings.sidebar_hidden();
-    let toggle = quiet_icon(t, Icon::PanelLeft, SIZE_DEFAULT, Message::Settings(crate::settings::SettingsMsg::ToggleSidebar), if hidden { "Show sidebar" } else { "Hide sidebar" });
-    let content: Element<'_, Message> = if hidden {
-        // The rail: restore, then Settings. Quiet icons, as in Swift's toolbar toggle.
-        let settings = quiet_icon(t, Icon::Settings2, SIZE_DEFAULT, Message::Settings(crate::settings::SettingsMsg::Open), "Settings (\u{2318},)");
-        iced::widget::column![iced::widget::row![toggle].spacing(SP_4), iced::widget::row![settings].spacing(SP_4)].spacing(SP_4).padding([10, 9]).into()
-    } else {
-        // The sidebar's own empty top band is the window's title bar on macOS (`sidebar::view` keeps it 52 pt tall and
-        // empty). The toggle rides on that band instead of pushing it down, so the empty part stays a drag area.
-        // The toggle sits at the sidebar's trailing end, level with the traffic lights (the Mac's toolbar item there).
-        let band = container(row![Space::new().width(Length::Fill), toggle]).height(Length::Fixed(SIDEBAR_TOP_H)).align_y(Alignment::Center).padding([0, 9]);
-        // While Settings shows, the sidebar holds Back and the tabs instead (Swift `SidebarView`: `SettingsSidebar`).
-        let list = if app.state.settings.open { crate::settings::sidebar_list(app, SIDEBAR_TOP_H) } else { crate::sidebar::view(app) };
-        stack![list, container(band).width(Length::Fill).align_y(Alignment::Start)].into()
-    };
-    container(content).width(Length::Fixed(if hidden { 48.0 } else { SIDEBAR_W })).height(Length::Fill)
+    let toggle = toggle_button(app);
+    // The sidebar's own empty top band is the window's title bar on macOS (`sidebar::view` keeps it 52 pt tall and
+    // empty). The toggle rides on that band instead of pushing it down, so the empty part stays a drag area.
+    // The toggle sits at the sidebar's trailing end, level with the traffic lights (the Mac's toolbar item there).
+    let band = container(row![Space::new().width(Length::Fill), toggle]).height(Length::Fixed(SIDEBAR_TOP_H)).align_y(Alignment::Center).padding([0, 9]);
+    // While Settings shows, the sidebar holds Back and the tabs instead (Swift `SidebarView`: `SettingsSidebar`).
+    let list = if app.state.settings.open { crate::settings::sidebar_list(app, SIDEBAR_TOP_H) } else { crate::sidebar::view(app) };
+    container(stack![list, container(band).width(Length::Fill).align_y(Alignment::Start)]).width(Length::Fixed(SIDEBAR_W)).height(Length::Fill)
         .style(crate::style::sidebar(t, app.state.glass.on)).into()
+}
+
+fn toggle_button<'a>(app: &App) -> Element<'a, Message> {
+    let hidden = app.state.settings.sidebar_hidden();
+    quiet_icon(app.tokens(), fb_ui::icons::Icon::PanelLeft, fb_ui::icons::SIZE_DEFAULT, Message::Settings(crate::settings::SettingsMsg::ToggleSidebar), if hidden { "Show sidebar" } else { "Hide sidebar" })
+}
+
+/// While the sidebar is hidden: its toggle at the toolbar's leading end, after the traffic lights on macOS (the
+/// system's toolbar item beside them). A layer over the window, so it stays on the Settings page too. `None` while the
+/// sidebar shows (the toggle is on its top band then).
+pub fn sidebar_toggle(app: &App) -> Option<Element<'_, Message>> {
+    use iced::widget::container;
+    if !app.state.settings.sidebar_hidden() {
+        return None;
+    }
+    // Three 12 pt lights from x = 20, 8 pt apart (66 pt), then the toolbar's 12 pt gap.
+    let left = if app.state.chrome.title_bar == TitleBar::Hidden { 78.0 } else { fb_ui::theme::SP_8 };
+    let top = (fb_ui::theme::TOPROW_H - 30.0) / 2.0;
+    Some(container(toggle_button(app)).padding(iced::Padding { top, left, right: 0.0, bottom: 0.0 }).into())
 }
 
 #[cfg(test)]
