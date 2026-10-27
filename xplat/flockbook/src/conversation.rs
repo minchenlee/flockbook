@@ -756,7 +756,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(p) = &cs.probe {
         flow = flow.probe(p.clone());
     }
-    let body = crate::style::with_bottom_fade(app.ground(), Element::from(flow));
+    // Soft edges at the top row and over the status line: a line an edge cuts fades out instead of ending half drawn.
+    let body = crate::style::with_top_fade(app.ground(), crate::style::with_bottom_fade(app.ground(), Element::from(flow)));
     let body = if !cs.pinned {
         // The count of rows below the window and the down arrow, as the Swift button's label (Conversation.swift:246).
         let newer = cs.doc.rows.len().saturating_sub(cs.doc.window.range.1);
