@@ -42,6 +42,10 @@ fn tags_for(app: &App, pane: &herdr_core::Pane) -> Vec<StatusTag> {
     v
 }
 
+/// Height of the collapsed row: a tag (11 pt caption, 2 pt padding) or the chevron, plus 6 pt over it (Swift
+/// `.padding(.top, 6)`).
+const ROW_H: f32 = 6.0 + 22.0;
+
 pub fn view(app: &App) -> Element<'_, Message> {
     let Some(pane) = app.state.selected_pane() else { return Space::new().into() };
     let tags = tags_for(app, pane);
@@ -49,25 +53,34 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let t = app.tokens();
     let pane_id = pane.id.clone();
     let open = app.state.settings.expanded_status.contains(&pane_id);
-    responsive(move |size| {
-        let widths: Vec<f32> = tags.iter().map(|t| t.text.chars().count() as f32 * 12.0 + 20.0 + if t.percent.is_some() { 33.0 } else { 0.0 }).collect();
-        let shown = fitting(&widths, size.width);
-        let toggle = button(icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, SIZE_INLINE, t.label_2))
-            .padding(4).on_press(Message::Settings(SettingsMsg::ToggleStatus(pane_id.clone())));
-        let content: Element<'_, Message> = if open {
-            // Each tag may wrap in a narrow pane; the expanded area has its own height cap.
-            let mut all = column![].spacing(6).width(Length::Fill);
-            for item in &tags { all = all.push(tag(t, item)); }
-            row![container(scrollable(all)).max_height(160.0).width(Length::Fill), toggle].spacing(6).into()
-        } else {
-            let mut line = row![].spacing(6).align_y(Alignment::Center);
-            for item in tags.iter().take(shown) { line = line.push(tag(t, item)); }
-            line = line.push(Space::new().width(Length::Fill));
-            if shown < tags.len() { line = line.push(toggle); }
-            line.into()
-        };
-        container(content).padding([4, 14]).width(Length::Fill).max_width(app.state.settings.column_width()).into()
-    }).into()
+    let col = app.state.settings.column_width();
+    let toggle = move || button(icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, SIZE_INLINE, t.label_2))
+        .padding(4).on_press(Message::Settings(SettingsMsg::ToggleStatus(pane_id.clone())));
+    // The reading column, as the composer under it: tags start at its edge plus 14 pt (Swift `StatusLineBar`).
+    let column_of = move |content: Element<'static, Message>| -> Element<'static, Message> {
+        container(container(content).padding(iced::Padding { top: 6.0, right: 14.0, bottom: 0.0, left: 14.0 }).width(Length::Fill).max_width(col))
+            .padding([0.0, 28.0])
+            .center_x(Length::Fill)
+            .into()
+    };
+    if open {
+        // Each tag may wrap in a narrow pane; the expanded area has its own height cap.
+        let mut all = column![].spacing(6).width(Length::Fill);
+        for item in &tags { all = all.push(tag(t, item)); }
+        return column_of(row![container(scrollable(all)).max_height(160.0).width(Length::Fill), toggle()].spacing(6).into());
+    }
+    // One row: the tags that fit and the chevron when one is left out. Fixed height, so it never takes the
+    // conversation's space.
+    let widths: Vec<f32> = tags.iter().map(|t| t.text.chars().count() as f32 * 12.0 + 20.0 + if t.percent.is_some() { 33.0 } else { 0.0 }).collect();
+    let line = responsive(move |size| {
+        let shown = fitting(&widths, size.width.min(col) - 2.0 * (28.0 + 14.0));
+        let mut line = row![].spacing(6).align_y(Alignment::Center);
+        for item in tags.iter().take(shown) { line = line.push(tag(t, item)); }
+        line = line.push(Space::new().width(Length::Fill));
+        if shown < tags.len() { line = line.push(toggle()); }
+        column_of(line.into())
+    });
+    container(line).height(ROW_H).width(Length::Fill).into()
 }
 
 #[cfg(test)]

@@ -765,11 +765,31 @@ pub fn view(app: &App) -> Element<'_, Message> {
         } else {
             "\u{2193} Jump to latest".to_string()
         };
+        // Swift `.buttonStyle(.bordered).controlSize(.small)`, centred under the rows; over the rows it floats, so it
+        // takes the floating surface and the e1 shadow.
         let latest = container(
             button(CAPTION.text(label).color(t.label))
+                .padding([3.0, 10.0])
+                .style(move |_, status| {
+                    let down = matches!(status, button::Status::Pressed | button::Status::Hovered);
+                    let bg = match (t.mode.is_dark(), down) {
+                        (true, false) => iced::Color::from_rgb8(48, 48, 52),
+                        (true, true) => iced::Color::from_rgb8(60, 60, 64),
+                        (false, false) => iced::Color::WHITE,
+                        (false, true) => iced::Color::from_rgb8(242, 242, 242),
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(bg)),
+                        text_color: t.label,
+                        border: iced::Border { color: t.sep, width: 1.0, radius: R_ROW.into() },
+                        shadow: shadow_e1(&t),
+                        ..Default::default()
+                    }
+                })
                 .on_press(Message::Conversation(ConversationMsg::JumpLatest)),
         )
         .padding(16)
+        .width(Length::Fill)
         .align_x(Alignment::Center)
         .align_bottom(Length::Fill);
         Element::from(stack![body, latest])

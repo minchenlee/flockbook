@@ -54,7 +54,19 @@ fn chat(n: usize) -> Vec<ConversationItem> {
         .collect()
 }
 
+thread_local! {
+    /// The selected pane shows a status line (each test runs on its own thread).
+    static STATUS_TAGS: Cell<bool> = const { Cell::new(false) };
+}
+
 impl DataSource for Fake {
+    fn status_tags(&self, _pane: &Pane) -> Vec<herdr_core::StatusTag> {
+        if !STATUS_TAGS.with(Cell::get) {
+            return Vec::new();
+        }
+        let tag = |kind: &str, text: &str, percent: Option<f64>| herdr_core::StatusTag { kind: kind.into(), text: text.into(), spoken: text.into(), percent, warn: false };
+        vec![tag("model", "Model 1", None), tag("effort", "medium", None), tag("context", "ctx 25%", Some(25.0)), tag("cost", "$1.20 est.", None)]
+    }
     fn label(&self) -> String {
         "fake".into()
     }
@@ -463,6 +475,37 @@ fn five_thousand_messages_middle_snapshot() {
         let img = flockbook::snapshot::render_app(&app, (1280, 852));
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("evidence/app-conversation-5k-mid.png");
         flockbook::snapshot::write_png(&img, &path).unwrap();
+    }
+}
+
+/// Scrolled up with a status line: "Jump to latest" floats centred over the rows, the status line sits right over the
+/// composer and takes only its row. `FB_WRITE_EVIDENCE=1` writes evidence/app-conversation-scrolled-{light,dark}.png.
+#[test]
+fn scrolled_up_with_a_status_line() {
+    STATUS_TAGS.with(|c| c.set(true));
+    for (mode, name) in [(Mode::Light, "light"), (Mode::Dark, "dark")] {
+        let (mut app, _, _) = fake_app(chat(400), 0);
+        app.state.mode = mode;
+        settle(&mut app);
+        let total = probe(&app).total;
+        let _ = app.update(Message::Conversation(ConversationMsg::Flow(FlowEvent::ScrollTo(total / 2.0))));
+        settle(&mut app);
+        assert!(!app.state.conversation.pinned);
+        let mut s = sim(&app);
+        assert!(s.find("Model 1").is_ok(), "the status line shows");
+        let cs = &app.state.conversation;
+        let newer = cs.doc.rows.len().saturating_sub(cs.doc.window.range.1);
+        let label = if newer > 0 { format!("\u{2193} Jump to latest ({newer} newer)") } else { "\u{2193} Jump to latest".to_string() };
+        assert!(s.find(label.as_str()).is_ok(), "the jump button shows");
+        drop(s);
+        // The rows end right over the status line: it takes one row, not half the column.
+        let viewport = app.state.conversation.viewport;
+        assert!(viewport.height > 852.0 - 260.0, "the conversation keeps the height: {viewport:?}");
+        if std::env::var_os("FB_WRITE_EVIDENCE").is_some() {
+            let img = flockbook::snapshot::render_app(&app, (1280, 852));
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("evidence/app-conversation-scrolled-{name}.png"));
+            flockbook::snapshot::write_png(&img, &path).unwrap();
+        }
     }
 }
 
