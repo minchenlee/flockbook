@@ -269,6 +269,28 @@ fn wheel_scroll_is_clamped_and_marker_jumps_to_blocked_tab() {
 }
 
 #[test]
+fn the_edge_marker_does_not_sit_on_a_tab_title() {
+    // Selected tab in the middle: the blocked tabs are out of view on the right, and a title runs into the right edge.
+    let app = many(Mode::Light, "tab4");
+    let (w, h) = (1280u32, 852u32);
+    let img = render_app(&app, (w, h));
+    std::env::set_var("ICED_TEST_BACKEND", "tiny-skia");
+    let settings = Settings { fonts: fb_ui::fonts::bytes(), default_font: fb_ui::fonts::default_font(), ..Settings::default() };
+    let mut sim: Simulator<'_, Message> = Simulator::with_size(settings, Size::new(w as f32, h as f32), app.view());
+    let m = sim.find(flockbook::toprow::marker_id(Edge::Right)).expect("blocked edge marker").visible_bounds().expect("visible");
+    drop(sim);
+    // The band just before the marker shows the ground, not the end of a title running under it.
+    let (x0, x1) = (((m.x - 8.0) * 2.0) as u32, (m.x * 2.0) as u32);
+    for y in (m.y * 2.0) as u32..((m.y + m.height) * 2.0) as u32 {
+        for x in x0..x1 {
+            let i = ((y * img.width + x) * 4) as usize;
+            let px = &img.rgba[i..i + 3];
+            assert!(px.iter().all(|&c| c > 225), "text next to the marker at ({x}, {y}): {px:?}");
+        }
+    }
+}
+
+#[test]
 fn workspace_switch_resets_the_strip() {
     let mut app = many(Mode::Light, "tab12");
     render(&app);

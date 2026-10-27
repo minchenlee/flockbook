@@ -34,6 +34,8 @@ const MIN_TAB_W: f32 = 72.0;
 const MAX_TAB_W: f32 = 200.0;
 const FADE_L: f32 = 36.0;
 const FADE_R: f32 = 44.0;
+/// Room for an edge marker: its 4 pt inset plus a capsule of up to two digits and a chevron.
+const MARKER_W: f32 = 40.0;
 /// Pills are capsules and the island insets them by 3 on every side (Swift TabPill.height / TopRow.inset).
 const PILL_R: f32 = TAB_H / 2.0;
 const ISLAND_INSET: f32 = 3.0;
@@ -544,12 +546,18 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
     tip(t, pill, tab_tooltip(tab, position), tooltip::Position::Bottom)
 }
 
-fn fade<'a>(t: Tokens, left: bool) -> Element<'a, Message> {
+/// Edge fade. `solid` points at the outer end stay fully opaque, so a marker drawn there has only the ground under it.
+fn fade<'a>(t: Tokens, left: bool, solid: f32) -> Element<'a, Message> {
     let (from, to) = (t.bg, Color { a: 0.0, ..t.bg });
+    let w = if left { FADE_L } else { FADE_R } + solid;
+    let edge = solid / w;
     // Angle PI/2 runs left to right in iced's gradient space.
-    let (a, b) = if left { (from, to) } else { (to, from) };
-    let g = gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2)).add_stop(0.0, a).add_stop(1.0, b);
-    container(Space::new()).width(Length::Fixed(if left { FADE_L } else { FADE_R })).height(Length::Fill).style(move |_| container::Style { background: Some(Background::Gradient(g.into())), ..Default::default() }).into()
+    let g = if left {
+        gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2)).add_stop(0.0, from).add_stop(edge, from).add_stop(1.0, to)
+    } else {
+        gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2)).add_stop(0.0, to).add_stop(1.0 - edge, from).add_stop(1.0, from)
+    };
+    container(Space::new()).width(Length::Fixed(w)).height(Length::Fill).style(move |_| container::Style { background: Some(Background::Gradient(g.into())), ..Default::default() }).into()
 }
 
 /// Opaque blend of `over` onto `base`.
@@ -661,11 +669,13 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     let hidden_l = tabs.iter().zip(&lay).filter(|(t, (x, g))| t.status == AgentStatus::Blocked && x + g.width <= off + 1.0).count();
     let hidden_r = tabs.iter().zip(&lay).filter(|(t, (x, _))| t.status == AgentStatus::Blocked && *x >= off + strip_w - 1.0).count();
     let mut layers: Vec<Element<Message>> = vec![strip.into()];
+    // Unlike the Mac (14 pt fade under the marker), the marker gets a solid ground so no title runs under it.
+    let solid = |n: usize| if n > 0 { MARKER_W } else { 0.0 };
     if clipped_l {
-        layers.push(container(fade(t, true)).width(Length::Fill).align_x(Alignment::Start).into());
+        layers.push(container(fade(t, true, solid(hidden_l))).width(Length::Fill).align_x(Alignment::Start).into());
     }
     if clipped_r {
-        layers.push(container(fade(t, false)).width(Length::Fill).align_x(Alignment::End).into());
+        layers.push(container(fade(t, false, solid(hidden_r))).width(Length::Fill).align_x(Alignment::End).into());
     }
     if hidden_l > 0 {
         layers.push(container(marker(t, Edge::Left, hidden_l)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Start).align_y(Alignment::Center).padding([0, 4]).into());
