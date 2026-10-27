@@ -290,6 +290,106 @@ fn the_edge_marker_does_not_sit_on_a_tab_title() {
     }
 }
 
+// ---- a crowded top row: ten long tab names, the window buttons drawn ---------------------------------------------
+
+/// Ten tabs with long agent-style names: more than the row holds at 1280 pt, with or without the sidebar.
+struct TenTabs;
+
+const TEN: [(&str, AgentStatus); 10] = [
+    ("orchard-ui-orch", AgentStatus::Done),
+    ("orchard-ui-dev", AgentStatus::Done),
+    ("atlas-backfill-dev", AgentStatus::Done),
+    ("atlas-schema-dev", AgentStatus::Working),
+    ("harbor-deploy-ops", AgentStatus::Done),
+    ("quarry-rank-dev", AgentStatus::Done),
+    ("quarry-bench-perf", AgentStatus::Done),
+    ("tidepool-parse-dev", AgentStatus::Idle),
+    ("lighthouse-docs", AgentStatus::Idle),
+    ("lighthouse-release", AgentStatus::Blocked),
+];
+
+impl DataSource for TenTabs {
+    fn label(&self) -> String {
+        "ten".into()
+    }
+    fn workspaces(&self) -> Vec<Workspace> {
+        let tabs = TEN.iter().enumerate().map(|(i, (l, s))| tab(i, l, *s, 1)).collect();
+        vec![Workspace { id: "w1".into(), label: "Orchard".into(), tabs }]
+    }
+    fn connected(&self) -> bool {
+        true
+    }
+    fn conversation(&self, _pane: &Pane) -> Vec<ConversationItem> {
+        Vec::new()
+    }
+}
+
+/// The ten tabs as on the Mac: no title bar (the traffic lights over the content), the first tab selected.
+fn ten(mode: Mode, sidebar: bool, glass: bool) -> App {
+    let mut app = App::new(Box::new(TenTabs), mode, Screen::Conversation);
+    app.state.chrome.title_bar = flockbook::chrome::TitleBar::Hidden;
+    app.state.settings.prefs.sidebar_hidden = Some(!sidebar);
+    app.state.glass.on = glass;
+    app.state.select_tab("w1", "tab0");
+    app
+}
+
+/// The visible tab titles in the top row, left to right.
+fn titles(app: &App, w: f32) -> Vec<(String, iced::Rectangle)> {
+    std::env::set_var("ICED_TEST_BACKEND", "tiny-skia");
+    let _ = render_app(app, (w as u32, 852));
+    let settings = Settings { fonts: fb_ui::fonts::bytes(), default_font: fb_ui::fonts::default_font(), ..Settings::default() };
+    let mut sim: Simulator<'_, Message> = Simulator::with_size(settings, Size::new(w, 852.0), app.view());
+    let mut out: Vec<(String, iced::Rectangle)> = TEN
+        .iter()
+        .filter_map(|(l, _)| sim.find(*l).ok().and_then(|f| f.visible_bounds()).filter(|b| b.y < fb_ui::theme::TOPROW_H).map(|b| (l.to_string(), b)))
+        .collect();
+    out.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+    out
+}
+
+#[test]
+fn a_crowded_top_row_keeps_clear_of_the_window_buttons() {
+    for w in [1280.0f32, 1000.0] {
+        for sidebar in [false, true] {
+            let app = ten(Mode::Light, sidebar, false);
+            let ts = titles(&app, w);
+            assert!(!ts.is_empty(), "no tab title found at {w} (sidebar {sidebar})");
+            // Traffic lights (x 20..66) and, with the sidebar hidden, its toggle after them (78..108). A title starts
+            // after its pill's 10 pt inset and the 16 pt status symbol plus 6 pt gap.
+            let clear = if sidebar { fb_ui::theme::SIDEBAR_W } else { 108.0 };
+            let first = &ts[0];
+            assert!(first.1.x - 32.0 >= clear, "{w} sidebar {sidebar}: \"{}\" at x {} runs under the window buttons (clear from {clear})", first.0, first.1.x);
+            for pair in ts.windows(2) {
+                assert!(!pair[0].1.intersects(&pair[1].1), "{w} sidebar {sidebar}: {:?} and {:?} overlap", pair[0], pair[1]);
+            }
+        }
+    }
+}
+
+#[test]
+fn under_window_glass_the_tab_row_edge_has_no_opaque_block() {
+    // The strip's clipped end must show the glass bar, as the empty bar beside it does, not a painted ground.
+    for mode in [Mode::Light, Mode::Dark] {
+        let app = ten(mode, false, true);
+        let img = render_app(&app, (1280, 852));
+        let px = |x: f32, y: f32| {
+            let i = (((y * 2.0) as u32 * img.width + (x * 2.0) as u32) * 4) as usize;
+            [img.rgba[i] as i32, img.rgba[i + 1] as i32, img.rgba[i + 2] as i32]
+        };
+        // The group (island with its 3 pt inset, the 10 pt rule, two 36 pt buttons) is centred in the 1280 pt row.
+        let strip_w = app.state.toprow.strip_w.get();
+        let group = strip_w + 6.0 + 10.0 + 72.0;
+        let strip_r = 640.0 - group / 2.0 + 3.0 + strip_w;
+        assert!(app.state.toprow.content_w.get() > strip_w, "{mode:?}: the ten tabs should overflow");
+        // Above the pills (y 3) and level with the pill tops (y 14), just inside the strip's right end.
+        for x in [strip_r - 30.0, strip_r - 12.0] {
+            let (bar, edge) = (px(x, 3.0), px(x, 14.0));
+            assert!(bar.iter().zip(edge).all(|(a, b)| (a - b).abs() <= 6), "{mode:?}: block at the strip's end x {x}: {edge:?} vs bar {bar:?}");
+        }
+    }
+}
+
 #[test]
 fn workspace_switch_resets_the_strip() {
     let mut app = many(Mode::Light, "tab12");
@@ -347,6 +447,9 @@ fn snapshots() {
         let mut app = many(mode, "tab4");
         let _ = app.update(Message::TopRow(TopRowMsg::ToggleMenu(flockbook::toprow::MenuKind::AllTabs)));
         snap(&app, &format!("sidebar-toprow-menu-{n}"));
+        // Ten long tabs under window glass with the window buttons drawn, sidebar hidden and shown (r6d, r6e).
+        snap(&ten(mode, false, true), &format!("toprow-ten-hidden-{n}"));
+        snap(&ten(mode, true, true), &format!("toprow-ten-sidebar-{n}"));
     }
     let _ = DemoSource::new();
 }

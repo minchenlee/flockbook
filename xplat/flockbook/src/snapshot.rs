@@ -40,6 +40,9 @@ pub fn render_app(app: &App, size: (u32, u32)) -> Image {
     std::env::set_var("ICED_TEST_BACKEND", "tiny-skia");
     let settings = Settings { fonts: fb_ui::fonts::bytes(), default_font: fb_ui::fonts::default_font(), ..Settings::default() };
     let view = if app.state.glass.on { iced::widget::stack![wall(app.state.mode), app.view()].into() } else { app.view() };
+    // With the title bar hidden (macOS) the system draws the traffic lights over the content; draw them here too, so a
+    // shot shows what they would cover.
+    let view = if app.state.chrome.title_bar == crate::chrome::TitleBar::Hidden { iced::widget::stack![view, traffic_lights()].into() } else { view };
     let mut sim: Simulator<'_, Message> = Simulator::with_size(settings, Size::new(size.0 as f32, size.1 as f32), view);
     let snap = sim.snapshot(&app.theme()).expect("snapshot");
     // `Snapshot` keeps its pixels private; it can only write a PNG, so go through a temp file.
@@ -67,6 +70,18 @@ pub fn wall_svg(mode: Mode) -> String {
         spot("b", b, 88.0, 85.0, 55.0, 65.0),
         spot("c", c, 70.0, 10.0, 50.0, 60.0),
     )
+}
+
+/// The macOS window buttons: three 12 pt circles from x = 20, 8 pt apart, centred in the 52 pt top row.
+fn traffic_lights<'a>() -> iced::Element<'a, Message> {
+    use iced::widget::{container, row, Space};
+    let light = |r: u8, g: u8, b: u8| -> iced::Element<'a, Message> {
+        container(Space::new().width(12).height(12))
+            .style(move |_| container::Style { background: Some(iced::Color::from_rgb8(r, g, b).into()), border: iced::Border { radius: 6.0.into(), ..Default::default() }, ..Default::default() })
+            .into()
+    };
+    let top = (fb_ui::theme::TOPROW_H - 12.0) / 2.0;
+    container(row![light(255, 95, 87), light(254, 188, 46), light(40, 200, 64)].spacing(8)).padding(iced::Padding { top, left: 20.0, right: 0.0, bottom: 0.0 }).into()
 }
 
 fn wall<'a>(mode: Mode) -> iced::Element<'a, Message> {

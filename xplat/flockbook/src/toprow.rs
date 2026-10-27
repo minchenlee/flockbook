@@ -65,8 +65,6 @@ const PILL_SLOT_STILL: f32 = 16.0;
 fn glyph_slot(status: AgentStatus) -> f32 {
     if status == AgentStatus::Working { PILL_GLYPH } else { PILL_SLOT_STILL }
 }
-/// Window width assumed before the first `view` has measured the real one.
-const DEFAULT_STRIP_W: f32 = 480.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuKind {
@@ -546,9 +544,9 @@ fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: boo
     tip(t, pill, tab_tooltip(tab, position), tooltip::Position::Bottom)
 }
 
-/// Edge fade. `solid` points at the outer end stay fully opaque, so a marker drawn there has only the ground under it.
-fn fade<'a>(t: Tokens, left: bool, solid: f32) -> Element<'a, Message> {
-    let (from, to) = (t.bg, Color { a: 0.0, ..t.bg });
+/// Edge fade in the row's own ground (`App::ground`, the top row sits on the content's colour). `solid` points at the outer end stay fully opaque, so a marker drawn there has only the ground under it.
+fn fade<'a>(ground: Color, left: bool, solid: f32) -> Element<'a, Message> {
+    let (from, to) = (ground, Color { a: 0.0, ..ground });
     let w = if left { FADE_L } else { FADE_R } + solid;
     let edge = solid / w;
     // Angle PI/2 runs left to right in iced's gradient space.
@@ -607,7 +605,18 @@ fn strip_metrics(s: &State, width: f32, total: f32) -> (f32, f32) {
     let review_w = if review_diffstat(s).is_some() { 96.0 } else { 0.0 };
     // On the Search screen the field takes the trailing end; the group stays centred, so it gives up both sides.
     let field_w = if s.screen == Screen::Search { 2.0 * (crate::search::FIELD_W + SP_8) } else { 0.0 };
-    let avail = (width - 2.0 * SP_16 - CAPSULE_W - ACTION_GAP - review_w - SP_16 - field_w).max(DEFAULT_STRIP_W.min(width * 0.4));
+    // Swift AppModel.setDetailWidth: the group is centred, so the wider side reserve counts on both sides. Leading: the
+    // sidebar toggle (40), plus the traffic lights (80) when the sidebar is hidden and the content runs under them;
+    // trailing: the system padding (25).
+    let hidden = s.settings.sidebar_hidden();
+    let left = match (hidden, s.chrome.title_bar) {
+        (false, _) => 40.0,
+        (true, crate::chrome::TitleBar::Hidden) => 120.0,
+        (true, crate::chrome::TitleBar::Native) => 2.0 * SP_8 + 30.0,
+    };
+    let room = (width - 2.0 * f32::max(left, 25.0) - 20.0).max(240.0);
+    // Swift TopRow.islandWidth: never under 120 pt with the inset.
+    let avail = (room - CAPSULE_W - ACTION_GAP - 2.0 * ISLAND_INSET - review_w - field_w).max(120.0 - 2.0 * ISLAND_INSET);
     (total.min(avail), avail)
 }
 
@@ -616,7 +625,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
-    let t = app.bar_tokens();
+    // The row sits on the content's ground, not on a glass bar (Swift: the toolbar has no band of its own).
+    let t = app.tokens();
     let s = &app.state;
     let ts = &s.toprow;
     let tabs: &[Tab] = s.selected_workspace().map(|w| w.tabs.as_slice()).unwrap_or(&[]);
@@ -672,10 +682,10 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     // Unlike the Mac (14 pt fade under the marker), the marker gets a solid ground so no title runs under it.
     let solid = |n: usize| if n > 0 { MARKER_W } else { 0.0 };
     if clipped_l {
-        layers.push(container(fade(t, true, solid(hidden_l))).width(Length::Fill).align_x(Alignment::Start).into());
+        layers.push(container(fade(app.ground(), true, solid(hidden_l))).width(Length::Fill).align_x(Alignment::Start).into());
     }
     if clipped_r {
-        layers.push(container(fade(t, false, solid(hidden_r))).width(Length::Fill).align_x(Alignment::End).into());
+        layers.push(container(fade(app.ground(), false, solid(hidden_r))).width(Length::Fill).align_x(Alignment::End).into());
     }
     if hidden_l > 0 {
         layers.push(container(marker(t, Edge::Left, hidden_l)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Start).align_y(Alignment::Center).padding([0, 4]).into());
