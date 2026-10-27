@@ -168,6 +168,8 @@ pub struct SettingsState {
     pub pending: Option<&'static str>,
     /// The last save error.
     pub error: Option<String>,
+    /// Status tags per pane id, read at most once a second (views run on every message).
+    pub status_tags: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Vec<herdr_core::StatusTag>)>>,
 }
 
 impl SettingsState {

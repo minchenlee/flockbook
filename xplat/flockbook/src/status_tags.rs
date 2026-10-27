@@ -6,6 +6,7 @@ use fb_ui::theme::*;
 use herdr_core::StatusTag;
 use iced::widget::{button, column, container, responsive, row, scrollable, Space};
 use iced::{Alignment, Element, Length};
+use std::time::{Duration, Instant};
 
 fn tag(t: Tokens, tag: &StatusTag) -> Element<'static, Message> {
     let color = if tag.warn { t.blocked } else if tag.kind == "model" { t.label } else { t.label_2 };
@@ -24,9 +25,26 @@ fn fitting(widths: &[f32], available: f32) -> usize {
     widths.iter().take_while(|&&w| { used += w + 6.0; used <= available }).count()
 }
 
+/// The status line files change at most every few seconds; one read a second matches the 800 ms refresh.
+const TAGS_TTL: Duration = Duration::from_secs(1);
+
+fn tags_for(app: &App, pane: &herdr_core::Pane) -> Vec<StatusTag> {
+    let cache = &app.state.settings.status_tags;
+    if let Some((at, v)) = cache.borrow().get(&pane.id) {
+        if at.elapsed() < TAGS_TTL {
+            return v.clone();
+        }
+    }
+    let v = app.source.status_tags(pane);
+    let mut cache = cache.borrow_mut();
+    cache.retain(|_, (at, _)| at.elapsed() < TAGS_TTL);
+    cache.insert(pane.id.clone(), (Instant::now(), v.clone()));
+    v
+}
+
 pub fn view(app: &App) -> Element<'_, Message> {
     let Some(pane) = app.state.selected_pane() else { return Space::new().into() };
-    let tags = app.source.status_tags(pane);
+    let tags = tags_for(app, pane);
     if tags.is_empty() { return Space::new().into(); }
     let t = app.tokens();
     let pane_id = pane.id.clone();
@@ -60,5 +78,29 @@ mod tests {
         assert_eq!(fitting(&[100.0, 100.0], 250.0), 2);
         assert_eq!(fitting(&[100.0, 100.0], 180.0), 1);
         assert_eq!(fitting(&[100.0], 50.0), 0);
+    }
+
+    /// Demo data that counts status line reads.
+    struct Counting(crate::source::DemoSource, std::rc::Rc<std::cell::Cell<usize>>);
+    impl crate::source::DataSource for Counting {
+        fn status_tags(&self, _: &herdr_core::Pane) -> Vec<StatusTag> {
+            self.1.set(self.1.get() + 1);
+            vec![StatusTag { kind: "model".into(), text: "Model".into(), spoken: "Model".into(), percent: None, warn: false }]
+        }
+        fn label(&self) -> String { self.0.label() }
+        fn workspaces(&self) -> Vec<herdr_core::Workspace> { self.0.workspaces() }
+        fn connected(&self) -> bool { self.0.connected() }
+        fn conversation(&self, p: &herdr_core::Pane) -> Vec<herdr_core::ConversationItem> { self.0.conversation(p) }
+    }
+
+    #[test]
+    fn views_in_a_row_read_the_status_line_once() {
+        let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut app = App::new(Box::new(Counting(crate::source::DemoSource::new(), reads.clone())), crate::Mode::Light, crate::Screen::Conversation);
+        app.refresh();
+        for _ in 0..5 {
+            let _ = view(&app);
+        }
+        assert_eq!(reads.get(), 1);
     }
 }
