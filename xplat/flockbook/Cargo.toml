@@ -36,3 +36,7 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSAppearance", "NSColor", "NSGraphics", "NSOpenPanel", "NSPanel", "NSResponder", "NSSavePanel", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace"] }
 # The composer's + panel (NSOpenPanel takes files and folders in one panel).
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
+
+[dev-dependencies]
+# The perf example reads its own CPU time (getrusage).
+libc = "0.2"
