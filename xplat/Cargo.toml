@@ -16,3 +16,9 @@ png = "0.18"
 
 [profile.release]
 debug = "line-tables-only"
+
+# Dependencies (iced, wgpu, cosmic-text, tiny-skia) run about 10x slower unoptimized; the app's own crates stay at
+# opt-level 0 so they still build fast and debug well.
+[profile.dev.package."*"]
+opt-level = 2
+debug = "line-tables-only"
