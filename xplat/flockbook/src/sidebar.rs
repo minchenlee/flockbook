@@ -164,7 +164,7 @@ fn status_shown(tabs: &[herdr_core::Tab]) -> (Vec<&herdr_core::Tab>, usize) {
     (tabs.iter().enumerate().filter(|(i, _)| order.contains(i)).map(|(_, tab)| tab).collect(), tabs.len() - keep)
 }
 
-fn status_column<'a>(t: Tokens, animate: bool, tabs: &[herdr_core::Tab], slots: usize) -> Element<'a, Message> {
+fn status_column<'a>(t: Tokens, animate: Option<std::time::Duration>, tabs: &[herdr_core::Tab], slots: usize) -> Element<'a, Message> {
     let (shown, more) = status_shown(tabs);
     let mut r = row![].spacing(STATUS_SPACING).align_y(Alignment::Center);
     for tab in shown {
@@ -214,7 +214,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let name_color = if quiet && !selected { t.label_2 } else { t.label };
         // One weight for every name; quiet workspaces are secondary (SidebarView.swift:260-261).
         let name = BODY.text(ws.label.clone()).wrapping(text::Wrapping::None);
-        let content = row![monogram_chip(t, &ws.label, selected), name.color(name_color), Space::new().width(Length::Fill), status_column(t, s.toprow.animate, &ws.tabs, slots)]
+        let content = row![monogram_chip(t, &ws.label, selected), name.color(name_color), Space::new().width(Length::Fill), status_column(t, s.toprow.spin_frame(), &ws.tabs, slots)]
             .spacing(SP_8)
             .align_y(Alignment::Center);
         let tip = format!("{} \u{00B7} {} tab{}{}{}", ws.label, ws.tabs.len(), if ws.tabs.len() == 1 { "" } else { "s" }, if c.working > 0 { format!(" \u{00B7} {} working", c.working) } else { String::new() }, if c.blocked > 0 { format!(" \u{00B7} {} need you", c.blocked) } else { String::new() });

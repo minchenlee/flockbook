@@ -138,18 +138,19 @@ impl Frames {
 
     /// `n` frames that only redraw, as the runtime does when a widget asked for a redraw and no message came: the
     /// same `UserInterface` takes the redraw event and draws again; no `update`, no `view`, no layout. Returns the
-    /// costs and the redraw request of the last frame (a turning arc asks for the next one).
-    fn redraws(&mut self, app: &App, n: usize) -> (Vec<Cost>, iced::window::RedrawRequest) {
+    /// costs and the milliseconds to the redraw the last frame asked for (a turning arc asks for the next one).
+    fn redraws(&mut self, app: &App, n: usize) -> (Vec<Cost>, f64) {
         let theme = app.theme();
         let mut ui = UserInterface::build(app.view(), Size::new(W, H), self.cache.take().unwrap_or_default(), &mut self.renderer);
         let mut costs = Vec::new();
-        let mut last = iced::window::RedrawRequest::Wait;
+        let mut last = f64::INFINITY;
         for _ in 0..n {
             let cpu0 = cpu_ms();
             let t = Instant::now();
-            let (state, _) = ui.update(&[Event::Window(window::Event::RedrawRequested(Instant::now()))], self.cursor, &mut self.renderer, &mut clipboard::Null, &mut Vec::new());
-            if let user_interface::State::Updated { redraw_request, .. } = state {
-                last = redraw_request;
+            let now = Instant::now();
+            let (state, _) = ui.update(&[Event::Window(window::Event::RedrawRequested(now))], self.cursor, &mut self.renderer, &mut clipboard::Null, &mut Vec::new());
+            if let user_interface::State::Updated { redraw_request: iced::window::RedrawRequest::At(at), .. } = state {
+                last = at.saturating_duration_since(now).as_secs_f64() * 1000.0;
             }
             ui.draw(&mut self.renderer, &theme, &renderer::Style { text_color: theme.base().text_color }, self.cursor);
             let mut cost = Cost { draw: ms(t), ..Cost::default() };
@@ -354,7 +355,17 @@ fn idle() {
     app.state.toprow.animate = true;
     f.settle(&mut app);
     let (spin, ask) = f.redraws(&app, k(120));
-    println!("idle: a working arc asks for {ask:?} after a redraw");
+    let front = ask;
+    // In the background (another app in front, or minimized) the arcs ask for fewer frames.
+    let _ = app.update(Message::TopRow(flockbook::toprow::TopRowMsg::WindowFocus(false)));
+    f.settle(&mut app);
+    let (back, ask) = f.redraws(&app, k(60));
+    let behind = ask;
+    let _ = app.update(Message::TopRow(flockbook::toprow::TopRowMsg::WindowFocus(true)));
+    f.settle(&mut app);
+    let arcs = |c: &[Cost], every: f64| 1000.0 / every * stats(c).mean.cpu;
+    println!("idle: arcs ask for a redraw every {front:.0} ms in front, {behind:.0} ms in the background");
+    println!("idle: arc redraws cost {:.1} ms of CPU per second in front, {:.1} ms in the background", arcs(&spin, front), arcs(&back, behind));
     let tick: Vec<Cost> = (0..k(60)).map(|_| f.tick(&mut app, Message::Tick)).collect();
     let poll: Vec<Cost> = (0..k(30)).map(|_| f.tick(&mut app, Message::Composer(flockbook::composer::ComposerMsg::PollQueue))).collect();
     let empty: Vec<Cost> = (0..k(60)).map(|_| f.empty()).collect();

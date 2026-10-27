@@ -340,7 +340,7 @@ fn list_column<'a>(app: &'a App, list: &[Item<'a>], cur: usize) -> Element<'a, M
         for (ws, tab) in working {
             let name = Item { ws, tab }.agent_name();
             col = col.push(
-                button(row![status::symbol_live(StatusKind::Working, &t, 14.0, app.state.toprow.animate), column![BODY.text(name).size(12.0).color(t.label), CAPTION.text(tab.label.clone()).color(t.label_2)]].spacing(10).align_y(Alignment::Center))
+                button(row![status::symbol_live(StatusKind::Working, &t, 14.0, app.state.toprow.spin_frame()), column![BODY.text(name).size(12.0).color(t.label), CAPTION.text(tab.label.clone()).color(t.label_2)]].spacing(10).align_y(Alignment::Center))
                     .padding([4, 16])
                     .width(Length::Fill)
                     .on_press(Message::SelectTab { workspace: ws.id.clone(), tab: tab.id.clone() })

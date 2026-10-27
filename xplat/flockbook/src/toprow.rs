@@ -89,9 +89,18 @@ pub struct TopRowState {
     /// Working arcs turn (a real window, set by `main.rs`). Off in snapshots and tests: the arcs stand still. The
     /// sidebar and Needs you read it too.
     pub animate: bool,
+    /// The window is not the key window (another app is in front, or it is minimized): the arcs turn at about 10 fps.
+    pub background: bool,
     /// "Show terminal" pressed state. `terminal.rs` sets it when the sheet opens or closes.
     pub terminal_on: bool,
     pub dragging: Option<(String, Point)>,
+}
+
+impl TopRowState {
+    /// Time between frames of a working arc: `None` while the arcs stand still.
+    pub fn spin_frame(&self) -> Option<std::time::Duration> {
+        self.animate.then_some(if self.background { status::SPIN_FRAME_BACKGROUND } else { status::SPIN_FRAME })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +119,8 @@ pub enum TopRowMsg {
     PrevTab,
     /// 0-based index into the selected workspace's tabs (Cmd+1..9).
     SelectIndex(usize),
+    /// The window became the key window (true) or lost it (false).
+    WindowFocus(bool),
     ToggleMenu(MenuKind),
     CloseMenu,
     /// Pick a tab in the All tabs menu.
@@ -176,6 +187,10 @@ pub fn update(app: &mut App, msg: TopRowMsg) -> Task<Message> {
                 Some((workspace, tab)) => app.update(Message::SelectTab { workspace, tab }),
                 None => Task::none(),
             }
+        }
+        TopRowMsg::WindowFocus(focused) => {
+            app.state.toprow.background = !focused;
+            Task::none()
         }
         TopRowMsg::ToggleMenu(kind) => {
             let s = &mut app.state.toprow;
@@ -248,7 +263,12 @@ pub fn subscription(_app: &App) -> Subscription<Message> {
         keyboard::Event::KeyPressed { key, modifiers, .. } => on_key(key, modifiers),
         _ => None,
     });
-    keys
+    let focus = iced::event::listen_with(|e, _, _| match e {
+        iced::Event::Window(iced::window::Event::Focused) => Some(Message::TopRow(TopRowMsg::WindowFocus(true))),
+        iced::Event::Window(iced::window::Event::Unfocused) => Some(Message::TopRow(TopRowMsg::WindowFocus(false))),
+        _ => None,
+    });
+    Subscription::batch([keys, focus])
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -449,7 +469,7 @@ pub(crate) fn tip<'a>(t: Tokens, content: Element<'a, Message>, label: String, p
     tooltip(content, container(CALLOUT.text(label).color(t.label)).padding([5, 9]).style(style::float_e2(t, R_ROW)), pos).gap(6).delay(Duration::from_millis(450)).into()
 }
 
-fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: bool, position: usize, animate: bool) -> Element<'a, Message> {
+fn tab_pill<'a>(t: Tokens, ws_id: &str, tab: &'a Tab, g: &TabGeom, selected: bool, position: usize, animate: Option<std::time::Duration>) -> Element<'a, Message> {
     let blocked = tab.status == AgentStatus::Blocked;
     let split = tab.panes.len() > 1;
     let kind = status_kind(tab.status);
@@ -594,7 +614,7 @@ fn view_sized(app: &App, width: f32) -> Element<'_, Message> {
     let mut r = row![].align_y(Alignment::Center);
     for (i, (tab, (_, g))) in tabs.iter().zip(&lay).enumerate() {
         let sel = s.selected_tab.as_deref() == Some(tab.id.as_str());
-        r = r.push(tab_pill(t, &ws_id, tab, g, sel, i + 1, ts.animate));
+        r = r.push(tab_pill(t, &ws_id, tab, g, sel, i + 1, ts.spin_frame()));
     }
     let shifted: Element<Message> = Shift { content: r.into(), offset: off, width: strip_w, height: TAB_H }.into();
     let strip = mouse_area(shifted).on_scroll(|d| {
@@ -796,5 +816,22 @@ impl Widget<Message, iced::Theme, iced::Renderer> for DragTarget<'_> {
     }
     fn overlay<'b>(&'b mut self, tree: &'b mut widget::Tree, layout: Layout<'b>, renderer: &iced::Renderer, viewport: &Rectangle, translation: Vector) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
         self.content.as_widget_mut().overlay(tree, layout, renderer, viewport, translation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arcs_turn_slower_while_the_window_is_in_the_background() {
+        let mut app = App::demo(crate::Mode::Light, crate::Screen::Conversation);
+        assert_eq!(app.state.toprow.spin_frame(), None, "snapshots and tests draw the arcs still");
+        app.state.toprow.animate = true;
+        assert_eq!(app.state.toprow.spin_frame(), Some(status::SPIN_FRAME));
+        let _ = app.update(Message::TopRow(TopRowMsg::WindowFocus(false)));
+        assert_eq!(app.state.toprow.spin_frame(), Some(status::SPIN_FRAME_BACKGROUND));
+        let _ = app.update(Message::TopRow(TopRowMsg::WindowFocus(true)));
+        assert_eq!(app.state.toprow.spin_frame(), Some(status::SPIN_FRAME));
     }
 }
