@@ -78,6 +78,23 @@ Record only (tiny-skia, no raster): 0.7–2.1 ms per second (0.1–0.2% of one c
 | Terminal, 6 KB of output per poll | 0.57 ms | 1.2 ms |
 | Memory, 2000 items after scrolling | 42 MB | |
 
+## Real window (release)
+
+The headless bench does not see two costs that a real window with working agents has. Found with
+`/usr/bin/sample <pid> 10` on the running release app (read only), with 4 agents working:
+
+| Cost | Cause | Fix |
+|---|---|---|
+| About 1.5% of a core | Every store refresh (each herdr event, 50 ms debounce, and every 2 s) looked up each Claude pane's log again: a read of the projects folder (hundreds of entries) and a stat per entry, twice per pane. | The lead resolver keeps the logs it found and checks only that the file still exists. |
+| Bursts of 10–20% | The composer's queue poll (every 1.6 s) catches up on the session log, up to 16 MiB a call, and parsed every line as JSON. Logs reach hundreds of MB, so the catch-up after launch or a pane switch was long. | Only lines that contain `queue-operation` are parsed. |
+| About 1.2% (main thread) | wgpu present and the working arcs. | Not changed. |
+
+Before the fixes, `top -s 3` after 8 minutes: 3.6, 3.3, 4.1, 2.9, 3.9, 2.9, 3.8, 2.6% (about 3.4% on average). The Mac
+app at the same time: 0.1%.
+
+After the fixes: not measured yet. The app was closed before 8 minutes twice, and the measurement is on hold. If the
+steady value stays above 1%, the next step is to turn the working arcs at the background rate (100 ms) in front too.
+
 ## Not done
 
 - The 800 ms Tick still rebuilds the view when nothing changed (about 0.1–0.3 ms each in release, 1.25 a second). The
