@@ -137,7 +137,7 @@ so pasted text that quotes these tags is kept as is. Pasted blocks are not marke
 
 | Agent | Log | Notes |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<slug>/<id>.jsonl` | thinking hidden, except words logged as thinking right before a tool call of the same message (shown as text, as in the terminal); sidechains skipped |
+| Claude Code | `~/.claude/projects/<slug>/<id>.jsonl` | thinking hidden, except words logged as thinking right before a tool call of the same message (shown as text, as in the terminal); sidechains skipped; a log whose last line is `continued-in` is followed to the newest log of the chain |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl` | `response_item` lines only |
 | pi | `~/.pi/agent/sessions/<cwd-slug>/<time>_<uuid>.jsonl` (herdr gives the path) | see below |
 | Cursor | `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl` | see below |

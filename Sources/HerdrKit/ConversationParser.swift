@@ -13,6 +13,8 @@ public struct ConversationParser: Sendable {
     var callById: [String: ToolCall] = [:]   // call details; results patch these after the chip was emitted
     var runsByKey: [String: [(tool: String, label: ToolLabel, id: String)]] = [:]
     var questionAt: [String: Int] = [:]      // AskUserQuestion tool_use id -> index in `done`
+    /// The session the last line fed says the conversation went on in (Claude Code's `continued-in`), else nil.
+    public private(set) var continuedIn: String?
     var thought: (id: String, message: String?, text: String)?   // Claude thinking with words, until its message's next block
     var pi = PiState()                               // pi entry tree (see ConversationParser+Pi.swift)
     var grok = GrokState()                           // Grok Build chunk merging (see ConversationParser+Grok.swift)
@@ -61,8 +63,9 @@ public struct ConversationParser: Sendable {
         if let payload = o["payload"] as? [String: Any] { feedCodex(type: o["type"] as? String, payload: payload, offset: offset); return }
         if o["uuid"] == nil, let t = o["type"] as? String, Self.piTypes.contains(t) { feedPi(o, line: line, offset: offset); return }
         if Self.isCursor(o) { feedCursor(o, offset: offset); return }
-        if o["isSidechain"] as? Bool == true { return }
         let type = o["type"] as? String
+        continuedIn = type == "continued-in" ? o["continuedInSessionId"] as? String : nil
+        if o["isSidechain"] as? Bool == true { return }
         if type == "attachment" { feedQueued(o); return }
         if type == "queue-operation" { queue.feed(o); return }
         guard type == "user" || type == "assistant",

@@ -136,7 +136,11 @@ public actor SessionResolver {
 
     private func path(_ idOrPath: String) -> String? {
         if idOrPath.hasPrefix("/") { return (idOrPath as NSString).standardizingPath }
-        if let p = located[idOrPath], FileManager.default.fileExists(atPath: p) { return p }
+        if let p = located[idOrPath], FileManager.default.fileExists(atPath: p) {
+            let next = SessionLog.continued(URL(fileURLWithPath: p), projectsDir: projectsDir).path   // went on since
+            located[idOrPath] = next
+            return next
+        }
         let p = SessionLog.locate(agent: "claude", sessionId: idOrPath, dir: projectsDir).map { ($0.path as NSString).standardizingPath }
         located[idOrPath] = p
         return p

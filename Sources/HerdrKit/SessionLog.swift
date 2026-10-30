@@ -187,16 +187,51 @@ public final class SessionLog: Sendable {
     }
 
     /// `~/.claude/projects/*/<id>.jsonl`
+    /// A Claude Code log, followed to the newest log of its conversation (see `continued(_:projectsDir:)`).
     public static func locate(sessionId: String, projectsDir: String = NSHomeDirectory() + "/.claude/projects") -> URL? {
+        locateOne(sessionId: sessionId, projectsDir: projectsDir).map { continued($0, projectsDir: projectsDir) }
+    }
+
+    private static func locateOne(sessionId: String, projectsDir: String, near: URL? = nil) -> URL? {
         // reject path tricks in the id
         guard !sessionId.isEmpty, !sessionId.contains("/"), !sessionId.contains("..") else { return nil }
         let fm = FileManager.default
+        if let near {
+            let p = near.deletingLastPathComponent().appendingPathComponent(sessionId + ".jsonl")
+            if fm.fileExists(atPath: p.path) { return p }
+        }
         guard let dirs = try? fm.contentsOfDirectory(atPath: projectsDir) else { return nil }
         for d in dirs {
             let p = "\(projectsDir)/\(d)/\(sessionId).jsonl"
             if fm.fileExists(atPath: p) { return URL(fileURLWithPath: p) }
         }
         return nil
+    }
+
+    /// Claude Code ends a log with a `continued-in` line when the conversation goes on in another session's log, while
+    /// herdr keeps the old id. The newest log of the chain; `log` itself when its last line is not one, or the next log
+    /// is not there.
+    public static func continued(_ log: URL, projectsDir: String = NSHomeDirectory() + "/.claude/projects") -> URL {
+        var at = log, seen: Set<String> = [log.path]
+        while seen.count <= 16, let id = continuedIn(at), let next = locateOne(sessionId: id, projectsDir: projectsDir, near: at),
+              seen.insert(next.path).inserted {
+            at = next
+        }
+        return at
+    }
+
+    /// The `continuedInSessionId` of a log whose last line is a `continued-in` line, else nil.
+    public static func continuedIn(_ log: URL) -> String? {
+        guard let fh = try? FileHandle(forReadingFrom: log) else { return nil }
+        defer { try? fh.close() }
+        let size = (try? fh.seekToEnd()) ?? 0
+        guard size > 0 else { return nil }
+        try? fh.seek(toOffset: size > 4096 ? size - 4096 : 0)
+        let tail = (try? fh.readToEnd()) ?? Data()
+        guard let last = tail.split(separator: 0x0A).last,
+              let o = try? JSONSerialization.jsonObject(with: Data(last)) as? [String: Any],
+              o["type"] as? String == "continued-in" else { return nil }
+        return o["continuedInSessionId"] as? String
     }
 
     public struct Snapshot: Sendable {
@@ -351,6 +386,7 @@ public final class SessionLog: Sendable {
                         misses = 0
                     }
                     if let url, (try? FileHandle(forReadingFrom: url)) == nil { report(.failed("cannot read \(url.lastPathComponent)")) }
+                    var moveTo: URL?
                     if let url, remote == nil || mirrorFilled, let fh = try? FileHandle(forReadingFrom: url) {
                         defer { try? fh.close() }
                         let size = (try? fh.seekToEnd()) ?? 0
@@ -387,6 +423,11 @@ public final class SessionLog: Sendable {
                             state.lock.withLock { state.consumed = consumed }
                             reported = .ready
                             cont.yield(Snapshot(items: parser.items(), hasOpenToolUse: parser.hasOpenToolUse, queued: parser.queue))
+                            // The conversation went on in a new log (`continued-in`): tail that one from the start.
+                            if remote == nil, parser.continuedIn != nil {
+                                let next = SessionLog.continued(url, projectsDir: dir)
+                                if next != url { moveTo = next }
+                            }
                         }
                         report(.ready)   // located and read, even when the file is still empty
                         if backfill {   // the short first view is out; fill in the rest of the tail now
@@ -409,6 +450,7 @@ public final class SessionLog: Sendable {
                             cont.yield(Snapshot(items: parser.items(), hasOpenToolUse: parser.hasOpenToolUse, queued: parser.queue))
                         }
                     }
+                    if let moveTo { watch.disarm(); url = moveTo; reset(); continue }
                     if await wakes.next() == nil { break }
                 }
                 if mirror != nil { dropMirror() }
