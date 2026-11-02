@@ -6,7 +6,12 @@ public final class HerdrStore {
     public let session: HerdrSession
     public let client: HerdrClient
     public private(set) var workspaces: [Workspace] = []
+    /// True while at least one backend answers.
     public private(set) var connected = false
+    public private(set) var tuiConnected = false
+    public private(set) var hcConnected = false
+    /// herdr-core client; nil when the store was made without an hc session (tests, previews).
+    public let hcClient: HCClient?
     /// The panes there are now, from the last snapshot herdr gave (none: the last tab closed). Nil: no snapshot yet.
     public var knownPanes: Set<String>? {
         snapshotted ? Set(workspaces.flatMap(\.tabs).flatMap(\.panes).map(\.id)) : nil
@@ -71,11 +76,32 @@ public final class HerdrStore {
         }
     }
 
-    public init(session: HerdrSession) {
+    /// `hc`: also follow herdr-core at that socket (missing socket = normal, retried). Nil: TUI only.
+    public init(session: HerdrSession, hc: HCSession? = nil) {
         self.session = session
         self.client = HerdrClient(session: session)
+        self.hcClient = hc.map { HCClient(session: $0) }
         self.bridge = RemoteBridge(session: session)
         self.resolver = SessionResolver(socketPath: session.socketPath, remote: session.remote)
+    }
+
+    /// Layout writes for that backend (nil: hc not configured).
+    public func layout(_ kind: BackendKind) -> (any LayoutBackend)? { kind == .hc ? hcClient : client }
+
+    /// The backend that owns this pane id (`hc:` prefix = herdr-core).
+    public func backend(forPane paneId: String) -> (any HerdrBackend)? {
+        if HCMapper.address(fromPaneId: paneId) != nil { return hcClient }
+        return client
+    }
+
+    private func updateConnected() {
+        let c = tuiConnected || hcConnected
+        if c != connected { connected = c }
+    }
+
+    /// An hc pane of a terminal on another machine (`hc:box/t7`).
+    public static func isRemotePane(_ paneId: String) -> Bool {
+        HCMapper.address(fromPaneId: paneId).map { !HCMapper.machinePrefix($0).isEmpty } ?? false
     }
 
     // MARK: - Log times
@@ -169,12 +195,21 @@ public final class HerdrStore {
         guard !isPreview, resolveTask == nil else { return }
         let panes = raw.flatMap(\.tabs).flatMap(\.panes)
         let needs = panes.compactMap { p in
-            p.agent.flatMap { $0.sessionId == nil ? SessionResolver.Need(paneId: p.id, kind: $0.kind, cwd: p.cwd) : nil }
+            p.agent.flatMap { $0.sessionId == nil ? SessionResolver.Need(paneId: p.id, kind: $0.kind, cwd: p.cwd, pids: p.processIds) : nil }
         }
         if needs.isEmpty, resolved.isEmpty, Self.leadAsks(raw, found: [:]).isEmpty, swaps.isEmpty, leads.isEmpty { return }
         let claimed = Set(panes.compactMap { $0.agent?.sessionId })
-        resolveTask = Task { [weak self, resolver] in
-            let found = await resolver.resolve(needs, claimed: claimed)
+        // The claimant's cwd per session; two claimants in different folders: unknown (the claim always counts).
+        var claimedCwd: [String: String] = [:], mixed = Set<String>()
+        for p in panes { if let sid = p.agent?.sessionId { if let c = claimedCwd[sid], c != p.cwd { mixed.insert(sid) }; claimedCwd[sid] = p.cwd } }
+        for sid in mixed { claimedCwd[sid] = nil }
+        // Agents on another machine (`hc:box/t7`): found there and mirrored (`HCClient.resolveRemote`); asked every
+        // pass while hc is connected, so mirrors of panes gone stop.
+        let remote = needs.filter { Self.isRemotePane($0.paneId) }
+        let local = needs.filter { !Self.isRemotePane($0.paneId) }
+        resolveTask = Task { [weak self, resolver, hcClient] in
+            var found = await resolver.resolve(local, claimed: claimed, claimedCwd: claimedCwd)
+            if let hcClient { found.merge(await hcClient.resolveRemote(remote, claimed: claimed)) { a, _ in a } }
             let pass = await resolver.leads(Self.leadAsks(raw, found: found), claimed: claimed.union(found.values))
             guard let self else { return }
             self.resolveTask = nil
@@ -182,21 +217,27 @@ public final class HerdrStore {
                 self.resolved = found
                 self.swaps = pass.swaps
                 self.leads = pass.leads
-                self.applySnapshot(self.lastRaw)
+                self.compose()
             }
             // Sessions herdr named while this pass ran are judged by the next one.
             let judged = Set(pass.swaps.values.map(\.teammate)).union(pass.leads)
-            let named = self.lastRaw.flatMap(\.tabs).flatMap(\.panes).compactMap { $0.agent?.kind == "claude" ? $0.agent?.sessionId : nil }
-            if named.contains(where: { !judged.contains($0) }) { self.resolveMissing(self.lastRaw) }
+            let all = self.lastRaw + self.lastHCRaw
+            let named = all.flatMap(\.tabs).flatMap(\.panes).compactMap { $0.agent?.kind == "claude" ? $0.agent?.sessionId : nil }
+            if named.contains(where: { !judged.contains($0) }) { self.resolveMissing(all) }
         }
     }
 
-    /// The last snapshot as herdr sent it, before `withFallbacks`.
+    /// The last snapshots as each backend sent them, before `withFallbacks`. TUI workspaces come first.
     @ObservationIgnored private var lastRaw: [Workspace] = []
+    @ObservationIgnored private var lastHCRaw: [Workspace] = []
 
     private func applySnapshot(_ raw: [Workspace]) {
         lastRaw = raw
-        let ws = Self.withFallbacks(raw, resolved: resolved, swaps: swaps, leads: isPreview ? nil : leads)
+        compose()
+    }
+
+    private func compose() {
+        let ws = Self.withFallbacks(lastRaw + lastHCRaw, resolved: resolved, swaps: swaps, leads: isPreview ? nil : leads)
         if ws != workspaces { workspaces = ws }
         syncLogs()
     }
@@ -216,22 +257,26 @@ public final class HerdrStore {
             }
         }
         loop = Task { [weak self] in await self?.run() }
+        if let hc = hcClient { hcLoop = Task { [weak self] in await self?.runHC(hc) } }
     }
+    @ObservationIgnored private var hcLoop: Task<Void, Never>?
 
     public func stop() {
         bridge?.stop()
         loop?.cancel(); loop = nil
-        refreshTask?.cancel()
+        hcLoop?.cancel(); hcLoop = nil
+        refreshTask?.cancel(); hcRefreshTask?.cancel()
         for t in logTasks.values { t.cancel() }
         logTasks = [:]
-        connected = false
+        connected = false; tuiConnected = false; hcConnected = false
     }
 
     /// Successful snapshots taken so far.
     public private(set) var snapshots = 0
     /// A snapshot herdr gave.
     func took(_ raw: [Workspace]) {
-        connected = true
+        tuiConnected = true
+        updateConnected()
         if !snapshotted, !isPreview {
             Task { [weak self] in
                 let session = self?.session ?? .default()
@@ -245,13 +290,20 @@ public final class HerdrStore {
         applySnapshot(raw)
     }
 
+    /// Fresh snapshots from every backend.
     public func refresh() async {
+        await refreshTUI()
+        if hcClient != nil { await refreshHC() }
+    }
+
+    func refreshTUI() async {
         do {
             let raw = try await client.snapshot()
             took(raw)
-            resolveMissing(raw)
+            resolveMissing(lastRaw + lastHCRaw)
         } catch {
-            connected = false
+            tuiConnected = false
+            updateConnected()
             let session = session
             let found: ConnectionProblem?
             if session.remote != nil {
@@ -262,8 +314,23 @@ public final class HerdrStore {
             } else {
                 found = await Task.detached { ConnectionCheck.diagnose(session: session) }.value
             }
-            if found != problem, !connected { problem = found }
+            if found != problem, !tuiConnected { problem = found }
         }
+    }
+
+    func refreshHC() async {
+        guard let hc = hcClient else { return }
+        do {
+            let raw = try await hc.snapshot()
+            hcConnected = true
+            snapshotted = true
+            lastHCRaw = raw
+            compose()
+            resolveMissing(lastRaw + lastHCRaw)
+        } catch {
+            hcConnected = false
+        }
+        updateConnected()
     }
 
     /// Latest parsed conversation for a Claude Code session id. Starts tailing on first call.
@@ -332,11 +399,11 @@ public final class HerdrStore {
         while !Task.isCancelled {
             // The relay socket could not open in `start` (e.g. the runtime folder): try again before each connect.
             if let bridge, !isPreview, !bridge.isRunning { try? bridge.start() }
-            await refresh()
+            await refreshTUI()
             let poll = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await self?.refresh()
+                    await self?.refreshTUI()
                 }
             }
             defer { poll.cancel() }
@@ -346,9 +413,56 @@ public final class HerdrStore {
                     scheduleRefresh()
                 }
             } catch {}
-            connected = false
+            tuiConnected = false
+            updateConnected()
             try? await Task.sleep(nanoseconds: delay)
             delay = min(delay * 2, session.remote == nil ? 1_000_000_000 : 5_000_000_000)
+        }
+    }
+
+    /// Same loop for herdr-core. No socket file is normal (hc not installed or not running): check again every 2 s.
+    private func runHC(_ hc: HCClient) async {
+        var delay: UInt64 = 100_000_000
+        while !Task.isCancelled {
+            guard hc.session.isAvailable else {
+                if hcConnected { hcConnected = false; updateConnected() }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                continue
+            }
+            await refreshHC()
+            let poll = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    await self?.refreshHC()
+                }
+            }
+            defer { poll.cancel() }
+            do {
+                for try await _ in hc.events() {
+                    delay = 100_000_000
+                    scheduleHCRefresh()
+                }
+            } catch {}
+            poll.cancel()
+            hcConnected = false
+            updateConnected()
+            try? await Task.sleep(nanoseconds: delay)
+            delay = min(delay * 2, 1_000_000_000)
+        }
+    }
+
+    @ObservationIgnored private var hcRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var hcRefreshAgain = false
+    private func scheduleHCRefresh() {
+        guard hcRefreshTask == nil else { hcRefreshAgain = true; return }
+        hcRefreshTask = Task { [weak self] in
+            await self?.refreshHC()
+            while let self, self.hcRefreshAgain, !Task.isCancelled {
+                self.hcRefreshAgain = false
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                await self.refreshHC()
+            }
+            self?.hcRefreshTask = nil
         }
     }
 
@@ -358,11 +472,11 @@ public final class HerdrStore {
     private func scheduleRefresh() {
         guard refreshTask == nil else { refreshAgain = true; return }
         refreshTask = Task { [weak self] in
-            await self?.refresh()
+            await self?.refreshTUI()
             while let self, self.refreshAgain, !Task.isCancelled {
                 self.refreshAgain = false
                 try? await Task.sleep(nanoseconds: 50_000_000)
-                await self.refresh()
+                await self.refreshTUI()
             }
             self?.refreshTask = nil
         }

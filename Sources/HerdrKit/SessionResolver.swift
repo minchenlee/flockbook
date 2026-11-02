@@ -22,6 +22,8 @@ public struct LeadSwap: Sendable, Hashable {
 /// For a session on a `RemoteHost` it is off: `ps` and `lsof` here cannot see the host's processes, and the relay
 /// socket path matches no pane. Panes show herdr's `agent_session` as it is: `resolve` finds nothing, and `leads`
 /// judges every named Claude session a lead's log (teammate logs are not held back remotely).
+/// hc Claude panes also watch the mtime of `<pid>.json`: Claude rewrites its `sessionId` there on /clear or /resume
+/// without a new process.
 public actor SessionResolver {
     public struct Proc: Sendable, Hashable {
         public var pid: Int32
@@ -35,10 +37,16 @@ public actor SessionResolver {
         public var paneId: String
         public var kind: String
         public var cwd: String
-        public init(paneId: String, kind: String, cwd: String) { self.paneId = paneId; self.kind = kind; self.cwd = cwd }
+        /// hc panes: process ids to start from (foreground first). Empty for TUI panes (found by `HERDR_PANE_ID`).
+        public var pids: [Int32]
+        public init(paneId: String, kind: String, cwd: String, pids: [Int32] = []) {
+            self.paneId = paneId; self.kind = kind; self.cwd = cwd; self.pids = pids
+        }
     }
 
-    private struct Entry { var pid: Int32?; var path: String?; var checked: Date }
+    /// `stamp`: mtime of the Claude pid file the entry came from (hc Claude panes only); `stampPid` names that file.
+    /// It may be a child of the agent process, so it is kept apart from `pid`.
+    private struct Entry { var pid: Int32?; var path: String?; var checked: Date; var stamp: Date? = nil; var stampPid: Int32? = nil }
     private var cache: [String: Entry] = [:]
     private let socketPath: String
     private let codexDir: String
@@ -47,6 +55,8 @@ public actor SessionResolver {
     private let verdictCap: Int
     /// How many times a log was read to judge it.
     public private(set) var verdictReads = 0
+    private let claudeDir: String
+    private let piAgentDir: String
     /// Unresolved panes are tried again after this; resolved ones are re-checked (pid still the same) after `recheck`.
     private let retry: TimeInterval
     private let recheck: TimeInterval
@@ -55,8 +65,11 @@ public actor SessionResolver {
 
     public init(socketPath: String, codexDir: String = SessionLog.defaultDir(agent: "codex"),
                 projectsDir: String = SessionLog.defaultDir(agent: "claude"),
+                claudeDir: String = NSHomeDirectory() + "/.claude/sessions",
+                piAgentDir: String = NSHomeDirectory() + "/.pi/agent",
                 retry: TimeInterval = 5, recheck: TimeInterval = 30, verdictCap: Int = 8 << 20, remote: RemoteHost? = nil) {
         self.socketPath = socketPath; self.codexDir = codexDir; self.projectsDir = projectsDir; self.verdictCap = verdictCap
+        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir
         self.retry = retry; self.recheck = recheck; self.remote = remote != nil
     }
 
@@ -217,27 +230,54 @@ public actor SessionResolver {
 
     /// Log paths for the given panes (paneId → absolute `.jsonl` path). `claimed`: session ids or paths that other
     /// panes already use; they are never handed out again.
-    public func resolve(_ needs: [Need], claimed: Set<String>) -> [String: String] {
+    /// `claimedCwd`: the cwd of the pane behind a claim, where known. herdr's TUI has reported another folder's Codex
+    /// rollout for a pane; such a claim (pane cwd ≠ the rollout's cwd) does not hide a rollout from the Codex cwd + time match.
+    /// `procs`: a process list to use instead of running `ps` (checks).
+    public func resolve(_ needs: [Need], claimed: Set<String>, claimedCwd: [String: String] = [:],
+                        procs given: [Proc]? = nil) -> [String: String] {
         if remote { return [:] }
         let ids = Set(needs.map(\.paneId))
         cache = cache.filter { ids.contains($0.key) }
         let now = Date()
+        /// The pid file changed since the entry was made (a stat, no `ps`).
+        func pidFileChanged(_ n: Need, _ e: Entry) -> Bool {
+            guard e.stamp != nil, let pid = e.stampPid ?? e.pid else { return false }
+            return (pidFileStamp(pid) ?? .distantPast) != e.stamp   // no file: distantPast both times, not a change
+        }
         let due = needs.filter { n in
             guard let e = cache[n.paneId] else { return true }
-            return now.timeIntervalSince(e.checked) >= (e.path == nil ? retry : recheck)
+            return now.timeIntervalSince(e.checked) >= (e.path == nil ? retry : recheck) || pidFileChanged(n, e)
         }
         if !due.isEmpty {
-            let procs = Self.processes()
-            for n in due {
-                let agent = Self.agentProcess(paneId: n.paneId, socketPath: socketPath, procs: procs)
-                if let old = cache[n.paneId], old.path != nil, old.pid != nil, old.pid == agent?.pid {
+            let procs = given ?? Self.processes()
+            func agentOf(_ n: Need) -> Proc? {
+                n.pids.isEmpty ? Self.agentProcess(paneId: n.paneId, socketPath: socketPath, procs: procs)
+                               : Self.hcAgentProcess(pids: n.pids, kind: n.kind, procs: procs)
+            }
+            // Two pi in one cwd: each one's start splits the folder's files between them.
+            let piStarts: [(pane: String, cwd: String, start: Date)] = needs.filter { $0.kind == "pi" }.compactMap { n in
+                agentOf(n).map { (n.paneId, (n.cwd as NSString).standardizingPath, $0.start) }
+            }
+            // Earliest agent first: it takes its file before a later one looks.
+            let ordered = due.map { ($0, agentOf($0)) }
+                .sorted { ($0.1?.start ?? .distantFuture, $0.0.paneId) < ($1.1?.start ?? .distantFuture, $1.0.paneId) }
+            for (n, agent) in ordered {
+                if let old = cache[n.paneId], let path = old.path, old.pid != nil, old.pid == agent?.pid, !pidFileChanged(n, old),
+                   n.kind != "pi" || FileManager.default.fileExists(atPath: path) {
                     cache[n.paneId]?.checked = now
                     continue
                 }
                 var taken = claimed
                 for (p, e) in cache where p != n.paneId { if let path = e.path { taken.insert(path) } }
-                let path = agent.flatMap { find(n, agent: $0, procs: procs, claimed: taken) }
-                cache[n.paneId] = Entry(pid: agent?.pid, path: path, checked: now)
+                let cwd = (n.cwd as NSString).standardizingPath
+                let rivals = piStarts.filter { $0.pane != n.paneId && $0.cwd == cwd }.map(\.start)
+                let found = agent.map { find(n, agent: $0, procs: procs, claimed: taken, claimedCwd: claimedCwd, rivals: rivals) }
+                let claudeHC = !n.pids.isEmpty && n.kind == "claude"
+                // Unresolved: watch the agent's own file, where a new session id would most likely appear.
+                let stampPid = found?.source ?? agent?.pid
+                cache[n.paneId] = Entry(pid: agent?.pid, path: found?.path, checked: now,
+                                        stamp: claudeHC ? stampPid.flatMap { pidFileStamp($0) } ?? .distantPast : nil,
+                                        stampPid: claudeHC ? stampPid : nil)
             }
         }
         var out: [String: String] = [:]
@@ -245,29 +285,55 @@ public actor SessionResolver {
         return out
     }
 
-    private func find(_ n: Need, agent: Proc, procs: [Proc], claimed: Set<String>) -> String? {
+    private func pidFileStamp(_ pid: Int32) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: "\(claudeDir)/\(pid).json"))?[.modificationDate] as? Date
+    }
+
+    /// The log path (or Claude session id) and, for hc Claude, the pid whose `<pid>.json` named it.
+    private func find(_ n: Need, agent: Proc, procs: [Proc], claimed: Set<String>,
+                      claimedCwd: [String: String], rivals: [Date]) -> (path: String?, source: Int32?) {
+        if !n.pids.isEmpty, n.kind == "claude" {   // hc: Claude's own pid file names the session id
+            guard let hit = Self.claudeSessionSource(pids: [agent.pid] + n.pids, procs: procs, dir: claudeDir) else { return (nil, nil) }
+            return Self.isClaimed(hit.sid, claimed) ? (nil, hit.pid) : (hit.sid, hit.pid)
+        }
         let tree = Self.subtree(agent.pid, procs: procs)
         let open = Self.openFiles(pids: tree)
         let grok = n.kind == "grok" ? Self.grokHome(agent.line) : nil
-        if let p = Self.logPath(openFiles: open, kind: n.kind, grokHome: grok), !Self.isClaimed(p, claimed) { return p }
+        if let p = Self.logPath(openFiles: open, kind: n.kind, grokHome: grok), !Self.isClaimed(p, claimed) { return (p, nil) }
         if let grok {   // Grok Build lists its running sessions with their pids
             let sessions = grok + "/sessions"
             guard let data = FileManager.default.contents(atPath: grok + "/active_sessions.json"),
                   let id = Self.grokSession(active: data, pids: tree),
-                  let p = SessionLog.locateGrok(sessionId: id, sessionsDir: sessions)?.path, !Self.isClaimed(p, claimed) else { return nil }
-            return p
+                  let p = SessionLog.locateGrok(sessionId: id, sessionsDir: sessions)?.path, !Self.isClaimed(p, claimed) else { return (nil, nil) }
+            return (p, nil)
         }
-        guard n.kind == "codex" else { return nil }
-        let c = Self.codexCandidates(dir: codexDir, cwd: n.cwd, after: agent.start).filter { !Self.isClaimed($0, claimed) }
-        return c.count == 1 ? c[0] : nil
+        if n.kind == "pi" {   // pi keeps no file open: its cwd's session folder
+            let dir = Self.piSessionDir(cwd: n.cwd, agentDir: piAgentDir)
+            let files: [(String, Date, Data)] = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).compactMap { f in
+                guard f.hasSuffix(".jsonl") else { return nil }
+                let path = dir + "/" + f
+                guard let m = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date,
+                      let fh = FileHandle(forReadingAtPath: path) else { return nil }
+                defer { try? fh.close() }
+                return (path, m, (try? fh.read(upToCount: 1 << 16)) ?? Data())
+            }
+            return (Self.piPick(files, cwd: n.cwd, after: agent.start, rivals: rivals) { Self.isClaimed($0, claimed) }, nil)
+        }
+        guard n.kind == "codex" else { return (nil, nil) }
+        // Every candidate's session_meta cwd is `n.cwd`: a claim by a pane elsewhere is a wrong report, not a rival.
+        let c = Self.codexCandidates(dir: codexDir, cwd: n.cwd, after: agent.start)
+            .filter { !Self.isClaimed($0, claimed, cwd: n.cwd, claimedCwd: claimedCwd) }
+        return (c.count == 1 ? c[0] : nil, nil)
     }
 
     // MARK: - Pure parts (checked in HerdrKitChecks)
 
     /// `ps -E -ww -o pid=,ppid=,lstart=,command=` lines. `lstart` is five words in the C locale.
-    public static func parsePS(_ text: String) -> [Proc] {
+    /// `timeZone`: the one `ps` printed `lstart` in (another machine's run with `TZ=UTC0`).
+    public static func parsePS(_ text: String, timeZone: TimeZone = .current) -> [Proc] {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = timeZone
         f.dateFormat = "EEE MMM d HH:mm:ss yyyy"
         var out: [Proc] = []
         for raw in text.split(separator: "\n") {
@@ -291,6 +357,66 @@ public actor SessionResolver {
         return (kids.isEmpty ? roots : kids).max { $0.start < $1.start }
     }
 
+    /// Executable names per agent kind, matched against the first two words of a command line (`node …/codex`).
+    static let executables: [String: Set<String>] = ["claude": ["claude"], "codex": ["codex"], "cursor": ["cursor-agent", "cursor"], "pi": ["pi"]]
+
+    static func runs(_ p: Proc, kind: String) -> Bool {
+        let names = executables[kind] ?? [kind]
+        let words = p.line.split(separator: " ", maxSplits: 2).prefix(2).map { ($0 as NSString).lastPathComponent }
+        return words.contains { names.contains($0) }
+    }
+
+    /// hc: the agent process of a terminal from its pids (foreground first, then the terminal's own process).
+    /// A pid that runs the agent itself wins; else the newest process in their trees that does.
+    public static func hcAgentProcess(pids: [Int32], kind: String, procs: [Proc]) -> Proc? {
+        let byPid = Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
+        for pid in pids { if let p = byPid[pid], runs(p, kind: kind) { return p } }
+        let tree = Set(pids.flatMap { subtree($0, procs: procs) })
+        return procs.filter { tree.contains($0.pid) && runs($0, kind: kind) }.max { $0.start < $1.start }
+    }
+
+    /// Claude Code writes `~/.claude/sessions/<pid>.json` with `pid`, `sessionId` and `procStart` (UTC, `ps lstart`
+    /// format). Looks at the given pids and their process trees; a file counts only when its `procStart` matches the
+    /// live process start within 2 s (pids get reused). Exactly one session id, or nil.
+    public static func claudeSession(pids: [Int32], procs: [Proc], dir: String) -> String? {
+        claudeSessionSource(pids: pids, procs: procs, dir: dir)?.sid
+    }
+
+    /// `claudeSession` plus the pid whose file named it (the first one in search order).
+    public static func claudeSessionSource(pids: [Int32], procs: [Proc], dir: String) -> (sid: String, pid: Int32)? {
+        claudeSessionSource(pids: pids, procs: procs) { FileManager.default.contents(atPath: "\(dir)/\($0).json") }
+    }
+
+    /// The pids whose `<pid>.json` may name the session: the given ones, then their process trees.
+    public static func claudeSearchOrder(pids: [Int32], procs: [Proc]) -> [Int32] {
+        var order: [Int32] = []
+        for p in pids + pids.flatMap({ subtree($0, procs: procs) }) where !order.contains(p) { order.append(p) }
+        return order
+    }
+
+    /// `read`: the contents of `<pid>.json` (here, or fetched from another machine).
+    public static func claudeSessionSource(pids: [Int32], procs: [Proc], read: (Int32) -> Data?) -> (sid: String, pid: Int32)? {
+        let byPid = Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
+        let order = claudeSearchOrder(pids: pids, procs: procs)
+        let utc = DateFormatter()
+        utc.locale = Locale(identifier: "en_US_POSIX"); utc.timeZone = TimeZone(identifier: "UTC"); utc.dateFormat = "EEE MMM d HH:mm:ss yyyy"
+        var found = Set<String>()
+        var source: Int32?
+        for pid in order {
+            guard let proc = byPid[pid],
+                  let data = read(pid), data.count < 1 << 20,
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  (o["pid"] as? NSNumber)?.int32Value == pid,
+                  let sid = o["sessionId"] as? String, !sid.isEmpty, !sid.contains("/"),
+                  let ps = (o["procStart"] as? String).flatMap({ utc.date(from: $0.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")) }),
+                  abs(ps.timeIntervalSince(proc.start)) <= 2 else { continue }
+            found.insert(sid)
+            if source == nil { source = pid }
+        }
+        guard found.count == 1, let sid = found.first, let source else { return nil }
+        return (sid, source)
+    }
+
     public static func subtree(_ pid: Int32, procs: [Proc]) -> [Int32] {
         var out = [pid], i = 0
         while i < out.count {
@@ -303,9 +429,8 @@ public actor SessionResolver {
 
     /// The one agent log among open files, or nil when there is none or more than one. Grok Build keeps its session's
     /// `events.jsonl` open, not the conversation: the log is `updates.jsonl` in the same folder. `grokHome`: the agent's
-    /// `GROK_HOME` (default `~/.grok`).
-    public static func logPath(openFiles: [String], kind: String, grokHome: String? = nil) -> String? {
-        let home = NSHomeDirectory()
+    /// `GROK_HOME` (default `~/.grok`). `home`: the home folder of the machine the files are on.
+    public static func logPath(openFiles: [String], kind: String, grokHome: String? = nil, home: String = NSHomeDirectory()) -> String? {
         if kind == "grok" {
             let sessions = (grokHome ?? home + "/.grok") + "/sessions/"
             let dirs = Set(openFiles.compactMap { p -> String? in
@@ -326,6 +451,17 @@ public actor SessionResolver {
             }
         })
         return hits.count == 1 ? hits.first : nil
+    }
+
+    /// A path counts as claimed when it, or its session id (the file name ends in `<id>.jsonl`), is in `claimed`.
+    /// `isClaimed`, ignoring claims whose pane is known to sit in another cwd than `cwd` (the log's own cwd).
+    static func isClaimed(_ path: String, _ claimed: Set<String>, cwd: String, claimedCwd: [String: String]) -> Bool {
+        let want = (cwd as NSString).standardizingPath
+        return claimed.contains { c in
+            guard isClaimed(path, [c]) else { return false }
+            guard let other = claimedCwd[c] else { return true }
+            return (other as NSString).standardizingPath == want
+        }
     }
 
     /// A path counts as claimed when it, or its session id (the file name ends in `<id>.jsonl`; Grok Build's
@@ -386,7 +522,66 @@ public actor SessionResolver {
     public static func codexMeta(_ path: String) -> (cwd: String, start: Date)? {
         guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? fh.close() }
-        guard let data = try? fh.read(upToCount: 1 << 20), let nl = data.firstIndex(of: 0x0A) ?? (data.isEmpty ? nil : data.endIndex),
+        guard let data = try? fh.read(upToCount: 1 << 20) else { return nil }
+        return codexMeta(data: data)
+    }
+
+    /// The day folders (`<dir>/YYYY/MM/DD`) a rollout started at or after `after` can be in, up to `now` (at most 8).
+    /// `slackDays`: days added before `after` and after `now` (another machine may keep another time zone).
+    public static func codexDayFolders(dir: String, after: Date, now: Date = Date(), slackDays: Int = 0) -> [String] {
+        let cal = Calendar.current
+        var day = cal.date(byAdding: .day, value: -slackDays, to: cal.startOfDay(for: after.addingTimeInterval(-2))) ?? after
+        var out: [String] = []
+        // Slack after `now` too: a machine ahead in time zone writes tomorrow's folder.
+        let last = cal.date(byAdding: .day, value: slackDays, to: now) ?? now
+        while day <= last, out.count < 8 + 2 * slackDays {
+            let c = cal.dateComponents([.year, .month, .day], from: day)
+            out.append(String(format: "%@/%04d/%02d/%02d", dir, c.year ?? 0, c.month ?? 0, c.day ?? 0))
+            day = cal.date(byAdding: .day, value: 1, to: day) ?? now.addingTimeInterval(1)
+        }
+        return out
+    }
+
+    /// The rollouts among `(path, first line)` whose `session_meta` cwd is `cwd` and that started at or after `after`
+    /// (2 s slack), sorted.
+    public static func codexMatches(_ firstLines: [(String, Data)], cwd: String, after: Date) -> [String] {
+        let want = (cwd as NSString).standardizingPath, lower = after.addingTimeInterval(-2)
+        return firstLines.compactMap { path, line in
+            guard let meta = codexMeta(data: line), (meta.cwd as NSString).standardizingPath == want, meta.start >= lower else { return nil }
+            return path
+        }.sorted()
+    }
+
+    /// pi's session folder for a cwd (pi session-manager.js getDefaultSessionDirPath).
+    public static func piSessionDir(cwd: String, agentDir: String) -> String {
+        var c = Substring(cwd)
+        if c.first == "/" || c.first == "\\" { c = c.dropFirst() }
+        return agentDir + "/sessions/--" + String(c.map { "/\\:".contains($0) ? "-" : $0 }) + "--"
+    }
+
+    /// pi's file among `(path, mtime, first line)`: a `session` header with this cwd, started or written at or after
+    /// `after` (2 s slack; a resumed session is an older file pi writes to), not claimed; the newest by mtime (pi's
+    /// `/new` starts a newer file in the same process). `rivals`: start times of the other pi in this cwd. pi stamps
+    /// the header when it makes the session (at start) and writes the file later, so a header at or after a later
+    /// rival's start is that rival's file, even when it is the newest.
+    public static func piPick(_ files: [(String, Date, Data)], cwd: String, after: Date, rivals: [Date] = [], claimed: (String) -> Bool) -> String? {
+        let later = rivals.filter { $0 > after }
+        let want = (cwd as NSString).standardizingPath, lower = after.addingTimeInterval(-2)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return files.filter { path, mtime, data in
+            let nl = data.firstIndex(of: 0x0A) ?? data.endIndex
+            guard let o = try? JSONSerialization.jsonObject(with: data[..<nl]) as? [String: Any], o["type"] as? String == "session",
+                  let c = o["cwd"] as? String, (c as NSString).standardizingPath == want else { return false }
+            let started = (o["timestamp"] as? String).flatMap { iso.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+            if let t = started, later.contains(where: { t >= $0 }) { return false }
+            return ((started ?? .distantPast) >= lower || mtime >= lower) && !claimed(path)
+        }.max { ($0.1, $0.0) < ($1.1, $1.0) }?.0
+    }
+
+    /// cwd and start time from a rollout's first line.
+    public static func codexMeta(data: Data) -> (cwd: String, start: Date)? {
+        guard let nl = data.firstIndex(of: 0x0A) ?? (data.isEmpty ? nil : data.endIndex),
               let o = try? JSONSerialization.jsonObject(with: data[..<nl]) as? [String: Any],
               o["type"] as? String == "session_meta", let p = o["payload"] as? [String: Any],
               let cwd = p["cwd"] as? String, let ts = p["timestamp"] as? String ?? o["timestamp"] as? String else { return nil }

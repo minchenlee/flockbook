@@ -606,7 +606,9 @@ extension HerdrClient {
               let text = read["text"] as? String else { throw HerdrError.protocolError("pane.read has no text") }
         return text
     }
+}
 
+extension PaneScreen {
     /// Answers a pending question in `paneId`, one `QuestionAnswer` per question.
     /// Picker: (1) checks the picker with the first question is on screen (Claude: another question of this request
     /// is moved back with Left; anything else throws `.notOnScreen`, nothing sent),
@@ -764,7 +766,7 @@ extension HerdrClient {
         return full
     }
 
-    private func waitScreen(paneId: String, timeout: Double, _ ok: (String) -> Bool) async throws -> Bool {
+    func waitScreen(paneId: String, timeout: Double, _ ok: (String) -> Bool) async throws -> Bool {
         let end = Date().addingTimeInterval(timeout)
         while true {
             if ok(try await visibleText(paneId: paneId)) { return true }
