@@ -48,6 +48,10 @@ struct HerdrDeskApp: App {
                 exit(2)
             }
         }
+        // `--snapshot-live <dir>`: without the folder its runner never starts and the app would idle silently.
+        if let i = args.firstIndex(of: "--snapshot-live"), !(args.indices.contains(i + 1) && !args[i + 1].hasPrefix("--")) {
+            print("--snapshot-live: usage: --snapshot-live <output dir>"); exit(2)
+        }
         let fuzzSeconds = args.firstIndex(of: "--fuzz").flatMap { i in args.indices.contains(i + 1) ? Double(args[i + 1]) : nil }
         let fuzzSeed = args.firstIndex(of: "--seed").flatMap { i in args.indices.contains(i + 1) ? UInt64(args[i + 1]) : nil } ?? 1
         let store: HerdrStore
@@ -58,15 +62,20 @@ struct HerdrDeskApp: App {
         } else if args.contains("--preview") || args.contains("--snapshot") {
             store = .preview
         } else {
+            let env = ProcessInfo.processInfo.environment
+            // herdr-core too, unless `--no-hc`. Headless runs follow hc only with an explicit `--hc-socket` (an isolated test
+            // core), or for `--snapshot-live`, which reads the real sessions (snapshots and logs only, never input).
+            let liveRead = args.contains("--snapshot-live")
+            let wantHC = !args.contains("--no-hc") && (!headless || args.contains("--hc-socket") || liveRead)
             // Launch flags (--session, --remote) win; otherwise the machine chosen in Settings > General (read once: a new
             // choice there relaunches the app, as the store, the phone server and notifications all hang on this session).
-            store = HerdrStore(session: RemoteMachines.launchSession(arguments: args, environment: ProcessInfo.processInfo.environment,
-                                                                     defaults: AppDefaults.store))
+            store = HerdrStore(session: RemoteMachines.launchSession(arguments: args, environment: env, defaults: AppDefaults.store),
+                               hc: wantHC ? HCSession.resolve(environment: env, arguments: args) : nil)
             // The Claude hook and status line act on the machine Claude Code runs on: the host, for a remote session.
             ClaudeHookSetup.launchRemote = store.session.remote
             // Headless checks on the default session never read this store (the scene shows no RootView): no polling of
             // the owner's session. Live checks pass a named session and use it.
-            if !headless || store.session.name != nil { store.start() }
+            if !headless || store.session.name != nil || liveRead { store.start() }
         }
         if let i = args.firstIndex(of: "--snapshot"), args.indices.contains(i + 1) {
             let dir = args[i + 1]
@@ -90,6 +99,7 @@ struct HerdrDeskApp: App {
         }
         // Content-area checks (SnapshotMode+Content.swift); returns true when it started one.
         if ContentTests.run(args) {}
+        HCAppTests.run(args)
         if args.contains("--test-tabkeys") { Task { @MainActor in await ChromeTests.runTabKeysTest() } }
         if args.contains("--test-sidebar-layout") { Task { @MainActor in await ChromeTests.runSidebarLayoutTest() } }
         if args.contains("--test-newtab-live") { Task { @MainActor in await ChromeTests.runNewTabLiveTest() } }
@@ -178,6 +188,34 @@ struct HerdrDeskApp: App {
                 step("right-click item carries the checked state", ro.first { $0.kind == .rightClick }?.checked == true && rw.first { $0.kind == .rightClick }?.checked == false)
                 let single = PaneMenu.items(pane: pane, tab: Tab(id: "t", label: "x", number: 1, panes: [pane], status: .idle), zoomed: false, routed: false, writes: true)
                 step("zoom disabled on a single-pane tab", single.first { $0.kind == .zoom }?.enabled == false)
+                // hc (parity item 2): panes of the official app's tabs get the layout entries, no right-click routing
+                // (no hc equivalent); "Other terminals" panes only zoom.
+                let hp = Pane(id: "hc:t1", terminalId: "t1", cwd: "/tmp", agent: nil, backend: .hc)
+                let hcTab = Tab(id: "hc:tab:sp1/tb1", label: "1", number: 1, panes: [hp, hp], status: .idle, backend: .hc)
+                let other = Tab(id: "hc:term:t1", label: "x", number: 1, panes: [hp], status: .idle, backend: .hc)
+                let hcItems = PaneMenu.items(pane: hp, tab: hcTab, zoomed: false, routed: false, writes: true)
+                step("hc entries: \(hcItems.map(\.title))", hcItems.map(\.kind) == [.rename, .splitRight, .splitDown, .zoom, .close] && hcItems.allSatisfy(\.enabled))
+                step("hc other terminals: zoom only", PaneMenu.items(pane: hp, tab: other, zoomed: false, routed: false, writes: true).map(\.kind) == [.zoom])
+                let m = AppModel(store: HerdrStore.preview)
+                let hcWs = Workspace(id: "hc:space:sp1", label: "w", tabs: [hcTab], backend: .hc)
+                let otherWs = Workspace(id: HCMapper.otherId, label: "o", tabs: [other], backend: .hc)
+                step("hc tab menu: \(m.tabMenu(hcTab).map(\.id))", m.tabMenu(hcTab).map(\.id) == ["rename", "moveLeft", "moveRight", "close", "splitRight", "splitDown", "overview"])
+                step("hc other tab menu: overview only", m.tabMenu(other).map(\.id) == ["overview"])
+                step("hc workspace menu", m.workspaceMenu(hcWs).map(\.id) == ["rename", "newTab", "close"] && m.workspaceMenu(otherWs).isEmpty)
+                // Another machine's space (parity 3b): the same layout entries; the write goes to that machine's document.
+                let rp = Pane(id: "hc:box/t3", terminalId: "box/t3", cwd: "/tmp", agent: nil, backend: .hc)
+                let rTab = Tab(id: "hc:tab:box/sp1/tb1", label: "1", number: 1, panes: [rp, rp], status: .idle, backend: .hc)
+                let rWs = Workspace(id: "hc:space:box/sp1", label: "r", tabs: [rTab], backend: .hc)
+                step("hc remote pane: layout entries", PaneMenu.items(pane: rp, tab: rTab, zoomed: false, routed: false, writes: true).map(\.kind) == [.rename, .splitRight, .splitDown, .zoom, .close])
+                step("hc remote tab/workspace: layout entries (\(m.tabMenu(rTab).map(\.id)), \(m.workspaceMenu(rWs).map(\.id)))",
+                     m.tabMenu(rTab).map(\.id) == ["rename", "moveLeft", "moveRight", "close", "splitRight", "splitDown", "overview"]
+                     && m.workspaceMenu(rWs).map(\.id) == ["rename", "newTab", "close"] && m.layoutOK(rWs) && m.layoutOK(rTab))
+                var calls: [String] = []
+                m.workspaceHook = { calls.append("\($0) \($1)") }
+                m.createWorkspace(name: " Flock ", cwd: "/tmp", on: .hc)
+                m.rename(hcWs, to: "Herd")
+                m.split(tab: hcTab, .down)
+                step("hc writes routed (\(calls))", calls.first == "create-hc Flock" && calls.contains("rename hc:space:sp1 Herd") && calls.contains { $0.hasPrefix("split hc:tab:sp1/tb1") })
                 print("panemenu-test: \(failures == 0 ? "PASS" : "FAIL x\(failures)")")
                 NSApp.terminate(nil)
             }
@@ -266,7 +304,7 @@ struct DeskCommands: Commands {
             Button("Split Right") { model.splitFocused(.right) }.keyboardShortcut("d")
             Button("Split Down") { model.splitFocused(.down) }.keyboardShortcut("d", modifiers: [.command, .shift])
             Divider()
-            Button("Rename Tab…") { if let t = model.tab { model.screen = .tab; model.renamingTabID = t.id } }
+            Button("Rename Tab…") { if let t = model.tab, model.layoutOK(t) { model.screen = .tab; model.renamingTabID = t.id } }
                 .disabled(!model.writesEnabled || model.tab == nil)
             Button("Move Tab Left") { if let t = model.tab { model.moveTab(t, by: -1) } }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .control, .shift]).disabled(!model.writesEnabled)

@@ -13,7 +13,7 @@ public enum LaunchGuard {
         "--test-menus", "--test-tabdrag", "--test-chrome", "--test-sheet", "--test-panemenu", "--test-wheel",
         "--test-send-image", "--test-composer", "--fuzz", "--test-sidebar", "--test-sidebar-layout", "--test-root-width",
         "--test-newtab-live", "--test-settings-migration", "--test-island-height", "--test-tab-overflow", "--test-tabkeys", "--test-update",
-        "--test-settings-page",
+        "--test-settings-page", "--test-send-unconfirmed",
     ]
     /// Content-area checks (ContentTests), also headless.
     public static let content: Set<String> = [
@@ -29,6 +29,7 @@ public enum LaunchGuard {
     public static let options: Set<String> = [
         "--session", "--read-only", "--light", "--dark", "--save-window", "--preview", "--preview-dense", "--seed",
         "--deny", "--image", "--warm", "--other", "--legacy-look", "--remote", "--remote-local",
+        "--hc-socket", "--no-hc",
     ]
     public static let known: Set<String> = headless.union(content).union(realWindow).union(options)
 

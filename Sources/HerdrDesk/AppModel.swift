@@ -74,8 +74,8 @@ final class AppModel {
     func rename(_ tab: Tab, to label: String) {
         renamingTabID = nil
         let t = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard writesEnabled, !t.isEmpty, t != tab.label else { return }
-        Task { try? await store.client.renameTab(tab.id, to: t); await store.refresh() }
+        guard writesEnabled, layoutOK(tab), !t.isEmpty, t != tab.label else { return }
+        runLayout(tab.backend, "Rename tab") { try await $0.renameTab(tab.id, to: t) }
     }
 
     init(store: HerdrStore) {
@@ -97,6 +97,27 @@ final class AppModel {
         return AppDefaults.store.object(forKey: AppSettings.allowInputKey) as? Bool ?? true
     }
 
+    /// Layout writes (new/close/rename/move tab, split, workspace changes) for the current workspace. On hc they go
+    /// to the official app's document (`HCLayout.swift`); the "Other terminals" group has no layout.
+    var layoutEnabled: Bool { writesEnabled && (workspace.map(layoutOK) ?? true) }
+
+    /// Whether layout writes apply: TUI items, and hc spaces/tabs/panes from the official app's labels.
+    func layoutOK(_ ws: Workspace) -> Bool { ws.backend == .tui || HCClient.layoutWritable(id: ws.id) }
+    func layoutOK(_ t: Tab) -> Bool { t.backend == .tui || HCClient.layoutWritable(id: t.id) }
+    func layoutOK(_ p: Pane, in t: Tab?) -> Bool { p.backend == .tui || (t.map(layoutOK) ?? false) }
+
+    /// Runs a layout write on `backend`, then refreshes. A failure shows as a notice (on hc it says why the
+    /// official app's layout was left alone).
+    func runLayout(_ backend: BackendKind, _ what: String, then: (@MainActor () -> Void)? = nil,
+                   _ op: @escaping @Sendable (any LayoutBackend) async throws -> Void) {
+        guard let l = store.layout(backend) else { return }
+        Task {
+            do { try await op(l) } catch { notice = "\(what) failed: \(error)" }
+            await store.refresh()
+            then?()
+        }
+    }
+
     /// Bumped on every send: the conversation of that pane scrolls to the bottom (wherever the reader was).
     /// Panes whose right clicks go to the program (herdr's setting is write-only, so the app remembers it).
     var rightClickToPane: Set<String> = []
@@ -114,13 +135,11 @@ final class AppModel {
     /// Test hook: when set, replaces the call to herdr (tests must never create a real tab).
     var newTabHook: ((Workspace) -> Void)?
     func newTab() {
-        guard writesEnabled, let ws = workspace else { return }
+        guard writesEnabled, let ws = workspace, layoutOK(ws) else { return }
         if let hook = newTabHook { hook(ws); return }
         let cwd = tab?.panes.first?.cwd, wsID = ws.id, before = Set(ws.tabs.map(\.id))
-        Task {
-            try? await store.client.createTab(workspaceId: wsID, label: nil, cwd: cwd)
-            await store.refresh()
-            selectCreatedTab(in: wsID, before: before)
+        runLayout(ws.backend, "New tab", then: { [weak self] in self?.selectCreatedTab(in: wsID, before: before) }) {
+            try await $0.createTab(workspaceId: wsID, label: nil, cwd: cwd)
         }
     }
     /// Selects the tab herdr just created: the tab of `wsID` that was not in `before` (tab.create gives no id to the
@@ -137,12 +156,13 @@ final class AppModel {
     /// Test hook: when set, replaces the call to herdr (tests must never close a real tab).
     var closeTabHook: ((Tab) -> Void)?
     func closeTab(_ t: Tab) {
-        guard writesEnabled else { return }
+        guard writesEnabled, layoutOK(t) else { return }
         if let hook = closeTabHook { hook(t); return }
         if t.id == tab?.id, let ws = workspace, let i = ws.tabs.firstIndex(of: t), ws.tabs.count > 1 {
             tabID = ws.tabs[i + 1 < ws.tabs.count ? i + 1 : i - 1].id
         }
-        Task { try? await store.client.closeTab(t.id); await store.refresh() }
+        let id = t.id
+        runLayout(t.backend, "Close tab") { try await $0.closeTab(id) }
     }
     /// The toolbar's +: what Settings > General chose (`PlusAction`), on the focused pane; no pane: a new tab.
     func plus() {
@@ -153,14 +173,17 @@ final class AppModel {
     /// Test hook: when set, replaces the call to herdr (tests must never split a real pane).
     var splitHook: ((Pane, SplitDirection) -> Void)?
     func splitFocused(_ dir: SplitDirection) {
-        guard writesEnabled, let t = tab, let fid = focusedPaneID(in: t), let p = t.panes.first(where: { $0.id == fid }) else { return }
+        guard writesEnabled, let t = tab, layoutOK(t), let fid = focusedPaneID(in: t), let p = t.panes.first(where: { $0.id == fid }) else { return }
         splitDirection = dir.rawValue
         if let hook = splitHook { hook(p, dir); return }
-        Task { try? await store.client.split(paneId: p.id, direction: dir); await store.refresh() }
+        let id = p.id
+        runLayout(t.backend, "Split") { try await $0.split(paneId: id, direction: dir) }
     }
 
     /// terminal ids whose latest screen shows a Claude permission prompt (checked from observe frames, read-only).
     var promptVisible: Set<String> = []
+    /// Panes whose card answer is on its way: their card stays off and presses are ignored until the re-check after it.
+    let approvals = ApprovalSender()
     var notice: String?
 
     /// True when the log ends with a pending tool call for this pane's agent.
@@ -171,16 +194,37 @@ final class AppModel {
         }
     }
 
+    /// Screen reads and card keys for this pane's backend: `terminal.read` / `terminal.keys` on hc, herdr's pane calls on TUI.
+    func screen(for pane: Pane) -> (any PaneScreen)? { screen(paneId: pane.id) }
+    /// The same by pane id (the hub's calls name a pane by id): nil for an hc pane while hc is off.
+    func screen(paneId id: String) -> (any PaneScreen)? {
+        HCMapper.address(fromPaneId: id) != nil ? store.hcClient : store.client
+    }
+
     /// Asks the kit whether the visible screen shows Claude's permission prompt.
-    /// Runs only for blocked agents or a pending tool call; otherwise clears the flag.
-    /// Also keeps the prompt read from the screen (`screenPrompts`) for a blocked Claude or Grok.
+    /// Runs only when `PermissionGate.checkApproval` says so (hc: blocked, not a question; TUI: blocked or a pending
+    /// tool call); otherwise clears the flag. Also keeps the prompt read from the screen (`screenPrompts`) for a blocked
+    /// Claude or Grok. A prompt whose answer is on the way stays off (its buttons stay off).
     func checkPrompt(for pane: Pane) async {
-        guard pane.agent?.status == .blocked || hasPending(pane) else { promptVisible.remove(pane.id); screenPrompts[pane.id] = nil; return }
-        let screen = try? await store.client.visibleText(paneId: pane.id)
-        if let screen, PermissionGate.screenShowsPrompt(screen) { promptVisible.insert(pane.id) } else { promptVisible.remove(pane.id) }
+        guard PermissionGate.checkApproval(pane.agent, pendingTool: hasPending(pane)), let reader = screen(for: pane) else {
+            promptVisible.remove(pane.id); screenPrompts[pane.id] = nil; return
+        }
+        let screen = try? await reader.visibleText(paneId: pane.id)
+        if let screen, PermissionGate.screenShowsPrompt(screen), !approvals.isAnswering(pane.id) { promptVisible.insert(pane.id) }
+        else { promptVisible.remove(pane.id) }
         let a = pane.agent
         screenPrompts[pane.id] = a?.status == .blocked && (a?.kind == "claude" || a?.kind == "grok")
             ? screen.flatMap { ApprovalNotice.screenRequest($0, agent: a?.kind ?? "") } : nil
+    }
+
+    /// While a tab's card can show: re-reads the screen of its blocked panes (and of panes whose card is up) every 2 s,
+    /// so a prompt answered in the terminal or replaced by the next one does not leave a stale card. Read-only.
+    func watchPrompts(tabId: String) async {
+        while !Task.isCancelled {
+            let panes = store.workspaces.flatMap(\.tabs).first { $0.id == tabId }?.panes ?? []
+            for p in panes where p.agent?.status == .blocked || promptVisible.contains(p.id) { await checkPrompt(for: p) }
+            try? await Task.sleep(for: .seconds(2))
+        }
     }
 
     /// Permission prompts read from the screen, by pane id: the card's request when the log has none (a Claude without a
@@ -222,16 +266,29 @@ final class AppModel {
     /// Allow once = "1" (no Enter), Deny = Escape (verified in a named test session). Only when the prompt is on screen.
     /// `bound`: the request the card showed (nil: the card's request now). The keys go out only while that prompt is
     /// still open (`respondIfOpen` reads the pane right before them); else nothing is sent and the terminal opens.
+    /// One answer per prompt: a second press while the first is on the way does nothing.
     func approve(pane: Pane, allow: Bool, bound: PermissionRequest? = nil) {
-        guard writesEnabled, promptVisible.contains(pane.id), let agent = pane.agent,
+        if approvals.isAnswering(pane.id) { return }
+        guard writesEnabled, promptVisible.contains(pane.id), let agent = pane.agent, let screen = screen(for: pane),
               let prompt = (bound ?? approvalRequest(pane))?.toolUseId else { showTerminal = true; return }
         let id = pane.id
         let pending = pendingRequest(pane)
+        guard approvals.begin(id) else { return }
+        promptVisible.remove(id)   // the card's buttons turn off at once (canRespond reads promptVisible)
         Task {
-            let sent = (try? await store.client.respondIfOpen(paneId: id, prompt: prompt, allow: allow, agentKind: agent.kind,
-                                                             blocked: agent.status == .blocked, pending: pending)) == true
+            let sent: Bool
+            do {
+                sent = try await screen.respondIfOpen(paneId: id, prompt: prompt, allow: allow, agentKind: agent.kind,
+                                                      blocked: agent.status == .blocked, pending: pending)
+            } catch {
+                approvals.end(id)
+                notice = "The answer was not sent. Open the terminal to check."; showTerminal = true
+                await checkPrompt(for: pane)
+                return
+            }
             noticeLog.info("card \(allow ? "allow" : "deny", privacy: .public) pane \(id, privacy: .public) prompt \(prompt, privacy: .public): \(sent ? "keys sent" : "not sent, prompt changed", privacy: .public)")
             guard sent else {
+                approvals.end(id)
                 notice = "The prompt changed. Nothing was sent."; showTerminal = true
                 await checkPrompt(for: pane)
                 return
@@ -240,6 +297,7 @@ final class AppModel {
             await store.refresh()
             let still = store.workspaces.flatMap(\.tabs).flatMap(\.panes).first { $0.id == id }?.agent?.status == .blocked
             if still { notice = "Status did not change. Open the terminal to check."; showTerminal = true }
+            approvals.end(id)
             await checkPrompt(for: pane)
         }
     }
@@ -253,7 +311,7 @@ final class AppModel {
     /// Read-only: the blocked pane's state for the notification buttons (reads its visible screen).
     func approvalState(_ pane: Pane) async -> ApprovalNotice.PaneState? {
         guard let a = pane.agent else { return nil }
-        return await store.client.approvalState(paneId: pane.id, agentKind: a.kind, blocked: a.status == .blocked, pending: pendingRequest(pane))
+        return await screen(for: pane)?.approvalState(paneId: pane.id, agentKind: a.kind, blocked: a.status == .blocked, pending: pendingRequest(pane))
     }
 
     /// The pane and prompt a new "needs you" notification may answer with Allow / Deny. Nil: no buttons. Read-only.
@@ -288,10 +346,10 @@ final class AppModel {
         noticeLog.info("action \(action, privacy: .public) pane \(paneID, privacy: .public) bound \(prompt ?? "none", privacy: .public) now \(now.flatMap { ApprovalNotice.prompt($0, writes: self.writesEnabled) } ?? "none", privacy: .public) -> \(String(describing: outcome), privacy: .public)")
         switch outcome {
         case .send(let allow):
-            guard let pane, let a = pane.agent, let prompt else { return false }
+            guard let pane, let a = pane.agent, let prompt, let screen = screen(for: pane) else { return false }
             // Once more right before the keys: the same rule as the hub (`respondIfOpen`).
-            let sent = (try? await store.client.respondIfOpen(paneId: pane.id, prompt: prompt, allow: allow, agentKind: a.kind,
-                                                               blocked: a.status == .blocked, pending: pendingRequest(pane))) == true
+            let sent = (try? await screen.respondIfOpen(paneId: pane.id, prompt: prompt, allow: allow, agentKind: a.kind,
+                                                         blocked: a.status == .blocked, pending: pendingRequest(pane))) == true
             noticeLog.info("action \(action, privacy: .public) pane \(paneID, privacy: .public) keys \(sent ? "sent" : "not sent: prompt changed", privacy: .public)")
             guard sent else { return false }
             promptVisible.insert(pane.id)
@@ -365,16 +423,24 @@ final class AppModel {
     /// The composer's send: `text` into the pane, holding the pane's lock. Sent: the pulled texts in that composer
     /// went with it (`composerSent`).
     func deliver(_ text: String, pane id: String, kind: String?) async -> Bool {
-        guard writesEnabled else { return false }
+        await deliverResult(text, pane: id, kind: kind) != .failed
+    }
+    /// `deliver` with hc's third outcome: `unconfirmed` (`terminal.send` timed out; the core may still deliver it, so the
+    /// composer keeps the text out and says so).
+    func deliverResult(_ text: String, pane id: String, kind: String?) async -> DeliveryOutcome {
+        guard writesEnabled else { return .failed }
         guard claim(id) else {
             notice = "A pull of this pane is running. Your message was not sent; it is still in the composer."
-            return false
+            return .failed
         }
         defer { release(id) }
         noteSent(id)
-        let ok = if let sendHook { await sendHook(id, text) } else { await MessageSender.send(text, to: id, client: store.client, kind: kind) }
-        if ok { composerSent(pane: id) }
-        return ok
+        let outcome: DeliveryOutcome
+        if let sendHook { outcome = await sendHook(id, text) ? .sent : .failed }
+        else if HCMapper.address(fromPaneId: id) != nil { outcome = await MessageSender.deliverHC(text, to: id, hc: store.hcClient) }
+        else { outcome = await MessageSender.send(text, to: id, client: store.client, kind: kind) ? .sent : .failed }
+        if outcome != .failed { composerSent(pane: id) }
+        return outcome
     }
     /// Pulled texts kept until a composer sent them (`PulledText`): the Mac's own, and the phones' (the hub's).
     /// The app keeps them in a file (`HerdrDeskApp`); offscreen runs in memory.

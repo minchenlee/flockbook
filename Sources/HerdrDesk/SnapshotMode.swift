@@ -800,6 +800,8 @@ enum SnapshotRunner {
         try? await Task.sleep(for: .seconds(2))
         // conversation(for:) starts tailing a log on first call, so touch every agent first and let the logs load.
         let agents = store.workspaces.flatMap(\.tabs).flatMap(\.panes).compactMap { $0.agent }
+        // Keep every log: past `maxLiveLogs` the store releases the oldest, and the count below would re-open them empty.
+        store.maxLiveLogs = max(store.maxLiveLogs, agents.count + 1)
         for a in agents { _ = store.conversation(for: a.sessionId) }
         try? await Task.sleep(for: .seconds(25))
         var withLog = 0, report: [String] = []

@@ -59,6 +59,8 @@ func checksLaunchGuard() async throws {
     let why = LaunchGuard.problem([app, "--snapshot-settings /tmp/dir"]) ?? ""
     check(why.contains("--snapshot-settings /tmp/dir") && why.lowercased().contains("usage"), "launch guard: the usage line names the argument (\(why))")
     check(LaunchGuard.problem([app, "--test-local-only"], known: ["--test-local-only"]) == nil, "launch guard: extra known flags from the caller")
+    check(LaunchGuard.problem([app, "--hc-socket", "/tmp/hc.sock", "--test-send-unconfirmed"]) == nil && LaunchGuard.problem([app, "--no-hc"]) == nil,
+          "launch guard: the hc flags launch")
 
     // Every flag the app reads, and every check flag the scripts pass, is known: a new flag fails here until it is listed.
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -81,7 +83,7 @@ func checksLaunchGuard() async throws {
     check(unreadable.problems.contains { $0.contains("bad.swift") }, "launch guard: an unreadable file is a problem (\(unreadable.problems))")
     let prefixes: Set<String> = ["--test", "--snapshot"]   // hasPrefix tests, not flags
     // Arguments the app passes to other tools (herdr, tailscale, git, log), not its own.
-    let otherTools: Set<String> = ["--abbrev-ref", "--bg", "--check", "--cols", "--json", "--last", "--predicate", "--rows", "--style", "--takeover"]
+    let otherTools: Set<String> = ["--abbrev-ref", "--bg", "--check", "--cols", "--json", "--last", "--predicate", "--rows", "--style", "--takeover", "--show-toplevel"]
     let unknown = used.subtracting(prefixes).subtracting(otherTools).subtracting(LaunchGuard.known).sorted()
     check(used.count > 40, "launch guard: scanned the app's flags (\(used.count) flags)")
     check(unknown.isEmpty, "launch guard: every flag the app uses is known (unknown: \(unknown))")
