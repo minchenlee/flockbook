@@ -3,6 +3,9 @@ import SwiftUI
 
 /// The agents' own queues (QueuedInput): read while the agent works, shown faded over the composer, pulled back into it.
 extension AppModel {
+    /// Pull back reads herdr's pane layout (`pane.layout`), which herdr-core has no match for: refused on hc, no keys sent.
+    static let hcPullNote = "Pull back works on herdr server panes only. Nothing was sent."
+
     /// READ-ONLY: the pane's queue from its screen and log. Nothing unless the agent works and has a queue Flockbook reads.
     func checkQueue(for pane: Pane) async {
         deliverPulled(pane: pane.id)
@@ -13,7 +16,7 @@ extension AppModel {
         let read: QueuedInput?
         if let q = QueueProbe.injected[pane.id] { read = q }   // offscreen shots only (empty in the app)
         else {
-            let screen = try? await store.client.visibleText(paneId: pane.id)
+            let screen = try? await screen(for: pane)?.visibleText(paneId: pane.id)
             read = QueuedInput.read(agent: a, screen: screen, log: store.queuedInLog(for: a.sessionId))
         }
         let q = read.flatMap { $0.items.isEmpty ? nil : $0 }
@@ -25,6 +28,7 @@ extension AppModel {
     /// or the keys were refused, a notice says so and the log keeps it.
     func pullQueued(_ pane: Pane) {
         guard writesEnabled, let a = pane.agent else { return }
+        guard pane.backend == .tui else { notice = Self.hcPullNote; return }
         let id = pane.id
         // The pane's lock for the whole pull: no send (Mac or phone) types into the box meanwhile.
         guard claim(id) else { notice = "A message to this pane is still going out. Pull back again in a moment."; return }

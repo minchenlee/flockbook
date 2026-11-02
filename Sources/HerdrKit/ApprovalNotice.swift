@@ -269,7 +269,8 @@ public enum ApprovalNotice {
     }
 }
 
-extension HerdrClient {
+/// On both backends (TUI `pane.read` / `pane.send_text`, hc `terminal.read` / `terminal.keys`).
+extension PaneScreen {
     /// The approval card's input, sent only if `prompt` is still open: the pane is read again right before the keys.
     /// False: nothing sent. The notification buttons and the hub both answer through this.
     public func respondIfOpen(paneId: String, prompt: String, allow: Bool, agentKind: String, blocked: Bool, pending: PermissionRequest?, gate: KeyGate? = nil) async throws -> Bool {

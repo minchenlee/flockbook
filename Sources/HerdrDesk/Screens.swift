@@ -93,15 +93,17 @@ struct InboxView: View {
             let (ws, t) = sel
             let agent = t.primaryAgent
             OptionalScroll { detailBody(ws, t, agent) }   // the whole detail width scrolls; the content stays in the column
-                .task(id: t.id) { if let p = t.panes.first(where: { $0.agent?.status == .blocked }) { await model.checkPrompt(for: p) } }
+                .task(id: t.id) { await model.watchPrompts(tabId: t.id) }
         } else {
             Color.clear
         }
     }
 
     @ViewBuilder private func detailBody(_ ws: Workspace, _ t: Tab, _ agent: Agent?) -> some View {
-        let blockedPane = t.panes.first(where: { $0.agent?.status == .blocked })
-        let request: PermissionRequest? = blockedPane.flatMap { model.approvalRequest($0) }
+        // The card's text and its buttons belong to one pane: the blocked one whose screen shows the prompt (kept while
+        // its answer is on the way, with the buttons off).
+        let cardPane = PermissionGate.cardPane(t.panes, promptVisible: model.promptVisible.union(model.approvals.inFlight))
+        let request: PermissionRequest? = cardPane.flatMap { model.approvalRequest($0) }
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 14) {
                 ZStack(alignment: .bottomTrailing) {
@@ -117,9 +119,10 @@ struct InboxView: View {
                     Text("\(ws.label) · \(t.label) · Needs you").foregroundStyle(.secondary)
                 }
             }
-            if let request, request.state == .pending, blockedPane.map({ model.promptVisible.contains($0.id) }) ?? false {
-                ApprovalCard(request: request, agentName: agent?.name ?? "", canRespond: blockedPane.map { model.promptVisible.contains($0.id) } ?? false, onAllow: { if let p = t.panes.first(where: { $0.agent?.status == .blocked }) { model.approve(pane: p, allow: true, bound: request) } },
-                             onDeny: { if let p = t.panes.first(where: { $0.agent?.status == .blocked }) { model.approve(pane: p, allow: false, bound: request) } },
+            if let cardPane, let request, request.state == .pending {
+                ApprovalCard(request: request, agentName: cardPane.agent?.name ?? "", canRespond: model.promptVisible.contains(cardPane.id),
+                             onAllow: { model.approve(pane: cardPane, allow: true, bound: request) },
+                             onDeny: { model.approve(pane: cardPane, allow: false, bound: request) },
                              onOpen: { model.select(tab: t, in: ws); model.showTerminal = true })
                     .frame(maxWidth: 560)
             } else {

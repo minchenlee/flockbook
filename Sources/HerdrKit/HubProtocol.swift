@@ -656,7 +656,7 @@ public struct HubItem: Codable, Hashable, Sendable {
     }
 }
 
-extension HerdrClient {
+extension PaneScreen {
     /// Right before remote text is typed: a fresh snapshot and screen. True only when the pane still has an agent, it
     /// is not blocked, and nothing on screen would take the text as a choice (`Hub.screenTakesKeys`). Read-only.
     /// With `agent`: the pane must still show that agent (same kind and session), not one that took its place.
