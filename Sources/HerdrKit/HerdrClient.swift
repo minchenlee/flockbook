@@ -10,6 +10,7 @@ public actor HerdrClient {
 
     /// One request on its own short-lived connection. Returns the full response line.
     func rawRequest(method: String, params: [String: Any] = [:]) async throws -> Data {
+        try Self.refuseHCIds(params)
         seq += 1
         let id = "desk:\(seq)"
         let path = session.socketPath
@@ -22,6 +23,15 @@ public actor HerdrClient {
             try Self.throwIfError(line)
             return line
         }.value
+    }
+
+    /// An hc pane/tab/workspace id (`hc:` prefix) sent to the TUI server is a routing bug; refuse it before it leaves.
+    static func refuseHCIds(_ params: [String: Any]) throws {
+        for k in ["pane_id", "target_pane_id", "tab_id", "workspace_id"] {
+            if let v = params[k] as? String, v.hasPrefix(HCMapper.panePrefix) {
+                throw HerdrError.protocolError("\(k) \(v) belongs to herdr-core, not the TUI server")
+            }
+        }
     }
 
     static func throwIfError(_ line: Data) throws {
