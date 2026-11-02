@@ -31,7 +31,7 @@ struct TerminalSheet: View {
             }.padding(12)
             Divider()
             if let pane {
-                ObservedTerminal(client: model.store.client, paneId: pane.id, terminalId: pane.terminalId, writable: model.writesEnabled, focused: true,
+                ObservedTerminal(client: model.store.client, hc: pane.backend == .hc ? model.store.hcClient : nil, paneId: pane.id, terminalId: pane.terminalId, writable: TerminalPolicy.writable(backend: pane.backend, writesEnabled: model.writesEnabled), focused: true,
                                  handle: handle,
                                  rightClickToPane: model.rightClickToPane.contains(pane.id),
                                  onHistoryChange: { model.terminalHistoryOpen = $0 }).id(pane.terminalId)
@@ -160,6 +160,8 @@ struct SheetWindowSizer: NSViewRepresentable {
 struct ObservedTerminal: View {
     @Environment(\.underSettings) private var underSettings
     let client: HerdrClient
+    /// Set for an herdr-core pane: the view attaches through hc instead of the herdr CLI channel.
+    var hc: HCClient? = nil
     let paneId: String
     let terminalId: String
     var writable = false
@@ -171,6 +173,8 @@ struct ObservedTerminal: View {
     @State private var ownHandle = TerminalHandle()
     @State private var wheelState = WheelState()
     private var hnd: TerminalHandle { handle ?? ownHandle }
+    /// History comes from the pane's own backend: hc (`terminal.read {lines}`) or the herdr TUI (`pane.read`).
+    private var scroller: any ScrollSource { hc ?? client }
 
     /// Wheel bookkeeping. A plain object: written from event callbacks, never triggers a render.
     @MainActor final class WheelState {
@@ -204,7 +208,7 @@ struct ObservedTerminal: View {
         guard !fetching else { return }
         fetching = true
         Task { @MainActor in
-            let info = try? await client.scrollInfo(paneId: paneId)
+            let info = try? await scroller.scrollInfo(paneId: paneId)
             fetching = false   // before act: wheelUp guards on it, so a deferred reset dropped the first wheel-up
             guard let info else { return }
             st.kind = info.kind; st.kindAt = Date()
@@ -217,7 +221,7 @@ struct ObservedTerminal: View {
         case .history:
             if dy > 0 { wheelUp() }
         case .fullScreenProgram:
-            if writable, let session = hnd.session {
+            if TerminalPolicy.wheelToProgram(backend: hc == nil ? .tui : .hc, writable: writable), let session = hnd.session {
                 // Trackpad: one step per ~28 pt of movement (at most 4 per event); a wheel notch is one step.
                 let st = wheelState
                 st.accum += abs(dy)
@@ -235,8 +239,8 @@ struct ObservedTerminal: View {
         fetching = true
         Task { @MainActor in
             defer { fetching = false }
-            guard let info = try? await client.scrollInfo(paneId: paneId), info.kind != .none else { return }
-            guard let sb = try? await client.readScrollback(paneId: paneId, lines: Scrollback.readLimit, ansi: true) else { return }
+            guard let info = try? await scroller.scrollInfo(paneId: paneId), info.kind != .none else { return }
+            guard let sb = try? await scroller.readScrollback(paneId: paneId, lines: Scrollback.readLimit, ansi: true, unwrapped: false) else { return }
             if info.kind == .fullScreenProgram, sb.lineCount <= info.viewportRows {
                 guard notice == nil else { return }
                 notice = "這個程式沒有可捲動的歷史；對話內容請在對話頁看"
@@ -257,9 +261,10 @@ struct ObservedTerminal: View {
     }
 
     var body: some View {
-        TerminalNSView(client: client, terminalId: terminalId, writable: writable, takeover: takeover, focused: focused,
+        TerminalNSView(client: client, hc: hc, terminalId: terminalId, writable: writable, takeover: takeover, focused: focused,
                        handle: hnd, rightClickToPane: rightClickToPane, onWheel: wheel, historyOpen: { history != nil }, onClosed: { closedReason = $0 },
-                       onStartError: { startError = $0 })
+                       onStartError: { startError = $0 },
+                       onNotice: { n in Task { notice = n; try? await Task.sleep(for: .seconds(6)); if notice == n { notice = nil } } })
             .id("\(terminalId)-\(epoch)")
             .opacity(history == nil ? 1 : 0)   // both views are transparent: the history view replaces the live one
             .overlay {
@@ -312,7 +317,7 @@ struct ObservedTerminal: View {
                     HStack(spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         Text(Self.explain(r)).font(.callout).lineLimit(2)
-                        if writable, !r.contains("not found") {
+                        if writable, !Self.isGone(r) {
                             Button("Take over") { takeover = true; closedReason = nil; epoch += 1 }.controlSize(.small)
                                 .help("Make this window the controller of the terminal")
                         }
@@ -330,7 +335,14 @@ struct ObservedTerminal: View {
         if reason.contains("taken over") { return "Another client took over this terminal." }
         if reason.contains("already has an attached client") { return "Another client is controlling this terminal." }
         if reason.contains("not found") { return "This terminal no longer exists." }
+        if reason.hasPrefix("finished") { return "The program in this terminal has ended." }
+        if reason.hasPrefix("machine_unknown") { return "This terminal's machine is not known to herdr-core." }
         return reason
+    }
+
+    /// No controller can bring it back: no "Take over".
+    static func isGone(_ reason: String) -> Bool {
+        reason.contains("not found") || ["finished", "machine_unknown", "needs_framed"].contains { reason.hasPrefix($0) }
     }
 }
 
@@ -344,6 +356,7 @@ struct TerminalNSView: NSViewRepresentable {
     /// Tests only: the program in place of herdr.
     static var testLauncher: [String]?
     let client: HerdrClient
+    var hc: HCClient? = nil
     let terminalId: String
     var writable = false
     var takeover = false
@@ -355,6 +368,8 @@ struct TerminalNSView: NSViewRepresentable {
     var onClosed: (String) -> Void = { _ in }
     /// Why the terminal does not start (nil again once a frame comes).
     var onStartError: (String?) -> Void = { _ in }
+    /// Session notices worth showing (hc: keys typed while connecting that were not sent).
+    var onNotice: (String) -> Void = { _ in }
     @Environment(\.colorScheme) private var scheme
     @AppStorage(TerminalColors.key, store: AppDefaults.store) private var colorsSetting = TerminalColors.flockbook.rawValue
 
@@ -370,6 +385,7 @@ struct TerminalNSView: NSViewRepresentable {
         c.writable = writable
         c.onClosed = onClosed
         c.onStartError = onStartError
+        c.onNotice = onNotice
         c.handle = handle
         handle?.live = tv
         tv.onWheel = onWheel; tv.historyOpen = historyOpen; tv.rightClickToPane = rightClickToPane && writable
@@ -380,7 +396,9 @@ struct TerminalNSView: NSViewRepresentable {
         if mode == .ghostty { TerminalThemes.shared.reload() }
         Self.applyColors(tv, scheme, mode: mode)
         c.colors = colorsKey
-        let session = client.terminalSession(terminalId: terminalId, mode: writable ? .control(takeover: takeover) : .observe, launcher: Self.testLauncher)
+        let sessionMode: TerminalSession.Mode = writable ? .control(takeover: takeover) : .observe
+        let session = hc.map { TerminalSession(hcTerminal: terminalId, client: $0, mode: sessionMode) }
+            ?? client.terminalSession(terminalId: terminalId, mode: sessionMode, launcher: Self.testLauncher)
         c.session = session
         handle?.session = session
         session.start()
@@ -396,8 +414,11 @@ struct TerminalNSView: NSViewRepresentable {
                         tv.feed(text: "\u{1b}c")
                     }
                     tv.feed(byteArray: ArraySlice([UInt8](frame.bytes)))
+                    frame.consumed()   // hc: CREDIT only for what the view has drawn
                 case .closed(let reason): c.onClosed(reason)
-                case .notice(let s): said = s
+                case .notice(let s):
+                    said = s
+                    if s.contains("not sent") { c.onNotice(s) }   // hc: keys typed while connecting; other notices are CLI stderr chatter
                 // Stopped again before any frame: herdr's last words, while it keeps trying.
                 case .reconnecting: if !framed { c.onStartError(said ?? "herdr's terminal stopped before it showed anything.") }
                 case .failed(let reason): c.onStartError(reason)
@@ -410,7 +431,7 @@ struct TerminalNSView: NSViewRepresentable {
     func updateNSView(_ tv: PasteTerminalView, context: Context) {
         SettingsFocus.cover(tv, context.environment.underSettings)
         let c = context.coordinator
-        c.writable = writable; c.onClosed = onClosed; c.onStartError = onStartError; c.covered = context.environment.underSettings
+        c.writable = writable; c.onClosed = onClosed; c.onStartError = onStartError; c.onNotice = onNotice; c.covered = context.environment.underSettings
         tv.onWheel = onWheel; tv.historyOpen = historyOpen; tv.rightClickToPane = rightClickToPane && writable
         tv.allowMouseReporting = writable
         if c.colors != colorsKey {
@@ -481,6 +502,7 @@ struct TerminalNSView: NSViewRepresentable {
         var colors: String?
         var onClosed: (String) -> Void = { _ in }
         var onStartError: (String?) -> Void = { _ in }
+        var onNotice: (String) -> Void = { _ in }
         private var resizeTask: Task<Void, Never>?
 
         /// Keystrokes (IME text, Ctrl/Option/arrows are already encoded by SwiftTerm) go to the terminal session.

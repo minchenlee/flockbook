@@ -129,11 +129,13 @@ struct PaneView: View {
             } else {
                 if labelShown { PaneLabel(pane: pane, focused: focused, zoomed: zoomed, tab: tab) }
                 if flat { ShellCard(pane: pane) } else {
-                    ObservedTerminal(client: model.store.client, paneId: pane.id, terminalId: pane.terminalId,
-                                     writable: model.writesEnabled, focused: focused,
+                    ObservedTerminal(client: model.store.client, hc: pane.backend == .hc ? model.store.hcClient : nil, paneId: pane.id, terminalId: pane.terminalId,
+                                     // hc: watches (never resizes the user's terminal) until the user types here.
+                                     writable: TerminalPolicy.writable(backend: pane.backend, writesEnabled: model.writesEnabled,
+                                                                       underSheet: model.showTerminal), focused: focused,
                                      rightClickToPane: model.rightClickToPane.contains(pane.id))
                         .paneMenu(pane, tab: tab, suppressWhenRouted: true)
-                        .id(pane.terminalId)
+                        .id(TerminalPolicy.viewKey(terminalId: pane.terminalId, backend: pane.backend, underSheet: model.showTerminal))
                         .padding(.horizontal, 14).padding(.bottom, 8)   // same inset as the pane label; the text never touches the edge
                 }
             }
@@ -227,8 +229,8 @@ extension PaneView {
 
     /// READ-ONLY screen read, once each time the agent turns blocked (and after a failed answer). Sends nothing.
     private func readScreenQuestion() async {
-        guard let a = pane.agent, a.status == .blocked, a.kind == "claude" else { screenQuestion = nil; return }
-        let fresh = try? await model.store.client.pendingQuestion(paneId: pane.id)
+        guard PermissionGate.readQuestion(pane.agent), let screen = model.screen(for: pane) else { screenQuestion = nil; return }
+        let fresh = try? await screen.pendingQuestion(paneId: pane.id)
         // Keep the fully read request for the same picker: a read-only read has only the question on screen.
         if let fresh, let old = screenQuestion, old.toolUseId == fresh.toolUseId, old.questions.count > fresh.questions.count { return }
         screenQuestion = fresh
@@ -236,8 +238,8 @@ extension PaneView {
 
     /// User action only (Next past the questions read so far): moves Claude's picker to read the rest, and back.
     private func loadAllQuestions() async throws -> QuestionRequest? {
-        guard model.writesEnabled else { return nil }
-        let all = try await model.store.client.loadAllQuestions(paneId: pane.id)
+        guard model.writesEnabled, let screen = model.screen(for: pane) else { return nil }
+        let all = try await screen.loadAllQuestions(paneId: pane.id)
         if let all { screenQuestion = all }
         return all
     }
@@ -255,7 +257,8 @@ extension PaneView {
         guard !model.coveredBySettings else { throw QuestionCard.HeldUnderSettings() }   // not "Sent": nothing went
         let request = screenQuestion?.toolUseId == q.toolUseId ? screenQuestion ?? q : q   // the fully read one
         do {
-            try await model.store.client.answerQuestion(paneId: pane.id, request: request, answers: answers)
+            guard let screen = model.screen(for: pane) else { return }
+            try await screen.answerQuestion(paneId: pane.id, request: request, answers: answers)
             model.noteSent(pane.id)
             Task { try? await Task.sleep(for: .seconds(1.5)); answeredQuestions.insert(q.toolUseId) }
         } catch {
@@ -269,7 +272,7 @@ extension PaneView {
                      draft: model.drafts[pane.id] ?? ComposerDraft(),
                      onSend: { model.send($0, to: pane) },
                      onDraft: { model.setDraft($0, for: pane.id) },
-                     deliver: { await model.deliver($0, pane: pane.id, kind: agent.kind) },
+                     deliverResult: { await model.deliverResult($0, pane: pane.id, kind: agent.kind) },
                      placeholder: focused ? nil : "Click to reply to \(agent.name)",
                      focusRequest: focusRequest, remote: model.store.session.remote)
             .id("\(pane.id)-\(model.composerResets[pane.id] ?? 0)")   // a pulled queue starts the composer again from its draft
