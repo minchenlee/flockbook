@@ -61,6 +61,7 @@ public struct ConversationParser: Sendable {
         lineOffset = offset
         if let g = Self.grokUpdate(o) { feedGrok(g.update, meta: g.meta, top: o, offset: offset); return }
         if let payload = o["payload"] as? [String: Any] { feedCodex(type: o["type"] as? String, payload: payload, offset: offset); return }
+        if Self.isAgy(o) { feedAgy(o); return }
         if o["uuid"] == nil, let t = o["type"] as? String, Self.piTypes.contains(t) { feedPi(o, line: line, offset: offset); return }
         if Self.isCursor(o) { feedCursor(o, offset: offset); return }
         let type = o["type"] as? String
