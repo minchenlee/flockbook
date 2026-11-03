@@ -25,3 +25,6 @@ One short line: what this release is about.
 ### ⚙️ Changes
 
 - Phone app: a black and white frosted-glass look with no blue (orange, green and red still mean needs you, done and error). The bar floats as a capsule, and opening an agent turns its row into the bar.
+- Herdr app mod: the pointer at the window's left edge now slides the sidebar out as a floating panel over the content, so the content does not move.
+- Herdr app mod: a question card with several questions shows all of them at once (no "Show all" click), has no outer border, and puts Next and Send answer at the bottom right.
+- Herdr app mod: the top bar's panes button is gone (a split tab shows its panes by itself; the tab's right-click menu still switches); Needs you starts its detail at the top.

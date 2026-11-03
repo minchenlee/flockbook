@@ -1,12 +1,16 @@
 // What an agent waits for: an approval ("Do you want to run …?") or a question, as a card with
 // buttons. Read with the sidecar's `card`; answered with `approve` and `answer` (docs/protocol.md).
-// The keys go out only on a button press, never on a timer.
+// Answers go out only on a button press or a key. A question with more questions behind it is read
+// in full once per request (`card --all` walks the picker's tabs).
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
+import { shared, setShared } from "herdr";
 import { icon } from "./state.js";
 import * as sidecar from "./sidecar.js";
 
 export const CARD_MS = 1500;
+const KEY_ALL = "flockbook.card.all";   // "address:request" last read in full
+const KEY_FULL = "flockbook.card.full"; // { address, card }: that full card
 
 // Whether to read the card: herdr-app shows the agent as blocked, or the log ends with a call that
 // waits (a pending perm or question row).
@@ -88,6 +92,9 @@ export class Cards {
       let card = line && line.kind ? line : null;
       // The screen shows one question at a time; keep the full set read with "Show all".
       if (card && e.card && card.request === e.card.request && card.unread > 0 && !e.card.unread) card = e.card;
+      // Another view read it in full already.
+      const full = shared(KEY_FULL);
+      if (card?.unread > 0 && full?.address === address && full.card?.request === card.request) card = full.card;
       const fresh = card && card.request !== e.card?.request;
       if (JSON.stringify(card) !== JSON.stringify(e.card)) {
         if (card?.request !== e.card?.request) { e.picks = new Map(); e.others = new Map(); e.note = null; e.step = 0; if (this.address === address) this.others.forEach((i) => i.set_value("")); }
@@ -97,9 +104,15 @@ export class Cards {
       if (fresh && address === this.shown && this.focus && this.canFocus()) this.focus.focus();
       if (!e.read) { e.read = true; cx.notify(); }
     } finally { e.busy = false; }
+    // More questions follow: read them all now, once per request (the button stays to try again).
+    // The key is shared, so of the views that show this card only one walks the picker.
+    const req = e.card?.request;
+    if (e.card?.unread > 0 && e.allFor !== req && shared(KEY_ALL) !== `${address}:${req}`) {
+      e.allFor = req; setShared(KEY_ALL, `${address}:${req}`); await this.loadAll(cx, address);
+    }
   }
 
-  // "Show all N questions": walks the picker's tabs (keys go out, on this click only) and keeps the full card.
+  // Reads every question: walks the picker's tabs and keeps the full card.
   async loadAll(cx, address) {
     const e = this.entry(address);
     if (e.sending || !e.card?.unread) return;
@@ -107,7 +120,7 @@ export class Cards {
     try {
       const r = await sidecar.card(address, true);
       const line = r.error ? null : r.lines.find((l) => l.type === "card");
-      if (line?.kind === "question" && line.request === e.card.request && !line.unread) e.card = line;
+      if (line?.kind === "question" && line.request === e.card.request && !line.unread) { e.card = line; setShared(KEY_FULL, { address, card: line }); }
       else e.note = r.error?.message || "Could not read the other questions. Answer them in the agent's terminal.";
     } finally { e.sending = false; cx.notify(); }
   }
@@ -188,9 +201,7 @@ export class Cards {
       .border(1).border_color(primary && !off ? t.accent : t.border)
       .when(!off, (el) => el.hover((s) => s.opacity(0.9)).on_click((_e, cx) => cx.spawn((cx) => action(cx))))
       .child(label);
-    const focused = Boolean(this.focus?.is_focused?.());
-    const box = v_flex().id(id).w_full().max_w(800).p(14).gap(10).rounded(14).bg(t.raised).border(1)
-      .border_color(focused ? t.accent : t.border).shadow_sm();
+    const box = v_flex().id(id).w_full().max_w(800).p(14).gap(10).rounded(14).bg(t.raised);
     if (this.focus) box.track_focus(this.focus)
       .on_mouse_down("left", () => this.focus.focus())
       .on_key_down((ev, cx) => { if (this.key_down(ev, cx, address)) cx.stop_propagation(); });
@@ -253,12 +264,14 @@ export class Cards {
     } else {
       const ready = Boolean(answersFor(q, e.picks, e.others));
       const last = step >= count - 1;
+      // The hint on the left; Back, then Next or Send answer at the right end.
       box.child(h_flex().gap(10).items_center()
+        .child(div().text_size(12).text_color(t.dim).child(count ? `1-9 picks · Enter ${last ? "sends" : "goes on"}` : ""))
+        .child(div().flex_1())
         .when(step > 0, (el) => el.child(button("back", "Back", false, async (cx) => { e.step = step - 1; cx.notify(); })))
         .child(last
           ? button("answer", e.sending ? "Sending…" : "Send answer", true, (cx) => this.answer(cx, address), !ready || e.sending)
-          : button("next", "Next", true, async (cx) => { e.step = step + 1; cx.notify(); }, !answered(e, step)))
-        .child(div().text_size(12).text_color(t.dim).child(count ? `1-9 picks · Enter ${last ? "sends" : "goes on"}` : "")));
+          : button("next", "Next", true, async (cx) => { e.step = step + 1; cx.notify(); }, !answered(e, step))));
     }
     const n = tail(); if (n) box.child(n);
     return box;

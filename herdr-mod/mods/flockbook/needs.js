@@ -53,13 +53,13 @@ export class NeedsView {
           .child(div().truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · waits for you`)))
         .child(div().size(8).flex_none().rounded(4).bg(t.blocked));
     };
-    return watchEdge(h_flex().id("needs-root").size_full().min_h(0))
-      
+    // Both columns start at the top (h_flex centres its children by default).
+    return watchEdge(h_flex().id("needs-root").size_full().min_h(0).items_start())
       .child(v_flex().id("needs-list").w(340).flex_none().h_full().p(10).gap(2).border_r(1).border_color(t.border)
         .overflow_y_scrollbar()
         .child(div().px(4).pb(6).text_size(15).font_semibold().text_color(t.foreground).child(`Needs you · ${list.length}`))
         .children(list.map(item)))
-      .child(v_flex().id("needs-detail").flex_1().min_w(0).p(24).gap(12)
+      .child(v_flex().id("needs-detail").flex_1().min_w(0).h_full().overflow_y_scrollbar().p(24).gap(12)
         .child(div().text_size(18).font_semibold().text_color(t.foreground).child(agentName(cur)))
         .child(div().text_size(13).text_color(t.muted).child(cur.title || `${cur.space_name} · ${cur.tab_name}`))
         .child(this.cards.view(cur.address, t, "needs-card") ?? div().text_size(13).text_color(t.muted)

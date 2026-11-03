@@ -119,10 +119,7 @@ export function topBar(t, over = false) {
       : div().px(12).text_size(12.5).text_color(t.muted).child("No tabs in this space"));
   const tools = capsule("tools").px(5).gap(4)
     .child(button("new", svg(icon("plus")).size(15), () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 }), 30, "New tab (⌘T)"))
-    .when(Boolean(cur), (el) => el.child(button("terminal", svg(icon("terminal")).size(16), () => openTerminal(cur), 30, "Agent's terminal (⌃`)")))
-    // Chat ⇄ the tab's panes (splits show there; ⌘D splits).
-    .when(Boolean(cur), (el) => el.child(button("panes", svg(icon(shownScreen() === "tab" ? "send" : "split")).size(15),
-      () => showScreen(shownScreen() === "tab" ? "chat" : "tab"), 30, shownScreen() === "tab" ? "Show the chat" : "Show the tab's panes (splits)")));
+    .when(Boolean(cur), (el) => el.child(button("terminal", svg(icon("terminal")).size(16), () => openTerminal(cur), 30, "Agent's terminal (⌃`)")));
 
   // The right padding matches the left, so the capsules stay centred. The sidebar button gets a
   // round backing when drawn over content, like the capsules.
