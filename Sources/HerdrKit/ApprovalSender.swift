@@ -17,9 +17,11 @@ import Observation
     /// then `respondIfOpen` (the prompt re-read right before the keys). After keys went out the pane stays claimed
     /// until `prompt` has left the screen (read every `poll`, at most `maxWait`), so a redraw lag never lets a second
     /// "1" approve the next call. On hc a `terminal.keys` past its timeout may still land (the typing-quiet rule holds
-    /// keys): `unconfirmed`, claimed the same way.
+    /// keys): `unconfirmed`, claimed the same way but for up to `heldWait` (about hc's send timeout), since the key
+    /// may still be held after the short `maxWait` meant for a redraw.
     public func answer(paneId: String, via screen: any PaneScreen, prompt: String, allow: Bool, agentKind: String, blocked: Bool,
-                       pending: PermissionRequest?, gate: KeyGate? = nil, poll: Duration = .seconds(1), maxWait: Duration = .seconds(10)) async -> ApprovalAnswer {
+                       pending: PermissionRequest?, gate: KeyGate? = nil, poll: Duration = .seconds(1), maxWait: Duration = .seconds(10),
+                       heldWait: Duration = .seconds(60)) async -> ApprovalAnswer {
         guard begin(paneId) else { return .busy }
         let result: ApprovalAnswer
         do {
@@ -33,7 +35,8 @@ import Observation
         }
         guard result == .sent || result == .unconfirmed else { end(paneId); return result }
         Task { [weak self] in
-            await Self.waitGone(paneId: paneId, via: screen, prompt: prompt, agentKind: agentKind, pending: pending, poll: poll, maxWait: maxWait)
+            await Self.waitGone(paneId: paneId, via: screen, prompt: prompt, agentKind: agentKind, pending: pending, poll: poll,
+                                maxWait: result == .unconfirmed ? heldWait : maxWait)
             self?.end(paneId)
         }
         return result

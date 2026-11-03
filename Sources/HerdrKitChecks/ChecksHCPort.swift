@@ -85,6 +85,17 @@ import Foundation
     fake.setScreen("t1", "> done")
     for _ in 0..<30 where sender.isAnswering("hc:t1") { try await Task.sleep(for: .milliseconds(100)) }
     check(!sender.isAnswering("hc:t1"), "answer once: the prompt gone ends the flight")
+
+    // Unconfirmed: hc may hold the key while someone types, past the short wait meant for a redraw. The pane stays
+    // claimed while the prompt is on screen, up to the longer `heldWait` (about hc's send timeout).
+    fake.setScreen("t1", prompt)
+    fake.keysDelay = 1.0
+    let held = await sender.answer(paneId: "hc:t1", via: hc, prompt: id, allow: true, agentKind: "claude", blocked: true, pending: nil,
+                                   poll: .milliseconds(100), maxWait: .milliseconds(300), heldWait: .seconds(3))
+    try await Task.sleep(for: .seconds(1))
+    check(held == .unconfirmed && sender.isAnswering("hc:t1"), "answer once: unconfirmed stays claimed past the short wait (\(held))")
+    for _ in 0..<40 where sender.isAnswering("hc:t1") { try await Task.sleep(for: .milliseconds(100)) }
+    check(!sender.isAnswering("hc:t1"), "answer once: unconfirmed is released after heldWait at the latest")
     fake.keysDelay = 0
 }
 
