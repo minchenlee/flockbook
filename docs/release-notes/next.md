@@ -38,3 +38,4 @@ One short line: what this release is about.
 - Herdr app mod: code blocks and tables in chat replies now have rounded corners, and table columns size to their content. Code text in these boxes cannot be selected yet.
 - Security: Herdr app mod approval cards follow the app's rules. The card is the prompt box on screen (its id includes the command); a log that still names the call before can no longer allow the next prompt; Grok prompts get Grok's own keys.
 - Security: Herdr app mod approvals go out once per prompt, across views and windows. A second press while the prompt is still drawn sends nothing (the card says "Answer sent"), and a key herdr-core held past the timeout is reported as "may still arrive", not as failed.
+- Fix: Herdr app mod chat no longer flips back to an old log every 30 seconds after Claude goes on in a new log; approvals and questions from the new log no longer go missing then.

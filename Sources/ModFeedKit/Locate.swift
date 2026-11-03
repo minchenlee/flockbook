@@ -77,8 +77,14 @@ public enum FeedLocate {
         guard let pane = pane(ws, terminal: terminal) else { throw Failure.noTerminal(terminal) }
         guard let kind = pane.agent?.kind else { throw Failure.notAgent(terminal) }
         var cache = readCache(cacheURL)
+        // Claude goes on in a new log and herdr keeps the old id: both paths follow `continued-in` (a cached path too,
+        // or the chat flips between the two logs until the next recheck).
+        func latest(_ p: String?, kind: String) -> String? {
+            guard let p, kind == "claude" else { return p }
+            return SessionLog.continued(URL(fileURLWithPath: p)).path
+        }
         if let e = cache.entries[pane.terminalId], fresh(e, for: pane, kind: kind, now: now) {
-            return Found(pane: pane, path: e.path, cached: true)
+            return Found(pane: pane, path: latest(e.path, kind: kind), cached: true)
         }
         let agents = ws.flatMap(\.tabs).flatMap(\.panes).filter { $0.agent != nil && !$0.terminalId.contains("/") }
         let needs = agents.map { SessionResolver.Need(paneId: $0.id, kind: $0.agent!.kind, cwd: $0.cwd, pids: $0.processIds) }
@@ -92,13 +98,12 @@ public enum FeedLocate {
             return SessionLog.locate(agent: kind, sessionId: v, dir: SessionLog.defaultDir(agent: kind))?.path
         }
         for p in agents {
-            next.entries[p.terminalId] = Entry(kind: p.agent!.kind, cwd: p.cwd, pids: p.processIds, path: absolute(found[p.id], kind: p.agent!.kind),
+            let k = p.agent!.kind
+            next.entries[p.terminalId] = Entry(kind: k, cwd: p.cwd, pids: p.processIds, path: latest(absolute(found[p.id], kind: k), kind: k),
                                                checked: now.timeIntervalSince1970)
         }
         cache = next
         writeCache(cache, to: cacheURL)
-        var path = absolute(found[pane.id], kind: kind)
-        if let p = path, kind == "claude" { path = SessionLog.continued(URL(fileURLWithPath: p)).path }
-        return Found(pane: pane, path: path, cached: false)
+        return Found(pane: pane, path: latest(absolute(found[pane.id], kind: kind), kind: kind), cached: false)
     }
 }

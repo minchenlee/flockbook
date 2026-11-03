@@ -100,4 +100,23 @@ func checksModFeedReview() async throws {
     let lag = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id2, allow: true, cache: cache)
     check(lag.result == "answered" && keys().count == k4 + 1, "review1 #2: sent, box still drawn: the next press sends nothing (\(lag))")
     // Without a cache file (no claim possible) the old behaviour stays: one key per press.
+
+    // 3. A Claude conversation went on in a new log (the old one ends with `continued-in`; herdr keeps the old id).
+    // A cache hit must give the new log too, not the old, frozen one, so the chat does not flip between them.
+    let proj = dir.appendingPathComponent("projects/-w-proj")
+    try FileManager.default.createDirectory(at: proj, withIntermediateDirectories: true)
+    let oldLog = proj.appendingPathComponent("old1.jsonl"), newLog = proj.appendingPathComponent("new1.jsonl")
+    let lead = #"{"type":"user","uuid":"l1","sessionId":"s","message":{"role":"user","content":"start"}}"#
+    try (lead + "\n" + #"{"type":"continued-in","timestamp":"2026-11-03T06:54:55.989Z","sessionId":"old1","continuedInSessionId":"new1"}"# + "\n")
+        .write(to: oldLog, atomically: true, encoding: .utf8)
+    try (lead + "\n").write(to: newLog, atomically: true, encoding: .utf8)
+    fake.terminals = [FakeHC.terminal("t3", status: "working")]
+    let ws3 = try await hc.snapshot()
+    let p3 = FeedLocate.pane(ws3, terminal: "t3")!
+    let cache3 = dir.appendingPathComponent("locate/cache.json")
+    var c3 = FeedLocate.Cache()
+    c3.entries[p3.terminalId] = FeedLocate.Entry(kind: "claude", cwd: p3.cwd, pids: p3.processIds, path: oldLog.path, checked: Date().timeIntervalSince1970)
+    FeedLocate.writeCache(c3, to: cache3)
+    let hit = try await FeedLocate.find(terminal: "t3", workspaces: ws3, resolver: SessionResolver(socketPath: "/nonexistent.sock"), cacheURL: cache3)
+    check(hit.cached && hit.path == newLog.path, "review1 #3: a cache hit follows continued-in to the new log (\(hit.path ?? "nil"))")
 }
