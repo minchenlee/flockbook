@@ -31,6 +31,9 @@ export function answersFor(question, picks, others) {
 
 export const MAX_QUESTIONS = 4;
 
+// Whether question `qi` has a pick or an own answer.
+const answered = (en, qi) => Boolean(en.picks.get(qi)?.size || (en.others.get(qi) ?? "").trim());
+
 // A digit key's number (1-9), or null.
 export function digit(e) {
   const m = e?.modifiers ?? {};
@@ -87,7 +90,7 @@ export class Cards {
       if (card && e.card && card.request === e.card.request && card.unread > 0 && !e.card.unread) card = e.card;
       const fresh = card && card.request !== e.card?.request;
       if (JSON.stringify(card) !== JSON.stringify(e.card)) {
-        if (card?.request !== e.card?.request) { e.picks = new Map(); e.others = new Map(); e.note = null; if (this.address === address) this.others.forEach((i) => i.set_value("")); }
+        if (card?.request !== e.card?.request) { e.picks = new Map(); e.others = new Map(); e.note = null; e.step = 0; if (this.address === address) this.others.forEach((i) => i.set_value("")); }
         e.card = card; cx.notify();
       }
       // A new card takes the keyboard (1-9, Enter), unless you are typing a reply.
@@ -122,17 +125,29 @@ export class Cards {
     const qs = c.question?.questions ?? [];
     if (e?.key === "enter") {
       if (c.unread > 0) return false;
+      const step = en.step ?? 0;
+      if (step < qs.length - 1) {
+        if (!answered(en, step)) return false;
+        en.step = step + 1; cx.notify(); return true;
+      }
       if (answersFor(c.question, en.picks, en.others)) { cx.spawn((cx) => this.answer(cx, address)); return true; }
       return false;
     }
     if (n === null) return false;
-    let qi = qs.findIndex((_q, i) => !(en.picks.get(i)?.size) && !(en.others.get(i) ?? "").trim());
-    if (qi < 0) qi = qs.length - 1;
+    const qi = Math.min(en.step ?? 0, qs.length - 1);
+    if (!this.pick(en, qs, qi, n - 1)) return false;
+    cx.notify();
+    return true;
+  }
+
+  // Picks option `oi` of question `qi`. A one-choice pick moves on to the next question.
+  pick(en, qs, qi, oi) {
     const q = qs[qi];
-    if (!q || n > (q.options ?? []).length) return false;
+    if (!q || oi >= (q.options ?? []).length) return false;
     const s = new Set(q.multi ? en.picks.get(qi) ?? [] : []);
-    if (s.has(n - 1)) s.delete(n - 1); else s.add(n - 1);
-    en.picks.set(qi, s); cx.notify();
+    if (s.has(oi)) s.delete(oi); else s.add(oi);
+    en.picks.set(qi, s);
+    if (!q.multi && s.size && qi < qs.length - 1) en.step = qi + 1;
     return true;
   }
 
@@ -198,8 +213,15 @@ export class Cards {
     }
 
     const q = c.question ?? { questions: [] };
-    box.child(head(q.questions.length > 1 ? `The agent asks ${q.questions.length} questions` : "The agent asks"));
+    // One question at a time, as in Flockbook: "Question 1 of 2", Back and Next, Send on the last.
+    const count = q.questions.length, step = Math.min(e.step ?? 0, Math.max(0, count - 1));
+    box.child(h_flex().gap(10).items_center()
+      .child(head(count > 1 ? `The agent asks · question ${step + 1} of ${count}` : "The agent asks"))
+      .when(count > 1, (el) => el.child(div().flex_1()).child(h_flex().gap(5).children(q.questions.map((_x, i) =>
+        div().id(`${id}-dot-${i}`).size(7).rounded(4).bg(i === step ? t.accent : answered(e, i) ? t.muted : t.border)
+          .on_click((_ev, cx) => { e.step = i; cx.notify(); }))))));
     q.questions.forEach((qq, qi) => {
+      if (qi !== step) return;
       const picks = e.picks.get(qi) ?? new Set();
       const sec = v_flex().gap(6);
       if (qq.header) sec.child(div().text_size(11.5).text_color(t.muted).child(qq.header));
@@ -208,11 +230,7 @@ export class Cards {
         const on = picks.has(oi);
         sec.child(h_flex().id(`${id}-q${qi}-o${oi}`).px(10).py(7).gap(10).items_center().rounded(8)
           .bg(on ? t.selected : t.background).border(1).border_color(on ? t.accent : t.border).hover((s) => s.bg(on ? t.selected : t.hover))
-          .on_click((_e, cx) => {
-            const s = new Set(qq.multi ? picks : []);
-            if (s.has(oi)) s.delete(oi); else s.add(oi);
-            e.picks.set(qi, s); cx.notify();
-          })
+          .on_click((_e, cx) => { this.pick(e, q.questions, qi, oi); cx.notify(); })
           .child(div().size(14).flex_none().rounded(qq.multi ? 3 : 7).border(1).border_color(on ? t.accent : t.muted).bg(on ? t.accent : t.background))
           .child(v_flex().flex_1().min_w(0)
             .child(h_flex().gap(6).child(div().text_size(13).text_color(t.foreground).child(o.label || ""))
@@ -234,9 +252,13 @@ export class Cards {
           .child(`${c.unread} more question${c.unread === 1 ? " follows" : "s follow"}. Answer them all here, then send.`)));
     } else {
       const ready = Boolean(answersFor(q, e.picks, e.others));
+      const last = step >= count - 1;
       box.child(h_flex().gap(10).items_center()
-        .child(button("answer", e.sending ? "Sending…" : "Send answer", true, (cx) => this.answer(cx, address), !ready || e.sending))
-        .child(div().text_size(12).text_color(t.dim).child(q.questions.length ? "1-9 picks · Enter sends" : "")));
+        .when(step > 0, (el) => el.child(button("back", "Back", false, async (cx) => { e.step = step - 1; cx.notify(); })))
+        .child(last
+          ? button("answer", e.sending ? "Sending…" : "Send answer", true, (cx) => this.answer(cx, address), !ready || e.sending)
+          : button("next", "Next", true, async (cx) => { e.step = step + 1; cx.notify(); }, !answered(e, step)))
+        .child(div().text_size(12).text_color(t.dim).child(count ? `1-9 picks · Enter ${last ? "sends" : "goes on"}` : "")));
     }
     const n = tail(); if (n) box.child(n);
     return box;

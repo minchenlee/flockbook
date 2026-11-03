@@ -65,19 +65,25 @@ test("Deny sends --deny; a changed card shows the new one with a note", async ()
   assert.match(textOf(byId(el, "card-note")), /changed on screen/);
 });
 
-test("question card: pick options, then Send answer sends the answers in order", async () => {
+test("question card: one question at a time; a one-choice pick goes on; Back; Send answer on the last", async () => {
   cardNow = question;
   const cx = fakeCx(); const c = new Cards();
   await c.poll(cx, "t1", true);
   let el = c.view("t1", T);
-  assert.match(textOf(el), /2 questions.*Pick a color\?.*Red.*Recommended/);
-  assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send answer is off until each question has an answer");
+  assert.match(textOf(el), /question 1 of 2.*Pick a color\?.*Red.*Recommended/);
+  assert.doesNotMatch(textOf(el), /Which sizes/);
+  assert.equal(byId(el, "card-next")._h.on_click, undefined, "Next is off until the question has an answer");
   byId(el, "card-q0-o1")._h.on_click({}, cx);
+  el = c.view("t1", T);
+  assert.match(textOf(el), /question 2 of 2.*Which sizes\?/);
+  byId(el, "card-back")._h.on_click({}, cx); await cx.settle();
+  assert.match(textOf(c.view("t1", T)), /Pick a color/);
+  byId(c.view("t1", T), "card-dot-1")._h.on_click({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send is off until each question has an answer");
   byId(el, "card-q1-o0")._h.on_click({}, cx);
-  el = c.view("t1", T);
-  byId(el, "card-q1-o2")._h.on_click({}, cx);
-  el = c.view("t1", T);
-  byId(el, "card-answer")._h.on_click({}, cx); await cx.settle();
+  byId(c.view("t1", T), "card-q1-o2")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-answer")._h.on_click({}, cx); await cx.settle();
   const i = acts[0].indexOf("--answers");
   assert.deepEqual(JSON.parse(acts[0][i + 1]), [{ picks: [1] }, { picks: [0, 2] }]);
   assert.ok(acts[0].includes("toolu_q"));
@@ -95,8 +101,8 @@ test("a question with unread ones: Show all reads every question (card --all), t
   assert.ok(acts.some((a) => a.includes("--all")));
   await c.poll(cx, "t1", true, true);   // the screen still shows one question; the full card stays
   el = c.view("t1", T);
-  assert.match(textOf(el), /Which sizes\?/);
-  assert.ok(byId(el, "card-answer"));
+  assert.match(textOf(el), /question 1 of 2/);
+  assert.ok(byId(el, "card-next"));
 });
 
 test("keys: 1-9 pick in the first open question, Enter sends; approval 1 allows, 2 denies", async () => {
@@ -104,7 +110,7 @@ test("keys: 1-9 pick in the first open question, Enter sends; approval 1 allows,
   const cx = fakeCx(); const c = new Cards(); await c.poll(cx, "t1", true);
   const key = (k, mods = {}) => c.key_down({ key: k, modifiers: mods }, cx, "t1");
   assert.equal(key("enter"), false, "nothing picked yet");
-  assert.equal(key("2"), true);
+  assert.equal(key("2"), true, "picks Blue and goes on to question 2");
   assert.equal(key("1", { platform: true }), false, "cmd-1 is the tab key");
   assert.equal(key("7"), false, "no 7th option");
   key("1"); key("3");
