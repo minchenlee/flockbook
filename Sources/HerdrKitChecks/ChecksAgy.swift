@@ -211,6 +211,9 @@ esc to cancel                                                     accept-edits Â
     check((try? QuestionAdapter.steps(for: q, answers: [QuestionAnswer(picks: [], other: "Green")])) == nil, "agy: write-in not proven: refused")
     var multi = q; multi.questions[0].multiSelect = true
     check((try? QuestionAdapter.steps(for: multi, answers: [QuestionAnswer(picks: [0, 1])])) == nil, "agy: multi-select not proven: refused")
+    var two = q; two.questions.append(q.questions[0]); two.questions[1].text = "And tea or coffee?"
+    check((try? QuestionAdapter.steps(for: two, answers: [QuestionAnswer(picks: [0]), QuestionAnswer(picks: [1])])) == nil,
+          "agy: several questions not proven: refused")
     // hc 7501: blocked kind question is not an approval; the question comes from the log, not a screen read.
     let agy = Agent(name: "a", kind: "agy", status: .blocked, sessionId: "/x.jsonl", title: "a", backend: .hc, statusKind: "question")
     check(!PermissionGate.checkApproval(agy, pendingTool: true) && !PermissionGate.readQuestion(agy), "agy: hc question kind: no approval, no screen read")

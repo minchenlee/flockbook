@@ -22,8 +22,9 @@ extension QuestionAdapter {
     }
 
     /// Verified for one single-choice question: the digit picks and submits (no Enter). Write-in and multi-select are
-    /// not verified, so they are refused before anything is sent. Several questions: wait for the next.
+    /// not verified, and neither are several questions in a row, so they are refused before anything is sent.
     static func agySteps(_ q: QuestionRequest, _ answers: [QuestionAnswer]) throws -> [Step] {
+        if q.questions.count > 1 { throw Failure.unsupported("agy questions in a row are not supported yet: answer in the terminal") }
         var out: [Step] = []
         for (k, question) in q.questions.enumerated() {
             if question.multiSelect { throw Failure.unsupported("agy multi-select is not supported yet: answer in the terminal") }
