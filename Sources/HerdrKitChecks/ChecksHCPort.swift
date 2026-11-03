@@ -87,3 +87,22 @@ import Foundation
     check(!sender.isAnswering("hc:t1"), "answer once: the prompt gone ends the flight")
     fake.keysDelay = 0
 }
+
+/// hc gone: its panes stay a short while (a reconnect keeps them), then leave, so a blocked hc agent does not keep
+/// asking for an answer nobody can give.
+@MainActor func checksHCStale() async throws {
+    let fake = FakeHC(path: fakeHCPath())
+    try fake.start()
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "permission")]
+    let none = HerdrSession(name: "x", socketPath: "/nonexistent")
+    let keep = HerdrStore(session: none, hc: HCSession(socketPath: fake.path))
+    let drop = HerdrStore(session: none, hc: HCSession(socketPath: fake.path))
+    drop.hcStaleAfter = .zero
+    await keep.refreshHC(); await drop.refreshHC()
+    func hcPanes(_ s: HerdrStore) -> [String] { s.workspaces.flatMap(\.tabs).flatMap(\.panes).map(\.id).filter { $0.hasPrefix("hc:") } }
+    check(hcPanes(keep) == ["hc:t1"] && hcPanes(drop) == ["hc:t1"], "hc stale: connected: the pane shows")
+    fake.kill()
+    await keep.refreshHC(); await drop.refreshHC()
+    check(!keep.hcConnected && hcPanes(keep) == ["hc:t1"], "hc stale: just gone: the pane stays for a reconnect (\(hcPanes(keep)))")
+    check(!drop.hcConnected && hcPanes(drop).isEmpty, "hc stale: gone past the limit: its panes leave (\(hcPanes(drop)))")
+}

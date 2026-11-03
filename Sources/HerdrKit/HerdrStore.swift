@@ -332,14 +332,26 @@ public final class HerdrStore {
         do {
             let raw = try await hc.snapshot()
             hcConnected = true
+            hcDownSince = nil
             hcSnapshotted = true
             lastHCRaw = raw
             compose()
             resolveMissing(lastRaw + lastHCRaw)
         } catch {
-            hcConnected = false
+            hcDown()
         }
         updateConnected()
+    }
+
+    /// How long an unreachable hc's panes stay (a reconnect within it keeps them); then they leave.
+    public var hcStaleAfter: Duration = .seconds(10)
+    @ObservationIgnored private var hcDownSince: ContinuousClock.Instant?
+    /// hc did not answer: not connected; past `hcStaleAfter` its panes leave the store.
+    private func hcDown() {
+        hcConnected = false
+        let since = hcDownSince ?? .now
+        hcDownSince = since
+        if ContinuousClock.now - since >= hcStaleAfter, !lastHCRaw.isEmpty { lastHCRaw = []; compose() }
     }
 
     /// Latest parsed conversation for a Claude Code session id. Starts tailing on first call.
@@ -434,7 +446,7 @@ public final class HerdrStore {
         var delay: UInt64 = 100_000_000
         while !Task.isCancelled {
             guard hc.session.isAvailable else {
-                if hcConnected { hcConnected = false; updateConnected() }
+                hcDown(); updateConnected()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 continue
             }
@@ -453,7 +465,7 @@ public final class HerdrStore {
                 }
             } catch {}
             poll.cancel()
-            hcConnected = false
+            hcDown()
             updateConnected()
             try? await Task.sleep(nanoseconds: delay)
             delay = min(delay * 2, 1_000_000_000)
