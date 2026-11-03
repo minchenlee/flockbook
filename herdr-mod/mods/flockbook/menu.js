@@ -8,11 +8,13 @@ import { openTerminal, showScreen, shownScreen, showAgent, openTab, KEY_SCREEN }
 const ROW_H = 28, PAD = 6, WIDTH = 220;
 
 // Item: { label, cmd?, args?, act?, danger?, sep? }. `sep`: a line above it.
-export function openMenu(items) {
+// `at`: where to open; "pointer" by default. A view in an overlay window passes the press's own
+// position, as Herdr's pointer is not updated while the pointer is over an overlay.
+export function openMenu(items, at = "pointer") {
   const list = items.filter(Boolean);
   if (!list.length) return null;
   const seps = list.filter((i) => i.sep).length;
-  return openOverlay({ mod: "flockbook", props: { view: "menu", items: list }, kind: "popup", at: "pointer",
+  return openOverlay({ mod: "flockbook", props: { view: "menu", items: list }, kind: "popup", at,
     width: WIDTH, height: PAD * 2 + list.length * ROW_H + seps * 9 + 2 });
 }
 

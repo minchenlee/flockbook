@@ -61,7 +61,7 @@ export class SideView {
       return h_flex().id(`space-${s.id}`).h(34).px(10).gap(9).items_center().rounded(7)
         .bg(s.active ? t.selected : t.chrome).hover((x) => x.bg(s.active ? t.selected : t.hover))
         .on_mouse_down("left", stop).on_click(() => showSpace(s.id))
-        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(spaceItems(s)); })
+        .on_mouse_down("right", (e, cx) => { cx.stop_propagation(); openMenu(spaceItems(s), this.floating && e?.position ? { x: e.position.x, y: e.position.y } : "pointer"); })
         .child(div().size(22).flex_none().rounded(6).flex().items_center().justify_center().text_size(10.5).font_semibold()
           .bg(t.raised).border(1).border_color(t.border).text_color(t.muted).child(monogram(s.name)))
         .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(s.active ? t.foreground : t.muted).child(s.name))

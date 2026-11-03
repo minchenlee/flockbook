@@ -92,3 +92,17 @@ test("the sidebar button is on the same spot in the panel as in the docked sideb
   assert.deepEqual(floating, docked);
   assert.deepEqual(docked, { x: lightsRoom() + 14, y: BAR_H / 2 }, "where the top bar has it while the sidebar is hidden");
 });
+
+test("a right-click in the panel opens the menu at the press, not at Herdr's last pointer", async () => {
+  const { SideView } = await import("../mods/flockbook/side.js");
+  const { byId } = await import("./stub/ui.mjs");
+  reset(); fake.shared["flockbook.sidebar"] = false;
+  fake.spaces = [{ id: "s1", name: "one", tabs: [] }];
+  fake.props = { view: "side", peek: true, overlay: "o9" };
+  const el = new SideView(fakeCx()).render(fakeCx());
+  const row = byId(el, "space-s1");
+  assert.ok(row, "the space row is drawn");
+  row._h.on_mouse_down_right({ position: { x: 60, y: 150 } }, { ...fakeCx(), stop_propagation() {} });
+  assert.deepEqual(log.overlays.at(-1).at, { x: 60, y: 150 });
+  fake.props = undefined;
+});
