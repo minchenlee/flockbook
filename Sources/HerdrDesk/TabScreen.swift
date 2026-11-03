@@ -239,11 +239,11 @@ extension PaneView {
     /// User action only (Next past the questions read so far): moves Claude's picker to read the rest, and back.
     private func loadAllQuestions() async throws -> QuestionRequest? {
         guard model.writesEnabled else { return nil }
-        // Every key gated on this pane's agent, as a paired device's: another agent there now stops the walk.
-        // Through the model, so the walk holds the pane's lock like the phone's.
-        guard let agent = pane.agent else { throw KeyGateStop() }
+        // Every key gated by `KeyGate.onMac` (as `loadAllQuestionsGated`): another agent or another question there now
+        // stops the walk. Through the model, so the walk holds the pane's lock like the phone's.
         let model = model
-        let all = try await model.loadAllQuestions(pane: pane.id, gate: KeyGate(agent: agent, allowed: { model.writesEnabled }), expect: screenQuestion)
+        let all = try await model.loadAllQuestions(pane: pane.id, gate: KeyGate.onMac(pane.agent, allowed: { model.writesEnabled }),
+                                                   expect: screenQuestion)
         if let all { screenQuestion = all }
         return all
     }
