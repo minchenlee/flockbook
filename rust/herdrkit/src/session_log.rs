@@ -94,16 +94,16 @@ fn id_ok(session_id: &str) -> bool {
     !session_id.is_empty() && !session_id.contains('/') && !session_id.contains("..")
 }
 
-/// Where an agent keeps its logs (the search root for an id), read from the process environment.
-pub fn default_dir(agent: &str) -> String {
+/// Where an agent keeps its logs (the search root for an id), with the process environment.
+pub fn default_dir_env(agent: &str) -> String {
     let env: HashMap<String, String> = std::env::vars().collect();
-    default_dir_in(agent, &env)
+    default_dir(agent, &env)
 }
 
 /// Where an agent keeps its logs. Grok Build: `$GROK_HOME/sessions`, else `~/.grok/sessions`; Codex
 /// `~/.codex/sessions`; Cursor `~/.cursor/projects`; everything else `~/.claude/projects` (as Swift: no
 /// `CODEX_HOME` / `CLAUDE_CONFIG_DIR` here). The home is always `home_dir()`, not `env`'s.
-pub fn default_dir_in(agent: &str, env: &HashMap<String, String>) -> String {
+pub fn default_dir(agent: &str, env: &HashMap<String, String>) -> String {
     let home = home_dir();
     if agent == "grok" {
         let g = env.get("GROK_HOME").filter(|s| !s.is_empty()).cloned().unwrap_or_else(|| home + "/.grok");
@@ -118,7 +118,7 @@ pub fn default_dir_in(agent: &str, env: &HashMap<String, String>) -> String {
 }
 
 /// The log file for a session: an absolute `.jsonl` path is used as is (any agent); otherwise it is looked up by id
-/// in `dir` (`default_dir(agent)` normally).
+/// in `dir` (`default_dir_env(agent)` normally).
 pub fn locate(agent: &str, session_id: &str, dir: &str) -> Option<PathBuf> {
     // TODO(windows): an absolute Windows path (`C:\...`) is not taken as a path here, as in Swift; herdr's
     // `agent_session` paths on Windows are unknown.
@@ -191,7 +191,7 @@ pub fn locate_grok(session_id: &str, sessions_dir: &str) -> Option<PathBuf> {
 
 /// Claude Code: `<projects>/*/<id>.jsonl`, followed to the newest log of its conversation (see `continued`).
 pub fn locate_claude(session_id: &str, projects_dir: &str) -> Option<PathBuf> {
-    locate_one(session_id, projects_dir, None).map(|p| continued(&p, projects_dir))
+    locate_one(session_id, projects_dir, None).map(|p| continued(&p, Some(projects_dir)))
 }
 
 fn locate_one(session_id: &str, projects_dir: &str, near: Option<&Path>) -> Option<PathBuf> {
@@ -216,8 +216,11 @@ fn locate_one(session_id: &str, projects_dir: &str, near: Option<&Path>) -> Opti
 
 /// Claude Code ends a log with a `continued-in` line when the conversation goes on in another session's log, while
 /// herdr keeps the old id. The newest log of the chain; `log` itself when its last line is not one, or the next log
-/// is not there. At most 16 steps; a loop ends.
-pub fn continued(log: &Path, projects_dir: &str) -> PathBuf {
+/// is not there. At most 16 steps; a loop ends. `projects_dir` None: `~/.claude/projects` (as Swift's default:
+/// not `default_dir`'s environment).
+pub fn continued(log: &Path, projects_dir: Option<&str>) -> PathBuf {
+    let default = home_dir() + "/.claude/projects";
+    let projects_dir = projects_dir.unwrap_or(&default);
     let mut at = log.to_path_buf();
     let mut seen: std::collections::HashSet<PathBuf> = [log.to_path_buf()].into_iter().collect();
     while seen.len() <= 16 {
@@ -273,14 +276,14 @@ mod tests {
     #[test]
     fn default_dirs() {
         let g: HashMap<String, String> = [("GROK_HOME".to_string(), "/g".to_string())].into_iter().collect();
-        assert_eq!(default_dir_in("grok", &g), "/g/sessions");
-        assert_eq!(default_dir_in("grok", &HashMap::new()), home_dir() + "/.grok/sessions");
+        assert_eq!(default_dir("grok", &g), "/g/sessions");
+        assert_eq!(default_dir("grok", &HashMap::new()), home_dir() + "/.grok/sessions");
         let empty: HashMap<String, String> = [("GROK_HOME".to_string(), String::new())].into_iter().collect();
-        assert_eq!(default_dir_in("grok", &empty), home_dir() + "/.grok/sessions");
-        assert_eq!(default_dir_in("codex", &g), home_dir() + "/.codex/sessions");
-        assert_eq!(default_dir_in("cursor", &g), home_dir() + "/.cursor/projects");
-        assert_eq!(default_dir_in("claude", &g), home_dir() + "/.claude/projects");
-        assert_eq!(default_dir_in("pi", &g), home_dir() + "/.claude/projects");
+        assert_eq!(default_dir("grok", &empty), home_dir() + "/.grok/sessions");
+        assert_eq!(default_dir("codex", &g), home_dir() + "/.codex/sessions");
+        assert_eq!(default_dir("cursor", &g), home_dir() + "/.cursor/projects");
+        assert_eq!(default_dir("claude", &g), home_dir() + "/.claude/projects");
+        assert_eq!(default_dir("pi", &g), home_dir() + "/.claude/projects");
     }
 
     // ChecksCore checksLocateTail (locate part).
@@ -386,7 +389,7 @@ mod tests {
         assert_eq!(locate_claude("later1", &projects).map(|p| s(&p)), Some(later.clone()), "only a last line counts");
         assert_eq!(continued_in(Path::new(&later)), None);
         assert_eq!(continued_in(Path::new(&format!("{dir}/old1.jsonl"))), Some("mid1".into()));
-        assert_eq!(continued(Path::new(&format!("{dir}/old1.jsonl")), &projects), PathBuf::from(&new1));
+        assert_eq!(continued(Path::new(&format!("{dir}/old1.jsonl")), Some(&projects)), PathBuf::from(&new1));
         assert_eq!(continued_in(Path::new("/nonexistent/x.jsonl")), None);
     }
 }
