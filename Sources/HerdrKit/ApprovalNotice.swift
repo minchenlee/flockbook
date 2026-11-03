@@ -298,7 +298,8 @@ extension PaneScreen {
     /// was given (a Down may have moved the focus only).
     func respondGrok(paneId: String, screenPrompt: String, allow: Bool, gate: KeyGate?) async throws -> Bool {
         var moved = false
-        for _ in 0..<20 {
+        // hc may hold a key for its typing-quiet rule (about 3 s): wait longer there for the focus to move.
+        for _ in 0..<(backend == .hc ? 60 : 20) {
             let screen = try await visibleText(paneId: paneId)
             guard let box = ApprovalNotice.grokBox(screen), ApprovalNotice.grokID(box) == screenPrompt else { return false }
             let key = ApprovalNotice.grokKey(screen, allow: allow)
@@ -310,6 +311,8 @@ extension PaneScreen {
             moved = true
             try await Task.sleep(for: .milliseconds(150))
         }
+        // hc: the Down went out but the focus never showed on "No, reject": not "nothing sent" (`unconfirmed`).
+        if moved, backend == .hc { throw HerdrError.timeout("grok: the focus did not reach No, reject") }
         return false
     }
 
