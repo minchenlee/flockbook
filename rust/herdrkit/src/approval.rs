@@ -514,3 +514,6 @@ pub fn respond_grok<S: PaneScreen + ?Sized>(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod tests;
