@@ -204,7 +204,7 @@ final class AppModel {
     /// Asks the kit whether the visible screen shows Claude's permission prompt.
     /// Runs only when `PermissionGate.checkApproval` says so (hc: blocked, not a question; TUI: blocked or a pending
     /// tool call); otherwise clears the flag. Also keeps the prompt read from the screen (`screenPrompts`) for a blocked
-    /// Claude or Grok. A prompt whose answer is on the way stays off (its buttons stay off).
+    /// Claude, Grok or agy. A prompt whose answer is on the way stays off (its buttons stay off).
     func checkPrompt(for pane: Pane) async {
         guard PermissionGate.checkApproval(pane.agent, pendingTool: hasPending(pane)), let reader = screen(for: pane) else {
             promptVisible.remove(pane.id); screenPrompts[pane.id] = nil; return
@@ -213,7 +213,7 @@ final class AppModel {
         if let screen, PermissionGate.screenShowsPrompt(screen), !approvals.isAnswering(pane.id) { promptVisible.insert(pane.id) }
         else { promptVisible.remove(pane.id) }
         let a = pane.agent
-        screenPrompts[pane.id] = a?.status == .blocked && (a?.kind == "claude" || a?.kind == "grok")
+        screenPrompts[pane.id] = a?.status == .blocked && (a?.kind == "claude" || a?.kind == "grok" || a?.kind == "agy")
             ? screen.flatMap { ApprovalNotice.screenRequest($0, agent: a?.kind ?? "") } : nil
     }
 

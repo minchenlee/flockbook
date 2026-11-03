@@ -70,3 +70,70 @@ import Foundation
           "agy: unknown 7501 app is no kind")
 }
 
+
+// Approval: agy 1.4.12's command prompt (live sample): "Run this command?" with rows "1. Yes, run command" … "4. No,
+// cancel", cursor ">". `1` approves, Escape denies (the same keys as Claude Code).
+let agyPermScreen = """
+● Bash(ls -d demo*) (ctrl+o to expand)
+
+Command
+──────────────────────────────────────────
+
+Requesting permission for:
+   ls -d demo*
+
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with 'ls'
+  3. Yes, and always allow for commands that start with 'ls' (Persist to settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                     accept-edits · Gemini 4 Argon · medium
+"""
+let agyQuestionScreen = """
+> Use your ask_question tool: which color do I prefer, red or blue?
+
+? Which color do you prefer, red or blue?
+
+Question
+──────────────────────────────────────────
+
+Question 1/1: Which color do you prefer, red or blue?
+
+> 1. Red
+  2. Blue
+  3. Write-in...
+
+  ↑/↓ Navigate · enter Select · esc Skip
+esc to cancel                                                     accept-edits · Gemini 4 Argon · medium
+"""
+
+@MainActor func checksAgyApproval() async throws {
+    typealias N = ApprovalNotice
+    check(PermissionGate.screenShowsPrompt(agyPermScreen), "agy: permission prompt on screen")
+    check(!PermissionGate.screenShowsPrompt(agyQuestionScreen), "agy: question picker is not a permission prompt")
+    func state(_ screen: String, kind: String = "agy", cmd: String? = "ls -d demo*", blocked: Bool = true) -> N.PaneState {
+        N.PaneState(agentKind: kind, blocked: blocked, pendingToolUseId: cmd == nil ? nil : "ag1-0", screen: screen,
+                    pendingTool: cmd == nil ? nil : "Bash", pendingCommand: cmd)
+    }
+    let ids = N.promptIDs(state(agyPermScreen), writes: true)
+    check(ids.count == 2 && ids[0] == "ag1-0" && ids[1].hasPrefix("screen-"), "agy: the log's call is the box on screen \(ids)")
+    check(N.promptIDs(state(agyPermScreen, cmd: "rm -rf demo"), writes: true) == [ids.last ?? "?"], "agy: another command in the log: the box only")
+    check(N.promptIDs(state(agyPermScreen, cmd: nil), writes: true) == [ids.last ?? "?"], "agy: no log call: the box")
+    check(N.promptIDs(state(agyPermScreen), writes: false).isEmpty && N.promptIDs(state(agyPermScreen, blocked: false), writes: true).isEmpty,
+          "agy: no buttons without input or block")
+    check(N.promptIDs(state(agyQuestionScreen), writes: true).isEmpty, "agy: a question picker gets no approval buttons")
+    check(N.promptIDs(state(agyPermScreen, kind: "claude"), writes: true).isEmpty, "agy: the agy box is not read for Claude")
+    let moved = agyPermScreen.replacingOccurrences(of: "> 1. Yes", with: "  1. Yes").replacingOccurrences(of: "  4. No", with: "> 4. No")
+    check(N.promptIDs(state(moved, cmd: nil), writes: true) == [ids.last ?? "?"], "agy: the cursor moving keeps the prompt id")
+    let two = agyPermScreen.replacingOccurrences(of: "  2. Yes", with: "> 2. Yes")
+    check(N.promptIDs(state(two), writes: true).isEmpty, "agy: two cursors: not read")
+    let clipped = agyPermScreen.components(separatedBy: "\n").dropFirst(4).joined(separator: "\n")
+    check(N.promptIDs(state(clipped), writes: true).isEmpty, "agy: box top off screen: not read")
+    let r = N.screenRequest(agyPermScreen, agent: "agy")
+    check(r?.command == "ls -d demo*" && r?.toolName == "Bash" && r?.toolUseId == ids.last, "agy: card request from the screen \(String(describing: r))")
+    let agy = Agent(name: "a", kind: "agy", status: .blocked, sessionId: "/x.jsonl", title: "a", backend: .hc, statusKind: "permission")
+    var q = agy; q.statusKind = "question"
+    check(PermissionGate.checkApproval(agy, pendingTool: true) && !PermissionGate.checkApproval(q, pendingTool: true), "agy: hc 7501 kind gates the approval card")
+}
