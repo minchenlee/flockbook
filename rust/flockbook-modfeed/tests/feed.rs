@@ -176,3 +176,14 @@ fn status_tags() {
     status::run("codex", Some(&log), &settings, &mut o7, SystemTime::now());
     assert!(o7.lines[0].contains(r#""source":"log""#) && o7.lines[0].contains("claude-test-1"), "modfeed status: model from the log otherwise");
 }
+
+#[test]
+fn cache_times_read_back_exactly() {
+    // A value CI read back one ulp off (as ...617) before serde_json's float_roundtrip.
+    let dir = tempfile::tempdir().unwrap();
+    let mut cache = locate::Cache::default();
+    cache.entries.insert("t7".into(), locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![1], path: None, checked: 1793722804.7949615 });
+    let cf = dir.path().join("cache.json");
+    locate::write_cache(&cache, Some(&cf));
+    assert_eq!(locate::read_cache(Some(&cf)), cache);
+}
