@@ -14,6 +14,13 @@ use std::sync::Arc;
 
 // MARK: helpers
 
+/// A JSON object literal (`[String: Any]`).
+macro_rules! o {
+    ($($t:tt)*) => {
+        json!($($t)*).as_object().unwrap().clone()
+    };
+}
+
 /// A Swift multi-line literal: the first newline dropped, the closing line's indentation removed from every line.
 fn sw(s: &str) -> String {
     let s = s.strip_prefix('\n').unwrap_or(s);
@@ -460,7 +467,7 @@ impl Sim {
 
 /// A hooked request (Swift: `ClaudeQuestionHook.record(...).request`: `QuestionAdapter.claude`, headers cleared).
 fn hooked(id: &str, questions: Value) -> QuestionRequest {
-    let mut q = claude(id, &json!({ "questions": questions })).expect("questions");
+    let mut q = claude(id, json!({ "questions": questions }).as_object().unwrap()).expect("questions");
     q.headers = vec![];
     q
 }
@@ -484,9 +491,7 @@ fn run_sim(sim: Rc<RefCell<Sim>>, live: &Live, req: &QuestionRequest, a: &[Quest
 /// checksAskUserQuestion: the parser parts (the `AskUserQuestion` input and its result).
 #[test]
 fn ask_user_question_parse() {
-    let q1 = claude(
-        "toolu_q1",
-        &json!({"questions": [{"question": "Which branch should the worktree start from?", "header": "Branch", "multiSelect": false,
+    let q1 = claude("toolu_q1", &o!({"questions": [{"question": "Which branch should the worktree start from?", "header": "Branch", "multiSelect": false,
             "options": [{"label": "integration (Recommended)", "description": "Has the latest merged work."}, {"label": "main", "description": "Stable."}]}]}),
     )
     .unwrap();
@@ -500,9 +505,7 @@ fn ask_user_question_parse() {
         QuestionState::Answered(Some(vec!["integration (Recommended)".into()])),
         "question: answers from toolUseResult"
     );
-    let q2 = claude(
-        "toolu_q2",
-        &json!({"questions": [{"question": "Which items to clean?", "header": "Cleanup", "multiSelect": true,
+    let q2 = claude("toolu_q2", &o!({"questions": [{"question": "Which items to clean?", "header": "Cleanup", "multiSelect": true,
             "options": [{"label": "Old caches", "description": "Rebuildable."}, {"label": "Build output（建議）", "description": "Rebuildable."}, {"label": "Logs", "description": ""}]},
             {"question": "Report \"numbers\" after?", "header": "Report", "multiSelect": false, "options": [{"label": "Yes", "description": ""}, {"label": "No", "description": ""}]}]}),
     )
@@ -517,13 +520,13 @@ fn ask_user_question_parse() {
         QuestionState::Answered(Some(vec!["Old caches, Build output（建議）".into(), "Yes".into()])),
         "question: answers parsed from result text, quotes escaped"
     );
-    let q3 = claude("toolu_q3", &json!({"questions": [{"question": "Proceed?", "header": "Go", "multiSelect": false, "options": [{"label": "Yes"}, {"label": "No"}]}]})).unwrap();
+    let q3 = claude("toolu_q3", &o!({"questions": [{"question": "Proceed?", "header": "Go", "multiSelect": false, "options": [{"label": "Yes"}, {"label": "No"}]}]})).unwrap();
     assert_eq!(
         claude_state(&q3, true, Some(&json!("Error: The user doesn't want to proceed with this tool use.")), "rejected"),
         QuestionState::Declined,
         "question: error result is .declined"
     );
-    assert!(claude("x", &json!({"questions": []})).is_none() && claude("x", &json!({"questions": [1]})).is_none(), "no questions: no request");
+    assert!(claude("x", &o!({"questions": []})).is_none() && claude("x", &o!({"questions": [1]})).is_none(), "no questions: no request");
 }
 
 /// checksCodexQuestions: the parser parts.
@@ -701,9 +704,7 @@ fn question_keys() {
 // MARK: ChecksGrokQuestion.swift
 
 fn grok_two() -> QuestionRequest {
-    grok(
-        "call-q-0",
-        &json!({"questions":[{"question":"Which color?","options":[{"label":"Red (Recommended)","description":"Warm."},{"label":"Blue","description":"Cool."}]},
+    grok("call-q-0", &o!({"questions":[{"question":"Which color?","options":[{"label":"Red (Recommended)","description":"Warm."},{"label":"Blue","description":"Cool."}]},
             {"question":"Which size?","options":[{"label":"Small","description":"Little."},{"label":"Large","description":"Big."}]}]}),
     )
     .unwrap()
@@ -752,7 +753,7 @@ fn grok_question() {
     let t = r#"User has answered your questions: "Which color?"="Blue", "Which size?"="Small"."#;
     assert_eq!(grok_state(&q, false, None, t), QuestionState::Answered(Some(vec!["Blue".into(), "Small".into()])), "grok question: answers from the result text");
     assert_eq!(grok_state(&q, true, None, "dismissed"), QuestionState::Declined, "grok question: a failed call is declined");
-    let m = grok("call-m", &json!({"questions":[{"question":"Which fruits?","options":[{"label":"Apple"},{"label":"Pear"}],"multi_select":true}]})).unwrap();
+    let m = grok("call-m", &o!({"questions":[{"question":"Which fruits?","options":[{"label":"Apple"},{"label":"Pear"}],"multi_select":true}]})).unwrap();
     assert!(m.questions[0].multi_select, "grok question: multi_select");
 
     let color = [("Red", "Warm."), ("Blue", "Cool.")];
@@ -818,9 +819,7 @@ esc to cancel                                                     accept-edits �
 /// checksAgyQuestions
 #[test]
 fn agy_questions() {
-    let q = agy(
-        "ag1-0",
-        &json!({"questions":[{"is_multi_select":false,"options":["Red","Blue"],"question":"Which color do you prefer, red or blue?"}]}),
+    let q = agy("ag1-0", &o!({"questions":[{"is_multi_select":false,"options":["Red","Blue"],"question":"Which color do you prefer, red or blue?"}]}),
     )
     .unwrap();
     assert!(

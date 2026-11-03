@@ -4,7 +4,7 @@
 use super::*;
 
 /// `{questions:[{question, options:[String], is_multi_select}]}`. Labels are kept as agy shows them.
-pub fn agy(id: &str, input: &Value) -> Option<QuestionRequest> {
+pub fn agy(id: &str, input: &Map<String, Value>) -> Option<QuestionRequest> {
     let qs = as_objects(input.get("questions"))?;
     if qs.is_empty() {
         return None;

@@ -163,8 +163,8 @@ pub const RECOMMENDED_SUFFIXES: [&str; 6] = ["(Recommended)", "（Recommended）
 pub fn strip_recommended(raw: &str) -> (String, bool) {
     let label = trim_ws(raw);
     for suf in RECOMMENDED_SUFFIXES {
-        if let Some(rest) = label.strip_suffix(suf) {
-            return (trim_ws(rest).to_string(), true);
+        if crate::parser::text::has_suffix(label, suf) {
+            return (trim_ws(&label[..label.len() - suf.len()]).to_string(), true);
         }
     }
     (label.to_string(), false)
@@ -182,7 +182,7 @@ fn labelled_options(q: &Map<String, Value>) -> Vec<QuestionOption> {
 }
 
 /// Claude Code's AskUserQuestion `input`: `{questions:[{question, header, options:[{label, description}], multiSelect}]}`.
-pub fn claude(id: &str, input: &Value) -> Option<QuestionRequest> {
+pub fn claude(id: &str, input: &Map<String, Value>) -> Option<QuestionRequest> {
     let qs = as_objects(input.get("questions"))?;
     if qs.is_empty() {
         return None;
@@ -305,7 +305,7 @@ pub fn codex_state(q: &QuestionRequest, output: &str) -> Option<QuestionState> {
 
 /// `{questions:[{question, options:[{label, description}], multi_select?}]}`. Grok Build logs the call while its
 /// picker is open, and the result when it is answered.
-pub fn grok(call_id: &str, input: &Value) -> Option<QuestionRequest> {
+pub fn grok(call_id: &str, input: &Map<String, Value>) -> Option<QuestionRequest> {
     let qs = as_objects(input.get("questions"))?;
     if qs.is_empty() {
         return None;
