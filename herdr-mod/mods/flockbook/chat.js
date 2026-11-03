@@ -46,6 +46,7 @@ export class ChatView {
     this.busy = false;
     this.lastPoll = 0;
     this.composer = new Composer(cx);
+    this.composer.seen = (address) => { const f = this.feeds.get(address); return f ? { agent: f.agent ?? null, path: f.path ?? null } : null; };
     this.top = {}; startTop(cx, this.top);
     this.appear = new Appear();
     this.cards = new Cards(cx);

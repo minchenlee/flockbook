@@ -80,6 +80,8 @@ export class Composer {
     this.input.on("change", (_e, cx) => { const e = !this.input.value().trim(); if (e !== this.empty) { this.empty = e; cx.notify(); } });
     this.drafts = new Map();   // address → { text, files } of agents not shown
     this.address = null;
+    // address → { agent, path } the chat showed last (set by the chat); send is bound to it.
+    this.seen = null;
     this.files = [];
     this.sending = false;
     this.note = null;          // { text, bad } under the box, after a send
@@ -147,7 +149,7 @@ export class Composer {
     b.input.set_value(""); b.files = [];
     cx.notify();
     try {
-      const r = await sidecar.send(a, withFiles(text, files), files);
+      const r = await sidecar.send(a, withFiles(text, files), files, this.seen?.(a) ?? null);
       const done = r.lines.find((l) => l.type === "done");
       const moved = sidecar.agentChanged(done);
       // Only "sent" and "unconfirmed" (it may still arrive) mean the text went out; any other result did not send.

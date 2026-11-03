@@ -48,7 +48,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `card` | `--terminal <addr>` `[--cache <file>]` | `card` |
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
-| `send` | `--terminal <addr> --text <s>` `[--file <path>]…` | `done` |
+| `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
 
 `card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.

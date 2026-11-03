@@ -127,3 +127,17 @@ test("⌘V with an image and no text on the clipboard attaches the sidecar's PNG
   assert.deepEqual(asked[0].slice(0, 3), ["paste-image", "--dir", "/home/test/.config/herdr-app/flockbook/paste"]);
   assert.match(textOf(byId(v.render(cx), "file-0")), /paste-1\.png/);
 });
+
+test("send names the agent and the log the chat showed, so the sidecar can refuse another one", async () => {
+  const cx = fakeCx(); const c = new Composer(cx);
+  c.seen = (address) => address === "t1" ? { agent: "claude", path: "/logs/a.jsonl" } : null;
+  const b = c.box(fake.agents[0]);
+  b.input.set_value("Go on"); b.input._h.submit({}, cx); await cx.settle();
+  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Go on", "--expect-kind", "claude", "--expect-path", "/logs/a.jsonl"]);
+});
+
+test("the chat gives the composer what its feed showed", async () => {
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  v.feeds.set("t9", { agent: "codex", path: "/l/x.jsonl" });
+  assert.deepEqual(v.composer.seen("t9"), { agent: "codex", path: "/l/x.jsonl" });
+});

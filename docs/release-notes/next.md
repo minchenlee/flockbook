@@ -41,3 +41,4 @@ One short line: what this release is about.
 - Fix: Herdr app mod chat no longer flips back to an old log every 30 seconds after Claude goes on in a new log; approvals and questions from the new log no longer go missing then.
 - Fix: the Herdr app mod sidecar's `paste-image` cleans up only its own old pastes; other PNG files in the folder are never removed.
 - Fix: Herdr app mod says "cannot tell this agent from another program" (not "another agent is in this pane") when an agent has no process or session id to check, and the composer keeps the text for every reply that did not send.
+- Security: Herdr app mod replies go only to the agent and conversation the chat showed. If another agent (or a new conversation) took the terminal before Send, nothing is typed and the text stays in the box.

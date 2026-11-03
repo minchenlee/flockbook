@@ -9,7 +9,7 @@
 //   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
 //   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
 //   flockbook-modfeed paste-image --dir <folder>   (the clipboard's image as a PNG there; path null when none)
-//   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--cache <file>]
+//   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>] [--cache <file>]
 import Foundation
 import HerdrKit
 import ModFeedKit
@@ -84,7 +84,8 @@ case "feed", "status", "card", "approve", "answer", "send":
     case "send":
         guard let text = opt("--text"), !text.isEmpty else { fail("usage", "send needs --text <s>") }
         let files = args.indices.filter { args[$0] == "--file" && args.indices.contains($0 + 1) }.map { args[$0 + 1] }
-        out.emit(await FeedCards.send(pane: found.pane, client: client, text: text, files: files))
+        out.emit(await FeedCards.send(pane: found.pane, client: client, text: text, files: files, log: url,
+                                      expectKind: opt("--expect-kind"), expectPath: opt("--expect-path")))
         finish(ok: true)
     default: break
     }

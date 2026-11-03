@@ -152,4 +152,17 @@ func checksModFeedReview() async throws {
               "review1 #5: \(what) says it cannot tell the agent apart (\(d))")
     }
     check(nq.result == "changed" || nq.result == "no-identity", "review1 #5: answer on an approval is refused (\(nq))")
+
+    // 6. send is bound to the agent the owner was reading: the mod passes the kind and the log it showed; another
+    // agent, or another conversation, in that terminal now gets nothing.
+    fake.terminals = [FakeHC.terminal("t5", status: "idle")]
+    let p5 = FeedLocate.pane(try await hc.snapshot(), terminal: "t5")!
+    let shownLog = dir.appendingPathComponent("shown.jsonl"), otherLog = dir.appendingPathComponent("other.jsonl")
+    let s6 = sends()
+    let wrongKind = await FeedCards.send(pane: p5, client: hc, text: "hi", files: [], log: shownLog, expectKind: "codex", expectPath: shownLog.path)
+    let wrongLog = await FeedCards.send(pane: p5, client: hc, text: "hi", files: [], log: otherLog, expectKind: "claude", expectPath: shownLog.path)
+    check(wrongKind.result == "changed" && wrongLog.result == "changed" && sends() == s6,
+          "review1 #6: another agent or another log than the one shown: nothing typed (\(wrongKind), \(wrongLog))")
+    let same = await FeedCards.send(pane: p5, client: hc, text: "hi", files: [], log: shownLog, expectKind: "claude", expectPath: shownLog.path)
+    check(same.result == "sent" && sends() == s6 + 1, "review1 #6: the agent and log shown: sent (\(same))")
 }

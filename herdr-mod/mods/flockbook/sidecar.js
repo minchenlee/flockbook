@@ -44,7 +44,10 @@ export const card = (terminal, all = false) => call("card", ["--terminal", termi
 export const approve = (terminal, request, allow) => call("approve", ["--terminal", terminal, "--request", request, allow ? "--allow" : "--deny", "--cache", cachePath()]);
 export const answer = (terminal, request, answers) => call("answer", ["--terminal", terminal, "--request", request, "--answers", JSON.stringify(answers), "--cache", cachePath()]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
-export const send = (terminal, text, files = []) => call("send", ["--terminal", terminal, "--text", text, ...files.flatMap((f) => ["--file", f])]);
+// `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
+export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,
+  ...files.flatMap((f) => ["--file", f]),
+  ...(seen?.agent ? ["--expect-kind", seen.agent] : []), ...(seen?.path ? ["--expect-path", seen.path] : [])]);
 
 // The sidecar's "changed" reply when another agent took the pane: nothing was sent.
 export const AGENT_CHANGED = "Another agent is in this pane now. Nothing was sent.";

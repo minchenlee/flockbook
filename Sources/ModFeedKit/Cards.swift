@@ -161,7 +161,12 @@ public enum FeedCards {
     }
 
     /// The composer: the text, with each file in `files` named in it (`HCClient.deliver`).
-    public static func send(pane: Pane, client: HCClient, text: String, files: [String]) async -> Done {
+    public static func send(pane: Pane, client: HCClient, text: String, files: [String], log: URL? = nil,
+                            expectKind: String? = nil, expectPath: String? = nil) async -> Done {
+        // The agent the owner was reading (the kind and the log the mod's last feed showed): another agent, or a new
+        // conversation, in this terminal now gets nothing.
+        if let k = expectKind, k != pane.agent?.kind { return agentChanged }
+        if let p = expectPath, p != log?.path { return Done(result: "changed", message: "another agent or conversation is in this pane now; nothing was sent") }
         guard await client.passes(gate(pane), paneId: pane.id) else { return refused(pane) }
         let r = files.isEmpty ? await client.deliver(text: text, to: pane.id) : await client.deliver(text: text, to: pane.id, files: files)
         switch r {
