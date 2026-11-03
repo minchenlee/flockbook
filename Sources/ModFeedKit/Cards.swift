@@ -61,8 +61,13 @@ public enum FeedCards {
         return nil
     }
 
-    public static func card(pane: Pane, screen: any PaneScreen, log: URL?) async -> Card {
-        switch await current(pane: pane, screen: screen, log: log) {
+    /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click) so the
+    /// card holds every question and `unread` is 0.
+    public static func card(pane: Pane, screen: any PaneScreen, log: URL?, all: Bool = false) async -> Card {
+        var now = await current(pane: pane, screen: screen, log: log)
+        if all, case .question(let q)? = now, q.unread > 0,
+           let full = try? await screen.loadAllQuestions(paneId: pane.id, expect: q) { now = .question(full) }
+        switch now {
         case .approval(let id, let title, let command, let tool)?:
             return Card(kind: "approval", request: id, title: title, command: FeedRows.cut(command, FeedRows.textCap), tool: tool)
         case .question(let q)?:

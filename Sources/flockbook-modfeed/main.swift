@@ -5,9 +5,10 @@
 //   flockbook-modfeed feed   --terminal <addr> [--cursor <c>] [--cache <file>]
 //   flockbook-modfeed feed   --terminal <addr> --before <start> --path <log>   (older rows; no cache change)
 //   flockbook-modfeed status --terminal <addr> [--cache <file>]
-//   flockbook-modfeed card   --terminal <addr> [--cache <file>]
+//   flockbook-modfeed card   --terminal <addr> [--all] [--cache <file>]   (--all: load every question; sends keys)
 //   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
 //   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
+//   flockbook-modfeed paste-image --dir <folder>   (the clipboard's image as a PNG there; path null when none)
 //   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--cache <file>]
 import Foundation
 import HerdrKit
@@ -35,7 +36,13 @@ func fail(_ code: String, _ message: String) -> Never {
 out.emit(["type": "header", "protocol": FeedProtocol.version, "sidecar": FeedProtocol.sidecarVersion, "cmd": cmd])
 switch cmd {
 case "version":
-    out.emit(["type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send"]])
+    out.emit(["type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image"]])
+    finish(ok: true)
+case "paste-image":
+    guard let dir = opt("--dir") else { fail("usage", "paste-image needs --dir <folder>") }
+    guard let png = FeedPaste.clipboardPNG() else { out.emit(["type": "image", "path": NSNull()]); finish(ok: true) }
+    do { out.emit(["type": "image", "path": try FeedPaste.save(png, dir: URL(fileURLWithPath: dir))]) }
+    catch { fail("write", "cannot save the image: \(error)") }
     finish(ok: true)
 case "feed", "status", "card", "approve", "answer", "send":
     guard let terminal = opt("--terminal") else { fail("usage", "\(cmd) needs --terminal <addr>") }
@@ -60,7 +67,7 @@ case "feed", "status", "card", "approve", "answer", "send":
         FeedStatus.run(agent: kind, log: url, settings: FeedStatus.defaultSettings(), out: out)
         finish(ok: true)
     case "card":
-        out.emit(await FeedCards.card(pane: found.pane, screen: client, log: url))
+        out.emit(await FeedCards.card(pane: found.pane, screen: client, log: url, all: args.contains("--all")))
         finish(ok: true)
     case "approve":
         guard let request = opt("--request"), args.contains("--allow") != args.contains("--deny") else {

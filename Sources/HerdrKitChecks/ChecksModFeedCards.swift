@@ -53,6 +53,9 @@ func checksModFeedCards() async throws {
     let qc = await FeedCards.card(pane: qpane, screen: hc, log: nil)
     check(qc.kind == "question" && qc.question?.questions.first?.options.map(\.label) == ["Red", "Blue"]
           && qc.question?.questions.first?.options.first?.recommended == true, "modfeed cards: question card (\(qc))")
+    let k0 = keys().count
+    let qa = await FeedCards.card(pane: qpane, screen: hc, log: nil, all: true)
+    check(qa == qc && keys().count == k0, "modfeed card --all: one question, same card, no keys")
     let bad = await FeedCards.answer(pane: qpane, screen: hc, log: nil, request: "screen-nope", answers: [QuestionAnswer(picks: [1])])
     check(bad.result == "changed", "modfeed answer: another request, nothing sent")
     let before = keys().count

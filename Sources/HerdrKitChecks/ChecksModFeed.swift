@@ -47,6 +47,14 @@ func checksModFeed() throws {
     check(cut.start == UInt64(turn.dropLast().joined(separator: "\n").utf8.count + 1), "modfeed tail: start is the first whole line")
     check(FeedTail.model(turn) == "claude-test-1", "modfeed tail: model from the newest assistant line")
 
+    // Paste: a new PNG file in the folder; pastes older than a day go.
+    let pdir = dir.appendingPathComponent("paste")
+    let p1 = try FeedPaste.save(Data([1, 2, 3]), dir: pdir, now: Date(timeIntervalSince1970: 1_000_000))
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000)], ofItemAtPath: p1)
+    let p2 = try FeedPaste.save(Data([4]), dir: pdir, now: Date(timeIntervalSince1970: 1_000_000 + 2 * 86400))
+    check(!FileManager.default.fileExists(atPath: p1) && (try? Data(contentsOf: URL(fileURLWithPath: p2))) == Data([4]) && p2.hasSuffix(".png"),
+          "modfeed paste: new file, old one removed")
+
     // Older rows: the whole lines before a start, a cut first line dropped; start 0 at the file's start.
     let before = try FeedTail.read(f, before: cut.start, bytes: turn[6].utf8.count + turn[5].utf8.count + 5)
     check(before.lines == [turn[5], turn[6]], "modfeed older: lines before the tail, cut first one dropped (\(before.lines.count))")
