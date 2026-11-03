@@ -512,8 +512,8 @@ function find(pane: string): { w: Workspace; t: Tab; p: Pane } | undefined {
 // The app's StatusGlyph shapes: needs you = orange disc with "!", done = green disc with a check, working = faint ring
 // with a blue arc (turns), idle = hollow ring.
 const glyphs: Record<Status, string> = {
-  blocked: '<circle cx="8" cy="8" r="8" class="g-needs"/><path d="M8 4.2v4.6" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="11.6" r="1.15" fill="#fff"/>',
-  done: '<circle cx="8" cy="8" r="8" class="g-done"/><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  blocked: '<circle cx="8" cy="8" r="8" class="g-needs"/><path d="M8 4.2v4.6" stroke="#111" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="11.6" r="1.15" fill="#111"/>',
+  done: '<circle cx="8" cy="8" r="8" class="g-done"/><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#111" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   working: '<circle cx="8" cy="8" r="6" fill="none" class="g-ring" stroke-width="2"/><circle cx="8" cy="8" r="6" fill="none" class="g-arc" stroke-width="2" stroke-linecap="round" stroke-dasharray="11.3 100" transform="rotate(-90 8 8)"/>',
   idle: '<circle cx="8" cy="8" r="6.6" fill="none" class="g-idle" stroke-width="1.3"/>',
   unknown: '<circle cx="8" cy="8" r="6.6" fill="none" class="g-idle" stroke-width="1.3" stroke-dasharray="2 2"/>',
