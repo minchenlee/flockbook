@@ -133,7 +133,8 @@ struct NewWorkspaceSheet: View {
     @State private var backend: BackendKind?
     @FocusState private var focused: Bool
 
-    private var remote: RemoteHost? { model.store.session.remote }
+    /// The herdr session's host, for a workspace on the herdr server; an hc workspace's folder is on this Mac.
+    private var remote: RemoteHost? { (backend ?? model.defaultNewWorkspaceBackend) == .hc ? nil : model.store.session.remote }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {

@@ -102,7 +102,7 @@ struct PaneView: View {
                                  onFresh: { if focused { focusRequest += 1 } },
                                  loadState: model.store.conversationState(for: agent.sessionId),
                                  team: agent.team,
-                                 hostSetup: SessionResolver.hostSetup(kind: agent.kind, sessionId: agent.sessionId, remote: model.store.session.remote),
+                                 hostSetup: SessionResolver.hostSetup(kind: agent.kind, sessionId: agent.sessionId, remote: pane.composerRemote(model.store.session.remote)),
                                  scrollToken: model.sendTokens[pane.id] ?? 0,
                                  session: agent.sessionId,
                                  onLoadEarlier: { await model.store.loadEarlier(paneId: pane.id) })
@@ -142,7 +142,7 @@ struct PaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { paneFrame = $0; QuestionProbe.paneFrame = $0 }
-        .task(id: pane.cwd) { branch = await GitInfo.branch(cwd: pane.cwd, host: model.store.session.remote) }
+        .task(id: pane.cwd) { branch = await GitInfo.branch(cwd: pane.cwd, host: pane.composerRemote(model.store.session.remote)) }
         .task(id: pane.agent?.status) { await readScreenQuestion() }
         .task(id: "\(pane.agent?.status.rawValue ?? "")-\(focused)") {
             // While blocked or a tool call is pending, re-read the screen every 2 s.
@@ -274,7 +274,7 @@ extension PaneView {
                      onDraft: { model.setDraft($0, for: pane.id) },
                      deliverResult: { await model.deliverResult($0, pane: pane.id, kind: agent.kind) },
                      placeholder: focused ? nil : "Click to reply to \(agent.name)",
-                     focusRequest: focusRequest, remote: model.store.session.remote)
+                     focusRequest: focusRequest, remote: pane.composerRemote(model.store.session.remote))
             .id("\(pane.id)-\(model.composerResets[pane.id] ?? 0)")   // a pulled queue starts the composer again from its draft
             .overlay {
                 if !focused {

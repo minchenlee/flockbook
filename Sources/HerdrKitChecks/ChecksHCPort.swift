@@ -22,3 +22,12 @@ import Foundation
     pulled.prune(gone: store.paneGone)
     check(pulled.all.map(\.pane) == ["hc:t1"], "hc prune: a TUI snapshot without the pane prunes it (\(pulled.all.map(\.pane)))")
 }
+
+/// A composer's attachments go to the TUI's remote host only for TUI panes; an hc pane's go through `terminal.put`.
+@MainActor func checksHCComposerRemote() {
+    let host = RemoteHost(via: .local)
+    let tui = Pane(id: "w1:p1", terminalId: "p1", cwd: "/tmp", agent: nil)
+    let hc = Pane(id: "hc:t1", terminalId: "t1", cwd: "/tmp", agent: nil, backend: .hc)
+    check(tui.composerRemote(host) == host && tui.composerRemote(nil) == nil, "hc composer: a TUI pane uploads to the session's host")
+    check(hc.composerRemote(host) == nil, "hc composer: an hc pane never uploads to the TUI's host")
+}

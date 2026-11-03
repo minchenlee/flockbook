@@ -8,6 +8,12 @@ public enum BackendKind: String, Sendable, Hashable, Codable {
     case hc
 }
 
+extension Pane {
+    /// The host a composer uploads this pane's attachments to (and runs its hook setup and git on): the herdr
+    /// session's remote host for a TUI pane; none for an hc pane, whose files go beside its terminal (`terminal.put`).
+    public func composerRemote(_ sessionRemote: RemoteHost?) -> RemoteHost? { backend == .tui ? sessionRemote : nil }
+}
+
 /// What became of a message the composer handed to a backend.
 public enum DeliveryOutcome: Sendable, Equatable {
     /// The backend took it.
