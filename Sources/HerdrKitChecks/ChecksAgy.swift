@@ -56,6 +56,23 @@ import Foundation
       11    10 Sun Nov  1 00:50:20 2026     agy TERM=x
     """)
     check(R.hcAgentProcess(pids: [10], kind: "agy", procs: procs)?.pid == 11, "agy: hc finds the agy process under the shell")
+    // /new or /resume inside the same agy process switches the lock; a recheck follows it.
+    let dir = NSTemporaryDirectory() + "agy-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    func transcript(_ cid: String) -> String {
+        let l = "\(dir)/brain/\(cid)/.system_generated/logs"
+        try? FileManager.default.createDirectory(atPath: l, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: l + "/transcript_full.jsonl", contents: Data())
+        return l + "/transcript_full.jsonl"
+    }
+    let pathA = transcript(id), pathB = transcript(id2)
+    let held = Locked(["\(dir)/presence/\(id).lock"])
+    let res = R(socketPath: "/nonexistent", agyDir: dir, recheck: 0, openFiles: { _ in held.get() })
+    let need = R.Need(paneId: "hc:t1", kind: "agy", cwd: "/tmp", pids: [10])
+    check(await res.resolve([need], claimed: [], procs: procs)["hc:t1"] == pathA, "agy: resolver follows the open lock")
+    held.set(["\(dir)/presence/\(id2).lock"])
+    let switched = await res.resolve([need], claimed: [], procs: procs)["hc:t1"]
+    check(switched == pathB, "agy: same pid, new lock id: the recheck switches to the new transcript \(switched ?? "nil")")
 }
 
 
