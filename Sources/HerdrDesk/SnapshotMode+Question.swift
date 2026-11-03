@@ -375,6 +375,20 @@ extension ContentTests {
             awin.orderOut(nil)
         }
 
+        // One answer per question pane: the Mac card and the phone take the pane's lock, so their key sequences never
+        // interleave (on hc each key may be held a while). A second answer while one is on its way sends nothing.
+        let qm = AppModel(store: HerdrStore.preview)
+        let qp = Pane(id: "hc:tq", terminalId: "tq", cwd: "/tmp", agent: nil, backend: .hc)
+        _ = qm.claim(qp.id)
+        var busyErr: Error?
+        do { try await qm.answerQuestion(pane: qp.id, request: single(), answers: [QuestionAnswer(picks: [0])]) } catch { busyErr = error }
+        step("a second answer while one is on its way: refused, nothing sent (\(busyErr.map { "\($0)" } ?? "no error"))",
+             (busyErr as? QuestionAdapter.Failure) == .unsupported(AppModel.answerBusy))
+        qm.release(qp.id)
+        do { try await qm.answerQuestion(pane: qp.id, request: single(), answers: [QuestionAnswer(picks: [0])]) } catch { busyErr = error }
+        let free = qm.claim(qp.id)
+        step("the answer releases the pane afterwards", free)
+
         print("question-test: pictures in \(dir)")
         print("question-test: \(failures == 0 ? "PASS" : "FAIL x\(failures)")")
         NSApp.terminate(nil)

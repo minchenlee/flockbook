@@ -132,6 +132,6 @@ import Foundation
             throw QuestionAdapter.Failure.unsupported("\(q.questions.count) questions, \(answers.count) answers")
         }
         guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
-        try await reader.answerQuestion(paneId: id, request: q, answers: answers, gate: gate)
+        try await model.answerQuestion(pane: id, request: q, answers: answers, gate: gate)
     }
 }

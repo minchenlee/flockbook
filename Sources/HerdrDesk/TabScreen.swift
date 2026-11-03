@@ -257,8 +257,7 @@ extension PaneView {
         guard !model.coveredBySettings else { throw QuestionCard.HeldUnderSettings() }   // not "Sent": nothing went
         let request = screenQuestion?.toolUseId == q.toolUseId ? screenQuestion ?? q : q   // the fully read one
         do {
-            guard let screen = model.screen(for: pane) else { return }
-            try await screen.answerQuestion(paneId: pane.id, request: request, answers: answers)
+            try await model.answerQuestion(pane: pane.id, request: request, answers: answers)
             model.noteSent(pane.id)
             Task { try? await Task.sleep(for: .seconds(1.5)); answeredQuestions.insert(q.toolUseId) }
         } catch {

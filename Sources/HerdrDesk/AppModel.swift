@@ -413,6 +413,16 @@ final class AppModel {
     /// Takes the pane's lock; false: a pull or a send of it runs.
     func claim(_ id: String) -> Bool { busy.insert(id).inserted }
     func release(_ id: String) { busy.remove(id) }
+
+    static let answerBusy = "Another answer, send or pull of this pane is on its way. Nothing was sent."
+    /// A question's answer keys, for the Mac card and the phone alike: holds the pane's lock for the whole sequence,
+    /// so two answers (or an answer and a send) never interleave their keys (on hc each key may be held a while).
+    func answerQuestion(pane id: String, request: QuestionRequest, answers: [QuestionAnswer], gate: KeyGate? = nil) async throws {
+        guard claim(id) else { throw QuestionAdapter.Failure.unsupported(Self.answerBusy) }
+        defer { release(id) }
+        guard let screen = screen(paneId: id) else { throw QuestionAdapter.Failure.unsupported("this pane's backend is not connected") }
+        try await screen.answerQuestion(paneId: id, request: request, answers: answers, gate: gate)
+    }
     /// Test hook: when set, replaces MessageSender (offscreen checks must never type into a real pane).
     @ObservationIgnored var sendHook: ((String, String) async -> Bool)?
     /// The composer's send: `text` into the pane, holding the pane's lock. Sent: the pulled texts in that composer
