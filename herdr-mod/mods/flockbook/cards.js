@@ -1,7 +1,7 @@
 // What an agent waits for: an approval ("Do you want to run …?") or a question, as a card with
 // buttons. Read with the sidecar's `card`; answered with `approve` and `answer` (docs/protocol.md).
-// Answers go out only on a button press or a key. A question with more questions behind it is read
-// in full once per request (`card --all` walks the picker's tabs).
+// Keys go out only on a button press or a key, never on a timer: that includes "Show all", which
+// walks the picker's tabs (`card --all`).
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
 import { shared, setShared } from "herdr";
@@ -9,7 +9,6 @@ import { icon } from "./state.js";
 import * as sidecar from "./sidecar.js";
 
 export const CARD_MS = 1500;
-const KEY_ALL = "flockbook.card.all";   // "address:request" last read in full
 const KEY_FULL = "flockbook.card.full"; // { address, card }: that full card
 
 // Whether to read the card: herdr-app shows the agent as blocked, or the log ends with a call that
@@ -104,15 +103,10 @@ export class Cards {
       if (fresh && address === this.shown && this.focus && this.canFocus()) this.focus.focus();
       if (!e.read) { e.read = true; cx.notify(); }
     } finally { e.busy = false; }
-    // More questions follow: read them all now, once per request (the button stays to try again).
-    // The key is shared, so of the views that show this card only one walks the picker.
-    const req = e.card?.request;
-    if (e.card?.unread > 0 && e.allFor !== req && shared(KEY_ALL) !== `${address}:${req}`) {
-      e.allFor = req; setShared(KEY_ALL, `${address}:${req}`); await this.loadAll(cx, address);
-    }
   }
 
-  // Reads every question: walks the picker's tabs and keeps the full card.
+  // "Show all N questions": walks the picker's tabs (keys go out, on this click only) and keeps the
+  // full card, shared so the other views show it too.
   async loadAll(cx, address) {
     const e = this.entry(address);
     if (e.sending || !e.card?.unread) return;

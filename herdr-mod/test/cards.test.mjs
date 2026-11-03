@@ -156,22 +156,15 @@ test("no view makes input state while it draws (herdr-app refuses it)", async ()
   assert.equal(made.textarea, before);
 });
 
-test("a question with unread ones reads every question at once, one time per request", async () => {
-  const first = { ...question, unread: 1, question: { ...question.question, questions: question.question.questions.slice(0, 1) } };
-  cardNow = first;
-  let alls = 0, give = null;
-  fake.exec = ((prev) => (cmd, args) => args.includes("--all") ? (alls++, give ? jl(header("card"), give, end) : { code: 1, stdout: "", stderr: "no" }) : prev(cmd, args))(fake.exec);
+test("a question with unread ones never reads the others without a click", async () => {
+  cardNow = { ...question, unread: 1, question: { ...question.question, questions: question.question.questions.slice(0, 1) } };
+  let alls = 0;
+  fake.exec = ((prev) => (cmd, args) => args.includes("--all") ? (alls++, jl(header("card"), question, end)) : prev(cmd, args))(fake.exec);
   const cx = fakeCx(); const c = new Cards();
   await c.poll(cx, "t1", true); await cx.settle();
-  assert.equal(alls, 1, "read without a click");
-  assert.ok(byId(c.view("t1", T), "card-all"), "it failed: the button stays to try again");
   await c.poll(cx, "t1", true, true); await cx.settle();
-  assert.equal(alls, 1, "not again for the same request");
-  give = question;
-  cardNow = { ...first, request: "toolu_r" }; give = { ...question, request: "toolu_r" };
-  await c.poll(cx, "t1", true, true); await cx.settle();
-  assert.equal(alls, 2, "a new request reads again");
-  assert.match(textOf(c.view("t1", T)), /question 1 of 2/);
+  assert.equal(alls, 0, "no keys on a timer");
+  assert.ok(byId(c.view("t1", T), "card-all"));
 });
 
 test("the card has no outer border; Next and Send sit at the right end, after the hint", async () => {
@@ -185,13 +178,14 @@ test("the card has no outer border; Next and Send sit at the right end, after th
   assert.ok(ids.indexOf("hint") < ids.indexOf("card-next"));
 });
 
-test("two views of one card: one reads every question, both show them", async () => {
+test("two views of one card: Show all in one, both show every question", async () => {
   cardNow = { ...question, unread: 1, question: { ...question.question, questions: question.question.questions.slice(0, 1) } };
   let alls = 0;
   fake.exec = ((prev) => (cmd, args) => args.includes("--all") ? (alls++, jl(header("card"), question, end)) : prev(cmd, args))(fake.exec);
   const cx = fakeCx(); const a = new Cards(), b = new Cards();
-  await a.poll(cx, "t1", true); await cx.settle();
-  await b.poll(cx, "t1", true); await cx.settle();
+  await a.poll(cx, "t1", true); await b.poll(cx, "t1", true);
+  byId(a.view("t1", T), "card-all")._h.on_click({}, cx); await cx.settle();
+  await b.poll(cx, "t1", true, true); await cx.settle();
   assert.equal(alls, 1);
   assert.match(textOf(b.view("t1", T)), /question 1 of 2/);
 });
