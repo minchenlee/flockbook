@@ -1,6 +1,7 @@
 //! Swift: `LineSocket.swift`, the blocking NDJSON connection, as the plain-mode calls use it (one per call).
 
 use crate::models::HerdrError;
+#[cfg(unix)]
 use std::io::{Read, Write};
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ pub struct LineSocket {
     buffer: Vec<u8>,
 }
 
+#[cfg(unix)]
 fn io_err(what: &str, e: std::io::Error) -> HerdrError {
     match e.kind() {
         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => HerdrError::Timeout(what.into()),
@@ -60,6 +62,7 @@ impl LineSocket {
                 self.buffer.drain(..=nl);
                 return Ok(line);
             }
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut chunk = vec![0u8; 65536];
             #[cfg(unix)]
             let n = loop {

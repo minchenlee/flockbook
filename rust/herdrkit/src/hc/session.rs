@@ -96,6 +96,7 @@ pub fn run_user_dir() -> Option<String> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn env(kv: &[(&str, &str)]) -> HashMap<String, String> {
         kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }

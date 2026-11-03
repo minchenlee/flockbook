@@ -284,7 +284,7 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
             }
         }
         if answers.len() != q.questions.len() {
-            return Ok(Some(Done::new("failed", Some(&format!("{} answers for {} questions", answers.len(), q.questions.len()))))));
+            return Ok(Some(Done::new("failed", Some(&format!("{} answers for {} questions", answers.len(), q.questions.len())))));
         }
         question_adapter::answer_question(screen, &pane.id, &q, answers, Some(&g))?;
         Ok(None)

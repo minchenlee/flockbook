@@ -1,6 +1,7 @@
 //! HerdrKit in Rust: the parts of Flockbook's Swift `HerdrKit` that the herdr-app mod's sidecar
 //! (`flockbook-modfeed`) reaches. No UI, no TUI (`herdr` 0.9) backend: herdr-core (`hc`) only.
 
+pub mod approval;
 pub mod fake;
 pub mod hc;
 pub mod keygate;
