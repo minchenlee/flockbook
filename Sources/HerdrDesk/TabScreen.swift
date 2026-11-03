@@ -261,7 +261,10 @@ extension PaneView {
         guard !model.coveredBySettings else { throw QuestionCard.HeldUnderSettings() }   // not "Sent": nothing went
         let request = screenQuestion?.toolUseId == q.toolUseId ? screenQuestion ?? q : q   // the fully read one
         do {
-            try await model.answerQuestion(pane: pane.id, request: request, answers: answers)
+            // Every key gated by the Mac's rule (the agent when it has an identity, else the screen before each key).
+            let model = model
+            try await model.answerQuestion(pane: pane.id, request: request, answers: answers,
+                                           gate: KeyGate.onMac(pane.agent, allowed: { model.writesEnabled }))
             model.noteSent(pane.id)
             Task { try? await Task.sleep(for: .seconds(1.5)); answeredQuestions.insert(q.toolUseId) }
         } catch {

@@ -17,7 +17,7 @@ One short line: what this release is about.
 
 ### 🔒 Security
 
-- Question cards: reading the other questions of a picker now checks before every key that the pane still shows the same agent and question; if another agent took the pane, nothing more is sent and the card says so. The same check now guards Allow/Deny, answers and replies sent from the Herdr app mod.
+- Question and approval cards: every key now checks first that the pane still shows the same agent and the same question; if not, nothing more is sent and the card says so. On the Mac an agent without a session id is not refused: each key checks the screen instead. This covers reading the other questions, answers, Allow/Deny and replies from the Herdr app mod.
 
 ### 🐛 Bug Fixes
 

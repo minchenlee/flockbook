@@ -79,6 +79,47 @@ func checksModFeedCards() async throws {
     var macStopped = false
     do { _ = try await hc.loadAllQuestionsGated(pane: mpane, expect: nil, allowed: { true }) } catch is KeyGateStop { macStopped = true } catch {}
     check(macStopped && keys().count == k1, "mac card load all: gated, another agent, stopped before any key (\(keys().suffix(3)))")
+    // The Mac (the owner at the screen): an agent with no identity (no session id, no process) is not refused; each
+    // key checks the screen instead. A picker that answers Left/Right; read all completes; a switch to another
+    // request stops the walk; the Mac's answer keys go through the same rule.
+    final class Sim: @unchecked Sendable { var i = 0; var other = false }
+    let sim = Sim()
+    @Sendable func picker(_ i: Int, other: Bool = false) -> String {
+        let tabs = other ? "←  ☐ Lunch  ☐ Drink  ✔ Submit  →" : "←  ☐ Color  ☐ Size  ✔ Submit  →"
+        let q = other ? (i == 0 ? "Pick a lunch?\n❯ 1. Soup\n  2. Rice" : "Pick a drink?\n❯ 1. Tea\n  2. Milk")
+                      : (i == 0 ? "Pick a color?\n❯ 1. Red\n  2. Blue" : "Which size?\n❯ 1. S\n  2. M")
+        return tabs + "\n" + q + "\n  3. Type something.\n────────────────────\n  4. Chat about this\nEnter to select · Tab/Arrow keys to navigate · Esc to cancel"
+    }
+    var bare = mpane; bare.agent?.process = nil; bare.agent?.sessionId = nil
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
+    sim.i = 0; sim.other = false; fake.setScreen("t1", picker(0))
+    fake.onKeys = { a, k in
+        guard a == "t1" else { return }
+        if k == ["left"] { sim.i = max(0, sim.i - 1) } else if k == ["right"] { sim.i = min(1, sim.i + 1) }
+        fake.setScreen("t1", picker(sim.i, other: sim.other))
+    }
+    let one = try? await hc.pendingQuestion(paneId: mpane.id)
+    let macAll = try? await hc.loadAllQuestions(paneId: mpane.id, gate: KeyGate.onMac(bare.agent, allowed: { true }), expect: one)
+    check(macAll?.questions.count == 2, "mac load all: no agent identity, still reads every question (\(macAll?.questions.map(\.text) ?? []))")
+    // Another request comes up after the first key: the next key's screen check stops the walk.
+    sim.i = 0; sim.other = false; fake.setScreen("t1", picker(0))
+    fake.onKeys = { a, k in guard a == "t1" else { return }; sim.other = true; fake.setScreen("t1", picker(0, other: true)) }
+    let kA = keys().count
+    var switched = false
+    do { _ = try await hc.loadAllQuestions(paneId: mpane.id, gate: KeyGate.onMac(bare.agent, allowed: { true }), expect: one) } catch { switched = true }
+    check(switched && keys().count - kA <= 1, "mac load all: another question on screen, stopped (\(keys().suffix(3)))")
+    // The Mac's answer keys: another agent (with an identity) in the pane, not one key.
+    fake.onKeys = nil; sim.i = 0; sim.other = false; fake.setScreen("t1", picker(0))
+    fake.terminals = [FakeHC.terminal("t1", argv: ["codex"], pid: 5151, status: "blocked", kind: "question")]
+    let kB = keys().count
+    var answerStopped = false
+    if let full = macAll {
+        do { try await hc.answerQuestion(paneId: mpane.id, request: full, answers: [QuestionAnswer(picks: [0]), QuestionAnswer(picks: [0])],
+                                         gate: KeyGate.onMac(mpane.agent, allowed: { true })) } catch is KeyGateStop { answerStopped = true } catch {}
+    }
+    check(answerStopped && keys().count == kB, "mac answer: gated, another agent, no keys (\(keys().suffix(3)))")
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
+    fake.setScreen("t1", picker(0))
     // The same agent: the gate lets the walk start (the fake screen does not move, so it stops after that).
     fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
     _ = await FeedCards.card(pane: mpane, screen: hc, log: nil, all: true)
