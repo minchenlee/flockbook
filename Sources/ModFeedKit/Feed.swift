@@ -66,4 +66,14 @@ public enum Feed {
         for l in enc.lines[at...] { out.raw(l) }
         return state
     }
+
+    /// `feed --before <start>`: the rows of the 2 MB of `url` before `start`, for scrolling up past the tail.
+    /// Prints `older {start, count}` and the rows. It keeps no state: the tail's cursor is not touched.
+    /// `start` 0 in the answer: the log's first row is in it.
+    public static func older(url: URL, before: UInt64, out: JSONLines, now: Date = Date(), calendar: Calendar = .current) throws {
+        let range = try FeedTail.read(url, before: before)
+        let rows = FeedRows.rows(FeedTail.items(range.lines), now: now, calendar: calendar)
+        out.emit(["type": "older", "path": url.path, "start": range.start, "count": rows.count])
+        for r in rows { out.emit(r) }
+    }
 }

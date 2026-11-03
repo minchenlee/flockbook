@@ -3,6 +3,7 @@
 //
 //   flockbook-modfeed version
 //   flockbook-modfeed feed   --terminal <addr> [--cursor <c>] [--cache <file>]
+//   flockbook-modfeed feed   --terminal <addr> --before <start> --path <log>   (older rows; no cache change)
 //   flockbook-modfeed status --terminal <addr> [--cache <file>]
 //   flockbook-modfeed card   --terminal <addr> [--cache <file>]
 //   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
@@ -79,6 +80,12 @@ case "feed", "status", "card", "approve", "answer", "send":
         out.emit(await FeedCards.send(pane: found.pane, client: client, text: text, files: files))
         finish(ok: true)
     default: break
+    }
+    if let b = opt("--before") {
+        guard let before = UInt64(b), let want = opt("--path") else { fail("usage", "feed --before needs a number and --path <log>") }
+        guard let url, url.path == want else { fail("moved", "the agent now writes another log") }
+        do { try Feed.older(url: url, before: before, out: out) } catch { fail("read", "cannot read the log: \(error)") }
+        finish(ok: true)
     }
     var cache = FeedLocate.readCache(cacheURL)
     do {

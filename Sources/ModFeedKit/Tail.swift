@@ -34,6 +34,26 @@ public enum FeedTail {
         return Range(lines: parts.compactMap { $0.isEmpty ? nil : String(decoding: $0, as: UTF8.self) }, start: start, size: size)
     }
 
+    /// The whole lines that end before `before` (a line start): up to `bytes` back, a cut first line dropped.
+    /// `start` is where they begin; 0 means the file's start was reached.
+    public static func read(_ url: URL, before: UInt64, bytes: Int = bytes) throws -> Range {
+        let fh = try FileHandle(forReadingFrom: url)
+        defer { try? fh.close() }
+        let size = try fh.seekToEnd()
+        let end = min(before, size)
+        var start = end > UInt64(bytes) ? end - UInt64(bytes) : 0
+        try fh.seek(toOffset: start)
+        let data = try fh.read(upToCount: Int(end - start)) ?? Data()
+        var body = data[...]
+        if start > 0 {
+            guard let nl = body.firstIndex(of: UInt8(ascii: "\n")) else { return Range(lines: [], start: end, size: size) }
+            start += UInt64(nl - body.startIndex + 1)
+            body = body[(nl + 1)...]
+        }
+        let parts = body.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
+        return Range(lines: parts.map { String(decoding: $0, as: UTF8.self) }, start: start, size: size)
+    }
+
     public static func items(_ lines: [String]) -> [ConversationItem] {
         var p = ConversationParser()
         for l in lines { p.feed(line: l) }
