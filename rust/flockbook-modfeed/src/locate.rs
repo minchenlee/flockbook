@@ -126,7 +126,7 @@ fn absolute(v: Option<&String>, kind: &str) -> Option<String> {
 
 /// Finds the log for `terminal`. On a cache miss it resolves every local agent pane in one pass, so two panes never
 /// get the same log, and caches them all.
-pub fn find(terminal: &str, ws: &[Workspace], resolver: &SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Result<Found, Failure> {
+pub fn find(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Result<Found, Failure> {
     let pane = pane(ws, terminal).cloned().ok_or_else(|| Failure::NoTerminal(terminal.into()))?;
     let kind = pane.agent.as_ref().map(|a| a.kind.clone()).ok_or_else(|| Failure::NotAgent(terminal.into()))?;
     let cache = read_cache(cache_path);

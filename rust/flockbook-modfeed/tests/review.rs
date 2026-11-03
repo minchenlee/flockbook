@@ -171,7 +171,7 @@ fn review1() {
     let now_s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
     c3.entries.insert(p3.terminal_id.clone(), locate::Entry { kind: "claude".into(), cwd: p3.cwd.clone(), pids: p3.process_ids.clone(), path: Some(old_log.to_string_lossy().into()), checked: now_s });
     locate::write_cache(&c3, Some(&cache3));
-    let hit = locate::find("t3", &ws3, &SessionResolver::new("/nonexistent.sock"), Some(&cache3), now_s).ok().unwrap();
+    let hit = locate::find("t3", &ws3, &mut SessionResolver::new("/nonexistent.sock"), Some(&cache3), now_s).ok().unwrap();
     assert!(hit.cached && hit.path.as_deref() == Some(new_log.to_string_lossy().as_ref()), "#3: a cache hit follows continued-in ({:?})", hit.path);
 
     // 4. paste-image cleans only its own old pastes.

@@ -80,7 +80,7 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => return r.fail("core", &format!("herdr-core: {e}")),
             };
             let now_s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-            let found = match locate::find(&terminal, &ws, &SessionResolver::new(&session.socket_path), cache_url, now_s) {
+            let found = match locate::find(&terminal, &ws, &mut SessionResolver::new(&session.socket_path), cache_url, now_s) {
                 Ok(f) => f,
                 Err(e @ locate::Failure::NoTerminal(_)) => return r.fail("no-terminal", &e.to_string()),
                 Err(e) => return r.fail("not-agent", &e.to_string()),
