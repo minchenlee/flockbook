@@ -135,11 +135,23 @@ Tap **Notify me** at the top of the agent list. The phone then shows a notificat
 
 **Direct address** (no Tailscale Serve) is under the same setting, marked advanced and less safe: it uses a self-signed certificate that the phone's browser cannot check.
 
+### Herdr app terminals (herdr-core)
+
+Terminals of the official Herdr app (herdr-core) show beside the herdr server's, grouped by the app's spaces and tabs. They get the same conversation view, approval and question cards, and scrollback.
+
+### Herdr app mod (preview)
+
+`herdr-mod/` is a Flockbook layout and mod for the Herdr app itself: the reading view runs inside the Herdr app window, with no change to the app. It has tab capsules, the chat with approval and question cards, Needs you, Overview and a sliding sidebar. A small helper, `flockbook-modfeed`, reads the session logs for it.
+
+It is a preview and is not in the release download yet. To try it, install it into a test Herdr app home, never your real one. See [herdr-mod/README.md](herdr-mod/README.md).
+
+Its cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
+
 ## Requirements
 
 - macOS 15 or later
 - Herdr, running
-- Agents in Herdr: Claude Code, Codex, Grok Build, Cursor, or pi. Flockbook reads their local session logs to show the conversation.
+- Agents in Herdr: Claude Code, Codex, Grok Build, Cursor, pi, or Antigravity CLI (agy). Flockbook reads their local session logs to show the conversation.
 
 ## Releases
 
@@ -159,6 +171,7 @@ Signed builds update themselves: once an hour Flockbook checks for a new release
 scripts/bundle.sh    # builds build/Flockbook.app (ad-hoc signed)
 scripts/package.sh   # dist/Flockbook-<version>.zip and .dmg
 scripts/test-update.sh build/update-test   # headless auto-update check with a throwaway key
+swift build -c release --product flockbook-modfeed   # the Herdr app mod's helper
 ```
 
 ## Linux and Windows (in progress)
@@ -167,7 +180,7 @@ The Rust code in `xplat/` is an early port of Flockbook to Linux and Windows, bu
 
 ## Privacy
 
-Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service.
+Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service.
 
 ## How this was built
 
