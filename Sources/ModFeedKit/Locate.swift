@@ -85,13 +85,19 @@ public enum FeedLocate {
         let found = await resolver.resolve(needs, claimed: [])
         var next = Cache()
         next.feeds = cache.feeds
+        // The resolver gives a full path, or for some agents only a session id: look that up in the agent's folder.
+        func absolute(_ v: String?, kind: String) -> String? {
+            guard let v, !v.isEmpty else { return nil }
+            if v.hasPrefix("/") { return v }
+            return SessionLog.locate(agent: kind, sessionId: v, dir: SessionLog.defaultDir(agent: kind))?.path
+        }
         for p in agents {
-            next.entries[p.terminalId] = Entry(kind: p.agent!.kind, cwd: p.cwd, pids: p.processIds, path: found[p.id],
+            next.entries[p.terminalId] = Entry(kind: p.agent!.kind, cwd: p.cwd, pids: p.processIds, path: absolute(found[p.id], kind: p.agent!.kind),
                                                checked: now.timeIntervalSince1970)
         }
         cache = next
         writeCache(cache, to: cacheURL)
-        var path = found[pane.id]
+        var path = absolute(found[pane.id], kind: kind)
         if let p = path, kind == "claude" { path = SessionLog.continued(URL(fileURLWithPath: p)).path }
         return Found(pane: pane, path: path, cached: false)
     }
