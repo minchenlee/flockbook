@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 4 (composer with a pasted image, live 2026-11-02): on hc a pasted image path inside the message reaches
+// Composer with a pasted image (live 2026-11-02): on hc a pasted image path inside the message reaches
 // Claude as text and Claude reads the file (Read tool); a bare path becomes `[Image #1]`. A terminal on another machine
 // cannot read this Mac's file: the image is first put beside it (`terminal.put`, on its machine) and the message names
 // that copy.

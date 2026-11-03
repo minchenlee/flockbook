@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 2: layout writes on hc through the `herdr-app` document (docs/research/hc-api/herdr-app-doc.md).
+// Layout writes on hc through the `herdr-app` document (docs/research/hc-api/herdr-app-doc.md).
 // Fixtures and tree rules come from the official app's own tests (herdr-app 0c1a102, layout.rs / model.rs / mirror.rs).
 
 private func json(_ s: String) -> Any { try! JSONSerialization.jsonObject(with: Data(s.utf8)) }

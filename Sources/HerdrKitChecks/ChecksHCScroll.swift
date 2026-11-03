@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 4: terminal history on scroll for hc panes. hc has no scroll position; `terminal.read {lines}` gives
+// Terminal history on scroll for hc panes. hc has no scroll position; `terminal.read {lines}` gives
 // history above the screen as text. More lines than the screen: history to show; none and a program other than the
 // shell in front: a full-screen program; else nothing to scroll.
 
@@ -33,7 +33,7 @@ import Foundation
     check(i5.kind == .none, "hc scroll: fresh shell: nothing to scroll (\(i5))")
 }
 
-/// Parity item 4: the terminal inside the tab screen takes typing on hc too (same path as the sheet: it watches until
+/// The terminal inside the tab screen takes typing on hc too (same path as the sheet: it watches until
 /// the first key, then takes control). The wheel over a full-screen program goes to the program on the herdr TUI only.
 @MainActor func checksHCInlineTerminal() {
     check(TerminalPolicy.writable(backend: .hc, writesEnabled: true) && TerminalPolicy.writable(backend: .tui, writesEnabled: true),

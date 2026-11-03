@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 4: pi on hc. pi does not keep its session file open, so lsof finds nothing. Its file is in
+// pi on hc: pi does not keep its session file open, so lsof finds nothing. Its file is in
 // `<agent dir>/sessions/--<cwd, / \ : as ->--/` (pi session-manager.js) and starts with `{type: session, cwd,
 // timestamp}`. The pane's file: the newest unclaimed one there with the pane's cwd that pi started, or wrote to
 // (resume), after the agent started.

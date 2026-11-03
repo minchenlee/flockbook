@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 3c: conversations of agents on another machine. The log is found there (`machine.exec`: ps with
+// Conversations of agents on another machine. The log is found there (`machine.exec`: ps with
 // TZ=UTC0, Claude's `<pid>.json`, lsof, Codex rollouts' first lines) and mirrored into a local file by polling
 // `file.read {on, offset}`, so the same SessionLog tails it. Only whole lines are copied.
 

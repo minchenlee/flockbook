@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 3: terminals on other machines (`hc machine add`). Each machine keeps its own `herdr-app` document
+// Terminals on other machines (`hc machine add`). Each machine keeps its own `herdr-app` document
 // (`doc.get {on}`); its ids and labels are local to that machine. The official app shows them qualified (`box/sp1`)
 // and leaves temporary machines out (herdr-app 0c1a102 mirror.rs qualify/local, window.rs documents_updated).
 

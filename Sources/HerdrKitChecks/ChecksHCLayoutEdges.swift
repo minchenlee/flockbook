@@ -4,7 +4,7 @@ import Foundation
 // hc layout writes: machines, kill scope, partial failures, tab order and the official app's commands.
 
 /// #1: a remote terminal's labels are local to its machine. Its space and tab are machine-qualified (`box/sp1`), and no
-/// layout write touches them until remote layout exists (item 3).
+/// layout write touches them until remote layout exists (see `ChecksHCRemoteWrite`).
 @MainActor func checksHCLayoutRemote() async throws {
     let lab = ["herdr.space": "sp1", "herdr.tab": "tb1"]
     let terms = [FakeHC.terminal("t1", labels: lab, argv: ["zsh"], pid: 11),
@@ -17,7 +17,7 @@ import Foundation
     check(tl.space == "box/sp1" && tl.tab == "box/tb1", "a remote tab id parses to its qualified space and tab (\(tl))")
     check(HCClient.layoutWritable(id: "hc:space:sp1") && HCClient.layoutWritable(id: "hc:tab:sp1/tb1"),
           "local space and tab ids are writable")
-    // Item 3b: remote ids offer layout actions; an op on a machine that is not connected and kept is refused below.
+    // Remote ids offer layout actions; an op on a machine that is not connected and kept is refused below.
     check(!HCClient.layoutWritable(id: "hc:other") && !HCClient.layoutWritable(id: "hc:term:t1"),
           "Other ids are not writable")
 

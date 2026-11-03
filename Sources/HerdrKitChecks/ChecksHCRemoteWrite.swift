@@ -1,7 +1,7 @@
 import Foundation
 @testable import HerdrKit
 
-// Parity item 3b: layout writes on another machine go to that machine's `herdr-app` document (`doc.get/set {on}`)
+// Layout writes on another machine go to that machine's `herdr-app` document (`doc.get/set {on}`)
 // and terminals (`terminal.run {on}`), with that machine's own ids, as the official app does (mirror.rs local).
 // A temporary or unconnected machine's layout is not the official app's: refused, nothing written.
 

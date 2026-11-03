@@ -220,7 +220,7 @@ func fakeHCPath() -> String { NSTemporaryDirectory() + "fhc-\(UInt32.random(in: 
     hc.terminals = [FakeHC.terminal("t1", labels: ["herdr.space": "s1", "herdr.tab": "a"], argv: ["claude"], status: "blocked", kind: "question")]
     hc.pushEvent(type: "status", terminal: "t1", data: ["status": ["state": "blocked", "kind": "question"]])
     check(await wait(2) { st.workspaces.last?.tabs.first?.panes.first?.agent?.status == .blocked }, "hc status event updates the store")
-    // Parity item 4: the notification path (Notifier) sees the hc tab become blocked, and its ids open that tab.
+    // Notifications: the notification path (Notifier) sees the hc tab become blocked, and its ids open that tab.
     let note = BlockedTabs.fresh(known: knownBefore, in: st.workspaces)
     let opened = note.fresh.first.flatMap { ws, t in st.workspaces.first { $0.id == ws.id }?.tabs.first { $0.id == t.id } }
     check(note.fresh.map(\.1.id) == ["hc:tab:s1/a"] && opened?.backend == .hc,
