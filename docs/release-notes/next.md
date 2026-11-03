@@ -29,3 +29,4 @@ One short line: what this release is about.
 - Herdr app mod: a question card has no outer border and puts Next and Send answer at the bottom right; after "Show all" in one view, the other views show every question too.
 - Herdr app mod: the top bar's panes button is gone (a split tab shows its panes by itself; the tab's right-click menu still switches); Needs you starts its detail at the top.
 - Herdr app mod: the floating sidebar panel is as tall as the window and slides in from the left.
+- Herdr app mod: the "Or type your own answer" box in a question card takes clicks and typing again, looks like the options, and its number key moves the keyboard into it.

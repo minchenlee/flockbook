@@ -142,6 +142,8 @@ export class Cards {
     }
     if (n === null) return false;
     const qi = Math.min(en.step ?? 0, qs.length - 1);
+    // The number after the options moves the keyboard into the own-answer box.
+    if (n - 1 === (qs[qi]?.options ?? []).length && this.others[qi]) { this.others[qi].focus?.(); return true; }
     if (!this.pick(en, qs, qi, n - 1)) return false;
     cx.notify();
     return true;
@@ -246,7 +248,16 @@ export class Cards {
       // The boxes are shared by every card; fill them with this card's text when it is shown.
       const input = this.others[qi];
       if (this.address !== address) { this.others.forEach((b, k) => b.set_value(e.others.get(k) ?? "")); this.address = address; }
-      if (input) sec.child(div().id(`${id}-q${qi}-other`).px(8).py(4).rounded(8).bg(t.background).border(1).border_color(t.border).child(Textarea.new(input).w_full()));
+      // Own answer: a row like the options. Clicks and keys stay in the text box: the card would
+      // take the focus on a press and read 1-9 and Enter as picks.
+      const own = Boolean((e.others.get(qi) ?? "").trim());
+      const keep = (_ev, cx) => cx.stop_propagation();
+      if (input) sec.child(h_flex().id(`${id}-q${qi}-other`).px(10).py(7).gap(10).items_center().rounded(8)
+        .bg(own ? t.selected : t.background).border(1).border_color(own ? t.accent : t.border)
+        .on_mouse_down("left", keep).on_key_down(keep)
+        .child(div().size(14).flex_none().rounded(qq.multi ? 3 : 7).border(1).border_color(own ? t.accent : t.muted).bg(own ? t.accent : t.background))
+        .child(div().flex_1().min_w(0).child(Textarea.new(input).w_full().text_size(13)))
+        .when((qq.options ?? []).length < 9, (el) => el.child(hint((qq.options ?? []).length + 1))));
       box.child(sec);
     });
     if (c.unread > 0) {

@@ -189,3 +189,23 @@ test("two views of one card: Show all in one, both show every question", async (
   assert.equal(alls, 1);
   assert.match(textOf(b.view("t1", T)), /question 1 of 2/);
 });
+
+test("own answer: a row like the options; clicks and keys in it stay in the text box", async () => {
+  cardNow = question;
+  const cx = fakeCx(); const c = new Cards(cx); await c.poll(cx, "t1", true);
+  const row = byId(c.view("t1", T), "card-q0-other");
+  assert.match(textOf(row), /3/, "numbered after the options");
+  let stopped = 0; const ecx = { ...cx, stop_propagation() { stopped++; } };
+  row._h.on_mouse_down?.({}, ecx);
+  row._h.on_key_down({ key: "1", modifiers: {} }, ecx);
+  assert.equal(stopped, 2, "the card neither takes the focus nor picks option 1");
+  assert.equal(c.byAgent.get("t1").picks.size, 0);
+});
+
+test("the number after the options moves the keyboard into the own-answer box", async () => {
+  cardNow = question;
+  const cx = fakeCx(); const c = new Cards(cx); await c.poll(cx, "t1", true);
+  let focused = 0; c.others[0].focus = () => { focused++; };
+  assert.equal(c.key_down({ key: "3", modifiers: {} }, cx, "t1"), true);
+  assert.equal(focused, 1);
+});
