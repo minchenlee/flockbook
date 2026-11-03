@@ -63,6 +63,8 @@ final class FakeHC: @unchecked Sendable {
     private var _screens: [String: String] = [:]
     /// What `terminal.read` returns per address (the visible screen as text).
     func setScreen(_ address: String, _ text: String) { lock.withLock { _screens[address] = text } }
+    /// No screen for `address`: `terminal.read` fails (as a read that timed out).
+    func clearScreen(_ address: String) { lock.withLock { _screens[address] = nil } }
     /// Called after each `terminal.keys` (address, keys), e.g. to move a fake picker on.
     var onKeys: (@Sendable (String, [String]) -> Void)?
     /// Called on each `terminal.put` (address), before it answers: e.g. another program starts meanwhile.

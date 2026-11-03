@@ -31,6 +31,12 @@ extension PaneScreen {
         return true
     }
 
+    /// The question card's "read all" on the Mac, gated by `KeyGate.onMac`: another agent in the pane, or another
+    /// question on screen, before a key: stopped, that key and the rest not sent.
+    public func loadAllQuestionsGated(pane: Pane, expect: QuestionRequest?, allowed: (@MainActor @Sendable () -> Bool)?) async throws -> QuestionRequest? {
+        try await loadAllQuestions(paneId: pane.id, gate: KeyGate.onMac(pane.agent, allowed: allowed), expect: expect)
+    }
+
     /// Throws `KeyGateStop` when `passes` says no.
     func gated(_ gate: KeyGate?, paneId: String, screen ok: (@Sendable (String) -> Bool)? = nil) async throws {
         guard await passes(gate, paneId: paneId, screen: ok) else { throw KeyGateStop() }
@@ -63,5 +69,19 @@ extension HerdrBackend {
               let ws = try? await snapshot(), let a = ws.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.id == paneId })?.agent,
               a.kind == seen.kind, a.sessionId == sid else { return nil }
         return a
+    }
+}
+
+extension KeyGate {
+    /// What a gate can bind an agent to: hc, the program in the terminal; herdr, the session id.
+    public static func hasIdentity(_ a: Agent) -> Bool {
+        a.backend == .hc ? a.process?.isEmpty == false : a.sessionId?.isEmpty == false
+    }
+
+    /// The Mac's rule (the owner is at the screen): bind to the agent when it has an identity; without one, no agent
+    /// check, and every key still checks the screen (the expected question) first. Paired devices and the mod's
+    /// sidecar stay fail closed (`KeyGate(agent:)`): their user is not at the terminal.
+    public static func onMac(_ agent: Agent?, allowed: (@MainActor @Sendable () -> Bool)?) -> KeyGate {
+        KeyGate(agent: agent.flatMap { hasIdentity($0) ? $0 : nil }, allowed: allowed)
     }
 }

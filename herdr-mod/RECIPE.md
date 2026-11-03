@@ -1,0 +1,198 @@
+# Flockbook
+
+A reading view for coding agents. Each tab with an agent shows as a conversation instead of a
+terminal: user messages in bubbles, the agent's replies as markdown with rounded code boxes and
+tables, tool calls folded into chips, and a reply box under it. A floating bar at the top has one
+capsule per tab with a status mark. When an agent asks for permission or asks a question, a card
+above the reply box answers it. Needs you lists every agent that waits; Overview shows every tab as
+a card. The sidebar is hidden and slides out from the window's left edge.
+
+![Flockbook](preview.png)
+
+## What you see
+
+The window has no title bar. The macOS window buttons sit at 18, 22. The theme is black and white
+(`flockbook` dark, `flockbook-light` light); the Mac themes (`flockbook-mac`, `flockbook-mac-light`)
+use blue `#007aff` for working, green `#34c759` for done and orange `#ff9500` for blocked.
+Dark colors: canvas `#000000`, chrome `#0b0b0b`, raised `#161616`, hover `#1c1c1c`, selected
+`#262626`, border `#363636`, muted `#9a9a9a`, dim `#5f5f5f`, accent and foreground `#ededed`.
+
+Left to right:
+
+1. **Sidebar** (250 px, 220 to 320, hidden by default, `chrome` background, 1 px `border` divider).
+   Top to bottom:
+   - A 56 px header with a round 28 px sidebar button, at the same spot as the bar's sidebar button.
+   - Rows, 30 px tall, 13 px text, a 22 px icon column: **New tab**, **Needs you** (an orange pill
+     with the count when agents wait), **Overview**. The row for the shown screen is `selected`.
+   - A "Workspaces" heading (11.5 px, semibold, muted) with a small + on the right.
+   - One 34 px row per space: a 22 px monogram square (two letters, 10.5 px), the name, and the
+     status marks of its tabs on the right (all up to 5, else the first 3 and "+N").
+   - **Settings** at the bottom.
+2. **Work area**: a stack of four screens. The bar floats over the first three.
+   - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
+     round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
+     Centered: a tab capsule and a tools capsule, both 38 px tall, fully round, `chrome` with a 1 px
+     border and a small shadow.
+     - The tab capsule has one 30 px pill per tab that is not put away: a status mark, then the
+       label (13 px, at most 170 px, cut with an ellipsis). The shown tab is `selected`, semibold,
+       with a × to close it. The capsule scrolls sideways when the tabs do not fit.
+     - The tools capsule has **+** (new tab) and a terminal button (the agent's terminal).
+   - **Chat**: a reading column at most 760 px wide, 24 px gutters, centered.
+     - User message: a right-aligned bubble, at most 78% of the column, 16 px corners, `raised`.
+       "1 image" or "N images" under it when it had pictures.
+     - Agent reply: full-width markdown, 14 px text. Code fences are 12 px rounded boxes (`raised`,
+       1 px border, Menlo 13 px, 19 px lines). Tables are 12 px rounded frames: a `raised` header
+       row, 1 px lines between rows, columns sized to their content.
+     - Tool calls: a row of 28 px round chips ("Ran 3 commands", an icon per kind: terminal, doc,
+       search, tool), each with ▾. A spinner while a call runs.
+     - A pending call: a 28 px chip "Running · <what>" with a spinner.
+     - Separators and footers in 11.5 px dim text.
+     - A round 34 px ↓ button at the bottom center while you read older messages.
+     - "Loading earlier messages" in a small capsule under the bar while older rows load.
+   - **Reply box** under the chat, at most 800 px wide: a row of 22 px round tags (model, effort,
+     context, cost, folder, branch, agent; a warning tag is orange), then a 16 px rounded `raised`
+     box with a one-line text area ("Reply to the agent"), + to attach files on the left, the
+     branch, and a round 28 px send button (accent when there is text). File chips above the text.
+   - **Card** between the chat and the reply box, at most 800 px, 14 px corners, `raised`, 14 px
+     padding, an orange 8 px dot before the title.
+     - Approval: the title (the prompt's own, for example "Bash command"; else "<tool> wants to
+       run"), the command in Menlo 12.5 px on `background`
+       (at most 140 px, scrolls), then **1 Allow once** (accent) and **2 Deny**.
+     - Question: "Question 1 of N" with dots, the question, options as rows with a round (one
+       choice) or square (several) mark, "Recommended" in accent, a number hint per option, an
+       "Or type your own answer" row, then "1-9 picks · Enter goes on" on the left and Back,
+       Next or **Send answer** on the right.
+   - **Needs you**: a 340 px list on the left ("Needs you · N", 52 px rows: the program icon,
+     the name, "<space> · waits for you", an orange dot) and the picked agent on the right (name in
+     18 px, its title, its card, an **Open chat** button). With none: a green check, "All clear",
+     "No agent waits for you."
+   - **Overview**: at most 1220 px wide. A greeting ("Good morning", 26 px), "N tabs · N working ·
+     N need you", and a "Group by Status | Workspace" switch. Then groups of 64 px cards (1 to 3
+     columns, at least 300 px each, 12 px gaps): a status mark, the tab label (14 px semibold), how
+     long ago it changed ("13m"), and the space and agent in 12 px muted.
+   - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
+     above them, 8 px padding, 6 px gaps, 8 px corners, 1 px border, `muted` border on focus).
+
+Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms); done is a check
+(`done`); blocked is a 9 px dot (`blocked`); idle is a 12 px empty ring (`dim`).
+
+## How it behaves
+
+- **Tabs**: click a pill to show that tab. A tab with one agent shows the chat; a split tab or a
+  shell shows its panes. Right-click a pill: Rename…, Move left, Move right, Open terminal,
+  Show chat or Show panes, Split right, Split down, Put away, Close tab.
+- **Chat**: opens at the newest message and follows new ones. Scrolling up stops following; the ↓
+  button goes back to the end. Older messages load only when you scroll up past the first row.
+  A click on a tool chip opens its calls (name, summary, a check, a spinner, or "failed").
+  Another agent's chat fades in.
+- **Reply**: Enter sends (the text area's submit). Drop files on the chat or click + (the
+  macOS file dialog) to attach them; ⌘V with an image on the clipboard attaches it as a PNG.
+  If the text did not go out, it stays in the box with a red note. "Sent. The agent did not
+  confirm it yet." when the core did not answer in time.
+- **Approval card**: 1 allows once, 2 denies (with the card focused). After an answer the buttons
+  turn off and the card says "Answer sent. Waiting for the agent." until the prompt leaves.
+  "It changed on screen. Here is what it shows now." when the prompt on screen is another one.
+- **Question card**: 1-9 picks an option (a one-choice pick moves on); the number after the
+  options moves the keyboard into the own-answer box; Enter goes on or sends. With more questions
+  behind the first: **Show all N questions** reads them all from the agent's picker.
+- **Sidebar**: ⌘B or the sidebar button shows and hides it. With it hidden, the pointer at the
+  window's left 4 px slides it out as a floating panel (260 px wide, 8 px from the edges, 14 px
+  corners, a large shadow), which closes when the pointer leaves it, on Esc or a click beside it.
+  Right-click a space: New tab here, Rename…, Close workspace….
+- **Agent's terminal**: ⌃` or the terminal button opens the agent's real terminal in a floating
+  window (70% of the window, 16 px corners) with a 42 px title bar (a terminal chip, the name,
+  "Terminal", a round close button). ⌃` again closes it.
+- **Keys** (while this layout shows): ⌘T new tab, ⌘W close tab, ⌘⇧N new space, ⌘1-⌘9 a tab,
+  ⌘⇧[ / ⌘⇧] or ⌃Tab / ⌃⇧Tab the tab before or after, ⌘⌥↑ / ⌘⌥↓ the space before or after,
+  ⌘⌃⇧← / ⌘⌃⇧→ move the tab, ⌘⇧I Needs you, ⌘⇧\ Overview, ⌘B sidebar, ⌃` terminal,
+  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘/ help.
+
+## Built from
+
+- **Layout** `layouts/flockbook.json`: a `row` (`titlebar: "none"`, `traffic_lights: [18, 22]`,
+  background `canvas`, theme light `flockbook-light` / dark `flockbook`) with:
+  - `sidebar`: a `column`, 250 px (min 220, max 320), `hidden`, `chrome`, a 1 px divider, holding
+    one block `side`.
+  - `work`: a `column` holding the `stack` `screen` (active `chat`) with the blocks `chat`,
+    `needs`, `overview` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
+    `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
+    padding 8).
+  - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
+- **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked
+  by `props.view`: `side`, `chat`, `needs`, `overview`, `top`; overlays use `termbar` (the terminal
+  window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
+  All views are in one folder because a mod cannot import another mod's files.
+- **Shared state** (`shared` / `setShared`): `flockbook.agent` (the agent shown),
+  `flockbook.screen` (the shown screen), `flockbook.sidebar`, `flockbook.sidebar.peek`,
+  `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`.
+- **herdr functions**: `spaces`, `agents`, `panes`, `focused`, `theme`, `layout`, `window`,
+  `settings`, `props`, `run`, `nextCommand`, `setAgentOrder`, `openOverlay`, `closeOverlay`,
+  `exec`, `appHome`, `home`, `readTextFile`.
+- **Commands it runs**: `layout.select {stack: "screen", child}`, `layout.show` / `layout.hide
+  {id: "sidebar"}`, `tab.select`, `tab.close`, `tab.move`, `tab.rename`, `tab.settle`, `tab.new`,
+  `pane.split`, `space.select`, `space.new`, `space.rename`, `space.close`, `agent.focus`,
+  `app.settings`. Its own key commands: `flockbook.terminal`, `flockbook.needs`,
+  `flockbook.sidebar`, `flockbook.overview`, `flockbook.move-left`, `flockbook.move-right`.
+- **Shipped mods**: `new-menu` (the + popup, 250 × 512).
+- **Programs**:
+  - `flockbook-modfeed`, a helper at `<herdr-app home>/flockbook/bin/flockbook-modfeed`. Build it
+    from <https://github.com/minchenlee/flockbook> with
+    `swift build -c release --product flockbook-modfeed`. It reads each agent's session log
+    (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`,
+    `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to herdr-core (`hc`) to read
+    screens and send keys and text. Commands: `feed`, `status`, `card`, `approve`, `answer`,
+    `send`, `paste-image`, one per `exec`, JSON Lines back (`herdr-mod/docs/protocol.md` in that
+    repo). It keeps `<herdr-app home>/flockbook/cache.json`, `answered/` beside it, and pastes in
+    `<herdr-app home>/flockbook/paste/`.
+  - `osascript`, for the file dialog.
+  - It reads `<herdr-app home>/layouts/.state/flockbook.json` once, for whether the sidebar was open.
+- **Themes** `themes/flockbook.json`, `flockbook-light.json`, `flockbook-mac.json`,
+  `flockbook-mac-light.json`.
+- **Keys** `keys.json`: one `layout:flockbook` section.
+- **Art** `mods/flockbook/icons/`: arrow-down, bell, branch, check, close, doc, folder, gear, grid,
+  plus, search, send, sidebar, spinner, split, terminal, tool (16 × 16 SVG, 1.8 px round strokes, `currentColor`).
+
+## Watch out
+
+- The mod alone draws nothing, and the layout alone shows empty blocks. Copy both, and the themes
+  the layout names.
+- Without the helper, the chat says "The Flockbook helper is missing. Install it again." Every
+  other view still works.
+- Do not add a `mod:flockbook` section to `keys.json`: with one, no key worked.
+- `layout()` is the file, not the live tree. Keep the shown screen and the sidebar state in shared
+  state, and select the screen outright.
+- Each screen draws its own top bar, so each copy runs the bar's work. Two copies can get one key
+  command: the first acts, and the others skip it within 150 ms (`flockbook.command`).
+- The chat is a `v_virtual_list` with guessed heights (14 px text, 22 px lines, wide letters
+  counted as 14 px, the rest 0.58 × 14), because `list` cannot be scrolled from code and the chat
+  must open at the end. A guess too low cuts a row; guesses lean high.
+- `TextView.markdown` takes no style and draws code and tables square. Split the text into blocks
+  and draw fences and tables yourself. A `TextView` in a flexible cell keeps its one-line width
+  and spills out: give table cells a fixed width.
+- `openOverlay` with `at: "pointer"` uses a pointer position that is not updated while the pointer
+  is over an overlay window. The floating sidebar opens its menus at the press's own position.
+- A popup sizes to its content and ignores a height. The floating sidebar is a frameless `window`
+  overlay sized from the window height the views note.
+- Keys go out only on a press or a key, never on a timer. The helper checks the screen again right
+  before every key: a prompt that changed sends nothing. One approval goes out once per prompt.
+  A reply goes only to the agent and conversation the chat showed.
+- Esc goes to the terminal in the terminal window, so its title bar has the close button.
+- Built and tried on macOS only. The helper needs herdr-core running; agents it reads: Claude
+  Code, Codex, Grok Build, Cursor, pi, Antigravity CLI.
+
+## Done when
+
+- `herdr-app check mods/flockbook` passes, and `layout.switch {"name": "flockbook"}` shows the bar
+  with one pill per tab of the shown space, each with its status mark.
+- A tab with a Claude Code agent shows its conversation, at the newest message, and a new reply
+  from the agent appears without a click.
+- A reply with a code fence and a table shows a rounded code box and a rounded table whose text
+  stays inside its cells.
+- Typing in the reply box and pressing Enter puts the text into the agent's terminal.
+- A Claude permission prompt shows the approval card with the same command; 1 allows it once, and
+  the buttons turn off until the prompt leaves.
+- A question picker shows the question card; picking and Send answer answers it in the terminal.
+- ⌘⇧I shows Needs you with the waiting agents; ⌘⇧\ shows Overview with every tab.
+- With the sidebar hidden, moving the pointer to the window's left edge slides out the floating
+  sidebar, and it closes when the pointer leaves it.
+- ⌃` opens the agent's terminal window; ⌃` again closes it.
