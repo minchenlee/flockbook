@@ -96,6 +96,22 @@ jobs:
       - name: HerdrKitChecks
         run: swift run HerdrKitChecks
 
+  # The Herdr app mod's Node tests (fake gpui-kit, gpui-base and herdr modules; no app, no network).
+  mod:
+    name: Herdr app mod tests
+    needs: gate
+    if: ${{ needs.gate.outputs.skip != '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: npm test
+        working-directory: herdr-mod
+        run: npm test
+
   # The offline checks in 3 groups at once (SHARD in scripts/ui-checks.sh); one group when `only` names checks.
   # 3 groups here and 2 on macOS 15: 5 macOS jobs, the most that run at the same time.
   ui:
