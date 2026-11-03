@@ -1,9 +1,9 @@
 // The "side" view: New tab, Needs you, Overview, the spaces with a status mark per tab, Settings.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, spaces, run, openOverlay } from "herdr";
+import { theme, spaces, run, openOverlay, closeOverlay, props } from "herdr";
 import { openMenu, spaceItems } from "./menu.js";
-import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, endPeek } from "./state.js";
+import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, peekClosed } from "./state.js";
 import { statusMark, lightsRoom } from "./top.js";
 
 // Status marks for a space's tabs: all of them up to 5, else the first 3 and "+N".
@@ -21,7 +21,17 @@ export function monogram(name) {
 }
 
 export class SideView {
-  constructor(_cx) {}
+  // `peek`: this copy is the panel that floats over the content (a popup opened at the left edge).
+  constructor(_cx) { this.peek = props()?.peek === true ? props().overlay ?? null : null; this.floating = props()?.peek === true; }
+
+  // The panel goes when the pointer leaves it.
+  leave() {
+    if (!this.floating) return;
+    const id = props()?.overlay ?? this.peek;
+    if (id) { closeOverlay(id); peekClosed(id); }
+  }
+
+  close(_cx) { const id = props()?.overlay ?? this.peek; if (this.floating && id) peekClosed(id); }
 
   render(_cx) {
     const t = theme();
@@ -60,8 +70,11 @@ export class SideView {
       .child(div().id("side-toggle").size(28).flex_none().flex().items_center().justify_center().rounded(14)
         .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", stop).on_click(() => toggleSidebar()).child(svg(icon("sidebar")).size(16)));
-    return v_flex().id("side-root").size_full().px(8).pb(8).gap(2)
-      .on_hover((h) => { if (!h) endPeek(); })
+    const root = v_flex().id("side-root").size_full().px(8).pb(8).gap(2)
+      .on_hover((h) => { if (!h) this.leave(); });
+    // Floating: the panel draws its own surface, as Herdr draws no frame around it.
+    if (this.floating) root.bg(t.chrome).rounded(14).border(1).border_color(t.border).shadow_lg();
+    return root
       .child(header)
       .child(row("side-new", "plus", "New tab", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .child(row("side-needs", "bell", "Needs you", () => showNeeds(), badge, screen === "needs"))

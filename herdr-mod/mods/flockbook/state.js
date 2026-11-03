@@ -26,23 +26,31 @@ export const KEY_SIDEBAR = "flockbook.sidebar";
 export const sidebarShown = () => shared(KEY_SIDEBAR) === true;
 export function toggleSidebar() {
   const show = !sidebarShown();
-  setShared(KEY_PEEK, false);
+  endPeek();
   setShared(KEY_SIDEBAR, show);
   run(show ? "layout.show" : "layout.hide", { id: "sidebar" });
 }
-// The pointer at the window's left edge opens the sidebar for a peek; it closes again when the
-// pointer leaves it. A click on the sidebar button keeps it open (toggleSidebar clears the peek).
+// The pointer at the window's left edge floats the sidebar over the content (a frameless popup that
+// the side view draws as a panel), so the content does not move. It closes when the pointer leaves
+// it, on Esc or on a click beside it. KEY_PEEK holds the popup's id while it is open.
 export const KEY_PEEK = "flockbook.sidebar.peek";
 export const EDGE_PX = 4;
+export const PEEK_W = 260, PEEK_GAP = 8;
 export function peekAtEdge(e) {
-  if (sidebarShown() || (e?.position?.x ?? 99) > EDGE_PX) return;
-  setShared(KEY_PEEK, true); setShared(KEY_SIDEBAR, true);
-  run("layout.show", { id: "sidebar" });
+  if (sidebarShown() || shared(KEY_PEEK) || (e?.position?.x ?? 99) > EDGE_PX) return;
+  const id = openOverlay({ mod: "flockbook", props: { view: "side", peek: true }, kind: "popup", frame: "none",
+    at: { x: PEEK_GAP, y: PEEK_GAP }, width: PEEK_W, height: 0.98 });
+  setShared(KEY_PEEK, id);
 }
 export function endPeek() {
-  if (!shared(KEY_PEEK)) return;
-  setShared(KEY_PEEK, false); setShared(KEY_SIDEBAR, false);
-  run("layout.hide", { id: "sidebar" });
+  const id = shared(KEY_PEEK);
+  if (!id) return;
+  setShared(KEY_PEEK, null);
+  closeOverlay(id);
+}
+// The panel went (Esc, a click beside it, or endPeek): forget it so the edge opens it again.
+export function peekClosed(id) {
+  if (shared(KEY_PEEK) === id) setShared(KEY_PEEK, null);
 }
 // Adds the edge watch to a view's root.
 export const watchEdge = (el) => el.on_mouse_move((e) => peekAtEdge(e));

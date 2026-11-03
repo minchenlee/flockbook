@@ -21,6 +21,8 @@ export default class Flockbook extends View {
     this.view = Impl ? new Impl(cx) : null;
   }
 
+  async close(cx) { await this.view?.close?.(cx); }
+
   render(cx) {
     if (this.view) return this.view.render(cx);
     const t = theme();
