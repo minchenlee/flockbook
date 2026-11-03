@@ -16,8 +16,17 @@ public final class HerdrStore {
     public var knownPanes: Set<String>? {
         snapshotted ? Set(workspaces.flatMap(\.tabs).flatMap(\.panes).map(\.id)) : nil
     }
-    /// A snapshot was applied (`workspaces` is herdr's, not the empty start).
+    /// Whether the pane is gone, judged only by its own backend: a TUI pane after a herdr snapshot without it, an hc
+    /// pane after an hc snapshot without it. One backend's snapshot never stands for the other's (a herdr server that
+    /// is down or slower than hc must not make its panes look gone).
+    public func paneGone(_ id: String) -> Bool {
+        guard HCMapper.address(fromPaneId: id) != nil ? hcSnapshotted : snapshotted else { return false }
+        return !workspaces.lazy.flatMap(\.tabs).flatMap(\.panes).contains { $0.id == id }
+    }
+    /// A herdr (TUI) snapshot was applied (`workspaces` is herdr's, not the empty start).
     @ObservationIgnored private var snapshotted = false
+    /// An hc snapshot was applied.
+    @ObservationIgnored private var hcSnapshotted = false
     /// Why the last snapshot failed, with the next step (`ConnectionCheck`). Nil while connected, or when the socket
     /// accepts but the request fails.
     public private(set) var problem: ConnectionProblem?
@@ -323,7 +332,7 @@ public final class HerdrStore {
         do {
             let raw = try await hc.snapshot()
             hcConnected = true
-            snapshotted = true
+            hcSnapshotted = true
             lastHCRaw = raw
             compose()
             resolveMissing(lastRaw + lastHCRaw)

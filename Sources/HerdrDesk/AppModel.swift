@@ -448,10 +448,10 @@ final class AppModel {
     /// The Mac's kept texts this run put in a composer (the drafts are memory only: a quit puts them there again).
     @ObservationIgnored var delivered: Set<String> = []
 
-    /// Kept pulled texts of panes that are gone: only from a snapshot herdr gave (an empty one too: the last tab
-    /// closed), never the empty start. Called on every snapshot (`HerdrStore.snapshots`), not only on a change.
+    /// Kept pulled texts of panes that are gone, each judged by its own backend's snapshot (`HerdrStore.paneGone`; an
+    /// empty one too: the last tab closed), never the empty start. Called on every snapshot (`HerdrStore.snapshots`), not only on a change.
     func prunePulled() {
-        if let known = store.knownPanes { pulledTexts.prune(panes: known) }
+        pulledTexts.prune(gone: store.paneGone)
     }
 
     func prune() {
