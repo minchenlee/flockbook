@@ -119,4 +119,18 @@ func checksModFeedReview() async throws {
     FeedLocate.writeCache(c3, to: cache3)
     let hit = try await FeedLocate.find(terminal: "t3", workspaces: ws3, resolver: SessionResolver(socketPath: "/nonexistent.sock"), cacheURL: cache3)
     check(hit.cached && hit.path == newLog.path, "review1 #3: a cache hit follows continued-in to the new log (\(hit.path ?? "nil"))")
+
+    // 4. paste-image cleans only its own old pastes: another PNG in the folder stays, however old.
+    let pastes = dir.appendingPathComponent("paste")
+    try FileManager.default.createDirectory(at: pastes, withIntermediateDirectories: true)
+    let mine = pastes.appendingPathComponent("paste-20261101-101010-ab12cd.png"), theirs = pastes.appendingPathComponent("holiday.png")
+    let lookalike = pastes.appendingPathComponent("paste-notes.png")
+    for f in [mine, theirs, lookalike] {
+        try Data([1]).write(to: f)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86400)], ofItemAtPath: f.path)
+    }
+    _ = try FeedPaste.save(Data([2]), dir: pastes)
+    let left = Set((try? FileManager.default.contentsOfDirectory(atPath: pastes.path)) ?? [])
+    check(!left.contains(mine.lastPathComponent) && left.contains("holiday.png") && left.contains("paste-notes.png"),
+          "review1 #4: an old paste goes; other PNGs stay (\(left.sorted()))")
 }

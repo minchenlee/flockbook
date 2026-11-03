@@ -19,12 +19,18 @@ public enum FeedPaste {
         return nil
     }
 
-    /// Writes `png` into `dir` as a new file and returns its path; removes pastes older than `keep`.
+    /// The name `save` gives a paste: "paste-YYYYMMDD-HHMMSS-xxxxxx.png". Only these are ever removed.
+    static func isPaste(_ name: String) -> Bool {
+        name.wholeMatch(of: /paste-\d{8}-\d{6}-[0-9A-Fa-f]{6}\.png/) != nil
+    }
+
+    /// Writes `png` into `dir` as a new file and returns its path; removes its own pastes older than `keep`. Other
+    /// files in `dir` are never touched (`--dir` can name any folder).
     public static func save(_ png: Data, dir: URL, now: Date = Date()) throws -> String {
         let fm = FileManager.default
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         for f in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        where f.pathExtension == "png" {
+        where isPaste(f.lastPathComponent) {
             if let d = try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, now.timeIntervalSince(d) > keep {
                 try? fm.removeItem(at: f)
             }
