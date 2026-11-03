@@ -71,10 +71,10 @@ public enum HCMapper {
     static let wrappers: Set<String> = ["node", "bun", "deno", "python", "python3", "env", "npx", "bunx"]
 
     /// Agent kind from the foreground process (what runs now), then the start argv. Interpreters (`node …/codex`)
-    /// are looked through: their first non-flag argument names the program. Last, the `app` name of the 7501 report.
+    /// are looked through: their first non-flag argument names the program. Last, agy's 7501 `app` name (only that one).
     static func kind(_ t: Term) -> String? {
         for argv in [[t.fgName ?? ""] + t.fgArgv, t.argv] { if let k = kind(argv: argv) { return k } }
-        return t.statusApp.flatMap { knownKinds[$0] }   // the program's own 7501 name, when the processes say nothing
+        return t.statusApp == "antigravity" ? "agy" : nil   // agy's own 7501 name (verified), when the processes say nothing
     }
 
     /// The agent kind one command line names, if any.

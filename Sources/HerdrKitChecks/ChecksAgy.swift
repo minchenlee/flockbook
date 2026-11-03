@@ -106,6 +106,15 @@ import Foundation
           "agy: 7501 app names the kind when the foreground does not")
     check(kind(["argv": ["/bin/zsh", "-l"], "foreground": ["name": "zsh", "argv": ["zsh"]], "status": ["state": "done", "app": "zsh"]]) == nil,
           "agy: unknown 7501 app is no kind")
+    // Only agy's own 7501 name is a fallback: every other agent keeps the kind the processes give, as before agy.
+    for app in ["claude", "codex", "pi", "grok", "cursor", "cursor-agent", "gemini", "opencode", "amp", "agy"] {
+        for fg in [["name": "zsh", "argv": ["zsh"]], ["name": "vim", "argv": ["vim", "a.txt"]]] as [[String: Any]] {
+            check(kind(["argv": ["/bin/zsh", "-l"], "foreground": fg, "status": ["state": "done", "app": app]]) == nil,
+                  "agy: 7501 app \(app) with \(fg["name"] ?? "") in front: no kind, as before")
+        }
+    }
+    check(kind(["argv": ["/bin/zsh", "-l"], "foreground": ["name": "pi", "argv": ["pi"]], "status": ["state": "done", "app": "antigravity"]]) == "pi",
+          "agy: the foreground wins over the 7501 app")
 }
 
 
