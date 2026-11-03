@@ -12,7 +12,7 @@
 //! Windows has neither yet (see `processes`). The pure logic takes process lists as arguments, so checks inject them.
 
 use crate::models::Date;
-use crate::session_log::{self, deleting_last_path_component, home_dir, last_path_component, standardize_path};
+use crate::session_log::{self, deleting_last_path_component, home_dir, is_abs_path, last_path_component, standardize_path};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -223,7 +223,7 @@ impl SessionResolver {
         self.verdicts.retain(|k, _| asked.contains(k));
         self.located.retain(|k, _| asks.iter().any(|a| &a.session_id == k));
         let shown: HashSet<String> =
-            claimed.iter().map(|c| if c.starts_with('/') { standardize_path(c) } else { c.clone() }).collect();
+            claimed.iter().map(|c| if is_abs_path(c) { standardize_path(c) } else { c.clone() }).collect();
         for a in asks {
             if pass.leads.contains(&a.session_id) {
                 continue;
@@ -263,7 +263,7 @@ impl SessionResolver {
 
     /// Session id → its log's standardized path, kept while the file is there.
     fn path(&mut self, id_or_path: &str) -> Option<String> {
-        if id_or_path.starts_with('/') {
+        if is_abs_path(id_or_path) {
             return Some(standardize_path(id_or_path));
         }
         if let Some(p) = self.located.get(id_or_path) {

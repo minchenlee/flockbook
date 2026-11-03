@@ -47,11 +47,12 @@ pub(crate) fn deleting_last_path_component(p: &str) -> String {
 /// resolved in absolute paths, no trailing slash. On macOS an initial `/private` is dropped when the rest exists
 /// (as Foundation does). Symlinks are not resolved (Foundation resolves them only around a `..`).
 pub fn standardize_path(p: &str) -> String {
-    let mut s = p.to_string();
+    // Windows: both separators name the same path; `/` is kept (drive paths stay `C:/...`).
+    let mut s = if cfg!(windows) { p.replace('\\', "/") } else { p.to_string() };
     if s == "~" || s.starts_with("~/") {
         s = home_dir() + &s[1..];
     }
-    let abs = s.starts_with('/');
+    let abs = is_abs_path(&s);
     let mut parts: Vec<&str> = vec![];
     for c in s.split('/') {
         match c {
@@ -63,7 +64,7 @@ pub fn standardize_path(p: &str) -> String {
         }
     }
     let joined = parts.join("/");
-    let out = if abs { format!("/{joined}") } else { joined };
+    let out = if s.starts_with('/') { format!("/{joined}") } else { joined };
     #[cfg(target_os = "macos")]
     {
         if let Some(rest) = out.strip_prefix("/private/") {
@@ -117,13 +118,17 @@ pub fn default_dir(agent: &str, env: &HashMap<String, String>) -> String {
     }
 }
 
+/// An absolute path: `/...`, or on Windows also `C:\\...` / `C:/...` (Swift only knows the first).
+pub fn is_abs_path(s: &str) -> bool {
+    s.starts_with('/') || Path::new(s).is_absolute()
+}
+
 /// The log file for a session: an absolute `.jsonl` path is used as is (any agent); otherwise it is looked up by id
 /// in `dir` (`default_dir_env(agent)` normally).
 pub fn locate(agent: &str, session_id: &str, dir: &str) -> Option<PathBuf> {
-    // TODO(windows): an absolute Windows path (`C:\...`) is not taken as a path here, as in Swift; herdr's
-    // `agent_session` paths on Windows are unknown.
-    if session_id.starts_with('/') {
-        return if session_id.ends_with(".jsonl") && !session_id.contains("/../") && file_exists(session_id) {
+    // Windows: a drive path is a path too (herdr's `agent_session` paths there are not documented yet).
+    if is_abs_path(session_id) {
+        return if session_id.ends_with(".jsonl") && !session_id.contains("/../") && !(cfg!(windows) && session_id.contains("\\..\\")) && file_exists(session_id) {
             Some(PathBuf::from(session_id))
         } else {
             None
@@ -140,7 +145,7 @@ pub fn locate(agent: &str, session_id: &str, dir: &str) -> Option<PathBuf> {
 /// Codex: `<sessions>/YYYY/MM/DD/rollout-<time>-<id>.jsonl`, newest day first. Accepts a session id or the file
 /// path itself.
 pub fn locate_codex(session_id: &str, sessions_dir: &str) -> Option<PathBuf> {
-    if session_id.starts_with('/') {
+    if is_abs_path(session_id) {
         return if file_exists(session_id) && session_id.ends_with(".jsonl") { Some(PathBuf::from(session_id)) } else { None };
     }
     if !id_ok(session_id) {
@@ -258,8 +263,9 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// A path as text, with `/` on Windows too (both separators name the same path there).
     fn s(p: &Path) -> String {
-        p.to_string_lossy().into_owned()
+        p.to_string_lossy().replace('\\', "/")
     }
 
     #[test]
