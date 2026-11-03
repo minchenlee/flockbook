@@ -10,7 +10,7 @@ test("the pointer at the left edge floats the sidebar over the content; leaving 
   assert.equal(log.overlays.length, 0, "not at the edge");
   peekAtEdge({ position: { x: 2, y: 100 } });
   const o = log.overlays.at(-1);
-  assert.equal(o.kind, "popup"); assert.equal(o.frame, "none");
+  assert.equal(o.kind, "window", "a popup ignores the height"); assert.equal(o.frame, "none");
   assert.deepEqual(o.props, { view: "side", peek: true });
   assert.equal(sidebarShown(), false, "the layout's sidebar stays hidden: the content does not move");
   assert.equal(log.run.length, 0);

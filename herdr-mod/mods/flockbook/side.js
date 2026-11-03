@@ -79,7 +79,7 @@ export class SideView {
     const root = v_flex().id("side-root").size_full().px(8).pb(8).gap(2)
       .on_hover((h) => { if (!h) this.leave(); });
     // Floating: the panel draws its own surface, as Herdr draws no frame around it.
-    if (this.floating) root.bg(t.chrome).rounded(14).border(1).border_color(t.border).shadow_lg()
+    if (this.floating) root.on_mouse_down("left", stop).bg(t.chrome).rounded(14).border(1).border_color(t.border).shadow_lg()
       .relative().left(this.slid ? 0 : -PEEK_W).when(this.slid, (el) => el.spring("left", SPRING));
     return root
       .child(header)

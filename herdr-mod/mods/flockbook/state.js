@@ -44,7 +44,9 @@ export function noteWindowHeight(size) {
 }
 export function peekAtEdge(e) {
   if (sidebarShown() || shared(KEY_PEEK) || (e?.position?.x ?? 99) > EDGE_PX) return;
-  const id = openOverlay({ mod: "flockbook", props: { view: "side", peek: true }, kind: "popup", frame: "none",
+  // A window, not a popup: a popup sizes to its content and ignores the height. The panel closes
+  // itself when the pointer leaves it, and stops presses so they don't drag it.
+  const id = openOverlay({ mod: "flockbook", props: { view: "side", peek: true }, kind: "window", frame: "none",
     at: { x: PEEK_GAP, y: PEEK_GAP }, width: PEEK_W, height: (shared(KEY_WIN_H) ?? 800) - PEEK_GAP * 2 });
   setShared(KEY_PEEK, id);
 }
