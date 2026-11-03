@@ -44,3 +44,4 @@ One short line: what this release is about.
 - Security: Herdr app mod approvals stay answered when the screen cannot be read for a moment or the pane is resized, and while a key held by herdr-core may still arrive; only a screen without that prompt lets it be answered again.
 - Security: Herdr app mod replies go only to the agent and conversation the chat showed. If another agent (or a new conversation) took the terminal before Send, nothing is typed and the text stays in the box.
 - Fix: Herdr app mod chat no longer leaves a large blank gap under a long reply with code blocks or tables; their height is now guessed at the size they are drawn.
+- Herdr app mod: each release now has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and a signed `flockbook-modfeed`, ready to install into a test Herdr app home.

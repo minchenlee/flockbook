@@ -24,7 +24,7 @@ A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat
 
 The cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
 
-**Status: preview.** The mod is not in the release download yet. To try it, install it into a test Herdr app home, never your real one. See [herdr-mod/README.md](herdr-mod/README.md). [herdr-mod/RECIPE.md](herdr-mod/RECIPE.md) describes every part of it.
+**Status: preview.** Each [release](https://github.com/minchenlee/flockbook/releases/latest) has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and the helper. Install it into a test Herdr app home, never your real one. See [herdr-mod/README.md](herdr-mod/README.md). [herdr-mod/RECIPE.md](herdr-mod/RECIPE.md) describes every part of it.
 
 ## Flockbook for Mac
 
@@ -186,6 +186,7 @@ scripts/bundle.sh    # builds build/Flockbook.app (ad-hoc signed)
 scripts/package.sh   # dist/Flockbook-<version>.zip and .dmg
 scripts/test-update.sh build/update-test   # headless auto-update check with a throwaway key
 swift build -c release --product flockbook-modfeed   # the Herdr app mod's helper
+VERSION=0.7.0 scripts/package-mod.sh   # dist/Flockbook-herdr-mod-<version>.zip
 ```
 
 ## Linux and Windows (in progress)

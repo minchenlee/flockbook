@@ -34,6 +34,17 @@ The sidebar column has the id `sidebar`, so herdr-app's own ⌘B (`layout.toggle
 
 Never install into your real herdr-app home while this is in development.
 
+From a release: download `Flockbook-herdr-mod-<version>.zip` from GitHub Releases. It has this
+folder's layout, mod, themes, keys and install script, and a universal, signed `flockbook-modfeed`
+in `bin/`. Unzip it, then:
+
+```sh
+mkdir -p /tmp/flockbook-test-home
+./install-isolated.sh /tmp/flockbook-test-home bin/flockbook-modfeed
+```
+
+From the repo:
+
 ```sh
 mkdir -p /tmp/flockbook-test-home
 ./install-isolated.sh /tmp/flockbook-test-home path/to/flockbook-modfeed

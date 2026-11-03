@@ -106,6 +106,8 @@ jobs:
           if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh build/Flockbook.app; fi
           scripts/package.sh
           if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh "dist/Flockbook-$VERSION.dmg"; fi
+          # The Herdr app mod (preview): layout, mod and a universal flockbook-modfeed in one zip.
+          NOTARIZE="$NOTARIZED" scripts/package-mod.sh
           (cd dist && shasum -a 256 Flockbook-* > SHA256SUMS && cat SHA256SUMS)
           {
             if [ "$NOTARIZED" = 1 ]; then
