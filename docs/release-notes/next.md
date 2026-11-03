@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- A Rust version of the Herdr app mod's sidecar (`rust/`), so the mod can run on Linux too (preview; Windows to follow).
+
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
