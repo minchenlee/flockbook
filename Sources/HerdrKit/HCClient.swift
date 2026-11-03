@@ -239,12 +239,27 @@ public actor HCClient {
     /// each is first put beside it (`terminal.put`, on its machine) and the text names that copy. A file that cannot
     /// be read or put fails before anything is sent.
     public func deliver(text: String, to paneId: String, files: [String]) async -> DeliveryOutcome {
-        guard let a = try? address(paneId) else { return .failed }
+        guard let typed = await placed(text: text, to: paneId, files: files) else { return .failed }
+        return await deliver(text: typed, to: paneId)
+    }
+
+    /// A paired device's send: the files first (on another machine each is a call there), then the key gate on a
+    /// fresh read, then the text in one `terminal.send`. Unconfirmed counts as sent: the core may still type it.
+    public func sendFromDevice(text: String, to paneId: String, files: [String], gate: KeyGate) async -> HubSendResult {
+        guard let typed = await placed(text: text, to: paneId, files: files) else { return .failed }
+        guard await passes(gate, paneId: paneId) else { return .changed }
+        return await deliver(text: typed, to: paneId) == .failed ? .failed : .sent
+    }
+
+    /// `text` with each pasted file put beside a terminal on another machine and named by that copy; as it is for
+    /// a terminal here. Nil when a file cannot be read or put (nothing was sent).
+    func placed(text: String, to paneId: String, files: [String]) async -> String? {
+        guard let a = try? address(paneId) else { return nil }
         var text = text
         if !HCMapper.machinePrefix(a).isEmpty {
             for f in files where text.contains(f) {
                 guard let data = FileManager.default.contents(atPath: f),
-                      let there = try? await put(paneId: paneId, name: (f as NSString).lastPathComponent, data: data) else { return .failed }
+                      let there = try? await put(paneId: paneId, name: (f as NSString).lastPathComponent, data: data) else { return nil }
                 // The copy's path as the composer writes paths; a local path already in quotes (or in
                 // the composer's quoting) is swapped whole, so the quotes do not double.
                 let q = ShellQuote.quotedIfNeeded(there)
@@ -252,7 +267,7 @@ public actor HCClient {
                 text = text.replacingOccurrences(of: f, with: q)
             }
         }
-        return await deliver(text: text, to: paneId)
+        return text
     }
 
     /// `terminal.put`: a file beside the terminal, on its machine (removed with the terminal). The path there.

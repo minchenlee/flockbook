@@ -50,10 +50,11 @@ import Foundation
         model.noteSent(id)
         let message = ([text] + images.map(ComposerHandle.quoted)).filter { !$0.isEmpty }.joined(separator: " ")
         if let hc = reader as? HCClient {
-            // hc types the whole message in one `terminal.send`: the gate is asked once, right before it. Unconfirmed
-            // (no answer in time) counts as sent: the core may still type it, so a retry could send it twice.
-            guard await hc.passes(KeyGate(agent: agent, allowed: may), paneId: id) else { return .changed }
-            return await MessageSender.deliverHC(message, to: id, hc: hc) == .failed ? .failed : .sent
+            // hc types the whole message in one `terminal.send`: files go first (another machine: a call each), then
+            // the gate once, right before the text. Unconfirmed (no answer in time) counts as sent: the core may still
+            // type it, so a retry could send it twice.
+            return await hc.sendFromDevice(text: message, to: id, files: HCClient.localFiles(in: message, under: PasteImages.directory.path),
+                                           gate: KeyGate(agent: agent, allowed: may))
         }
         return await MessageSender.send(message, to: id, client: store.client, kind: agent.kind,
                                         gate: KeyGate(agent: agent, allowed: may)) ? .sent : .failed

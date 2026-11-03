@@ -65,6 +65,8 @@ final class FakeHC: @unchecked Sendable {
     func setScreen(_ address: String, _ text: String) { lock.withLock { _screens[address] = text } }
     /// Called after each `terminal.keys` (address, keys), e.g. to move a fake picker on.
     var onKeys: (@Sendable (String, [String]) -> Void)?
+    /// Called on each `terminal.put` (address), before it answers: e.g. another program starts meanwhile.
+    var onPut: (@Sendable (String) -> Void)?
     private var seq = 0
     /// First paint sent on each new attach channel.
     var firstPaint = Data("\u{1b}[2J\u{1b}[Hhello from t1\r\n".utf8)
@@ -306,6 +308,7 @@ final class FakeHC: @unchecked Sendable {
             // As hc: the file lands in a folder of its own on the terminal's machine; the path as that machine sees it.
             let a = params["terminal"] as? String ?? ""
             guard terminals.contains(where: { $0["address"] as? String == a }) else { return (reply(id: id, result: nil, error: (-32000, "no terminal", "not_found")), nil) }
+            if let cb = onPut { cb(a) }
             let name = params["name"] as? String ?? "file"
             let data = Data(base64Encoded: params["data"] as? String ?? "") ?? Data()
             return (reply(id: id, result: ["path": "\(putDir)/\(a.replacingOccurrences(of: "/", with: "-"))/\(name)", "bytes": data.count]), nil)
