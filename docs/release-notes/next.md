@@ -11,7 +11,7 @@ One short line: what this release is about.
 - Herdr app mod: move the pointer to the window's left edge to peek the sidebar; it closes when the pointer leaves.
 - Herdr app mod: the top bar floats over the chat, Overview and Needs you; only its capsules have a background.
 - Herdr app mod: right-click a tab, a workspace or an Overview card for its actions (rename, move, split, put away, close).
-- Herdr app mod: a split tab shows its panes; the bar's panes button switches between the chat and the panes.
+- Herdr app mod: a split tab shows its panes; the bar's panes button switches between the chat and the panes. The bar's buttons say what they do on hover.
 - herdr-core: terminals of herdr-core (the official Herdr app's core) show beside the herdr server's, grouped by the app's spaces and tabs, with their conversations, approval and question cards, layout changes, other machines and scrollback.
 - Antigravity CLI (agy): agy panes show their conversation from the agy transcript, with tool calls and their results, and its command prompts get the approval card and notification buttons, and its single-choice questions the question card.
 
