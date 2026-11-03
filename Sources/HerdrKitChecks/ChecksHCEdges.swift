@@ -1,10 +1,10 @@
 import Foundation
 @testable import HerdrKit
 
-// Review round 1: one block per item. FakeHC only.
+// Edge cases of the hc client, terminal and store: one block per case. FakeHC only.
 
 /// #1 late frames after close, #2 backlog order.
-@MainActor func checksHCReviewChannels() async throws {
+@MainActor func checksHCEdgeChannels() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -51,7 +51,7 @@ import Foundation
 }
 
 /// #3: `terminal.send` gets its own, longer timeout; a timeout means "sent, not confirmed", never "not sent".
-@MainActor func checksHCReviewSend() async throws {
+@MainActor func checksHCEdgeSend() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -74,7 +74,7 @@ import Foundation
 
 /// #4: viewing never resizes the user's terminals. A control session watches (observe) until the user types; then it
 /// reattaches as a controller with the view's real size, sends the keys, and comes back `resumed` after a drop.
-@MainActor func checksHCReviewObserveFirst() async throws {
+@MainActor func checksHCEdgeObserveFirst() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -120,7 +120,7 @@ import Foundation
 
 /// #5: a remote child's `parent` is local to its machine: `host2/t9` with parent `t3` belongs to `host2/t3`, even when
 /// this machine also has a `t3`.
-@MainActor func checksHCReviewRemoteParent() async throws {
+@MainActor func checksHCEdgeRemoteParent() async throws {
     let ws = HCMapper.workspaces(terminals: [
         FakeHC.terminal("t3", labels: ["herdr.space": "local", "herdr.tab": "a"], argv: ["zsh"]),
         FakeHC.terminal("host2/t3", labels: ["herdr.space": "remote", "herdr.tab": "b"], argv: ["claude"]),
@@ -131,7 +131,7 @@ import Foundation
 }
 
 /// #6: Claude rewrites `sessionId` in `<pid>.json` on /clear or /resume, in the same process: the resolver follows.
-@MainActor func checksHCReviewClaudeClear() async throws {
+@MainActor func checksHCEdgeClaudeClear() async throws {
     let ps = """
       500     1 Sat Oct 31 10:00:00 2026     -zsh HC_TERMINAL_ID=t1
       501   500 Sat Oct 31 10:01:00 2026     claude HC_TERMINAL_ID=t1
@@ -159,7 +159,7 @@ import Foundation
 }
 
 /// #7: attach errors that can never succeed end the session instead of a reconnect loop.
-@MainActor func checksHCReviewFinalErrors() async throws {
+@MainActor func checksHCEdgeFinalErrors() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -188,7 +188,7 @@ import Foundation
 
 /// #8: CREDIT bounds memory: it goes out when the view has processed a frame (`frame.consumed()`), not when the frame
 /// enters the session's event stream.
-@MainActor func checksHCReviewCredit() async throws {
+@MainActor func checksHCEdgeCredit() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -210,7 +210,7 @@ import Foundation
 }
 
 /// #9: concurrent first attaches share one framed connection; LineSocket close from another thread ends a blocked read.
-@MainActor func checksHCReviewSingleFlight() async throws {
+@MainActor func checksHCEdgeSingleFlight() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -235,7 +235,7 @@ import Foundation
 
 /// looking at an hc terminal never takes it over. Focus reports (`CSI I`/`CSI O`, sent by the view on
 /// focus) and mouse reports (X10 `CSI M`, SGR `CSI <`) are dropped while watching; only real input upgrades.
-@MainActor func checksHCReviewReportsWatch() async throws {
+@MainActor func checksHCEdgeReportsWatch() async throws {
     check(TerminalSession.isReportOnly(Array("\u{1b}[I".utf8)) && TerminalSession.isReportOnly(Array("\u{1b}[O\u{1b}[I".utf8))
           && TerminalSession.isReportOnly(Array("\u{1b}[<0;12;5M\u{1b}[<0;12;5m".utf8)) && TerminalSession.isReportOnly([0x1b, 0x5b, 0x4d, 0x20, 0x21, 0x21]),
           "reports: focus and mouse reports are told apart")

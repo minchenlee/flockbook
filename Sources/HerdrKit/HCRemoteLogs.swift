@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Conversations of agents on another machine (`box/t7`, parity item 3): the log is found there with `machine.exec`
+/// Conversations of agents on another machine (`box/t7`): the log is found there with `machine.exec`
 /// (ps, Claude's `<pid>.json`, lsof, Codex rollouts' first lines; the same rules as `SessionResolver`) and mirrored
 /// into a local file by polling `file.read {on, offset}`, so `SessionLog` tails it as any local log. Read-only on the
 /// other machine: nothing is sent to its terminals.

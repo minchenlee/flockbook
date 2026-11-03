@@ -1,10 +1,10 @@
 import Foundation
 @testable import HerdrKit
 
-// Review round 2. FakeHC only.
+// The hc terminal's input: queued keys, descriptors, stamps, credit and failed connects. FakeHC only.
 
 /// A: keys queued during the upgrade go out before any key typed after it. B: queued keys are capped and expire.
-@MainActor func checksHCReview2Keys() async throws {
+@MainActor func checksHCInputKeys() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -73,7 +73,7 @@ import Foundation
 }
 
 /// C: LineSocket never closes a descriptor another thread is still using (its number could go to a new socket).
-@MainActor func checksHCReview2FD() async throws {
+@MainActor func checksHCInputFD() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -98,7 +98,7 @@ import Foundation
 }
 
 /// D: the resolver watches the pid file that actually named the session, also when it belongs to a child of the agent.
-@MainActor func checksHCReview2Stamp() async throws {
+@MainActor func checksHCInputStamp() async throws {
     typealias R = SessionResolver
     let procs = R.parsePS("""
       800     1 Sat Oct 31 10:00:00 2026     -zsh HC_TERMINAL_ID=t1
@@ -127,7 +127,7 @@ import Foundation
 }
 
 /// E: a frame the view finishes after its stream closed sends no CREDIT (the channel is gone or reused).
-@MainActor func checksHCReview2Credit() async throws {
+@MainActor func checksHCInputCredit() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -148,7 +148,7 @@ import Foundation
 
 /// A failed connect closes its descriptor once. (A thrown init still runs deinit, which closed the same number again:
 /// a reconnect loop against a dead path then closed whatever socket another thread had just opened.)
-@MainActor func checksHCReview2FailedConnect() async throws {
+@MainActor func checksHCInputFailedConnect() async throws {
     let stop = Locked(false)
     Thread.detachNewThread {
         while !stop.get() { _ = try? LineSocket(path: NSTemporaryDirectory() + "hk-none-\(getpid()).sock") }

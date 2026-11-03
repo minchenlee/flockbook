@@ -187,7 +187,7 @@ struct HerdrDeskApp: App {
                 step("right-click item carries the checked state", ro.first { $0.kind == .rightClick }?.checked == true && rw.first { $0.kind == .rightClick }?.checked == false)
                 let single = PaneMenu.items(pane: pane, tab: Tab(id: "t", label: "x", number: 1, panes: [pane], status: .idle), zoomed: false, routed: false, writes: true)
                 step("zoom disabled on a single-pane tab", single.first { $0.kind == .zoom }?.enabled == false)
-                // hc (parity item 2): panes of the official app's tabs get the layout entries, no right-click routing
+                // hc: panes of the official app's tabs get the layout entries, no right-click routing
                 // (no hc equivalent); "Other terminals" panes only zoom.
                 let hp = Pane(id: "hc:t1", terminalId: "t1", cwd: "/tmp", agent: nil, backend: .hc)
                 let hcTab = Tab(id: "hc:tab:sp1/tb1", label: "1", number: 1, panes: [hp, hp], status: .idle, backend: .hc)

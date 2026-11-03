@@ -1,10 +1,10 @@
 import Foundation
 @testable import HerdrKit
 
-// Review round 3: the approval/question card path.
+// The approval and question card path on hc.
 
 /// 1: one answer per prompt. A press claims the pane; more presses are ignored until the caller's re-check ends it.
-@MainActor func checksHCReview3InFlight() async throws {
+@MainActor func checksHCCardFlowInFlight() async throws {
     let s = ApprovalSender()
     check(s.begin("hc:t1"), "1: the first press claims the pane")
     check(!s.begin("hc:t1"), "1: a second press (Allow twice, or Allow then Deny) is ignored")
@@ -15,7 +15,7 @@ import Foundation
 }
 
 /// 2: the screen is read again right before the keys; a prompt that is gone gets nothing.
-@MainActor func checksHCReview3Stale() async throws {
+@MainActor func checksHCCardFlowStale() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }
@@ -31,7 +31,7 @@ import Foundation
 }
 
 /// 3: the card answers the pane its text came from: the blocked pane whose screen shows the prompt.
-@MainActor func checksHCReview3CardPane() async throws {
+@MainActor func checksHCCardFlowCardPane() async throws {
     func pane(_ id: String, _ s: AgentStatus, sid: String) -> Pane {
         Pane(id: id, terminalId: id, cwd: "/tmp", agent: Agent(name: id, kind: "claude", status: s, sessionId: sid, title: "", backend: .hc), backend: .hc)
     }
@@ -43,7 +43,7 @@ import Foundation
 }
 
 /// 4: only Claude's approval prompt counts, not a question menu or text that merely contains "Do you want".
-@MainActor func checksHCReview3Marker() async throws {
+@MainActor func checksHCCardFlowMarker() async throws {
     let G = PermissionGate.self
     check(G.screenShowsPrompt(" Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again\n   3. No (esc)"), "4: the approval prompt")
     check(G.screenShowsPrompt("│ Do you want to make this edit to main.swift?\n│ ❯ 1. Yes\n│   2. No, and tell Claude what to do differently (esc)"), "4: edit prompt inside a box")
@@ -64,7 +64,7 @@ import Foundation
 }
 
 /// 5: a slowly typed line whose start expired is dropped whole: never the rest of it plus Enter.
-@MainActor func checksHCReview3PartialKeys() async throws {
+@MainActor func checksHCCardFlowPartialKeys() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
     defer { fake.kill() }

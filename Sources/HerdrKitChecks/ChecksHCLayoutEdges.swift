@@ -1,11 +1,11 @@
 import Foundation
 @testable import HerdrKit
 
-// Review round 4: hc layout writes.
+// hc layout writes: machines, kill scope, partial failures, tab order and the official app's commands.
 
 /// #1: a remote terminal's labels are local to its machine. Its space and tab are machine-qualified (`box/sp1`), and no
 /// layout write touches them until remote layout exists (item 3).
-@MainActor func checksHCReview4Remote() async throws {
+@MainActor func checksHCLayoutRemote() async throws {
     let lab = ["herdr.space": "sp1", "herdr.tab": "tb1"]
     let terms = [FakeHC.terminal("t1", labels: lab, argv: ["zsh"], pid: 11),
                  FakeHC.terminal("box/t3", labels: lab, argv: ["zsh"], pid: 33)]
@@ -55,7 +55,7 @@ import Foundation
 
 /// #2: a remote child's `parent` names a terminal on the child's own machine. Ending local `t3` never ends `host2/t9`
 /// (parent `t3` on host2), and ending `host2/t3` ends it.
-@MainActor func checksHCReview4ParentMachine() async throws {
+@MainActor func checksHCLayoutParentMachine() async throws {
     let lab = ["herdr.space": "sp1", "herdr.tab": "tb1"]
     let terms = [FakeHC.terminal("t3", labels: lab, argv: ["zsh"]),
                  FakeHC.terminal("t5", argv: ["claude"], parent: "t3"),
@@ -80,7 +80,7 @@ import Foundation
 
 /// #3: close ends only the terminals its edit took out of the document tree, as the official app does, and a terminal
 /// labeled with a space but no tab is adopted into a new tab with a fresh `tb…` id (window.rs adopt), never `tab == space`.
-@MainActor func checksHCReview4KillScope() async throws {
+@MainActor func checksHCLayoutKillScope() async throws {
     func j(_ s: String) -> Any { try! JSONSerialization.jsonObject(with: Data(s.utf8)) }
     let lab = ["herdr.space": "sp1", "herdr.tab": "tb1"]
     let terms = [FakeHC.terminal("t1", labels: lab, argv: ["zsh"]),
@@ -157,7 +157,7 @@ private nonisolated func unchangedDoc(_ v: Any?) -> Any { v ?? NSNull() }
 
 /// #4: a create or split whose document write fails ends the terminal it started and throws; a close whose kill fails
 /// says so (the kept, labeled terminal would come back as an unnamed tab).
-@MainActor func checksHCReview4Partial() async throws {
+@MainActor func checksHCLayoutPartial() async throws {
     func j(_ s: String) -> Any { try! JSONSerialization.jsonObject(with: Data(s.utf8)) }
     let lab = ["herdr.space": "sp1", "herdr.tab": "tb1"]
     let fake = FakeHC(path: fakeHCPath())
@@ -198,7 +198,7 @@ private nonisolated func unchangedDoc(_ v: Any?) -> Any { v ?? NSNull() }
 /// #5: Flockbook shows only the tabs with live terminals; the document also holds mod-only and empty tabs. A move by
 /// shown index lands next to the shown neighbour in the document, and an unnamed tab is called by its place in the
 /// document, as the official app does (model.rs tab_name).
-@MainActor func checksHCReview4MoveIndex() async throws {
+@MainActor func checksHCLayoutMoveIndex() async throws {
     func j(_ s: String) -> Any { try! JSONSerialization.jsonObject(with: Data(s.utf8)) }
     func pane(_ t: String) -> String { #"{"id":"r\#(t)","type":"row","children":[{"id":"p\#(t)","type":"block","content":{"terminal":"\#(t)"}}]}"# }
     let doc = j(#"{"spaces":[{"id":"sp1","name":"w","folder":"/w","tabs":[{"id":"tbA","name":"","root":{"id":"rA","type":"block","content":{"mod":"notes"}}},{"id":"tb1","name":"","root":\#(pane("t1"))},{"id":"tbB","name":"","root":\#(pane("t9"))},{"id":"tb2","name":"","root":\#(pane("t2"))},{"id":"tb3","name":"","root":\#(pane("t3"))}]}]}"#)
@@ -238,7 +238,7 @@ private nonisolated func unchangedDoc(_ v: Any?) -> Any { v ?? NSNull() }
 
 /// #6: `herdr-app do` JSON-parses `--k v` values (control.rs parse_args), so a name like "2" would go as a number.
 /// Arguments go as one JSON object, which it takes as is.
-@MainActor func checksHCReview4AppArgs() async throws {
+@MainActor func checksHCLayoutAppArgs() async throws {
     let dir = NSTemporaryDirectory() + "hkapp-\(UUID().uuidString)"
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -268,7 +268,7 @@ private nonisolated func unchangedDoc(_ v: Any?) -> Any { v ?? NSNull() }
 
 /// #7: a pane marked `closable: false` is not closed (window.rs pane.close). While the official app runs, Flockbook
 /// writes nothing behind it: a pane it has no command for (no pane id, or a rename) is refused.
-@MainActor func checksHCReview4AppOnly() async throws {
+@MainActor func checksHCLayoutAppOnly() async throws {
     func j(_ s: String) -> Any { try! JSONSerialization.jsonObject(with: Data(s.utf8)) }
     let lab = ["herdr.space": "sp1", "herdr.tab": "tb1"]
     let fake = FakeHC(path: fakeHCPath())

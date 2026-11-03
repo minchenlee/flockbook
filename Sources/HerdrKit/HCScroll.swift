@@ -8,7 +8,7 @@ public protocol ScrollSource: Sendable {
 
 extension HerdrClient: ScrollSource {}
 
-/// Terminal history on hc (parity item 4). hc keeps no scroll position: `terminal.read {lines}` returns the last `lines`
+/// Terminal history on hc. hc keeps no scroll position: `terminal.read {lines}` returns the last `lines`
 /// lines above the screen plus the screen, as plain text (LF, trailing blank rows dropped); `how` is `screen` when there
 /// was nothing above it. Read-only: nothing is sent to the terminal.
 extension HCClient: ScrollSource {

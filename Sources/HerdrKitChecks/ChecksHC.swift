@@ -174,7 +174,7 @@ func fakeHCPath() -> String { NSTemporaryDirectory() + "fhc-\(UInt32.random(in: 
     check(snap.count == 4 && snap[0].label == "Repo X", "HCClient.snapshot maps the live list")
     check(fake.calls.contains { $0.method == "doc.get" && $0.params["name"] as? String == "herdr-app" }, "reads the herdr-app document")
     check(!fake.calls.contains { ["doc.set", "terminal.label", "terminal.kill", "terminal.rm", "terminal.run"].contains($0.method) }, "never writes")
-    check(client.backend == .hc && client.supportsLayout, "hc backend has layout actions (parity item 2)")
+    check(client.backend == .hc && client.supportsLayout, "hc backend has layout actions")
     let counter = EventCounter()
     let evTask = Task.detached { do { for try await _ in client.events() { await counter.bump() } } catch { await counter.fail("\(error)") } }
     defer { evTask.cancel() }

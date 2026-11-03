@@ -90,7 +90,7 @@ import Foundation
     exit(bad == 0 ? 0 : 1)
 }
 
-/// `--hc-layout-live <isolated sock>`: parity item 2 against a real core. Every terminal it starts it also ends.
+/// `--hc-layout-live <isolated sock>`: layout writes against a real core. Every terminal it starts it also ends.
 @MainActor func modeHCLayoutLive() async throws {
     guard let i = CommandLine.arguments.firstIndex(of: "--hc-layout-live"), CommandLine.arguments.indices.contains(i + 1) else { return }
     let sock = CommandLine.arguments[i + 1]
