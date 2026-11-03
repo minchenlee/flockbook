@@ -60,12 +60,12 @@ import Foundation
 @MainActor func checksAgyResolver() async throws {
     typealias R = SessionResolver
     let root = NSTemporaryDirectory() + "agy-\(UUID().uuidString)"
-    let id = "869e05de-dfbe-46df-be0f-832f29cb9fac", id2 = "d981a68a-038b-4745-aea1-6f1672dfbb1f"
+    let id = "00000000-0000-4000-8000-000000000001", id2 = "00000000-0000-4000-8000-000000000002"
     let logs = "\(root)/brain/\(id)/.system_generated/logs"
     try? FileManager.default.createDirectory(atPath: logs, withIntermediateDirectories: true)
     FileManager.default.createFile(atPath: logs + "/transcript_full.jsonl", contents: Data())
     let lock = "\(root)/presence/\(id).lock", lock2 = "\(root)/presence/\(id2).lock"
-    let open = ["\(root)/log/cli-20261101_005021.log", "\(root)/settings.json", "\(root)/brain/\(id)", lock]
+    let open = ["\(root)/log/cli-20260101_000000.log", "\(root)/settings.json", "\(root)/brain/\(id)", lock]
     check(R.agyLogPath(openFiles: open, dataDir: root) == logs + "/transcript_full.jsonl", "agy: open presence lock names the transcript")
     check(R.agyLogPath(openFiles: open + [lock2], dataDir: root) == nil, "agy: two locks: no guess")
     check(R.agyLogPath(openFiles: [lock2], dataDir: root) == nil, "agy: no transcript yet: nil")
@@ -73,8 +73,8 @@ import Foundation
     check(R.agyLogPath(openFiles: ["\(root)/presence/../x.lock", "\(root)/presence/not-a-uuid.lock"], dataDir: root) == nil, "agy: odd lock names ignored")
     try? FileManager.default.removeItem(atPath: root)
     let procs = R.parsePS("""
-      10     1 Sun Nov  1 00:50:00 2026     -zsh TERM=x
-      11    10 Sun Nov  1 00:50:20 2026     agy TERM=x
+      10     1 Thu Jan  1 00:00:00 2026     -zsh TERM=x
+      11    10 Thu Jan  1 00:00:20 2026     agy TERM=x
     """)
     check(R.hcAgentProcess(pids: [10], kind: "agy", procs: procs)?.pid == 11, "agy: hc finds the agy process under the shell")
     // /new or /resume inside the same agy process switches the lock; a recheck follows it.
@@ -179,7 +179,7 @@ esc to cancel                                                     accept-edits Â
 // ask_question: in the log as a call, answered by its GENERIC ("A1: Blue" / "A1: User Skipped"); picked by digit (live).
 @MainActor func checksAgyQuestions() async throws {
     func step(_ i: Int, _ type: String, _ extra: String) -> String {
-        #"{"step_index":\#(i),"source":"\#(type == "USER_INPUT" ? "USER_EXPLICIT" : "MODEL")","type":"\#(type)","status":"DONE","created_at":"2026-11-02T01:36:2\#(i)Z",\#(extra)}"#
+        #"{"step_index":\#(i),"source":"\#(type == "USER_INPUT" ? "USER_EXPLICIT" : "MODEL")","type":"\#(type)","status":"DONE","created_at":"2026-11-02T02:00:2\#(i)Z",\#(extra)}"#
     }
     let ask = step(5, "PLANNER_RESPONSE", #""tool_calls":[{"name":"ask_question","args":{"questions":[{"is_multi_select":false,"options":["Red","Blue"],"question":"Which color do you prefer, red or blue?"}]}}]"#)
     let head = [step(4, "USER_INPUT", #""content":"<USER_REQUEST>\nAsk me.\n</USER_REQUEST>""#), ask]
