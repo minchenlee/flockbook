@@ -35,7 +35,9 @@ public struct Agent: Sendable, Hashable {
     /// hc only: what a `blocked` agent waits for, as the program said (`permission`, `question`, `auth`), or `error`
     /// for a program that reported 7501 `error` (status shows `done`; `title` reads "error: <msg>"). Nil otherwise.
     public var statusKind: String?
-    /// hc only: the program in the terminal (foreground pid, else the terminal's pid, plus the terminal's start time).
+    /// hc only: the agent's process in the terminal (`HCMapper.process`): its pid plus the terminal's creation time
+    /// (`created_ms`, 0 when hc gives none). The creation time is the terminal's, not the program's, so it does not
+    /// guard against a pid reused inside one terminal; hc gives no process start time.
     /// A paired device's key gate binds to it: hc gives no session id, the store finds it in the log. Nil otherwise.
     public var process: String?
     public init(name: String, kind: String, status: AgentStatus, sessionId: String?, title: String,

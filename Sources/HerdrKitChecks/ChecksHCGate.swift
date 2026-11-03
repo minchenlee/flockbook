@@ -2,7 +2,7 @@ import Foundation
 import HerdrKit
 
 /// A paired device's key gate on hc panes. hc gives no session id; the store finds it in the agent's log, so the
-/// gate binds to the program in the terminal instead (foreground pid, else the terminal's pid, plus its start time).
+/// gate binds to the agent's process in the terminal instead (its pid plus the terminal's creation time).
 @MainActor func checksHCGate() async throws {
     let fake = FakeHC(path: fakeHCPath())
     try fake.start()
