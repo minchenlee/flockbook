@@ -83,6 +83,11 @@ test("a blank box sends nothing; a failed send puts the text back with the reaso
   b.input.set_value("again"); await c.submit(cx);
   assert.equal(b.input.value(), "again");
   assert.match(textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note")), /Another agent is in this pane now/);
+  // An agent Flockbook cannot tell apart: not sent, the text comes back, the sidecar's reason as it is.
+  fake.sendResult = "no-identity"; fake.sendMessage = "Flockbook cannot tell this agent from another program in this terminal, so it sends nothing. Use the terminal.";
+  b.input.set_value("third"); await c.submit(cx);
+  assert.equal(b.input.value(), "third");
+  assert.match(textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note")), /cannot tell this agent/);
 });
 
 test("each agent keeps its own draft", () => {

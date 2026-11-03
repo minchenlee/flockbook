@@ -233,6 +233,7 @@ A running tool is not an approval.
 | `sent` | The keys or the text went out. | Clears the card or the composer. |
 | `changed` | Another card, or none, is on screen now. Nothing was sent. | Reads `card` again. |
 | `unconfirmed` | herdr-core did not answer in time. The text or the key may still arrive. | Keeps the composer empty (a retry could send it twice) and says so; an approval shows as `answered`. |
+| `no-identity` | Flockbook cannot tell the agent from another program in that terminal (hc: no process, for example under a wrapper script). Nothing was sent; a retry does not help. | Keeps the text or the card, shows `message`. |
 | `answered` | `approve` only: this prompt was answered less than 60 s ago and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
 

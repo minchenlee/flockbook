@@ -236,3 +236,14 @@ test("an approval already answered and still on screen: buttons off, 1 and 2 do 
   assert.equal(acts.length, 1, "no second approve");
   fake.message = undefined; fake.result = undefined;
 });
+
+test("an agent Flockbook cannot tell apart: the card shows the sidecar's reason, not 'another agent'", async () => {
+  const cx = fakeCx(); const c = new Cards();
+  await c.poll(cx, "t1", true);
+  fake.result = "no-identity"; fake.message = "Flockbook cannot tell this agent from another program in this terminal, so it sends nothing. Use the terminal.";
+  byId(c.view("t1", T), "card-allow")._h.on_click({}, cx); await cx.settle();
+  const note = textOf(byId(c.view("t1", T), "card-note"));
+  assert.match(note, /cannot tell this agent/);
+  assert.doesNotMatch(note, /Another agent/);
+  fake.result = undefined; fake.message = undefined;
+});

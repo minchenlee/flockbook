@@ -27,6 +27,10 @@ public enum FeedCards {
     /// and session, or for hc the same program), and the picker the expected question. No agent: fail closed.
     static func gate(_ pane: Pane) -> KeyGate { KeyGate(agent: pane.agent, allowed: { pane.agent != nil }) }
     static let agentChanged = Done(result: "changed", message: "another agent is in this pane now; nothing was sent")
+    static let noIdentity = Done(result: "no-identity", message: "Flockbook cannot tell this agent from another program in this terminal, so it sends nothing. Use the terminal.")
+    /// Why the gate said no: the agent changed, or it has no identity to check (hc: no process; TUI: no session id),
+    /// which no retry fixes.
+    static func refused(_ pane: Pane) -> Done { pane.agent.map(KeyGate.hasIdentity) == true ? agentChanged : noIdentity }
     static let alreadyAnswered = Done(result: "answered", message: "this approval was already answered; waiting for the agent to move on")
 
     enum Current {
@@ -85,7 +89,8 @@ public enum FeedCards {
     public struct Done: Encodable, Sendable, Equatable {
         public var type = "done"
         /// "sent"; "unconfirmed" (no answer in time: the text or key may still arrive); "changed" (another card, or
-        /// none, is on screen now: nothing sent); "answered" (approve: this prompt was answered already, nothing
+        /// none, is on screen now, or another agent: nothing sent); "no-identity" (the agent cannot be told apart
+        /// from another program: nothing sent, and a retry does not help); "answered" (approve: this prompt was answered already, nothing
         /// sent); "failed".
         public var result: String
         public var message: String?
@@ -96,7 +101,7 @@ public enum FeedCards {
               case .approval(let id, _, _, _, let pending)? = await current(pane: pane, screen: screen, log: log), id == request else {
             return Done(result: "changed", message: "the approval on screen is not the one shown")
         }
-        guard await screen.passes(gate(pane), paneId: pane.id) else { return agentChanged }
+        guard await screen.passes(gate(pane), paneId: pane.id) else { return refused(pane) }
         // One answer per prompt, across runs and views: claimed before the key; kept when the key went out or may
         // still land (hc held it); given back when nothing went out.
         let answered = FeedAnswered(cache: cache)
@@ -147,7 +152,7 @@ public enum FeedCards {
             try await screen.answerQuestion(paneId: pane.id, request: q, answers: answers, gate: gate(pane))
             return Done(result: "sent")
         } catch is KeyGateStop {
-            return agentChanged
+            return refused(pane)
         } catch QuestionAdapter.Failure.notOnScreen {
             return Done(result: "changed", message: "the question is not on screen")
         } catch {
@@ -157,7 +162,7 @@ public enum FeedCards {
 
     /// The composer: the text, with each file in `files` named in it (`HCClient.deliver`).
     public static func send(pane: Pane, client: HCClient, text: String, files: [String]) async -> Done {
-        guard await client.passes(gate(pane), paneId: pane.id) else { return agentChanged }
+        guard await client.passes(gate(pane), paneId: pane.id) else { return refused(pane) }
         let r = files.isEmpty ? await client.deliver(text: text, to: pane.id) : await client.deliver(text: text, to: pane.id, files: files)
         switch r {
         case .sent: return Done(result: "sent")

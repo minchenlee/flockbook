@@ -133,4 +133,23 @@ func checksModFeedReview() async throws {
     let left = Set((try? FileManager.default.contentsOfDirectory(atPath: pastes.path)) ?? [])
     check(!left.contains(mine.lastPathComponent) && left.contains("holiday.png") && left.contains("paste-notes.png"),
           "review1 #4: an old paste goes; other PNGs stay (\(left.sorted()))")
+
+    // 5. An agent Flockbook cannot tell apart (hc: no process, e.g. under a wrapper script): still nothing sent, and
+    // the reason says so, not "another agent".
+    fake.terminals = [FakeHC.terminal("t4", pid: nil, status: "blocked", kind: "permission")]
+    let p4 = FeedLocate.pane(try await hc.snapshot(), terminal: "t4")!
+    check(p4.agent != nil && p4.agent?.process == nil, "review1 #5: the fixture has an agent without a process")
+    fake.setScreen("t4", claudeBox("rm -rf build"))
+    func sends() -> Int { fake.calls.filter { $0.method == "terminal.send" }.count }
+    let k5 = keys().count, s5 = sends()
+    let r4 = await FeedCards.card(pane: p4, screen: hc, log: nil).request ?? "x"
+    let na = await FeedCards.approve(pane: p4, screen: hc, log: nil, request: r4, allow: true)
+    let ns = await FeedCards.send(pane: p4, client: hc, text: "hi", files: [])
+    let nq = await FeedCards.answer(pane: p4, screen: hc, log: nil, request: r4, answers: [QuestionAnswer(picks: [0])])
+    check(keys().count == k5 && sends() == s5, "review1 #5: no identity, nothing sent")
+    for (what, d) in [("approve", na), ("send", ns)] {
+        check(d.result == "no-identity" && d.message?.contains("cannot tell") == true && d.message?.contains("another agent") != true,
+              "review1 #5: \(what) says it cannot tell the agent apart (\(d))")
+    }
+    check(nq.result == "changed" || nq.result == "no-identity", "review1 #5: answer on an approval is refused (\(nq))")
 }

@@ -150,7 +150,8 @@ export class Composer {
       const r = await sidecar.send(a, withFiles(text, files), files);
       const done = r.lines.find((l) => l.type === "done");
       const moved = sidecar.agentChanged(done);
-      if (r.error || !done || done.result === "failed" || moved) {
+      // Only "sent" and "unconfirmed" (it may still arrive) mean the text went out; any other result did not send.
+      if (r.error || !done || (done.result !== "sent" && done.result !== "unconfirmed")) {
         // Put the text back, unless the box moved to another agent or something new was typed.
         if (this.address === a && !b.input.value()) { b.input.set_value(text); b.files = files; }
         else if (this.address !== a) this.drafts.set(a, { text, files });

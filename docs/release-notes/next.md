@@ -40,3 +40,4 @@ One short line: what this release is about.
 - Security: Herdr app mod approvals go out once per prompt, across views and windows. A second press while the prompt is still drawn sends nothing (the card says "Answer sent"), and a key herdr-core held past the timeout is reported as "may still arrive", not as failed.
 - Fix: Herdr app mod chat no longer flips back to an old log every 30 seconds after Claude goes on in a new log; approvals and questions from the new log no longer go missing then.
 - Fix: the Herdr app mod sidecar's `paste-image` cleans up only its own old pastes; other PNG files in the folder are never removed.
+- Fix: Herdr app mod says "cannot tell this agent from another program" (not "another agent is in this pane") when an agent has no process or session id to check, and the composer keeps the text for every reply that did not send.
