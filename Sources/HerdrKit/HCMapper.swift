@@ -30,6 +30,7 @@ public enum HCMapper {
         var status: String?
         var statusKind: String?
         var statusMsg: String
+        var statusApp: String?
         var fgName: String?
         var fgArgv: [String]
         var fgCwd: String?
@@ -51,6 +52,7 @@ public enum HCMapper {
             status = st?["state"] as? String
             statusKind = st?["kind"] as? String
             statusMsg = st?["msg"] as? String ?? ""
+            statusApp = st?["app"] as? String
             let fg = o["foreground"] as? [String: Any]
             fgName = fg?["name"] as? String
             fgArgv = fg?["argv"] as? [String] ?? []
@@ -64,14 +66,15 @@ public enum HCMapper {
     static let knownKinds: [String: String] = [
         "claude": "claude", "codex": "codex", "pi": "pi", "cursor-agent": "cursor", "cursor": "cursor",
         "gemini": "gemini", "opencode": "opencode", "amp": "amp", "grok": "grok",
+        "agy": "agy", "antigravity": "agy",   // agy's 7501 `app` (what `hc ls` prints as agent) is "antigravity"
     ]
     static let wrappers: Set<String> = ["node", "bun", "deno", "python", "python3", "env", "npx", "bunx"]
 
     /// Agent kind from the foreground process (what runs now), then the start argv. Interpreters (`node …/codex`)
-    /// are looked through: their first non-flag argument names the program.
+    /// are looked through: their first non-flag argument names the program. Last, the `app` name of the 7501 report.
     static func kind(_ t: Term) -> String? {
         for argv in [[t.fgName ?? ""] + t.fgArgv, t.argv] { if let k = kind(argv: argv) { return k } }
-        return nil
+        return t.statusApp.flatMap { knownKinds[$0] }   // the program's own 7501 name, when the processes say nothing
     }
 
     /// The agent kind one command line names, if any.

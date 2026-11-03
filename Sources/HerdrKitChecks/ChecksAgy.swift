@@ -58,3 +58,15 @@ import Foundation
     check(R.hcAgentProcess(pids: [10], kind: "agy", procs: procs)?.pid == 11, "agy: hc finds the agy process under the shell")
 }
 
+
+// Kind on hc: the foreground program is `agy`; 7501's `app` (what `hc ls` prints as agent) is `antigravity`.
+@MainActor func checksAgyKind() async throws {
+    func kind(_ o: [String: Any]) -> String? { var d = o; d["address"] = "t1"; return HCMapper.Term(d).flatMap(HCMapper.kind) }
+    check(kind(["argv": ["/bin/zsh", "-l"], "foreground": ["name": "agy", "argv": ["agy"]]]) == "agy", "agy: foreground agy")
+    check(kind(["argv": ["antigravity"]]) == "agy", "agy: antigravity name maps to agy")
+    check(kind(["argv": ["/bin/zsh", "-l"], "foreground": ["name": "zsh", "argv": ["zsh"]], "status": ["state": "done", "app": "antigravity"]]) == "agy",
+          "agy: 7501 app names the kind when the foreground does not")
+    check(kind(["argv": ["/bin/zsh", "-l"], "foreground": ["name": "zsh", "argv": ["zsh"]], "status": ["state": "done", "app": "zsh"]]) == nil,
+          "agy: unknown 7501 app is no kind")
+}
+
