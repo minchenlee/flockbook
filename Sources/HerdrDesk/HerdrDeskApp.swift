@@ -63,10 +63,9 @@ struct HerdrDeskApp: App {
             store = .preview
         } else {
             let env = ProcessInfo.processInfo.environment
-            // herdr-core too, unless `--no-hc`. Headless runs follow hc only with an explicit `--hc-socket` (an isolated test
-            // core), or for `--snapshot-live`, which reads the real sessions (snapshots and logs only, never input).
-            let liveRead = args.contains("--snapshot-live")
-            let wantHC = !args.contains("--no-hc") && (!headless || args.contains("--hc-socket") || liveRead)
+            // herdr-core too, unless `--no-hc`. Headless runs (`--snapshot-live` too) follow hc only with an explicit
+            // `--hc-socket` (`HCSession.wanted`).
+            let wantHC = HCSession.wanted(arguments: args, headless: headless)
             // Launch flags (--session, --remote) win; otherwise the machine chosen in Settings > General (read once: a new
             // choice there relaunches the app, as the store, the phone server and notifications all hang on this session).
             store = HerdrStore(session: RemoteMachines.launchSession(arguments: args, environment: env, defaults: AppDefaults.store),
@@ -74,8 +73,8 @@ struct HerdrDeskApp: App {
             // The Claude hook and status line act on the machine Claude Code runs on: the host, for a remote session.
             ClaudeHookSetup.launchRemote = store.session.remote
             // Headless checks on the default session never read this store (the scene shows no RootView): no polling of
-            // the owner's session. Live checks pass a named session and use it.
-            if !headless || store.session.name != nil || liveRead { store.start() }
+            // the owner's session. Live checks pass a named session or an explicit `--hc-socket` and use it.
+            if !headless || store.session.name != nil || store.hcClient != nil { store.start() }
         }
         if let i = args.firstIndex(of: "--snapshot"), args.indices.contains(i + 1) {
             let dir = args[i + 1]

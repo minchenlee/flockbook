@@ -32,6 +32,16 @@ import Foundation
     check(hc.composerRemote(host) == nil, "hc composer: an hc pane never uploads to the TUI's host")
 }
 
+/// `--snapshot-live` and other headless runs follow hc only with an explicit `--hc-socket`: no headless run reads
+/// the user's default herdr-core (and its machines) on its own.
+@MainActor func checksHCWanted() {
+    check(HCSession.wanted(arguments: ["app"], headless: false), "hc wanted: a normal launch follows hc")
+    check(!HCSession.wanted(arguments: ["app", "--no-hc"], headless: false), "hc wanted: --no-hc")
+    check(!HCSession.wanted(arguments: ["app", "--snapshot-live"], headless: true), "hc wanted: --snapshot-live alone does not read the default hc")
+    check(HCSession.wanted(arguments: ["app", "--snapshot-live", "--hc-socket", "/tmp/x.sock"], headless: true), "hc wanted: an explicit --hc-socket")
+    check(!HCSession.wanted(arguments: ["app", "--test-chrome"], headless: true), "hc wanted: other headless runs without --hc-socket")
+}
+
 /// One answer per prompt across the card, the notification buttons and the hub (`ApprovalSender.answer`). On hc a
 /// `terminal.keys` past its timeout may still land: the pane stays in flight until the prompt leaves the screen.
 @MainActor func checksHCAnswerOnce() async throws {

@@ -17,6 +17,12 @@ public struct HCSession: Sendable, Hashable {
         return resolve(environment: env)
     }
 
+    /// Whether a launch follows herdr-core: yes unless `--no-hc`. A headless run (checks, snapshots, `--snapshot-live`
+    /// too) only with an explicit `--hc-socket`: none reads the user's default hc, and its machines, on its own.
+    public static func wanted(arguments args: [String], headless: Bool) -> Bool {
+        !args.contains("--no-hc") && (!headless || args.contains("--hc-socket"))
+    }
+
     public static func resolve(environment env: [String: String] = ProcessInfo.processInfo.environment,
                                arguments: [String] = []) -> HCSession {
         if let i = arguments.firstIndex(of: "--hc-socket"), arguments.indices.contains(i + 1) { return HCSession(socketPath: arguments[i + 1]) }
