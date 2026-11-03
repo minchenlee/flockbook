@@ -3,6 +3,7 @@
 // TextView markdown. Heights stay as estimate.js guesses them (same line heights).
 import { div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
+import { cellWidth } from "./estimate.js";
 
 const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)\s*$/;
 const SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
@@ -69,27 +70,31 @@ function codeBox(b, t) {
     .children(lines.map((l) => div().min_h(19).child(keepIndent(l) || " ")));
 }
 
-function table(id, b, t) {
+// Cells get a fixed width: a TextView in a flexible cell keeps its full one-line width and spills
+// out of the table. estimate.js guesses the row heights from the same cellWidth.
+function table(id, b, t, width) {
   const n = Math.max(b.head.length, ...b.rows.map((r) => r.length));
-  const cell = (key, text, c, head) => h_flex().flex_1().min_w(0).px(12).py(8)
-    .when(b.align[c] === "right", (el) => el.justify_end()).when(b.align[c] === "center", (el) => el.justify_center())
+  const cw = cellWidth(width, n);
+  const cell = (key, text, c, head) => div().w(cw).flex_none().overflow_hidden().px(12).py(8)
+    .when(b.align[c] === "right", (el) => el.text_right()).when(b.align[c] === "center", (el) => el.text_center())
     .when(head, (el) => el.font_semibold())
     .child(TextView.markdown(key, text ?? "").selectable(true));
   const row = (cells, r, head) => h_flex().w_full().items_start()
     .when(head, (el) => el.bg(t.raised).rounded_t(11))
     .when(!head, (el) => el.border_t(1).border_color(t.border))
     .children(Array.from({ length: n }, (_v, c) => cell(`${id}-c${r}-${c}`, cells[c], c, head)));
-  return v_flex().w_full().my(6).rounded(12).border(1).border_color(t.border).text_size(13.5)
+  return v_flex().w_full().my(6).rounded(12).border(1).border_color(t.border).text_size(13.5).overflow_hidden()
     .child(row(b.head, "h", true))
     .children(b.rows.map((r, i) => row(r, i, false)));
 }
 
-// The whole text: one element. `id` keeps the TextView ids unique per row.
-export function markdownView(id, text, t) {
+// The whole text: one element. `id` keeps the TextView ids unique per row; `width` is the text's
+// width in px (tables need it).
+export function markdownView(id, text, t, width) {
   const blocks = splitBlocks(text);
   if (blocks.length === 1 && blocks[0].k === "md") return TextView.markdown(`md-${id}`, blocks[0].text).selectable(true);
   return v_flex().w_full().children(blocks.map((b, i) =>
     b.k === "code" ? codeBox(b, t)
-      : b.k === "table" ? table(`md-${id}-t${i}`, b, t)
+      : b.k === "table" ? table(`md-${id}-t${i}`, b, t, width)
         : TextView.markdown(`md-${id}-${i}`, b.text).selectable(true)));
 }

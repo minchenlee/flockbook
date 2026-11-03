@@ -18,16 +18,27 @@ export function wrapLines(text, width, fs = 14) {
 
 export function markdownHeight(text, width) {
   const LH = 22, CODE_LH = 19;
-  let h = 0, inCode = false, prevBlank = true;
+  let h = 0, inCode = false, prevBlank = true, inTable = false, tableCols = 1;
   for (const raw of String(text).split("\n")) {
     const line = raw.replace(/\t/g, "    ");
     if (/^\s*```/.test(line)) { h += inCode ? 16 : 34; inCode = !inCode; continue; }
     if (inCode) { h += CODE_LH * Math.max(1, wrapLines(line, width - 24, 13)); continue; }
-    if (!line.trim()) { if (!prevBlank) h += 10; prevBlank = true; continue; }
+    if (!line.trim()) { if (!prevBlank) h += 10; prevBlank = true; inTable = false; continue; }
     prevBlank = false;
     let m;
     if ((m = /^(#{1,6})\s/.exec(line))) { const size = [26, 22, 19, 17, 15, 14][m[1].length - 1]; h += wrapLines(line, width, size) * size * 1.4 + 12; continue; }
-    if (/^\s*\|/.test(line)) { if (!/^\s*\|[\s:|-]+\|?\s*$/.test(line)) h += 38; continue; }
+    if (/^\s*\|/.test(line)) {
+      // mdblocks.js draws tables with fixed-width cells (cellWidth), 8 px padding top and bottom, 1 px
+      // lines; a row is as tall as its longest cell. The frame adds 6 px above and below.
+      if (!inTable) { h += 14; inTable = true; tableCols = line.split("|").length - 2 || 1; }
+      if (!/^\s*\|[\s:|-]+\|?\s*$/.test(line)) {
+        const cw = cellWidth(width, tableCols) - 24;
+        const most = Math.max(1, ...line.split("|").slice(1, -1).map((c) => wrapLines(c.trim(), cw, 13.5)));
+        h += 17 + most * 21;
+      }
+      continue;
+    }
+    inTable = false;
     if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) { h += wrapLines(line, width - 24 - m[1].length * 8) * LH + 6; continue; }
     if (/^>\s?/.test(line)) { h += wrapLines(line, width - 24) * LH; continue; }
     h += wrapLines(line, width) * LH;
@@ -35,6 +46,9 @@ export function markdownHeight(text, width) {
   if (inCode) h += 16;
   return Math.ceil(h * 1.08);
 }
+
+// A table cell's width: the column split evenly (the table's 1 px frame left and right taken off).
+export const cellWidth = (width, n) => Math.max(40, Math.floor((width - 2) / Math.max(1, n)));
 
 export const columnWidth = (paneWidth) => Math.max(240, Math.min(READ_W, (paneWidth || 800) - GUTTER * 2));
 

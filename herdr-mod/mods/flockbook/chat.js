@@ -133,12 +133,12 @@ export class ChatView {
 
   // A row's content, without the list's fixed height. No handlers: list rows cannot have any.
   body(row, t) {
-    const md = (text) => markdownView(row.id, text || "", t);
+    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w);
     switch (row.k) {
       case "user":
         return h_flex().w_full().justify_end().py(8)
           .child(v_flex().max_w(Math.floor(this.colWidth() * 0.78)).px(14).py(10).gap(4).rounded(16).bg(t.raised).text_color(t.foreground)
-            .child(md(row.text))
+            .child(md(row.text, Math.floor(this.colWidth() * 0.78) - 28))
             .when(Boolean(row.images), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(row.images === 1 ? "1 image" : `${row.images} images`))));
       case "assistant":
         return div().w_full().py(8).text_color(t.foreground).child(md(row.text));
