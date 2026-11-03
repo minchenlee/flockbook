@@ -301,6 +301,10 @@ public actor SessionResolver {
         }
         let tree = Self.subtree(agent.pid, procs: procs)
         let open = Self.openFiles(pids: tree)
+        if n.kind == "agy" {   // agy keeps no log open: its presence lock names the conversation
+            guard let p = Self.agyLogPath(openFiles: open), !Self.isClaimed(p, claimed) else { return (nil, nil) }
+            return (p, nil)
+        }
         let grok = n.kind == "grok" ? Self.grokHome(agent.line) : nil
         if let p = Self.logPath(openFiles: open, kind: n.kind, grokHome: grok), !Self.isClaimed(p, claimed) { return (p, nil) }
         if let grok {   // Grok Build lists its running sessions with their pids
@@ -454,6 +458,21 @@ public actor SessionResolver {
             }
         })
         return hits.count == 1 ? hits.first : nil
+    }
+
+    /// agy holds `<dataDir>/presence/<conversation id>.lock` open while a conversation is active (none before the first
+    /// prompt). Exactly one such lock, and its `brain/<id>/.system_generated/logs/transcript_full.jsonl` exists: that path.
+    public static func agyLogPath(openFiles: [String],
+                                  dataDir: String = NSHomeDirectory() + "/.gemini/antigravity-cli") -> String? {
+        let dir = dataDir + "/presence/"
+        let ids = Set(openFiles.compactMap { p -> String? in
+            guard p.hasPrefix(dir), p.hasSuffix(".lock") else { return nil }
+            let id = String(p.dropFirst(dir.count).dropLast(5))
+            return UUID(uuidString: id) != nil ? id.lowercased() : nil
+        })
+        guard ids.count == 1, let id = ids.first else { return nil }
+        let path = "\(dataDir)/brain/\(id)/.system_generated/logs/transcript_full.jsonl"
+        return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
     /// A path counts as claimed when it, or its session id (the file name ends in `<id>.jsonl`), is in `claimed`.

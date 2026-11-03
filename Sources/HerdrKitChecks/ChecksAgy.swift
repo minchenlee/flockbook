@@ -34,3 +34,27 @@ import Foundation
     let tagged = #"{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-02T02:00:00Z","content":"<USER_SETTINGS_CHANGE>x</USER_SETTINGS_CHANGE>"}"#
     check(describe(SessionLog.parse(lines: [plain, tagged])) == ["user:hi"], "agy: plain prompt kept, tagged-only dropped")
 }
+
+// Log from the process: agy holds `presence/<conversation id>.lock` open; the transcript sits under `brain/<id>`.
+@MainActor func checksAgyResolver() async throws {
+    typealias R = SessionResolver
+    let root = NSTemporaryDirectory() + "agy-\(UUID().uuidString)"
+    let id = "869e05de-dfbe-46df-be0f-832f29cb9fac", id2 = "d981a68a-038b-4745-aea1-6f1672dfbb1f"
+    let logs = "\(root)/brain/\(id)/.system_generated/logs"
+    try? FileManager.default.createDirectory(atPath: logs, withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: logs + "/transcript_full.jsonl", contents: Data())
+    let lock = "\(root)/presence/\(id).lock", lock2 = "\(root)/presence/\(id2).lock"
+    let open = ["\(root)/log/cli-20261101_005021.log", "\(root)/settings.json", "\(root)/brain/\(id)", lock]
+    check(R.agyLogPath(openFiles: open, dataDir: root) == logs + "/transcript_full.jsonl", "agy: open presence lock names the transcript")
+    check(R.agyLogPath(openFiles: open + [lock2], dataDir: root) == nil, "agy: two locks: no guess")
+    check(R.agyLogPath(openFiles: [lock2], dataDir: root) == nil, "agy: no transcript yet: nil")
+    check(R.agyLogPath(openFiles: Array(open.dropLast()), dataDir: root) == nil, "agy: no lock (no conversation yet): nil")
+    check(R.agyLogPath(openFiles: ["\(root)/presence/../x.lock", "\(root)/presence/not-a-uuid.lock"], dataDir: root) == nil, "agy: odd lock names ignored")
+    try? FileManager.default.removeItem(atPath: root)
+    let procs = R.parsePS("""
+      10     1 Sun Nov  1 00:50:00 2026     -zsh TERM=x
+      11    10 Sun Nov  1 00:50:20 2026     agy TERM=x
+    """)
+    check(R.hcAgentProcess(pids: [10], kind: "agy", procs: procs)?.pid == 11, "agy: hc finds the agy process under the shell")
+}
+
