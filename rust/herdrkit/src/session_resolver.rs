@@ -154,22 +154,30 @@ fn read_prefix(path: &str, n: usize) -> Option<Vec<u8>> {
 }
 
 #[cfg(unix)]
-fn file_number(m: &std::fs::Metadata) -> u64 {
+fn file_number(_path: &str, m: &std::fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     m.ino()
 }
 
-/// Windows: std has no stable file index (only behind an unstable feature), so the file's last write time stands in.
-/// A log replaced by another file then counts as another file, and so does a log that was written to: its verdict is
-/// judged again (reading its head once more), never kept for a file it may not be.
-// TODO(windows): use the real file index (GetFileInformationByHandle) to keep verdicts across appends.
-#[cfg(not(unix))]
-fn file_number(m: &std::fs::Metadata) -> u64 {
-    m.modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
+/// Windows: the volume serial and file index (`GetFileInformationByHandle`), as the inode on Unix. 0 when it cannot
+/// be read: then a replaced log keeps its verdict until it shrinks.
+#[cfg(windows)]
+fn file_number(path: &str, _m: &std::fs::Metadata) -> u64 {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+    let Ok(f) = std::fs::File::open(path) else { return 0 };
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: a valid open handle and a zeroed out-struct of the right type.
+    if unsafe { GetFileInformationByHandle(f.as_raw_handle() as _, &mut info) } == 0 {
+        return 0;
+    }
+    let index = (info.nFileIndexHigh as u64) << 32 | info.nFileIndexLow as u64;
+    index ^ ((info.dwVolumeSerialNumber as u64) << 48)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_number(_path: &str, _m: &std::fs::Metadata) -> u64 {
+    0
 }
 
 impl SessionResolver {
@@ -254,7 +262,7 @@ impl SessionResolver {
     /// (file number) while it does not shrink.
     fn judge(&mut self, path: &str) -> Option<bool> {
         let m = std::fs::symlink_metadata(path).ok()?;
-        let (file, size) = (file_number(&m), m.len());
+        let (file, size) = (file_number(path, &m), m.len());
         if let Some(v) = self.verdicts.get_mut(path) {
             if v.file == file && size >= v.size && (v.fin || size == v.size) {
                 v.size = size;
