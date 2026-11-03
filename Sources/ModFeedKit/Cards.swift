@@ -24,6 +24,7 @@ public enum FeedCards {
     /// As the hub gates a paired device's keys: before each key the pane must still show the agent read now (same kind
     /// and session, or for hc the same program), and the picker the expected question. No agent: fail closed.
     static func gate(_ pane: Pane) -> KeyGate { KeyGate(agent: pane.agent, allowed: { pane.agent != nil }) }
+    static let agentChanged = Done(result: "changed", message: "another agent is in this pane now; nothing was sent")
 
     enum Current {
         case approval(id: String, title: String, command: String, tool: String)
@@ -94,6 +95,8 @@ public enum FeedCards {
         guard case .approval(let id, _, _, _)? = await current(pane: pane, screen: screen, log: log), id == request else {
             return Done(result: "changed", message: "the approval on screen is not the one shown")
         }
+        // The agent first, then answerPrompt reads the screen last, right before the key.
+        guard await screen.passes(gate(pane), paneId: pane.id) else { return agentChanged }
         switch await screen.answerPrompt(paneId: pane.id, allow: allow) {
         case .sent: return Done(result: "sent")
         case .promptGone: return Done(result: "changed", message: "the prompt went away")
@@ -127,8 +130,10 @@ public enum FeedCards {
             guard answers.count == q.questions.count else {
                 return Done(result: "failed", message: "\(answers.count) answers for \(q.questions.count) questions")
             }
-            try await screen.answerQuestion(paneId: pane.id, request: q, answers: answers)
+            try await screen.answerQuestion(paneId: pane.id, request: q, answers: answers, gate: gate(pane))
             return Done(result: "sent")
+        } catch is KeyGateStop {
+            return agentChanged
         } catch QuestionAdapter.Failure.notOnScreen {
             return Done(result: "changed", message: "the question is not on screen")
         } catch {
@@ -138,6 +143,7 @@ public enum FeedCards {
 
     /// The composer: the text, with each file in `files` named in it (`HCClient.deliver`).
     public static func send(pane: Pane, client: HCClient, text: String, files: [String]) async -> Done {
+        guard await client.passes(gate(pane), paneId: pane.id) else { return agentChanged }
         let r = files.isEmpty ? await client.deliver(text: text, to: pane.id) : await client.deliver(text: text, to: pane.id, files: files)
         switch r {
         case .sent: return Done(result: "sent")

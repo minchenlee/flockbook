@@ -95,6 +95,45 @@ func checksModFeedCards() async throws {
     """)
     let bad = await FeedCards.answer(pane: qpane, screen: hc, log: nil, request: "screen-nope", answers: [QuestionAnswer(picks: [1])])
     check(bad.result == "changed", "modfeed answer: another request, nothing sent")
+
+    // Every key is gated as the hub gates it: another program in the pane after the read, nothing goes out, and the
+    // reply says why (not a silent failure).
+    let other = [FakeHC.terminal("t1", argv: ["codex"], pid: 5151, status: "blocked", kind: "question")]
+    let claude = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
+    func sends() -> Int { fake.calls.filter { $0.method == "terminal.send" }.count }
+    let g0 = keys().count, s0 = sends()
+    fake.terminals = other
+    let ga = await FeedCards.answer(pane: qpane, screen: hc, log: nil, request: qc.request ?? "", answers: [QuestionAnswer(picks: [1])])
+    check(ga.result == "changed" && ga.message?.contains("agent") == true && keys().count == g0,
+          "modfeed answer: gated, another agent, no keys and says why (\(ga), \(keys().suffix(2)))")
+    let gs = await FeedCards.send(pane: qpane, client: hc, text: "hello", files: [])
+    check(gs.result == "changed" && gs.message?.contains("agent") == true && sends() == s0,
+          "modfeed send: gated, another agent, nothing typed and says why (\(gs))")
+    let saved = fake.terminals
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "permission")]
+    let apane = FeedLocate.pane(try await hc.snapshot(), terminal: "t1")!
+    fake.setScreen("t1", "Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No")
+    let ac = await FeedCards.card(pane: apane, screen: hc, log: nil)
+    fake.terminals = [FakeHC.terminal("t1", argv: ["codex"], pid: 5151, status: "blocked", kind: "permission")]
+    let gp = await FeedCards.approve(pane: apane, screen: hc, log: nil, request: ac.request ?? "", allow: true)
+    check(gp.result == "changed" && gp.message?.contains("agent") == true && keys().count == g0,
+          "modfeed approve: gated, another agent, no keys and says why (\(gp))")
+    _ = saved
+    fake.terminals = claude
+    fake.setScreen("t1", """
+    ❯ Ask me.
+    ────────────────────
+     ☐ Color
+    Pick a color?
+    ❯ 1. Red (Recommended)
+         warm
+      2. Blue
+         cool
+      3. Type something.
+    ────────────────────
+      4. Chat about this
+    Enter to select · ↑/↓ to navigate · Esc to cancel
+    """)
     let before = keys().count
     fake.onKeys = { addr, k in if addr == "t1", k == ["2"] { fake.setScreen("t1", "⏺ User answered: Blue\n> ") } }
     let answered = await FeedCards.answer(pane: qpane, screen: hc, log: nil, request: qc.request ?? "",
