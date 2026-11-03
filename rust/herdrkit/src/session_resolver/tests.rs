@@ -163,6 +163,8 @@ fn teammate_verdict_pure() {
 #[test]
 fn teammate_leads() {
     let (_t, root) = tmp();
+    // Lead paths come back standardized: `/` on Windows too.
+    let root = if cfg!(windows) { root.replace('\\', "/") } else { root };
     let projects = format!("{root}/projects");
     let dir = format!("{projects}/-w-proj");
     fs::create_dir_all(&dir).unwrap();
