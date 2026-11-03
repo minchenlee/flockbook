@@ -132,7 +132,8 @@ test("Terminal opens the agent's own terminal in a window with a Close bar", asy
   fake.props = { view: "termbar", name: "api", overlay: "o9" };
   const bar = new TermBar(fakeCx()).render(fakeCx());
   assert.match(textOf(bar), /api.*Terminal/);
-  assert.equal(o.layout.children[1].padding, 10, "the terminal sits inset from the frame");
+  assert.equal(o.layout.children[1].padding, undefined, "no inset around the terminal");
+  assert.equal(o.frame, "none"); assert.equal(o.layout.radius, 16);
   assert.ok(byId(bar, "term-close"));
 });
 

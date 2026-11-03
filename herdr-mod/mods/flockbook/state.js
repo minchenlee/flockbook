@@ -166,10 +166,12 @@ export function openTerminal(a) {
   if (open) { setShared(KEY_TERM, null); closeOverlay(open); return; }
   if (!a) return;
   const id = openOverlay({
-    kind: "window", key: "flockbook-terminal", width: 0.7, height: 0.7,
-    layout: { type: "column", children: [
+    // Our own frame (rounder than Herdr's): the root paints the terminal's background, so the bar and
+    // the terminal's square corners sit inside the rounded edge. No inset around the terminal.
+    kind: "window", key: "flockbook-terminal", width: 0.7, height: 0.7, frame: "none",
+    layout: { type: "column", background: "background", radius: 16, border: { width: 1, color: "border" }, shadow: "lg", children: [
       { type: "block", size: { px: 42 }, content: { mod: "flockbook", props: { view: "termbar", terminal: a.address, name: agentName(a) } } },
-      { type: "block", content: { terminal: a.address }, padding: 10 },
+      { type: "block", content: { terminal: a.address } },
     ] },
   });
   setShared(KEY_TERM, id);
