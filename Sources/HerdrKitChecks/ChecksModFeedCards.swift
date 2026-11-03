@@ -56,6 +56,43 @@ func checksModFeedCards() async throws {
     let k0 = keys().count
     let qa = await FeedCards.card(pane: qpane, screen: hc, log: nil, all: true)
     check(qa == qc && keys().count == k0, "modfeed card --all: one question, same card, no keys")
+
+    // card --all walks the picker with a gate, as the hub does: before each key the pane must still show the agent
+    // that was read. Here another program took the pane after the read, so not one key goes out.
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
+    let mpane = FeedLocate.pane(try await hc.snapshot(), terminal: "t1")!
+    fake.setScreen("t1", """
+    ←  ☐ Color  ☐ Size  ✔ Submit  →
+    Pick a color?
+    ❯ 1. Red
+      2. Blue
+      3. Type something.
+    ────────────────────
+      4. Chat about this
+    Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+    """)
+    fake.terminals = [FakeHC.terminal("t1", argv: ["codex"], pid: 5151, status: "blocked", kind: "question")]
+    let k1 = keys().count
+    _ = await FeedCards.card(pane: mpane, screen: hc, log: nil, all: true)
+    check(keys().count == k1, "modfeed card --all: gated, another agent in the pane, no keys (\(keys().suffix(3)))")
+    // The same agent: the gate lets the walk start (the fake screen does not move, so it stops after that).
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
+    _ = await FeedCards.card(pane: mpane, screen: hc, log: nil, all: true)
+    check(keys().dropFirst(k1).first == ["left"], "modfeed card --all: gated, same agent, the walk starts (\(keys().suffix(3)))")
+    fake.setScreen("t1", """
+    ❯ Ask me.
+    ────────────────────
+     ☐ Color
+    Pick a color?
+    ❯ 1. Red (Recommended)
+         warm
+      2. Blue
+         cool
+      3. Type something.
+    ────────────────────
+      4. Chat about this
+    Enter to select · ↑/↓ to navigate · Esc to cancel
+    """)
     let bad = await FeedCards.answer(pane: qpane, screen: hc, log: nil, request: "screen-nope", answers: [QuestionAnswer(picks: [1])])
     check(bad.result == "changed", "modfeed answer: another request, nothing sent")
     let before = keys().count

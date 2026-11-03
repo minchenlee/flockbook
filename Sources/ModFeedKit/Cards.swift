@@ -21,6 +21,10 @@ public enum FeedCards {
         public var unread: Int?
     }
 
+    /// As the hub gates a paired device's keys: before each key the pane must still show the agent read now (same kind
+    /// and session, or for hc the same program), and the picker the expected question. No agent: fail closed.
+    static func gate(_ pane: Pane) -> KeyGate { KeyGate(agent: pane.agent, allowed: { pane.agent != nil }) }
+
     enum Current {
         case approval(id: String, title: String, command: String, tool: String)
         case question(QuestionRequest)
@@ -66,7 +70,7 @@ public enum FeedCards {
     public static func card(pane: Pane, screen: any PaneScreen, log: URL?, all: Bool = false) async -> Card {
         var now = await current(pane: pane, screen: screen, log: log)
         if all, case .question(let q)? = now, q.unread > 0,
-           let full = try? await screen.loadAllQuestions(paneId: pane.id, expect: q) { now = .question(full) }
+           let full = try? await screen.loadAllQuestions(paneId: pane.id, gate: gate(pane), expect: q) { now = .question(full) }
         switch now {
         case .approval(let id, let title, let command, let tool)?:
             return Card(kind: "approval", request: id, title: title, command: FeedRows.cut(command, FeedRows.textCap), tool: tool)
@@ -115,7 +119,7 @@ public enum FeedCards {
         }
         do {
             if q.unread > 0 {
-                guard let all = try await screen.loadAllQuestions(paneId: pane.id, expect: q) else {
+                guard let all = try await screen.loadAllQuestions(paneId: pane.id, gate: gate(pane), expect: q) else {
                     return Done(result: "changed", message: "the question went away")
                 }
                 q = all
