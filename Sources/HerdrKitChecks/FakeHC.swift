@@ -41,6 +41,8 @@ final class FakeHC: @unchecked Sendable {
     var paintBurst = 0
     /// Seconds `terminal.send` takes before it answers (the core waits for typing quiet, then for `working`).
     var sendDelay: Double = 0
+    /// Seconds `terminal.keys` takes before it answers (hc's typing-quiet rule can hold keys this long).
+    var keysDelay: Double = 0
     /// When set, `terminal.attach` fails with this error kind.
     var attachError: String?
     /// Seconds before `terminal.attach` answers.
@@ -309,6 +311,7 @@ final class FakeHC: @unchecked Sendable {
             return (reply(id: id, result: ["path": "\(putDir)/\(a.replacingOccurrences(of: "/", with: "-"))/\(name)", "bytes": data.count]), nil)
         case "terminal.send", "terminal.keys":
             if method == "terminal.send", sendDelay > 0 { Thread.sleep(forTimeInterval: sendDelay) }
+            if method == "terminal.keys", keysDelay > 0 { Thread.sleep(forTimeInterval: keysDelay) }
             if method == "terminal.keys", let cb = onKeys { cb(params["terminal"] as? String ?? "", params["keys"] as? [String] ?? []) }
             return (reply(id: id, result: ["turn": 0, "status": "idle", "started": true]), nil)
         case "terminal.attach":

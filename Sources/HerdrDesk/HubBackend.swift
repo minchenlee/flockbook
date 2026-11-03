@@ -66,8 +66,11 @@ import Foundation
         let model = model
         let gate = KeyGate(agent: agent, allowed: { model.writesEnabled && allowed() })
         guard model.writesEnabled, allowed(), let p = pane(id), let a = p.agent, let reader = model.screen(paneId: id) else { return false }
-        guard (try? await reader.respondIfOpen(paneId: id, prompt: prompt, allow: allow, agentKind: a.kind,
-                                                    blocked: a.status == .blocked, pending: model.pendingRequest(p), gate: gate)) == true else { return false }
+        // One answer per prompt with the card and the notification buttons (`ApprovalSender`). Unconfirmed (hc held the
+        // keys past their timeout) counts as answered: they may still land, so the phone must not send them again.
+        let r = await model.approvals.answer(paneId: id, via: reader, prompt: prompt, allow: allow, agentKind: a.kind,
+                                             blocked: a.status == .blocked, pending: model.pendingRequest(p), gate: gate)
+        guard r == .sent || r == .unconfirmed else { return false }
         try? await Task.sleep(for: .seconds(1))
         await store.refresh()
         if let p = pane(id) { await model.checkPrompt(for: p) }

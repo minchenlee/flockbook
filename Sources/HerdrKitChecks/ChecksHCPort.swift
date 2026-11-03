@@ -31,3 +31,49 @@ import Foundation
     check(tui.composerRemote(host) == host && tui.composerRemote(nil) == nil, "hc composer: a TUI pane uploads to the session's host")
     check(hc.composerRemote(host) == nil, "hc composer: an hc pane never uploads to the TUI's host")
 }
+
+/// One answer per prompt across the card, the notification buttons and the hub (`ApprovalSender.answer`). On hc a
+/// `terminal.keys` past its timeout may still land: the pane stays in flight until the prompt leaves the screen.
+@MainActor func checksHCAnswerOnce() async throws {
+    let fake = FakeHC(path: fakeHCPath())
+    try fake.start()
+    defer { fake.kill() }
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "permission")]
+    let prompt = "Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No"
+    fake.setScreen("t1", prompt)
+    let hc = HCClient(session: HCSession(socketPath: fake.path), callTimeout: 0.4)
+    guard let s = await hc.approvalState(paneId: "hc:t1", agentKind: "claude", blocked: true, pending: nil),
+          let id = ApprovalNotice.promptIDs(s, writes: true).last else { check(false, "answer once: the prompt has an id"); return }
+    func keys() -> Int { fake.calls.filter { $0.method == "terminal.keys" }.count }
+    let sender = ApprovalSender()
+    func answer() async -> ApprovalAnswer {
+        await sender.answer(paneId: "hc:t1", via: hc, prompt: id, allow: true, agentKind: "claude", blocked: true, pending: nil,
+                            poll: .milliseconds(100), maxWait: .seconds(5))
+    }
+
+    // Two at once (card and notification): one goes out, the other is refused before any read.
+    fake.keysDelay = 0.2
+    async let a = answer()
+    async let b = answer()
+    let both = await [a, b]
+    check(both.filter { $0 == .sent }.count == 1 && both.contains(.busy) && keys() == 1, "answer once: two presses, one answer (\(both), \(keys()) keys)")
+
+    // Sent: still in flight while the prompt is on screen (a redraw lag must not let a second "1" through).
+    check(sender.isAnswering("hc:t1"), "answer once: sent, in flight until the prompt leaves the screen")
+    fake.setScreen("t1", "> done")
+    for _ in 0..<30 where sender.isAnswering("hc:t1") { try await Task.sleep(for: .milliseconds(100)) }
+    check(!sender.isAnswering("hc:t1"), "answer once: the prompt gone ends the flight after a send")
+    fake.setScreen("t1", prompt)
+
+    // A timeout on hc: unconfirmed, and the pane stays in flight while the prompt is on screen.
+    fake.keysDelay = 1.0
+    let n = keys()
+    let late = await answer()
+    check(late == .unconfirmed && sender.isAnswering("hc:t1"), "answer once: hc timeout = unconfirmed, still in flight (\(late))")
+    let again = await answer()
+    check(again == .busy && keys() == n + 1, "answer once: a second press while unconfirmed sends nothing (\(again))")
+    fake.setScreen("t1", "> done")
+    for _ in 0..<30 where sender.isAnswering("hc:t1") { try await Task.sleep(for: .milliseconds(100)) }
+    check(!sender.isAnswering("hc:t1"), "answer once: the prompt gone ends the flight")
+    fake.keysDelay = 0
+}

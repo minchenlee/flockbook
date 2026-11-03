@@ -266,38 +266,30 @@ final class AppModel {
     /// Allow once = "1" (no Enter), Deny = Escape (verified in a named test session). Only when the prompt is on screen.
     /// `bound`: the request the card showed (nil: the card's request now). The keys go out only while that prompt is
     /// still open (`respondIfOpen` reads the pane right before them); else nothing is sent and the terminal opens.
-    /// One answer per prompt: a second press while the first is on the way does nothing.
+    /// One answer per prompt across the card, the notification buttons and the hub (`ApprovalSender.answer`): a
+    /// second press while the first is on its way does nothing.
     func approve(pane: Pane, allow: Bool, bound: PermissionRequest? = nil) {
         if approvals.isAnswering(pane.id) { return }
         guard writesEnabled, promptVisible.contains(pane.id), let agent = pane.agent, let screen = screen(for: pane),
               let prompt = (bound ?? approvalRequest(pane))?.toolUseId else { showTerminal = true; return }
         let id = pane.id
         let pending = pendingRequest(pane)
-        guard approvals.begin(id) else { return }
         promptVisible.remove(id)   // the card's buttons turn off at once (canRespond reads promptVisible)
         Task {
-            let sent: Bool
-            do {
-                sent = try await screen.respondIfOpen(paneId: id, prompt: prompt, allow: allow, agentKind: agent.kind,
-                                                      blocked: agent.status == .blocked, pending: pending)
-            } catch {
-                approvals.end(id)
-                notice = "The answer was not sent. Open the terminal to check."; showTerminal = true
-                await checkPrompt(for: pane)
-                return
+            let r = await approvals.answer(paneId: id, via: screen, prompt: prompt, allow: allow, agentKind: agent.kind,
+                                           blocked: agent.status == .blocked, pending: pending)
+            noticeLog.info("card \(allow ? "allow" : "deny", privacy: .public) pane \(id, privacy: .public) prompt \(prompt, privacy: .public): \(String(describing: r), privacy: .public)")
+            switch r {
+            case .busy: return
+            case .failed: notice = "The answer was not sent. Open the terminal to check."; showTerminal = true
+            case .notSent: notice = "The prompt changed. Nothing was sent."; showTerminal = true
+            case .unconfirmed: notice = Self.unconfirmedAnswer
+            case .sent:
+                try? await Task.sleep(for: .seconds(1.5))
+                await store.refresh()
+                let still = store.workspaces.flatMap(\.tabs).flatMap(\.panes).first { $0.id == id }?.agent?.status == .blocked
+                if still { notice = "Status did not change. Open the terminal to check."; showTerminal = true }
             }
-            noticeLog.info("card \(allow ? "allow" : "deny", privacy: .public) pane \(id, privacy: .public) prompt \(prompt, privacy: .public): \(sent ? "keys sent" : "not sent, prompt changed", privacy: .public)")
-            guard sent else {
-                approvals.end(id)
-                notice = "The prompt changed. Nothing was sent."; showTerminal = true
-                await checkPrompt(for: pane)
-                return
-            }
-            try? await Task.sleep(for: .seconds(1.5))
-            await store.refresh()
-            let still = store.workspaces.flatMap(\.tabs).flatMap(\.panes).first { $0.id == id }?.agent?.status == .blocked
-            if still { notice = "Status did not change. Open the terminal to check."; showTerminal = true }
-            approvals.end(id)
             await checkPrompt(for: pane)
         }
     }
@@ -307,6 +299,8 @@ final class AppModel {
         ApprovalNotice.pendingRequest(in: store.conversation(for: pane.agent?.sessionId))
     }
     func pendingToolUseId(_ pane: Pane) -> String? { pendingRequest(pane)?.toolUseId }
+    /// hc held the answer's keys past their timeout: they may still land, so it is not sent again.
+    static let unconfirmedAnswer = "Answer sent, not confirmed: no reply in time. Check the terminal before you answer again."
 
     /// Read-only: the blocked pane's state for the notification buttons (reads its visible screen).
     func approvalState(_ pane: Pane) async -> ApprovalNotice.PaneState? {
@@ -347,11 +341,12 @@ final class AppModel {
         switch outcome {
         case .send(let allow):
             guard let pane, let a = pane.agent, let prompt, let screen = screen(for: pane) else { return false }
-            // Once more right before the keys: the same rule as the hub (`respondIfOpen`).
-            let sent = (try? await screen.respondIfOpen(paneId: pane.id, prompt: prompt, allow: allow, agentKind: a.kind,
-                                                         blocked: a.status == .blocked, pending: pendingRequest(pane))) == true
-            noticeLog.info("action \(action, privacy: .public) pane \(paneID, privacy: .public) keys \(sent ? "sent" : "not sent: prompt changed", privacy: .public)")
-            guard sent else { return false }
+            // Once more right before the keys, and one answer per prompt with the card and the hub (`ApprovalSender`).
+            let r = await approvals.answer(paneId: pane.id, via: screen, prompt: prompt, allow: allow, agentKind: a.kind,
+                                           blocked: a.status == .blocked, pending: pendingRequest(pane))
+            noticeLog.info("action \(action, privacy: .public) pane \(paneID, privacy: .public): \(String(describing: r), privacy: .public)")
+            if r == .unconfirmed { notice = Self.unconfirmedAnswer; return true }
+            guard r == .sent else { return false }
             promptVisible.insert(pane.id)
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
