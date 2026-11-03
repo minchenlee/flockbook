@@ -415,13 +415,33 @@ final class AppModel {
     func release(_ id: String) { busy.remove(id) }
 
     static let answerBusy = "Another answer, send or pull of this pane is on its way. Nothing was sent."
-    /// A question's answer keys, for the Mac card and the phone alike: holds the pane's lock for the whole sequence,
-    /// so two answers (or an answer and a send) never interleave their keys (on hc each key may be held a while).
-    func answerQuestion(pane id: String, request: QuestionRequest, answers: [QuestionAnswer], gate: KeyGate? = nil) async throws {
+    /// Runs `body` holding the pane's lock (the one sends and pulls take), so no other picker keys land in between
+    /// (on hc each key may be held a while). Held already: throws, nothing runs.
+    func withPane<T>(_ id: String, _ body: () async throws -> T) async throws -> T {
         guard claim(id) else { throw QuestionAdapter.Failure.unsupported(Self.answerBusy) }
         defer { release(id) }
+        return try await body()
+    }
+
+    /// A question's answer keys, for the Mac card: under the pane's lock (`withPane`).
+    func answerQuestion(pane id: String, request: QuestionRequest, answers: [QuestionAnswer], gate: KeyGate? = nil) async throws {
+        try await withPane(id) { try await answerKeys(pane: id, request: request, answers: answers, gate: gate) }
+    }
+
+    /// Reads the questions not read yet (moves Claude's picker: Left/Right), for the Mac card: under the pane's lock.
+    func loadAllQuestions(pane id: String, gate: KeyGate? = nil, expect: QuestionRequest? = nil) async throws -> QuestionRequest? {
+        try await withPane(id) { try await loadKeys(pane: id, gate: gate, expect: expect) }
+    }
+
+    /// Without the lock: only inside `withPane` (the phone holds it from the first navigation key to the last answer).
+    func answerKeys(pane id: String, request: QuestionRequest, answers: [QuestionAnswer], gate: KeyGate?) async throws {
         guard let screen = screen(paneId: id) else { throw QuestionAdapter.Failure.unsupported("this pane's backend is not connected") }
         try await screen.answerQuestion(paneId: id, request: request, answers: answers, gate: gate)
+    }
+
+    func loadKeys(pane id: String, gate: KeyGate?, expect: QuestionRequest?) async throws -> QuestionRequest? {
+        guard let screen = screen(paneId: id) else { throw QuestionAdapter.Failure.unsupported("this pane's backend is not connected") }
+        return try await screen.loadAllQuestions(paneId: id, gate: gate, expect: expect)
     }
     /// Test hook: when set, replaces MessageSender (offscreen checks must never type into a real pane).
     @ObservationIgnored var sendHook: ((String, String) async -> Bool)?

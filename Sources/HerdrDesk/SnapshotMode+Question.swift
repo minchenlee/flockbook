@@ -388,6 +388,23 @@ extension ContentTests {
         do { try await qm.answerQuestion(pane: qp.id, request: single(), answers: [QuestionAnswer(picks: [0])]) } catch { busyErr = error }
         let free = qm.claim(qp.id)
         step("the answer releases the pane afterwards", free)
+        // Reading the rest of the questions moves the picker (Left/Right): it takes the same lock, on the Mac card and
+        // on the phone (there in one hold with the answer keys), so no navigation key lands between another's answers.
+        var unreadQ = single(); unreadQ.headers = ["Sign-in", "Restore", "Ship"]   // 1 read, 2 not yet
+        var loadErr: Error?
+        do { _ = try await qm.loadAllQuestions(pane: qp.id) } catch { loadErr = error }
+        step("Mac 'load all' while the pane is held: refused before any key (\(loadErr.map { "\($0)" } ?? "no error"))",
+             (loadErr as? QuestionAdapter.Failure) == .unsupported(AppModel.answerBusy))
+        let hubAgent = Agent(name: "claude", kind: "claude", status: .blocked, sessionId: nil, title: "", backend: .hc)
+        var hubErr: Error?
+        do { try await AppHubBackend(model: qm).answer(pane: qp.id, question: unreadQ, answers: [], agent: hubAgent, allowed: { true }) } catch { hubErr = error }
+        step("phone answer with unread questions while the pane is held: refused before any key (\(hubErr.map { "\($0)" } ?? "no error"))",
+             (hubErr as? QuestionAdapter.Failure) == .unsupported(AppModel.answerBusy))
+        qm.release(qp.id)
+        do { try await AppHubBackend(model: qm).answer(pane: qp.id, question: unreadQ, answers: [], agent: hubAgent, allowed: { true }) } catch { hubErr = error }
+        let freeAgain = qm.claim(qp.id)
+        step("the phone's answer releases the pane afterwards", freeAgain)
+        qm.release(qp.id)
 
         print("question-test: pictures in \(dir)")
         print("question-test: \(failures == 0 ? "PASS" : "FAIL x\(failures)")")

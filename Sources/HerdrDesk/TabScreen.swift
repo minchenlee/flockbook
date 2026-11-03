@@ -238,8 +238,8 @@ extension PaneView {
 
     /// User action only (Next past the questions read so far): moves Claude's picker to read the rest, and back.
     private func loadAllQuestions() async throws -> QuestionRequest? {
-        guard model.writesEnabled, let screen = model.screen(for: pane) else { return nil }
-        let all = try await screen.loadAllQuestions(paneId: pane.id)
+        guard model.writesEnabled else { return nil }
+        let all = try await model.loadAllQuestions(pane: pane.id)
         if let all { screenQuestion = all }
         return all
     }

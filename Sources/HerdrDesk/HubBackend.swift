@@ -120,18 +120,21 @@ import Foundation
         let model = model
         let gate = KeyGate(agent: agent, allowed: { model.writesEnabled && allowed() })
         guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
-        guard let reader = model.screen(paneId: id) else { throw QuestionAdapter.Failure.unsupported("this pane's backend is not connected") }
-        var q = question
-        if q.unread > 0 {
-            // Bound to the request the client answered: another request on screen now (even with as many questions) is refused.
-            guard let full = try await reader.loadAllQuestions(paneId: id, gate: gate, expect: question),
-                  QuestionAdapter.sameRequest(full, as: question) else { throw QuestionAdapter.Failure.notOnScreen }
-            q = full
+        // One hold of the pane's lock from the first navigation key to the last answer key: no other picker keys
+        // (the Mac card, a send) land in between.
+        try await model.withPane(id) {
+            var q = question
+            if q.unread > 0 {
+                // Bound to the request the client answered: another request on screen now (even with as many questions) is refused.
+                guard let full = try await model.loadKeys(pane: id, gate: gate, expect: question),
+                      QuestionAdapter.sameRequest(full, as: question) else { throw QuestionAdapter.Failure.notOnScreen }
+                q = full
+            }
+            guard answers.count == q.questions.count else {
+                throw QuestionAdapter.Failure.unsupported("\(q.questions.count) questions, \(answers.count) answers")
+            }
+            guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
+            try await model.answerKeys(pane: id, request: q, answers: answers, gate: gate)
         }
-        guard answers.count == q.questions.count else {
-            throw QuestionAdapter.Failure.unsupported("\(q.questions.count) questions, \(answers.count) answers")
-        }
-        guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
-        try await model.answerQuestion(pane: id, request: q, answers: answers, gate: gate)
     }
 }
