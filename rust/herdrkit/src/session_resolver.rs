@@ -159,11 +159,17 @@ fn file_number(m: &std::fs::Metadata) -> u64 {
     m.ino()
 }
 
-// TODO(windows): std has no stable file index on Windows; a log replaced by another file at least as long keeps its
-// verdict here until it shrinks.
+/// Windows: std has no stable file index (only behind an unstable feature), so the file's last write time stands in.
+/// A log replaced by another file then counts as another file, and so does a log that was written to: its verdict is
+/// judged again (reading its head once more), never kept for a file it may not be.
+// TODO(windows): use the real file index (GetFileInformationByHandle) to keep verdicts across appends.
 #[cfg(not(unix))]
-fn file_number(_m: &std::fs::Metadata) -> u64 {
-    0
+fn file_number(m: &std::fs::Metadata) -> u64 {
+    m.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
 }
 
 impl SessionResolver {
