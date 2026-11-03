@@ -141,7 +141,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
     (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`,
     `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to herdr-core (`hc`) to read
     screens and send keys and text. Commands: `feed`, `status`, `card`, `approve`, `answer`,
-    `send`, `paste-image`, one per `exec`, JSON Lines back (`herdr-mod/docs/protocol.md` in that
+    `send`, `paste-image`, one per `exec`, JSON Lines back (`mod/docs/protocol.md` in that
     repo). It keeps `<herdr-app home>/flockbook/cache.json`, `answered/` beside it, and pastes in
     `<herdr-app home>/flockbook/paste/`.
   - `osascript`, for the file dialog.

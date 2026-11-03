@@ -10,7 +10,7 @@ Flockbook is becoming a layout and mod for the Herdr app. The mod is where new w
 
 ## Flockbook for the Herdr app (mod)
 
-<img src="herdr-mod/preview.png" alt="Flockbook in the Herdr app" width="800">
+<img src="mod/preview.png" alt="Flockbook in the Herdr app" width="800">
 
 The reading view runs inside the Herdr app window, with no change to the app:
 
@@ -24,7 +24,7 @@ A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat
 
 The cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
 
-**Status: preview.** Each [release](https://github.com/minchenlee/flockbook/releases/latest) has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and the helper. Install it into a test Herdr app home, never your real one. See [herdr-mod/README.md](herdr-mod/README.md). [herdr-mod/RECIPE.md](herdr-mod/RECIPE.md) describes every part of it.
+**Status: preview.** Each [release](https://github.com/minchenlee/flockbook/releases/latest) has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and the helper. Install it into a test Herdr app home, never your real one. See [mod/README.md](mod/README.md). [mod/RECIPE.md](mod/RECIPE.md) describes every part of it.
 
 ## Flockbook for Mac
 
