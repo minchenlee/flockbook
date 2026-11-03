@@ -65,7 +65,9 @@ import Testing
     }
 
     @Test func promptMarker() {
-        #expect(PermissionGate.screenShowsPrompt("Do you want to proceed?"))
+        // The question alone is not a prompt: the numbered choices must be on screen too.
+        #expect(!PermissionGate.screenShowsPrompt("Do you want to proceed?"))
+        #expect(PermissionGate.screenShowsPrompt("Do you want to proceed?\n❯ 1. Yes\n  2. No"))
         #expect(!PermissionGate.screenShowsPrompt("Running tests"))
     }
 
