@@ -1,0 +1,121 @@
+{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "traffic_lights": [
+    18,
+    22
+  ],
+  "background": "canvas",
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": {
+        "px": 250
+      },
+      "min": 220,
+      "max": 320,
+      "hidden": true,
+      "background": "chrome",
+      "divider": {
+        "width": 1,
+        "color": "border"
+      },
+      "children": [
+        {
+          "id": "side",
+          "type": "block",
+          "content": {
+            "mod": "flockbook",
+            "props": {
+              "view": "side"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "work",
+      "type": "column",
+      "resizable": false,
+      "children": [
+        {
+          "id": "top",
+          "type": "block",
+          "size": {
+            "px": 56
+          },
+          "window_drag": true,
+          "content": {
+            "mod": "flockbook",
+            "props": {
+              "view": "top"
+            }
+          }
+        },
+        {
+          "id": "screen",
+          "type": "stack",
+          "active": "chat",
+          "children": [
+            {
+              "id": "chat",
+              "type": "block",
+              "content": {
+                "mod": "flockbook",
+                "props": {
+                  "view": "chat"
+                }
+              }
+            },
+            {
+              "id": "needs",
+              "type": "block",
+              "content": {
+                "mod": "flockbook",
+                "props": {
+                  "view": "needs"
+                }
+              }
+            },
+            {
+              "id": "overview",
+              "type": "block",
+              "content": {
+                "mod": "flockbook",
+                "props": {
+                  "view": "overview"
+                }
+              }
+            },
+            {
+              "id": "tab",
+              "type": "block",
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "gap": 6,
+                  "radius": 8,
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "focus": {
+                    "width": 1,
+                    "color": "muted"
+                  }
+                }
+              },
+              "padding": 8
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "theme": {
+    "light": "flockbook-light",
+    "dark": "flockbook"
+  }
+}

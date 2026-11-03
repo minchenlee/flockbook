@@ -1,0 +1,6 @@
+{
+  "name": "flockbook-herdr-mod",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --import ./test/stub/register.mjs --test test/*.test.mjs" }
+}

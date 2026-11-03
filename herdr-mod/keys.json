@@ -1,0 +1,33 @@
+{
+  "layout:flockbook": {
+    "cmd-t": "tab.new",
+    "cmd-w": "tab.close",
+    "cmd-shift-n": "space.new",
+    "cmd-1": "tab.select:1",
+    "cmd-2": "tab.select:2",
+    "cmd-3": "tab.select:3",
+    "cmd-4": "tab.select:4",
+    "cmd-5": "tab.select:5",
+    "cmd-6": "tab.select:6",
+    "cmd-7": "tab.select:7",
+    "cmd-8": "tab.select:8",
+    "cmd-9": "tab.select:9",
+    "cmd-shift-[": "tab.prev",
+    "cmd-shift-]": "tab.next",
+    "ctrl-tab": "tab.next",
+    "ctrl-shift-tab": "tab.prev",
+    "cmd-alt-up": "space.prev",
+    "cmd-alt-down": "space.next",
+    "cmd-ctrl-shift-left": "flockbook.move-left",
+    "cmd-ctrl-shift-right": "flockbook.move-right",
+    "ctrl-`": "flockbook.terminal",
+    "cmd-shift-i": "flockbook.needs",
+    "cmd-b": "flockbook.sidebar",
+    "cmd-=": "app.zoom_in",
+    "cmd--": "app.zoom_out",
+    "cmd-0": "app.zoom_reset",
+    "cmd-,": "app.settings",
+    "cmd-/": "app.help",
+    "cmd-shift-\\": "flockbook.overview"
+  }
+}

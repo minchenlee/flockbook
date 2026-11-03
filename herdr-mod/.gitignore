@@ -1,0 +1,5 @@
+.DS_Store
+node_modules/
+# Files herdr-app writes into a mod folder.
+mods/*/jsconfig.json
+mods/*/*.d.ts

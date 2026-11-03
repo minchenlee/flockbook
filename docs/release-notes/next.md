@@ -4,6 +4,7 @@
 One short line: what this release is about.
 
 ### ✨ New
+- Herdr app mod (herdr-mod/): a Flockbook layout, mod, keys and themes for the Herdr app, with tab capsules, chat with cards and older messages on scroll-up, Overview, and the flockbook-modfeed sidecar.
 - herdr-core: terminals of herdr-core (the official Herdr app's core) show beside the herdr server's, grouped by the app's spaces and tabs, with their conversations, approval and question cards, layout changes, other machines and scrollback.
 - Antigravity CLI (agy): agy panes show their conversation from the agy transcript, with tool calls and their results, and its command prompts get the approval card and notification buttons, and its single-choice questions the question card.
 
