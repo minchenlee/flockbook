@@ -37,3 +37,4 @@ One short line: what this release is about.
 - Herdr app mod: the sidebar that slides in from the left edge is now the full sidebar (same height, Workspaces list and sidebar button spot), not a short popup.
 - Herdr app mod: code blocks and tables in chat replies now have rounded corners, and table columns size to their content. Code text in these boxes cannot be selected yet.
 - Security: Herdr app mod approval cards follow the app's rules. The card is the prompt box on screen (its id includes the command); a log that still names the call before can no longer allow the next prompt; Grok prompts get Grok's own keys.
+- Security: Herdr app mod approvals go out once per prompt, across views and windows. A second press while the prompt is still drawn sends nothing (the card says "Answer sent"), and a key herdr-core held past the timeout is reported as "may still arrive", not as failed.

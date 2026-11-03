@@ -126,6 +126,8 @@ export class Cards {
     if (!c || en.sending) return false;
     const n = digit(e);
     if (c.kind === "approval") {
+      // Answered already (the sidecar keeps one answer per prompt): the keys stay with whoever has the focus.
+      if (c.answered) return false;
       if (n === 1 || n === 2) { cx.spawn((cx) => this.approve(cx, address, n === 1)); return true; }
       return false;
     }
@@ -213,9 +215,12 @@ export class Cards {
       box.child(head(c.title || (c.tool ? `${c.tool} wants to run` : "Approval needed")));
       if (c.command) box.child(div().id(`${id}-command`).max_h(140).overflow_y_scrollbar().px(10).py(8).rounded(8).bg(t.background)
         .text_size(12.5).font_family("Menlo").text_color(t.foreground).child(c.command));
-      box.child(h_flex().gap(8)
-        .child(button("allow", e.sending ? "Sending…" : "1  Allow once", true, (cx) => this.approve(cx, address, true), e.sending))
-        .child(button("deny", "2  Deny", false, (cx) => this.approve(cx, address, false), e.sending)));
+      // Answered and still drawn (the agent has not moved on, or hc still holds the key): no second answer.
+      const off = e.sending || c.answered === true;
+      box.child(h_flex().gap(8).items_center()
+        .child(button("allow", e.sending ? "Sending…" : "1  Allow once", true, (cx) => this.approve(cx, address, true), off))
+        .child(button("deny", "2  Deny", false, (cx) => this.approve(cx, address, false), off))
+        .when(c.answered === true, (el) => el.child(div().text_size(12).text_color(t.muted).child("Answer sent. Waiting for the agent."))));
       const n = tail(); if (n) box.child(n);
       return box;
     }

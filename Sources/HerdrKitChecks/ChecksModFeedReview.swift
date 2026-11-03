@@ -72,4 +72,32 @@ func checksModFeedReview() async throws {
     let sent = Array(keys().dropFirst(k2))
     check(ga.result == "sent" && sent.count == 1 && sent.first?.first?.lowercased() == "enter",
           "review1 #1: grok allow is Enter on Yes, proceed, not '1' (\(ga), \(sent))")
+
+    // 2. One approval goes out once. Each sidecar run starts from nothing, so the claim lives next to the cache file.
+    let cache = dir.appendingPathComponent("cache.json")
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "permission")]
+    fake.setScreen("t1", claudeBox("rm -rf build"))
+    let id2 = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache).request ?? ""
+    // hc holds the key for its typing-quiet rule, past the sidecar's call timeout: the key may still land.
+    let slow = HCClient(session: HCSession(socketPath: fake.path), callTimeout: 1, sendTimeout: 2)
+    fake.keysDelay = 2
+    let k3 = keys().count
+    let held = await FeedCards.approve(pane: pane, screen: slow, log: nil, request: id2, allow: true, cache: cache)
+    fake.keysDelay = 0
+    check(held.result == "unconfirmed", "review1 #2: a held key is unconfirmed, not failed (\(held))")
+    let again = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id2, allow: true, cache: cache)
+    check(again.result == "answered" && keys().count == k3 + 1, "review1 #2: a second press of the same approval sends nothing (\(again), \(keys().suffix(2)))")
+    let shown = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache)
+    check(shown.request == id2 && shown.answered == true, "review1 #2: the card says it was answered, while the box is still there (\(shown))")
+    // The box leaves the screen: the claim goes; the same box later is a new prompt and can be answered.
+    fake.setScreen("t1", claudeBox("ls"))
+    _ = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache)
+    fake.setScreen("t1", claudeBox("rm -rf build"))
+    let k4 = keys().count
+    let later = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id2, allow: true, cache: cache)
+    check(later.result == "sent" && keys().count == k4 + 1, "review1 #2: after the box went away, the same box can be answered again (\(later))")
+    // Redraw lag: sent, the screen not redrawn yet; a second press (or a second view) sends nothing.
+    let lag = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id2, allow: true, cache: cache)
+    check(lag.result == "answered" && keys().count == k4 + 1, "review1 #2: sent, box still drawn: the next press sends nothing (\(lag))")
+    // Without a cache file (no claim possible) the old behaviour stays: one key per press.
 }

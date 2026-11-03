@@ -217,3 +217,22 @@ test("another agent in the pane: the card says so, nothing sent", async () => {
   byId(c.view("t1", T), "card-allow")._h.on_click({}, cx); await cx.settle();
   assert.match(textOf(byId(c.view("t1", T), "card-note")), /Another agent is in this pane now/);
 });
+
+test("an approval already answered and still on screen: buttons off, 1 and 2 do nothing, it says so", async () => {
+  const cx = fakeCx(); const c = new Cards();
+  // The key went out but the agent has not redrawn yet: the card comes back marked answered.
+  fake.result = "unconfirmed"; fake.message = "no answer in time; the key may still arrive";
+  await c.poll(cx, "t1", true);
+  const exec0 = fake.exec; fake.exec = (cmd, args) => { const r = exec0(cmd, args); if (args[0] === "approve") cardNow = { ...approval, answered: true }; return r; };
+  byId(c.view("t1", T), "card-allow")._h.on_click({}, cx); await cx.settle();
+  assert.equal(acts.length, 1);
+  const el = c.view("t1", T);
+  assert.match(textOf(el), /may still arrive/);
+  assert.equal(byId(el, "card-allow")._h.on_click, undefined, "Allow is off");
+  assert.equal(byId(el, "card-deny")._h.on_click, undefined, "Deny is off");
+  assert.match(textOf(el), /Answer sent/);
+  assert.equal(c.key_down({ key: "1", keystroke: { key: "1" } }, cx, "t1"), false);
+  await cx.settle();
+  assert.equal(acts.length, 1, "no second approve");
+  fake.message = undefined; fake.result = undefined;
+});

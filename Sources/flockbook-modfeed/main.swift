@@ -67,13 +67,13 @@ case "feed", "status", "card", "approve", "answer", "send":
         FeedStatus.run(agent: kind, log: url, settings: FeedStatus.defaultSettings(), out: out)
         finish(ok: true)
     case "card":
-        out.emit(await FeedCards.card(pane: found.pane, screen: client, log: url, all: args.contains("--all")))
+        out.emit(await FeedCards.card(pane: found.pane, screen: client, log: url, all: args.contains("--all"), cache: cacheURL))
         finish(ok: true)
     case "approve":
         guard let request = opt("--request"), args.contains("--allow") != args.contains("--deny") else {
             fail("usage", "approve needs --request <id> and one of --allow, --deny")
         }
-        out.emit(await FeedCards.approve(pane: found.pane, screen: client, log: url, request: request, allow: args.contains("--allow")))
+        out.emit(await FeedCards.approve(pane: found.pane, screen: client, log: url, request: request, allow: args.contains("--allow"), cache: cacheURL))
         finish(ok: true)
     case "answer":
         guard let request = opt("--request"), let answers = opt("--answers").flatMap(FeedCards.parseAnswers) else {

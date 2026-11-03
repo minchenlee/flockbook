@@ -212,8 +212,9 @@ as blocked, and for a pending `question` row.
 | Field | Meaning |
 |---|---|
 | `kind` | `approval`, `question`, or missing (no card). |
-| `request` | The id to pass to `approve` or `answer`. It stays the same while the same prompt is on screen. |
-| `title`, `command`, `tool` | Approval: what it asks to run. From the log when the log names the call, else from the lines above the prompt. |
+| `request` | The id to pass to `approve` or `answer`. It stays the same while the same prompt is on screen. Approval: the prompt box on screen (its id covers the tool, the command and the options); the log's call id only when the log's call is that box. |
+| `title`, `command`, `tool` | Approval: what it asks to run, from the box on screen (or the log's call when it is the box). |
+| `answered` | Approval: `true` when this prompt was answered already (by any view) and is still drawn. The mod shows no buttons. |
 | `question` | Question: the same object as in a `question` row. |
 | `unread` | Question: how many more questions exist than the card shows (Claude shows one at a time). `answer` reads them itself. |
 
@@ -231,11 +232,15 @@ A running tool is not an approval.
 |---|---|---|
 | `sent` | The keys or the text went out. | Clears the card or the composer. |
 | `changed` | Another card, or none, is on screen now. Nothing was sent. | Reads `card` again. |
-| `unconfirmed` | `send` only: herdr-core did not answer in time. The text may still arrive. | Keeps the composer empty (a retry could send it twice) and says so. |
+| `unconfirmed` | herdr-core did not answer in time. The text or the key may still arrive. | Keeps the composer empty (a retry could send it twice) and says so; an approval shows as `answered`. |
+| `answered` | `approve` only: this prompt was answered less than 60 s ago and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
 
-`approve` reads the screen again right before the keys. `--allow` sends `1` (allow once);
-`--deny` sends Esc.
+`approve` reads the screen again right before the keys and sends only while the box on screen is
+still `request` (the app's `respondIfOpen`). Claude and agy: `--allow` sends `1` (allow once),
+`--deny` sends Esc. Grok: Enter on "Yes, proceed", or Down then Enter on "No, reject", each key
+checked against the focus. One answer per prompt: the claim is a file in `answered/` next to the
+cache file, made before the key; it goes when the prompt leaves the screen, or after 60 s.
 
 `answer --answers` is one object per question, in order:
 `[{"picks":[1]}, {"picks":[0,2]}, {"picks":[],"other":"my own answer"}]`. `picks` are option
