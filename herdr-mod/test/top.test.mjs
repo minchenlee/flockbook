@@ -131,7 +131,8 @@ test("Terminal opens the agent's own terminal in a window with a Close bar", asy
   const { TermBar } = await import("../mods/flockbook/termbar.js");
   fake.props = { view: "termbar", name: "api", overlay: "o9" };
   const bar = new TermBar(fakeCx()).render(fakeCx());
-  assert.match(textOf(bar), /api · terminal/);
+  assert.match(textOf(bar), /api.*Terminal/);
+  assert.equal(o.layout.children[1].padding, 10, "the terminal sits inset from the frame");
   assert.ok(byId(bar, "term-close"));
 });
 

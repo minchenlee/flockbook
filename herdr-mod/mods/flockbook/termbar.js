@@ -11,12 +11,18 @@ export class TermBar {
   render(_cx) {
     const t = theme();
     const p = props() ?? {};
-    return h_flex().size_full().px(12).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border)
-      .child(svg(icon("terminal")).size(13).text_color(t.muted))
-      .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(`${p.name || "Agent"} · terminal`))
-      .child(div().id("term-close").h(24).px(10).flex().items_center().rounded(6).text_size(12).text_color(t.muted)
-        .border(1).border_color(t.border).hover((s) => s.bg(t.hover).text_color(t.foreground))
+    // A title bar: the agent's name with a terminal chip on the left, the close key and a round
+    // close button on the right. Presses elsewhere drag the window.
+    return h_flex().size_full().pl(10).pr(8).gap(10).items_center().bg(t.chrome).border_b(1).border_color(t.border)
+      .child(div().size(24).flex_none().rounded(7).flex().items_center().justify_center().bg(t.raised)
+        .border(1).border_color(t.border).child(svg(icon("terminal")).size(13).text_color(t.muted)))
+      .child(h_flex().flex_1().min_w(0).gap(8).items_center()
+        .child(div().min_w(0).truncate().text_size(13).font_semibold().text_color(t.foreground).child(p.name || "Agent"))
+        .child(div().flex_none().text_size(12).text_color(t.muted).child("Terminal")))
+      .child(div().flex_none().text_size(11.5).text_color(t.dim).child("⌃` closes"))
+      .child(div().id("term-close").size(26).flex_none().flex().items_center().justify_center().rounded(13)
+        .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Close (⌃`)")
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click(() => { setShared(KEY_TERM, null); closeOverlay(p.overlay); }).child("Close"));
+        .on_click(() => { setShared(KEY_TERM, null); closeOverlay(p.overlay); }).child(svg(icon("close")).size(14)));
   }
 }

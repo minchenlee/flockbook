@@ -168,8 +168,8 @@ export function openTerminal(a) {
   const id = openOverlay({
     kind: "window", key: "flockbook-terminal", width: 0.7, height: 0.7,
     layout: { type: "column", children: [
-      { type: "block", size: { px: 34 }, content: { mod: "flockbook", props: { view: "termbar", terminal: a.address, name: agentName(a) } } },
-      { type: "block", content: { terminal: a.address } },
+      { type: "block", size: { px: 42 }, content: { mod: "flockbook", props: { view: "termbar", terminal: a.address, name: agentName(a) } } },
+      { type: "block", content: { terminal: a.address }, padding: 10 },
     ] },
   });
   setShared(KEY_TERM, id);

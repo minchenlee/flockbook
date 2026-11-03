@@ -258,8 +258,8 @@ export class ChatView {
           .on_click((_e, cx) => { if (this.follow) return; this.follow = true; this.toNewest(); cx.notify(); })
           .child(svg(icon("arrow-down")).size(15))));
     }
-    // While older rows load: a small note at the top. Drawn only then: a hidden spinner still costs frames.
-    if (this.olderBusy) box.child(h_flex().absolute().top(10).left(0).right(0).justify_center()
+    // While older rows load: a small note under the bar's tabs. Drawn only then: a hidden spinner still costs frames.
+    if (this.olderBusy) box.child(h_flex().absolute().top(BAR_H + 6).left(0).right(0).justify_center()
       .child(h_flex().id("older").h(26).px(12).gap(6).items_center().rounded(13).bg(t.raised).border(1).border_color(t.border)
         .text_size(12).text_color(t.muted)
         .child(svg(icon("spinner")).size(11).spin(SPIN_MS)).child("Loading earlier messages")));
