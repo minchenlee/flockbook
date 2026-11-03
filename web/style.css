@@ -367,3 +367,11 @@ main.split.side-shown { --side: calc(320px + env(safe-area-inset-left)); --gl: 1
 .viewer-close { position: fixed; top: max(10px, env(safe-area-inset-top)); right: 12px; z-index: 1; border: none; border-radius: 99px;
   padding: 8px 16px; min-height: 36px; font: var(--headline); color: var(--label); background: var(--glass-float); box-shadow: var(--shadow-float); cursor: pointer; }
 .viewer-status { position: fixed; top: 50%; left: 0; right: 0; text-align: center; margin: 0; color: var(--label-2); font: var(--callout); }
+
+/* Morphs (app.ts `navigate`, `morphGlyphs`, `cardIn`). Opening an agent: its row becomes the bar, its glyph and title fly
+   into the bar (View Transitions, iOS 18); the rest cross-fades. Without View Transitions the conversation opens out of
+   the row's box (clip-path). Reduce Motion: none of it. */
+::view-transition-group(*) { animation-duration: .46s; animation-timing-function: var(--ease); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .26s; }
+::view-transition-old(fb-sheet), ::view-transition-new(fb-sheet) { height: 100%; }
+@media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
