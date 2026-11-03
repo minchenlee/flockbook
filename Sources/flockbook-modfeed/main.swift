@@ -4,6 +4,10 @@
 //   flockbook-modfeed version
 //   flockbook-modfeed feed   --terminal <addr> [--cursor <c>] [--cache <file>]
 //   flockbook-modfeed status --terminal <addr> [--cache <file>]
+//   flockbook-modfeed card   --terminal <addr> [--cache <file>]
+//   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
+//   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
+//   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--cache <file>]
 import Foundation
 import HerdrKit
 import ModFeedKit
@@ -30,15 +34,17 @@ func fail(_ code: String, _ message: String) -> Never {
 out.emit(["type": "header", "protocol": FeedProtocol.version, "sidecar": FeedProtocol.sidecarVersion, "cmd": cmd])
 switch cmd {
 case "version":
-    out.emit(["type": "version", "commands": ["version", "feed", "status"]])
+    out.emit(["type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send"]])
     finish(ok: true)
-case "feed", "status":
+case "feed", "status", "card", "approve", "answer", "send":
     guard let terminal = opt("--terminal") else { fail("usage", "\(cmd) needs --terminal <addr>") }
     let cacheURL = opt("--cache").map { URL(fileURLWithPath: $0) }
     let session = HCSession.resolve()
     guard session.isAvailable else { fail("no-core", "herdr-core is not running") }
     let ws: [Workspace]
-    do { ws = try await HCClient(session: session).snapshot() } catch { fail("core", "herdr-core: \(error)") }
+    // exec gives the sidecar 30 s; a send that waits longer reports `unconfirmed`.
+    let client = HCClient(session: session, callTimeout: 8, sendTimeout: 22)
+    do { ws = try await client.snapshot() } catch { fail("core", "herdr-core: \(error)") }
     let found: FeedLocate.Found
     do {
         found = try await FeedLocate.find(terminal: terminal, workspaces: ws,
@@ -48,9 +54,31 @@ case "feed", "status":
     } catch { fail("locate", "\(error)") }
     let kind = found.pane.agent?.kind ?? "agent"
     let url = found.path.map { URL(fileURLWithPath: $0) }
-    if cmd == "status" {
+    switch cmd {
+    case "status":
         FeedStatus.run(agent: kind, log: url, settings: FeedStatus.defaultSettings(), out: out)
         finish(ok: true)
+    case "card":
+        out.emit(await FeedCards.card(pane: found.pane, screen: client, log: url))
+        finish(ok: true)
+    case "approve":
+        guard let request = opt("--request"), args.contains("--allow") != args.contains("--deny") else {
+            fail("usage", "approve needs --request <id> and one of --allow, --deny")
+        }
+        out.emit(await FeedCards.approve(pane: found.pane, screen: client, log: url, request: request, allow: args.contains("--allow")))
+        finish(ok: true)
+    case "answer":
+        guard let request = opt("--request"), let answers = opt("--answers").flatMap(FeedCards.parseAnswers) else {
+            fail("usage", "answer needs --request <id> and --answers <json>")
+        }
+        out.emit(await FeedCards.answer(pane: found.pane, screen: client, log: url, request: request, answers: answers))
+        finish(ok: true)
+    case "send":
+        guard let text = opt("--text"), !text.isEmpty else { fail("usage", "send needs --text <s>") }
+        let files = args.indices.filter { args[$0] == "--file" && args.indices.contains($0 + 1) }.map { args[$0 + 1] }
+        out.emit(await FeedCards.send(pane: found.pane, client: client, text: text, files: files))
+        finish(ok: true)
+    default: break
     }
     var cache = FeedLocate.readCache(cacheURL)
     do {
@@ -62,5 +90,5 @@ case "feed", "status":
     } catch { fail("read", "cannot read the log: \(error)") }
     finish(ok: true)
 default:
-    fail("usage", "commands: version, feed, status")
+    fail("usage", "commands: version, feed, status, card, approve, answer, send")
 }
