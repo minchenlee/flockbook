@@ -45,8 +45,10 @@ public actor SessionResolver {
     }
 
     /// `stamp`: mtime of the Claude pid file the entry came from (hc Claude panes only); `stampPid` names that file.
-    /// It may be a child of the agent process, so it is kept apart from `pid`.
-    private struct Entry { var pid: Int32?; var path: String?; var checked: Date; var stamp: Date? = nil; var stampPid: Int32? = nil }
+    /// It may be a child of the agent process, so it is kept apart from `pid`. `needPids`: the hc pane's pids then; a
+    /// change (another program in the terminal) makes the entry due at once.
+    private struct Entry { var pid: Int32?; var path: String?; var checked: Date; var stamp: Date? = nil; var stampPid: Int32? = nil
+                           var needPids: [Int32] = [] }
     private var cache: [String: Entry] = [:]
     private let socketPath: String
     private let codexDir: String
@@ -246,7 +248,7 @@ public actor SessionResolver {
         }
         let due = needs.filter { n in
             guard let e = cache[n.paneId] else { return true }
-            return now.timeIntervalSince(e.checked) >= (e.path == nil ? retry : recheck) || pidFileChanged(n, e)
+            return now.timeIntervalSince(e.checked) >= (e.path == nil ? retry : recheck) || pidFileChanged(n, e) || e.needPids != n.pids
         }
         if !due.isEmpty {
             let procs = given ?? Self.processes()
@@ -265,6 +267,7 @@ public actor SessionResolver {
                 if let old = cache[n.paneId], let path = old.path, old.pid != nil, old.pid == agent?.pid, !pidFileChanged(n, old),
                    n.kind != "pi" || FileManager.default.fileExists(atPath: path) {
                     cache[n.paneId]?.checked = now
+                    cache[n.paneId]?.needPids = n.pids
                     continue
                 }
                 var taken = claimed
@@ -277,7 +280,7 @@ public actor SessionResolver {
                 let stampPid = found?.source ?? agent?.pid
                 cache[n.paneId] = Entry(pid: agent?.pid, path: found?.path, checked: now,
                                         stamp: claudeHC ? stampPid.flatMap { pidFileStamp($0) } ?? .distantPast : nil,
-                                        stampPid: claudeHC ? stampPid : nil)
+                                        stampPid: claudeHC ? stampPid : nil, needPids: n.pids)
             }
         }
         var out: [String: String] = [:]

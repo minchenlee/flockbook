@@ -215,3 +215,32 @@ import Foundation
     check(content(back) == head + "\n", "keep: an ended mirror's late read is not appended (\(content(back).count) bytes)")
     await hc.stopMirrors()
 }
+
+/// A new agent in the same hc terminal: the pane's pids change, so its log is looked up again at once, not after
+/// the 30 s recheck (the key gate binds to the new program at once; the conversation must follow it).
+@MainActor func checksHCResolverNewProgram() async throws {
+    let agentDir = NSTemporaryDirectory() + "hkpin-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: agentDir) }
+    let cwd = "/w/pi-new"
+    let dir = SessionResolver.piSessionDir(cwd: cwd, agentDir: agentDir)
+    let fm = FileManager.default
+    try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    func file(_ name: String, started: Date) -> String {
+        let p = dir + "/" + name + ".jsonl"
+        fm.createFile(atPath: p, contents: Data((#"{"type":"session","version":3,"id":"\#(name)","timestamp":"\#(iso.string(from: started))","cwd":"\#(cwd)"}"# + "\n").utf8))
+        try? fm.setAttributes([.modificationDate: started.addingTimeInterval(5)], ofItemAtPath: p)
+        return p
+    }
+    let first = Date().addingTimeInterval(-600), second = Date().addingTimeInterval(-60)
+    let one = file("one", started: first.addingTimeInterval(2))
+    let r = SessionResolver(socketPath: "/nonexistent", piAgentDir: agentDir)
+    let a = [SessionResolver.Proc(pid: 930_001, ppid: 1, start: first, line: "node /opt/homebrew/bin/pi HC_TERMINAL_ID=t7")]
+    let found = await r.resolve([SessionResolver.Need(paneId: "hc:t7", kind: "pi", cwd: cwd, pids: [930_001])], claimed: [], procs: a)["hc:t7"]
+    check(found == one, "hc resolver: the first pi's file (\(found ?? "nil"))")
+    // That pi quits; a new one starts in the same terminal and makes its own file.
+    let two = file("two", started: second.addingTimeInterval(2))
+    let b = [SessionResolver.Proc(pid: 930_002, ppid: 1, start: second, line: "node /opt/homebrew/bin/pi HC_TERMINAL_ID=t7")]
+    let again = await r.resolve([SessionResolver.Need(paneId: "hc:t7", kind: "pi", cwd: cwd, pids: [930_002])], claimed: [], procs: b)["hc:t7"]
+    check(again == two, "hc resolver: a new pid in the pane -> its log at once, not the old one (\(again ?? "nil"))")
+}
