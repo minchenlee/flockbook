@@ -79,7 +79,7 @@ fn session_fallback_pure_parts() {
         "two open rollouts: no guess"
     );
     assert!(
-        log_path(&[ro.clone()], "claude", None, &h).is_none() && log_path(&[format!("{h}/.claude/projects/x/id.jsonl")], "claude", None, &h).is_some(),
+        log_path(std::slice::from_ref(&ro), "claude", None, &h).is_none() && log_path(&[format!("{h}/.claude/projects/x/id.jsonl")], "claude", None, &h).is_some(),
         "log kind per agent"
     );
     assert!(
@@ -297,7 +297,7 @@ fn codex_foreign_claim() {
     let resolve = |claimed_cwd: &[(&str, &str)]| {
         let mut r = resolver(|r| r.codex_dir = root.clone());
         let cc: HashMap<String, String> = claimed_cwd.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
-        r.resolve_with(&[need.clone()], &set(&[id]), &cc, Some(&procs)).get("hc:t3").cloned()
+        r.resolve_with(std::slice::from_ref(&need), &set(&[id]), &cc, Some(&procs)).get("hc:t3").cloned()
     };
     assert_eq!(resolve(&[(id, "/w/other/in-ac")]), Some(path), "a claim from a pane in another cwd does not hide the matching rollout");
     assert_eq!(resolve(&[(id, "/w/desk")]), None, "a claim from a pane in the rollout's cwd still counts");
@@ -336,7 +336,7 @@ fn pi_session() {
     let need = Need::new("hc:t6", "pi", cwd, vec![910_001]);
     let resolve = |claimed: &[&str]| {
         let mut r = resolver(|r| r.pi_agent_dir = agent_dir.clone());
-        r.resolve_with(&[need.clone()], &set(claimed), &HashMap::new(), Some(&procs)).get("hc:t6").cloned()
+        r.resolve_with(std::slice::from_ref(&need), &set(claimed), &HashMap::new(), Some(&procs)).get("hc:t6").cloned()
     };
     assert_eq!(resolve(&[&taken]), Some(mine.clone()), "the newest unclaimed file of its cwd started after the agent");
     assert_eq!(resolve(&[]), Some(taken.clone()), "newest first when nothing is claimed (/new makes a newer file)");
@@ -380,7 +380,7 @@ fn pi_two_in_one_cwd() {
     fs::remove_file(&fa).unwrap();
     let mut r = resolver(|r| r.pi_agent_dir = agent_dir.clone());
     let got = r.resolve_with(&[na, nb], &set(&[]), &HashMap::new(), Some(&procs));
-    assert!(got.get("hc:ta").is_none() && got.get("hc:tb") == Some(&fb), "a later pi's file is not taken by the earlier one ({got:?})");
+    assert!(!got.contains_key("hc:ta") && got.get("hc:tb") == Some(&fb), "a later pi's file is not taken by the earlier one ({got:?})");
     let lines = vec![
         ("/r/a".to_string(), b0 + Duration::seconds(100), pi_head("a", a0 + Duration::seconds(1), cwd).into_bytes()),
         ("/r/b".to_string(), b0 + Duration::seconds(200), pi_head("b", b0 + Duration::seconds(1), cwd).into_bytes()),
@@ -479,7 +479,7 @@ fn agy_resolver() {
     let mut both = open.clone();
     both.push(lock2.clone());
     assert_eq!(agy_log_path(&both, &root), None, "two locks: no guess");
-    assert_eq!(agy_log_path(&[lock2.clone()], &root), None, "no transcript yet: nil");
+    assert_eq!(agy_log_path(std::slice::from_ref(&lock2), &root), None, "no transcript yet: nil");
     assert_eq!(agy_log_path(&open[..3], &root), None, "no lock (no conversation yet): nil");
     assert_eq!(agy_log_path(&[format!("{root}/presence/../x.lock"), format!("{root}/presence/not-a-uuid.lock")], &root), None, "odd lock names ignored");
     assert_eq!(
@@ -508,7 +508,7 @@ fn agy_resolver() {
         r.open_files = Box::new(move |_| h2.borrow().clone());
     });
     let need = Need::new("hc:t1", "agy", "/tmp", vec![10]);
-    assert_eq!(res.resolve_with(&[need.clone()], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"), Some(&path_a), "follows the open lock");
+    assert_eq!(res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"), Some(&path_a), "follows the open lock");
     *held.borrow_mut() = vec![format!("{dir}/presence/{id2}.lock")];
     assert_eq!(
         res.resolve_with(&[need], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"),
@@ -551,9 +551,9 @@ fn hc_sessions() {
 
     let need = Need::new("hc:t1", "claude", "/tmp", vec![501, 500]);
     let mut res = resolver(|r| r.claude_dir = dir.clone());
-    assert_eq!(res.resolve_with(&[need.clone()], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"), Some(&"sid-501".to_string()), "hc need resolved by pid");
+    assert_eq!(res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"), Some(&"sid-501".to_string()), "hc need resolved by pid");
     let mut res2 = resolver(|r| r.claude_dir = dir.clone());
-    assert!(res2.resolve_with(&[need], &set(&["sid-501"]), &HashMap::new(), Some(&procs)).get("hc:t1").is_none(), "a claimed session is not handed out twice");
+    assert!(!res2.resolve_with(&[need], &set(&["sid-501"]), &HashMap::new(), Some(&procs)).contains_key("hc:t1"), "a claimed session is not handed out twice");
 }
 
 #[test]
@@ -568,7 +568,7 @@ fn hc_edge_claude_clear() {
     write("sid-a", Utc::now() - Duration::seconds(60));
     let mut res = resolver(|r| r.claude_dir = dir.clone());
     let need = Need::new("hc:t1", "claude", "/tmp", vec![501, 500]);
-    let get = |res: &mut SessionResolver| res.resolve_with(&[need.clone()], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
+    let get = |res: &mut SessionResolver| res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
     assert_eq!(get(&mut res), Some("sid-a".into()), "#6: first session");
     write("sid-b", Utc::now());
     assert_eq!(get(&mut res), Some("sid-b".into()), "#6: /clear in the same process: the new sessionId is picked up at once");
@@ -595,7 +595,7 @@ fn hc_input_stamp() {
         r.recheck = 3600.0;
     });
     let need = Need::new("hc:t1", "claude", "/tmp", vec![800]);
-    let first = res.resolve_with(&[need.clone()], &set(&[]), &HashMap::new(), Some(&procs));
+    let first = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
     assert_eq!(first.get("hc:t1"), Some(&"sid-a".to_string()), "session found in a child pid's file");
     write("sid-b", Utc::now());
     let second = res.resolve_with(&[need], &set(&[]), &HashMap::new(), Some(&procs));
@@ -647,7 +647,7 @@ fn tui_pane_open_log() {
     let mut r = SessionResolver::new("/s.sock");
     r.open_files = Box::new(move |pids| if pids.contains(&101) { vec![ro2.clone()] } else { vec![] });
     let need = Need::new("w1:p1", "codex", "/w", vec![]);
-    assert_eq!(r.resolve_with(&[need.clone()], &set(&[]), &HashMap::new(), Some(&procs)).get("w1:p1"), Some(&ro));
+    assert_eq!(r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("w1:p1"), Some(&ro));
     let mut r2 = SessionResolver::new("/other.sock");
     r2.open_files = Box::new(|_| vec![]);
     assert!(r2.resolve_with(&[need], &set(&[]), &HashMap::new(), Some(&procs)).is_empty(), "another herdr session's socket: no match");

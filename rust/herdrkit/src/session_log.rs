@@ -244,7 +244,7 @@ pub fn continued_in(log: &Path) -> Option<String> {
     f.seek(SeekFrom::Start(size.saturating_sub(4096))).ok()?;
     let mut tail = vec![];
     f.read_to_end(&mut tail).ok()?;
-    let last = tail.split(|b| *b == b'\n').filter(|s| !s.is_empty()).last()?;
+    let last = tail.split(|b| *b == b'\n').rfind(|s| !s.is_empty())?;
     let o: serde_json::Value = serde_json::from_slice(last).ok()?;
     let o = o.as_object()?;
     if o.get("type")?.as_str()? != "continued-in" {
