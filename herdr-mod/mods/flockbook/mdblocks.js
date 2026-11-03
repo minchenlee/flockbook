@@ -3,27 +3,12 @@
 // TextView markdown. Heights stay as estimate.js guesses them (same line heights).
 import { div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { cellWidth } from "./estimate.js";
+import { tableCells, colWidths } from "./estimate.js";
+
+export { tableCells };
 
 const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)\s*$/;
 const SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
-
-// "| a | b |" → ["a", "b"]. An escaped pipe and pipes inside `code` stay in the cell.
-export function tableCells(line) {
-  let s = line.trim();
-  if (s.startsWith("|")) s = s.slice(1);
-  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
-  const out = []; let cur = "", code = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c === "\\" && s[i + 1] === "|") { cur += "|"; i++; continue; }
-    if (c === "`") code = !code;
-    if (c === "|" && !code) { out.push(cur.trim()); cur = ""; continue; }
-    cur += c;
-  }
-  out.push(cur.trim());
-  return out;
-}
 
 const alignOf = (cell) => {
   const c = cell.trim();
@@ -71,11 +56,12 @@ function codeBox(b, t) {
 }
 
 // Cells get a fixed width: a TextView in a flexible cell keeps its full one-line width and spills
-// out of the table. estimate.js guesses the row heights from the same cellWidth.
+// out of the table. Widths follow the content (colWidths); estimate.js guesses the row heights from
+// the same widths.
 function table(id, b, t, width) {
   const n = Math.max(b.head.length, ...b.rows.map((r) => r.length));
-  const cw = cellWidth(width, n);
-  const cell = (key, text, c, head) => div().w(cw).flex_none().overflow_hidden().px(12).py(8)
+  const ws = colWidths(width, [b.head, ...b.rows], n);
+  const cell = (key, text, c, head) => div().w(ws[c]).flex_none().overflow_hidden().px(12).py(8)
     .when(b.align[c] === "right", (el) => el.text_right()).when(b.align[c] === "center", (el) => el.text_center())
     .when(head, (el) => el.font_semibold())
     .child(TextView.markdown(key, text ?? "").selectable(true));
