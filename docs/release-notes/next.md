@@ -34,5 +34,5 @@ One short line: what this release is about.
 - Herdr app mod: the "Or type your own answer" box in a question card takes clicks and typing again, looks like the options, and its number key moves the keyboard into it.
 - Herdr app mod: the agent's terminal window has a cleaner title bar (name, "Terminal", a round close button) and rounder corners.
 - Herdr app mod: "Loading earlier messages" shows under the top bar's tabs instead of behind them.
-- Herdr app mod: the sidebar that slides in from the left edge is now the full sidebar (same height and Workspaces list), not a short popup.
+- Herdr app mod: the sidebar that slides in from the left edge is now the full sidebar (same height, Workspaces list and sidebar button spot), not a short popup.
 - Herdr app mod: code blocks and tables in chat replies now have rounded corners, and table columns size to their content. Code text in these boxes cannot be selected yet.

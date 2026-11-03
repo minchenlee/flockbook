@@ -3,8 +3,8 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, run, openOverlay, closeOverlay, props } from "herdr";
 import { openMenu, spaceItems } from "./menu.js";
-import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, peekClosed, PEEK_W, SPRING } from "./state.js";
-import { statusMark, lightsRoom } from "./top.js";
+import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, peekClosed, PEEK_W, PEEK_GAP, SPRING } from "./state.js";
+import { statusMark, lightsRoom, BAR_H } from "./top.js";
 
 // Status marks for a space's tabs: all of them up to 5, else the first 3 and "+N".
 export function tabMarks(tabs) {
@@ -72,7 +72,11 @@ export class SideView {
 
     // The header: the sidebar button right of the window buttons, where the top bar has it while
     // the sidebar is hidden, so it does not jump when the sidebar opens or closes.
-    const header = h_flex().h(56).flex_none().pl(Math.max(0, lightsRoom() - 8)).items_center()
+    // Floating, the panel starts PEEK_GAP in from the window plus its 1 px border, so the header is
+    // that much shorter and less indented: the button stays on the same spot on screen.
+    const inset = this.floating ? PEEK_GAP + 1 : 0;
+    const indent = lightsRoom() - 8 - inset;
+    const header = h_flex().h(BAR_H - inset * 2).flex_none().pl(Math.max(0, indent)).when(indent < 0, (el) => el.ml(indent)).items_center()
       .child(div().id("side-toggle").size(28).flex_none().flex().items_center().justify_center().rounded(14)
         .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", stop).on_click(() => toggleSidebar()).child(svg(icon("sidebar")).size(16)));

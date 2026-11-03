@@ -73,3 +73,22 @@ test("the panel slides in: first drawn left of its spot, then moved to it with a
   assert.ok(next._a.spring);
   fake.props = undefined;
 });
+
+test("the sidebar button is on the same spot in the panel as in the docked sidebar", async () => {
+  const { SideView } = await import("../mods/flockbook/side.js");
+  const { byId } = await import("./stub/ui.mjs");
+  const { BAR_H, lightsRoom } = await import("../mods/flockbook/top.js");
+  const spot = (peek) => {
+    reset(); fake.shared["flockbook.sidebar"] = !peek;
+    fake.props = peek ? { view: "side", peek: true, overlay: "o9" } : { view: "side" };
+    const el = new SideView(fakeCx()).render(fakeCx());
+    const header = el.kids.find((k) => byId(k, "side-toggle"));
+    // The panel is drawn at (PEEK_GAP, PEEK_GAP) with a 1 px border; the sidebar at (0, 0).
+    const at = peek ? 8 + 1 : 0;
+    return { x: at + 8 + (header._a.ml ?? 0) + header._a.pl + 14, y: at + header._a.h / 2 };
+  };
+  const docked = spot(false), floating = spot(true);
+  fake.props = undefined;
+  assert.deepEqual(floating, docked);
+  assert.deepEqual(docked, { x: lightsRoom() + 14, y: BAR_H / 2 }, "where the top bar has it while the sidebar is hidden");
+});
