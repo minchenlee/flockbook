@@ -54,6 +54,19 @@ import Foundation
     // A late result still fills a call whose slot had passed.
     let late = SessionLog.parse(lines: al + [#"{"step_index":6,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-11-02T03:00:19Z","content":"C"}"#])
     check(chipCalls(late)[2].output == "C" && chipCalls(late)[2].isError == false, "agy: late result fills the call")
+
+    // An injected step (SYSTEM_MESSAGE, CHECKPOINT …) between a call and its result pushes the result one step on.
+    let il = String(decoding: fixture("agy-injected.jsonl"), as: UTF8.self).split(separator: "\n").map(String.init)
+    func outs(_ lines: [String]) -> [String] { chipCalls(SessionLog.parse(lines: lines)).map { "\($0.output ?? "nil")\($0.isError ? "!" : "")" } }
+    let orders: [(String, [Int])] = [("in order", Array(0..<10)), ("injected step before the call", [0, 2, 1, 3, 4, 5, 7, 6, 8, 9]),
+                                     ("result before the call", [0, 1, 2, 3, 4, 5, 7, 8, 6, 9]), ("result, call, then injected step", [0, 1, 2, 3, 4, 5, 8, 6, 7, 9])]
+    for (name, order) in orders {
+        check(outs(order.map { il[$0] }) == ["a", "b", "c"], "agy: injected steps: \(name) \(outs(order.map { il[$0] }))")
+    }
+    var ip = ConversationParser()
+    for l in il { ip.feed(line: l) }
+    check(!ip.hasOpenToolUse && !ip.items().contains { if case .permissionRequest = $0.kind { return true }; return false },
+          "agy: injected steps: nothing left open")
 }
 
 // Log from the process: agy holds `presence/<conversation id>.lock` open; the transcript sits under `brain/<id>`.
