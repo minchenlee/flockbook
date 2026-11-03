@@ -45,3 +45,7 @@ export const approve = (terminal, request, allow) => call("approve", ["--termina
 export const answer = (terminal, request, answers) => call("answer", ["--terminal", terminal, "--request", request, "--answers", JSON.stringify(answers), "--cache", cachePath()]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 export const send = (terminal, text, files = []) => call("send", ["--terminal", terminal, "--text", text, ...files.flatMap((f) => ["--file", f])]);
+
+// The sidecar's "changed" reply when another agent took the pane: nothing was sent.
+export const AGENT_CHANGED = "Another agent is in this pane now. Nothing was sent.";
+export const agentChanged = (done) => done?.result === "changed" && /another agent/i.test(done?.message ?? "");

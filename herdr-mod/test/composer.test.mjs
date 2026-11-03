@@ -78,6 +78,11 @@ test("a blank box sends nothing; a failed send puts the text back with the reaso
   b.input.set_value("hello"); await c.submit(cx);
   assert.equal(b.input.value(), "hello");
   assert.match(textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note")), /terminal is gone/);
+  // Another agent in the pane: not sent either; the text comes back with the reason.
+  fake.sendResult = "changed"; fake.sendMessage = "another agent is in this pane now; nothing was sent";
+  b.input.set_value("again"); await c.submit(cx);
+  assert.equal(b.input.value(), "again");
+  assert.match(textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note")), /Another agent is in this pane now/);
 });
 
 test("each agent keeps its own draft", () => {

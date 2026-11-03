@@ -209,3 +209,11 @@ test("the number after the options moves the keyboard into the own-answer box", 
   assert.equal(c.key_down({ key: "3", modifiers: {} }, cx, "t1"), true);
   assert.equal(focused, 1);
 });
+
+test("another agent in the pane: the card says so, nothing sent", async () => {
+  cardNow = approval;
+  fake.result = "changed"; fake.message = "another agent is in this pane now; nothing was sent";
+  const cx = fakeCx(); const c = new Cards(); await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-allow")._h.on_click({}, cx); await cx.settle();
+  assert.match(textOf(byId(c.view("t1", T), "card-note")), /Another agent is in this pane now/);
+});

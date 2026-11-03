@@ -149,11 +149,12 @@ export class Composer {
     try {
       const r = await sidecar.send(a, withFiles(text, files), files);
       const done = r.lines.find((l) => l.type === "done");
-      if (r.error || !done || done.result === "failed") {
+      const moved = sidecar.agentChanged(done);
+      if (r.error || !done || done.result === "failed" || moved) {
         // Put the text back, unless the box moved to another agent or something new was typed.
         if (this.address === a && !b.input.value()) { b.input.set_value(text); b.files = files; }
         else if (this.address !== a) this.drafts.set(a, { text, files });
-        this.note = { text: (r.error?.message ?? done?.message) || "The message was not sent.", bad: true };
+        this.note = { text: moved ? sidecar.AGENT_CHANGED : (r.error?.message ?? done?.message) || "The message was not sent.", bad: true };
       } else if (done.result === "unconfirmed") {
         this.note = { text: "Sent. The agent did not confirm it yet.", bad: false };
       }
