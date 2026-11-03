@@ -5,6 +5,8 @@ import Foundation
 /// `USER_INPUT` is the prompt (inside `<USER_REQUEST>`), `PLANNER_RESPONSE` is the reply and its `tool_calls`
 /// (`{name, args}`, no call id), and the next `GENERIC` step is the result of the oldest open call.
 /// `SYSTEM_MESSAGE` is injected text; `CHECKPOINT` marks truncated history. A call without a result is pending.
+/// `ask_question` is a question card (result `A1: <answer>`). A denied call never gets a result (seen 2026-11-02):
+/// the next `USER_INPUT` closes it as not run.
 extension ConversationParser {
     static func isAgy(_ o: [String: Any]) -> Bool {
         o["uuid"] == nil && o["step_index"] is NSNumber && o["type"] is String && o["source"] is String
@@ -17,6 +19,7 @@ extension ConversationParser {
         lineTS = Self.parseTime(o["created_at"] as? String) ?? lineTS
         switch o["type"] as? String {
         case "USER_INPUT":
+            closeOpenAgyCalls()
             guard let text = Self.agyRequest(content), !text.isEmpty else { return }
             flush()
             done.append(ConversationItem(id: bid, kind: .userText(text), timestamp: lineTS))
@@ -28,8 +31,15 @@ extension ConversationParser {
             }
             for (i, c) in ((o["tool_calls"] as? [[String: Any]]) ?? []).enumerated() {
                 let args = c["args"] as? [String: Any] ?? [:]
-                let name = Self.agyTool(c["name"] as? String ?? "tool")
                 let id = "\(bid)-\(i)"
+                if c["name"] as? String == "ask_question", let q = QuestionAdapter.agy(id: id, input: args) {   // a card, never a permission
+                    flush()
+                    questionAt[id] = done.count
+                    openOrder.append(id)   // its result is the next GENERIC, in order with the calls
+                    done.append(ConversationItem(id: "q-\(id)", kind: .question(q), timestamp: lineTS))
+                    continue
+                }
+                let name = Self.agyTool(c["name"] as? String ?? "tool")
                 if run.isEmpty { runKey = id }
                 run.append((name, Self.label(for: name), id))
                 callTS[id] = lineTS
@@ -41,6 +51,11 @@ extension ConversationParser {
         case "GENERIC":
             guard let id = openOrder.first else { return }
             openOrder.removeFirst()
+            if let at = questionAt.removeValue(forKey: id), case .question(var q) = done[at].kind {
+                q.state = QuestionAdapter.agyState(q, text: Self.agyResult(content))
+                done[at].kind = .question(q)
+                return
+            }
             openToolUses[id] = nil
             callById[id]?.output = Self.cut(Self.agyResult(content))
             callById[id]?.isError = o["status"] as? String == "ERROR"
@@ -49,6 +64,21 @@ extension ConversationParser {
             done.append(ConversationItem(id: bid, kind: .status("Context compacted"), timestamp: lineTS))
         default: break   // SYSTEM_MESSAGE and others: injected, not shown
         }
+    }
+
+    /// A new prompt: calls still open were denied or interrupted (agy writes no result for them).
+    private mutating func closeOpenAgyCalls() {
+        for id in openOrder {
+            if let at = questionAt.removeValue(forKey: id), case .question(var q) = done[at].kind {
+                q.state = .declined
+                done[at].kind = .question(q)
+            } else {
+                callById[id]?.output = "Not run"
+                callById[id]?.isError = true
+                openToolUses[id] = nil
+            }
+        }
+        openOrder.removeAll()
     }
 
     /// The typed prompt: the `<USER_REQUEST>` body; plain text without tags as is; other tagged text is injected.

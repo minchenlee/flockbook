@@ -137,3 +137,50 @@ esc to cancel                                                     accept-edits Â
     var q = agy; q.statusKind = "question"
     check(PermissionGate.checkApproval(agy, pendingTool: true) && !PermissionGate.checkApproval(q, pendingTool: true), "agy: hc 7501 kind gates the approval card")
 }
+
+// ask_question: in the log as a call, answered by its GENERIC ("A1: Blue" / "A1: User Skipped"); picked by digit (live).
+@MainActor func checksAgyQuestions() async throws {
+    func step(_ i: Int, _ type: String, _ extra: String) -> String {
+        #"{"step_index":\#(i),"source":"\#(type == "USER_INPUT" ? "USER_EXPLICIT" : "MODEL")","type":"\#(type)","status":"DONE","created_at":"2026-11-02T01:36:2\#(i)Z",\#(extra)}"#
+    }
+    let ask = step(5, "PLANNER_RESPONSE", #""tool_calls":[{"name":"ask_question","args":{"questions":[{"is_multi_select":false,"options":["Red","Blue"],"question":"Which color do you prefer, red or blue?"}]}}]"#)
+    let head = [step(4, "USER_INPUT", #""content":"<USER_REQUEST>\nAsk me.\n</USER_REQUEST>""#), ask]
+    let pending = SessionLog.parse(lines: head)
+    guard case .question(let q)? = pending.last?.kind else { check(false, "agy: ask_question is a question item \(describe(pending))"); return }
+    check(q.agent == "agy" && q.delivery == .picker && q.state == .pending && q.questions.count == 1
+          && q.questions[0].text == "Which color do you prefer, red or blue?" && q.questions[0].options.map(\.label) == ["Red", "Blue"]
+          && !q.questions[0].multiSelect, "agy: question parsed")
+    check(!pending.contains { if case .permissionRequest = $0.kind { return true }; return false }, "agy: a question is never a permission request")
+    func state(_ result: String) -> QuestionRequest.State? {
+        let items = SessionLog.parse(lines: head + [step(6, "GENERIC", #""content":"Created At: x\nCompleted At: y\n\#(result)""#)])
+        return items.compactMap { if case .question(let q) = $0.kind { return q.state }; return nil }.first
+    }
+    check(state("A1: Blue") == .answered(["Blue"]), "agy: answered")
+    check(state("A1: User Skipped") == .declined, "agy: skipped is declined")
+    // Screen: the picker from its "Question k/n:" line; the exact question before every key.
+    check(QuestionAdapter.screenShows(q, screen: agyQuestionScreen) && !QuestionAdapter.screenShows(q, screen: agyPermScreen), "agy: picker on screen")
+    check(QuestionAdapter.shows(q, question: 0, screen: agyQuestionScreen), "agy: the exact question on screen")
+    let swapped = agyQuestionScreen.replacingOccurrences(of: "1. Red", with: "1. Blau")
+    let twoCursors = agyQuestionScreen.replacingOccurrences(of: "  2. Blue", with: "> 2. Blue")
+    let other = agyQuestionScreen.replacingOccurrences(of: "Question 1/1: Which color", with: "Question 1/1: Which colour")
+    let noFoot = agyQuestionScreen.replacingOccurrences(of: " Â· esc Skip", with: "")
+    let noWriteIn = agyQuestionScreen.replacingOccurrences(of: "  3. Write-in...\n", with: "")
+    check(![swapped, twoCursors, other, noFoot, noWriteIn, agyPermScreen].contains { QuestionAdapter.shows(q, question: 0, screen: $0) },
+          "agy: another option, two cursors, another text, no picker footer, no write-in row: not this question")
+    check(Hub.screenTakesKeys(agyQuestionScreen) && Hub.screenTakesKeys(agyPermScreen), "agy: prompts take keys (no typed text)")
+    // Keys
+    check((try? QuestionAdapter.steps(for: q, answers: [QuestionAnswer(picks: [1])])) == [.text("2")], "agy: digit picks and submits")
+    check((try? QuestionAdapter.steps(for: q, answers: [QuestionAnswer(picks: [], other: "Green")])) == nil, "agy: write-in not proven: refused")
+    var multi = q; multi.questions[0].multiSelect = true
+    check((try? QuestionAdapter.steps(for: multi, answers: [QuestionAnswer(picks: [0, 1])])) == nil, "agy: multi-select not proven: refused")
+    // hc 7501: blocked kind question is not an approval; the question comes from the log, not a screen read.
+    let agy = Agent(name: "a", kind: "agy", status: .blocked, sessionId: "/x.jsonl", title: "a", backend: .hc, statusKind: "question")
+    check(!PermissionGate.checkApproval(agy, pendingTool: true) && !PermissionGate.readQuestion(agy), "agy: hc question kind: no approval, no screen read")
+    // A denied call never gets a result: the next prompt closes it.
+    let deny = [step(8, "USER_INPUT", #""content":"<USER_REQUEST>\nRun pwd\n</USER_REQUEST>""#),
+                step(9, "PLANNER_RESPONSE", #""tool_calls":[{"name":"run_command","args":{"CommandLine":"pwd"}}]"#)]
+    check(describe(SessionLog.parse(lines: deny)).last == "perm:pwd", "agy: call pending before the next prompt")
+    let after = SessionLog.parse(lines: deny + [step(10, "USER_INPUT", #""content":"<USER_REQUEST>\nNext.\n</USER_REQUEST>""#)])
+    check(!after.contains { if case .permissionRequest = $0.kind { return true }; return false } && chipCalls(after).first?.isError == true,
+          "agy: next prompt closes the denied call \(describe(after))")
+}

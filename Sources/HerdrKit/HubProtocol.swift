@@ -116,7 +116,8 @@ public enum Hub {
         if ApprovalNotice.screenBox(screen) != nil || QuestionAdapter.claudeScreen(screen) != nil
             || QuestionAdapter.pickerRegion(agent: "codex", screen: screen) != nil
             || QuestionAdapter.pickerRegion(agent: "claude", screen: screen) != nil
-            || QuestionAdapter.pickerRegion(agent: "grok", screen: screen) != nil || ApprovalNotice.grokBox(screen) != nil || ApprovalNotice.agyBox(screen) != nil
+            || QuestionAdapter.pickerRegion(agent: "grok", screen: screen) != nil
+            || QuestionAdapter.pickerRegion(agent: "agy", screen: screen) != nil || ApprovalNotice.grokBox(screen) != nil || ApprovalNotice.agyBox(screen) != nil
             || unreadablePrompt(screen: screen, blocked: false) { return true }
         let lines = screen.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.suffix(12)
         let keyLines = ["enter to confirm", "esc to cancel", "enter to submit", "enter to select", "enter continue"]

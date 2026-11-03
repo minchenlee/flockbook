@@ -132,6 +132,7 @@ public enum QuestionAdapter {
         switch agent {
         case "codex": ["enter to submit"]
         case "grok": ["Shift+x:dismiss"]
+        case "agy": ["esc Skip"]
         default: ["Chat about this", "Review your answers"]
         }
     }
@@ -175,14 +176,14 @@ public enum QuestionAdapter {
     }
 
     /// The picker part of the screen only, flattened: Claude from its tab bar down, Codex from its "Question k/n" line
-    /// down, Grok from the top of its "┃" block down. Text above it (the user's own prompt often repeats the
+    /// down (agy too), Grok from the top of its "┃" block down. Text above it (the user's own prompt often repeats the
     /// question) must not count. Nil = no picker.
     public static func pickerRegion(agent: String, screen: String) -> String? {
         let lines = screen.components(separatedBy: "\n")
         let start: Int?
         if agent == "grok" {
             start = grokBlock(lines)?.lowerBound
-        } else if agent == "codex" {
+        } else if agent == "codex" || agent == "agy" {   // agy: "Question k/n: <text>"
             start = lines.lastIndex { $0.firstMatch(of: /^\s*Question \d+\/\d+/) != nil }
         } else {
             start = lines.lastIndex { l in
@@ -210,6 +211,7 @@ public enum QuestionAdapter {
         let want = q.questions[k], labels = want.options.map { flat($0.label) }
         if q.agent == "codex" { return codexExact(q, question: k, screen: screen, notes: other, row: row) }
         if q.agent == "grok" { return other == nil && grokExact(q, question: k, screen: screen) }
+        if q.agent == "agy" { return other == nil && agyExact(q, question: k, screen: screen) }
         // A request from the hook (not read from the screen) gets the exact compare; screen reads keep the parser.
         // The screen must prove question `k` only: when another question of the request also matches it (alike once
         // whitespace is dropped), the hub cannot know which one is open, so no key.
@@ -385,6 +387,7 @@ public enum QuestionAdapter {
         switch q.agent {
         case "codex": return try codexSteps(q, answers)
         case "grok": return try grokSteps(q, answers)
+        case "agy": return try agySteps(q, answers)
         default: return claudeSteps(q, answers)
         }
     }
@@ -660,8 +663,8 @@ extension PaneScreen {
             let ck: Set<Int>? = hooked && multi ? checked : nil
             let same: @Sendable (String) -> Bool = { r ? QuestionAdapter.showsReview(q, screen: $0, answers: answers) : QuestionAdapter.shows(q, question: k, screen: $0, other: inRow, focus: f, row: fr, checks: ck) }
             if hooked, step.sendsKeys { _ = try await waitScreen(paneId: paneId, timeout: 1.5, same) }
-            // Grok on the Mac (no gate): the exact question before each key too, not only its first words.
-            if q.agent == "grok", gate == nil, step.sendsKeys {
+            // Grok and agy on the Mac (no gate): the exact question before each key too, not only its first words.
+            if q.agent == "grok" || q.agent == "agy", gate == nil, step.sendsKeys {
                 guard try await waitScreen(paneId: paneId, timeout: 1.5, same) else { throw QuestionAdapter.Failure.notOnScreen }
             }
             switch step {
