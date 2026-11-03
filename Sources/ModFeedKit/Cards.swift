@@ -40,7 +40,12 @@ public enum FeedCards {
     }
 
     static func current(pane: Pane, screen: any PaneScreen, log: URL?) async -> Current? {
-        guard let agent = pane.agent else { return nil }
+        await look(pane: pane, screen: screen, log: log).now
+    }
+
+    /// `read`: the screen was read and the approval rules ran on it (a failed read is no evidence of anything).
+    static func look(pane: Pane, screen: any PaneScreen, log: URL?) async -> (now: Current?, read: Bool) {
+        guard let agent = pane.agent else { return (nil, false) }
         let items = log.flatMap { try? FeedTail.read($0) }.map { FeedTail.items($0.lines) } ?? []
         var perm: PermissionRequest?, question: QuestionRequest?
         for it in items.reversed() {
@@ -50,34 +55,42 @@ public enum FeedCards {
         // The app's rules (`ApprovalNotice`): the card is the prompt box on screen; the log's call only when it is
         // that box (same tool and command). A log that lags the screen still names the call before, and its id must
         // never answer the next prompt. The box's id covers its command (Claude, Grok and agy boxes alike).
+        var read = false
         if PermissionGate.checkApproval(agent, pendingTool: perm != nil), let text = try? await screen.visibleText(paneId: pane.id) {
+            read = true
             let state = ApprovalNotice.PaneState(agentKind: agent.kind, blocked: agent.status == .blocked, pendingToolUseId: perm?.toolUseId,
                                                  screen: text, pendingTool: perm?.toolName, pendingCommand: perm?.command)
             if ApprovalNotice.prompt(state, writes: true) != nil,
                let card = ApprovalNotice.cardRequest(logged: perm, onScreen: ApprovalNotice.screenRequest(text, agent: agent.kind)) {
-                return .approval(id: card.toolUseId, title: card.title.isEmpty ? "Approval needed" : card.title, command: card.command,
-                                 tool: card.toolName, pending: perm)
+                return (.approval(id: card.toolUseId, title: card.title.isEmpty ? "Approval needed" : card.title, command: card.command,
+                                  tool: card.toolName, pending: perm), true)
             }
         }
         // A question in the log: answered by a message (Codex async) any time, or by keys while the agent waits.
-        if let q = question, q.delivery == .message || agent.status == .blocked { return .question(q) }
-        if PermissionGate.readQuestion(agent), let q = try? await screen.pendingQuestion(paneId: pane.id) { return .question(q) }
-        return nil
+        if let q = question, q.delivery == .message || agent.status == .blocked { return (.question(q), read) }
+        if PermissionGate.readQuestion(agent), let q = try? await screen.pendingQuestion(paneId: pane.id) { return (.question(q), read) }
+        return (nil, read)
     }
 
     /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click) so the
     /// card holds every question and `unread` is 0.
     public static func card(pane: Pane, screen: any PaneScreen, log: URL?, all: Bool = false, cache: URL? = nil) async -> Card {
-        var now = await current(pane: pane, screen: screen, log: log)
+        let looked = await look(pane: pane, screen: screen, log: log)
+        var now = looked.now
         if all, case .question(let q)? = now, q.unread > 0,
            let full = try? await screen.loadAllQuestions(paneId: pane.id, gate: gate(pane), expect: q) { now = .question(full) }
-        // The claims of prompts no longer on screen go (`FeedAnswered.seen`); one still there shows as answered.
+        // The claims of prompts that surely left the screen go (`FeedAnswered.seen`, only after a read that worked);
+        // one still there, even re-wrapped, shows as answered.
         let answered = FeedAnswered(cache: cache)
-        if case .approval(let id, _, _, _, _)? = now { answered.seen(terminal: pane.id, current: id) } else { answered.seen(terminal: pane.id, current: nil) }
+        let blocked = pane.agent?.status == .blocked
+        if looked.read {
+            if case .approval(_, _, let command, let tool, _)? = now { answered.seen(terminal: pane.id, box: (tool, command)) }
+            else { answered.seen(terminal: pane.id, box: nil) }
+        }
         switch now {
         case .approval(let id, let title, let command, let tool, _)?:
             return Card(kind: "approval", request: id, title: title, command: FeedRows.cut(command, FeedRows.textCap), tool: tool,
-                        answered: answered.isClaimed(terminal: pane.id, id: id) ? true : nil)
+                        answered: answered.isClaimed(terminal: pane.id, id: id, tool: tool, command: command, blocked: blocked) ? true : nil)
         case .question(let q)?:
             let row = FeedRows.row(ConversationItem(id: q.toolUseId, kind: .question(q)))
             return Card(kind: "question", request: q.toolUseId, question: row.question, unread: q.unread)
@@ -98,14 +111,14 @@ public enum FeedCards {
 
     public static func approve(pane: Pane, screen: any PaneScreen, log: URL?, request: String, allow: Bool, cache: URL? = nil) async -> Done {
         guard let agent = pane.agent,
-              case .approval(let id, _, _, _, let pending)? = await current(pane: pane, screen: screen, log: log), id == request else {
+              case .approval(let id, _, let command, let tool, let pending)? = await current(pane: pane, screen: screen, log: log), id == request else {
             return Done(result: "changed", message: "the approval on screen is not the one shown")
         }
         guard await screen.passes(gate(pane), paneId: pane.id) else { return refused(pane) }
         // One answer per prompt, across runs and views: claimed before the key; kept when the key went out or may
         // still land (hc held it); given back when nothing went out.
         let answered = FeedAnswered(cache: cache)
-        guard answered.claim(terminal: pane.id, id: id) else { return alreadyAnswered }
+        guard answered.claim(terminal: pane.id, id: id, tool: tool, command: command, blocked: agent.status == .blocked) else { return alreadyAnswered }
         // As the app's buttons: the screen is read again right before the key, and the key goes only while the box on
         // screen is still this id (Grok: its own keys, each checked against the focus).
         do {
@@ -115,7 +128,8 @@ public enum FeedCards {
             answered.release(terminal: pane.id, id: id)
             return Done(result: "changed", message: "the prompt on screen is not the one shown")
         } catch HerdrError.timeout {
-            // hc may still hold the key for its typing-quiet rule: not "nothing sent". The claim stays.
+            // hc may still hold the key for its typing-quiet rule: not "nothing sent". The claim stays while the agent is blocked.
+            answered.hold(terminal: pane.id, id: id)
             return Done(result: "unconfirmed", message: "no answer in time; the key may still arrive")
         } catch {
             answered.release(terminal: pane.id, id: id)

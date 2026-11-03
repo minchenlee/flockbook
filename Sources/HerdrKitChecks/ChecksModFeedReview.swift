@@ -101,6 +101,48 @@ func checksModFeedReview() async throws {
     check(lag.result == "answered" && keys().count == k4 + 1, "review1 #2: sent, box still drawn: the next press sends nothing (\(lag))")
     // Without a cache file (no claim possible) the old behaviour stays: one key per press.
 
+    // Re-check, new finding 1: a claim goes only when its prompt surely left the screen. A failed read, or the same
+    // box re-wrapped (the pane was resized, so the box's screen id changed), keeps it. A held key's claim lasts while
+    // the agent is still blocked.
+    fake.setScreen("t1", claudeBox("ls"))
+    _ = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache)
+    fake.setScreen("t1", claudeBox("cat notes"))
+    let id5 = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache).request ?? ""
+    fake.keysDelay = 2
+    let held5 = await FeedCards.approve(pane: pane, screen: slow, log: nil, request: id5, allow: true, cache: cache)
+    fake.keysDelay = 0
+    check(held5.result == "unconfirmed", "review1 re-check: setup, a held key (\(held5))")
+    let kr = keys().count
+    fake.clearScreen("t1")
+    _ = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache)
+    fake.setScreen("t1", claudeBox("cat notes"))
+    let afterFail = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id5, allow: true, cache: cache)
+    check(afterFail.result == "answered" && keys().count == kr, "review1 re-check: a failed screen read keeps the claim (\(afterFail))")
+    let wrapped = claudeBox("cat notes").replacingOccurrences(of: " Run it\n", with: " Run\n it\n")
+    fake.setScreen("t1", wrapped)
+    let wcard = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache)
+    check(wcard.request != nil && wcard.request != id5, "review1 re-check: setup, a re-wrapped box has another screen id (\(wcard))")
+    check(wcard.answered == true, "review1 re-check: the same prompt re-wrapped still shows as answered (\(wcard))")
+    let wa = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: wcard.request ?? "", allow: true, cache: cache)
+    check(wa.result == "answered" && keys().count == kr, "review1 re-check: the re-wrapped box sends no second key (\(wa))")
+    // Past heldWait, the agent still blocked on that prompt: the held key's claim still holds.
+    let claims = dir.appendingPathComponent("answered", isDirectory: true)
+    let old = Date().addingTimeInterval(-(FeedAnswered.heldWait + 5))
+    for t in (try? FileManager.default.contentsOfDirectory(at: claims, includingPropertiesForKeys: nil)) ?? [] {
+        for u in (try? FileManager.default.contentsOfDirectory(at: t, includingPropertiesForKeys: nil)) ?? [] {
+            try? FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: u.path)
+        }
+    }
+    fake.setScreen("t1", claudeBox("cat notes"))
+    let renewed = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id5, allow: true, cache: cache)
+    check(renewed.result == "answered" && keys().count == kr, "review1 re-check: a held key's claim lasts while the agent is blocked (\(renewed))")
+    // A successful read with no box ends it: the prompt left.
+    fake.setScreen("t1", "  ❯ ")
+    _ = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache)
+    fake.setScreen("t1", claudeBox("cat notes"))
+    let fresh = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id5, allow: true, cache: cache)
+    check(fresh.result == "sent" && keys().count == kr + 1, "review1 re-check: after a read with no box, the prompt can be answered again (\(fresh))")
+
     // 3. A Claude conversation went on in a new log (the old one ends with `continued-in`; herdr keeps the old id).
     // A cache hit must give the new log too, not the old, frozen one, so the chat does not flip between them.
     let proj = dir.appendingPathComponent("projects/-w-proj")

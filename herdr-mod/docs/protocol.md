@@ -234,14 +234,17 @@ A running tool is not an approval.
 | `changed` | Another card, or none, is on screen now. Nothing was sent. | Reads `card` again. |
 | `unconfirmed` | herdr-core did not answer in time. The text or the key may still arrive. | Keeps the composer empty (a retry could send it twice) and says so; an approval shows as `answered`. |
 | `no-identity` | Flockbook cannot tell the agent from another program in that terminal (hc: no process, for example under a wrapper script). Nothing was sent; a retry does not help. | Keeps the text or the card, shows `message`. |
-| `answered` | `approve` only: this prompt was answered less than 60 s ago and is still on screen. Nothing was sent. | Shows the note; no buttons. |
+| `answered` | `approve` only: this prompt was answered less than 60 s ago (or its key may still arrive) and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
 
 `approve` reads the screen again right before the keys and sends only while the box on screen is
 still `request` (the app's `respondIfOpen`). Claude and agy: `--allow` sends `1` (allow once),
 `--deny` sends Esc. Grok: Enter on "Yes, proceed", or Down then Enter on "No, reject", each key
 checked against the focus. One answer per prompt: the claim is a file in `answered/` next to the
-cache file, made before the key; it goes when the prompt leaves the screen, or after 60 s.
+cache file, made before the key. It names the prompt by its screen id and by its tool and command,
+so a box re-wrapped by a resize is the same prompt. It goes only when a screen read that worked shows
+no approval box or a box with another command (a failed read keeps it), or after 60 s. A claim whose
+key is `unconfirmed` lasts while the agent stays blocked.
 
 `answer --answers` is one object per question, in order:
 `[{"picks":[1]}, {"picks":[0,2]}, {"picks":[],"other":"my own answer"}]`. `picks` are option
