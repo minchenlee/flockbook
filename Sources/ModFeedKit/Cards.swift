@@ -27,23 +27,9 @@ public enum FeedCards {
     static let agentChanged = Done(result: "changed", message: "another agent is in this pane now; nothing was sent")
 
     enum Current {
-        case approval(id: String, title: String, command: String, tool: String)
+        /// `pending`: the log's pending call, passed to `respondIfOpen` (which matches it with the box again).
+        case approval(id: String, title: String, command: String, tool: String, pending: PermissionRequest?)
         case question(QuestionRequest)
-    }
-
-    /// The prompt's own lines: the "Do you want …?" line and the 4 lines after it. The id of an approval the log does
-    /// not name is their hash, so a spinner elsewhere on screen does not change it.
-    static func promptLines(_ screen: String) -> [String] {
-        let lines = screen.components(separatedBy: "\n").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "│|┃ \t")) }
-        guard let i = lines.lastIndex(where: { $0.hasPrefix(PermissionGate.promptMarker) }) else { return [] }
-        return Array(lines[i...].filter { !$0.isEmpty }.prefix(5))
-    }
-
-    /// The lines above the prompt (what it asks about), for an approval the log does not name.
-    static func promptContext(_ screen: String) -> String {
-        let lines = screen.components(separatedBy: "\n").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "│|┃ \t")) }
-        guard let i = lines.lastIndex(where: { $0.hasPrefix(PermissionGate.promptMarker) }) else { return "" }
-        return lines[max(0, i - 6)..<i].filter { !$0.isEmpty && !$0.allSatisfy { "─━═╭╮╰╯".contains($0) } }.joined(separator: "\n")
     }
 
     static func current(pane: Pane, screen: any PaneScreen, log: URL?) async -> Current? {
@@ -54,11 +40,17 @@ public enum FeedCards {
             if perm == nil, case .permissionRequest(let p) = it.kind, p.state == .pending { perm = p }
             if question == nil, case .question(let q) = it.kind, q.state == .pending { question = q }
         }
-        if PermissionGate.checkApproval(agent, pendingTool: perm != nil), let text = try? await screen.visibleText(paneId: pane.id),
-           PermissionGate.screenShowsPrompt(text) {
-            let id = perm.map(\.toolUseId).flatMap { $0.isEmpty ? nil : $0 } ?? "screen-" + fnv1a(promptLines(text).joined(separator: "\n"))
-            let ctx = promptContext(text)
-            return .approval(id: id, title: perm?.title ?? "Approval needed", command: perm?.command ?? ctx, tool: perm?.toolName ?? "")
+        // The app's rules (`ApprovalNotice`): the card is the prompt box on screen; the log's call only when it is
+        // that box (same tool and command). A log that lags the screen still names the call before, and its id must
+        // never answer the next prompt. The box's id covers its command (Claude, Grok and agy boxes alike).
+        if PermissionGate.checkApproval(agent, pendingTool: perm != nil), let text = try? await screen.visibleText(paneId: pane.id) {
+            let state = ApprovalNotice.PaneState(agentKind: agent.kind, blocked: agent.status == .blocked, pendingToolUseId: perm?.toolUseId,
+                                                 screen: text, pendingTool: perm?.toolName, pendingCommand: perm?.command)
+            if ApprovalNotice.prompt(state, writes: true) != nil,
+               let card = ApprovalNotice.cardRequest(logged: perm, onScreen: ApprovalNotice.screenRequest(text, agent: agent.kind)) {
+                return .approval(id: card.toolUseId, title: card.title.isEmpty ? "Approval needed" : card.title, command: card.command,
+                                 tool: card.toolName, pending: perm)
+            }
         }
         // A question in the log: answered by a message (Codex async) any time, or by keys while the agent waits.
         if let q = question, q.delivery == .message || agent.status == .blocked { return .question(q) }
@@ -73,7 +65,7 @@ public enum FeedCards {
         if all, case .question(let q)? = now, q.unread > 0,
            let full = try? await screen.loadAllQuestions(paneId: pane.id, gate: gate(pane), expect: q) { now = .question(full) }
         switch now {
-        case .approval(let id, let title, let command, let tool)?:
+        case .approval(let id, let title, let command, let tool, _)?:
             return Card(kind: "approval", request: id, title: title, command: FeedRows.cut(command, FeedRows.textCap), tool: tool)
         case .question(let q)?:
             let row = FeedRows.row(ConversationItem(id: q.toolUseId, kind: .question(q)))
@@ -92,15 +84,19 @@ public enum FeedCards {
     }
 
     public static func approve(pane: Pane, screen: any PaneScreen, log: URL?, request: String, allow: Bool) async -> Done {
-        guard case .approval(let id, _, _, _)? = await current(pane: pane, screen: screen, log: log), id == request else {
+        guard let agent = pane.agent,
+              case .approval(let id, _, _, _, let pending)? = await current(pane: pane, screen: screen, log: log), id == request else {
             return Done(result: "changed", message: "the approval on screen is not the one shown")
         }
-        // The agent first, then answerPrompt reads the screen last, right before the key.
         guard await screen.passes(gate(pane), paneId: pane.id) else { return agentChanged }
-        switch await screen.answerPrompt(paneId: pane.id, allow: allow) {
-        case .sent: return Done(result: "sent")
-        case .promptGone: return Done(result: "changed", message: "the prompt went away")
-        case .failed: return Done(result: "failed", message: "herdr-core did not take the keys")
+        // As the app's buttons: the screen is read again right before the key, and the key goes only while the box on
+        // screen is still this id (Grok: its own keys, each checked against the focus).
+        do {
+            let sent = try await screen.respondIfOpen(paneId: pane.id, prompt: id, allow: allow, agentKind: agent.kind,
+                                                      blocked: agent.status == .blocked, pending: pending, gate: gate(pane))
+            return sent ? Done(result: "sent") : Done(result: "changed", message: "the prompt on screen is not the one shown")
+        } catch {
+            return Done(result: "failed", message: "herdr-core did not take the keys")
         }
     }
 

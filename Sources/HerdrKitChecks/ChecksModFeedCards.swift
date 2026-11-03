@@ -13,12 +13,12 @@ func checksModFeedCards() async throws {
     let ws = try await hc.snapshot()
     guard let pane = FeedLocate.pane(ws, terminal: "t1") else { check(false, "modfeed cards: pane t1 in the snapshot"); return }
 
-    // Approval with no log: the id is the prompt's hash; a spinner above it does not change it.
-    fake.setScreen("t1", "✻ Working… 3s\nBash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No")
+    // Approval with no log: the id is the prompt box's hash; a spinner above the box does not change it.
+    fake.setScreen("t1", "✻ Working… 3s\n────────────────────\nBash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No")
     let c1 = await FeedCards.card(pane: pane, screen: hc, log: nil)
     check(c1.kind == "approval" && c1.request?.hasPrefix("screen-") == true, "modfeed cards: approval card from the screen (\(c1))")
     check(c1.command?.contains("rm -rf build") == true, "modfeed cards: the command from above the prompt (\(c1.command ?? "nil"))")
-    fake.setScreen("t1", "✻ Working… 9s\nBash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No")
+    fake.setScreen("t1", "✻ Working… 9s\n────────────────────\nBash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No")
     let c2 = await FeedCards.card(pane: pane, screen: hc, log: nil)
     check(c2.request == c1.request, "modfeed cards: same prompt, same id while the spinner moves")
     check(keys().isEmpty, "modfeed cards: reading sends no keys")

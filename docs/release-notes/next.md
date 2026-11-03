@@ -36,3 +36,4 @@ One short line: what this release is about.
 - Herdr app mod: "Loading earlier messages" shows under the top bar's tabs instead of behind them.
 - Herdr app mod: the sidebar that slides in from the left edge is now the full sidebar (same height, Workspaces list and sidebar button spot), not a short popup.
 - Herdr app mod: code blocks and tables in chat replies now have rounded corners, and table columns size to their content. Code text in these boxes cannot be selected yet.
+- Security: Herdr app mod approval cards follow the app's rules. The card is the prompt box on screen (its id includes the command); a log that still names the call before can no longer allow the next prompt; Grok prompts get Grok's own keys.
