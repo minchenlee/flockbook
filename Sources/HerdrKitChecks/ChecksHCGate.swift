@@ -33,6 +33,17 @@ import HerdrKit
     check(await !hc.passes(gate(underShell), paneId: "hc:t1"), "hc gate: a new foreground pid under the same shell -> no")
     fake.terminals = [FakeHC.terminal("t1", argv: ["codex"], status: "blocked", kind: "permission")]
     check(await !hc.passes(gate(a), paneId: "hc:t1"), "hc gate: another agent kind -> no")
+    // No foreground read (before hc's first read, a failed read, a machine without process groups): the terminal's pid
+    // is the agent only when the terminal's own program is the agent. A shell that runs an agent gives nothing to bind to.
+    fake.terminals = [FakeHC.terminal("t1", argv: ["zsh"], status: "blocked", kind: "permission")]
+    let shell = try await seen("hc:t1")
+    check(shell != nil && shell?.process == nil, "hc gate: no foreground, the terminal runs a shell -> no program to bind to (\(shell?.process ?? "nil"))")
+    check(await !hc.passes(gate(shell), paneId: "hc:t1"), "hc gate: no foreground under a shell -> no")
+    fake.terminals = [FakeHC.terminal("t1", argv: ["zsh"], status: "blocked", kind: "permission", fg: ["name": "zsh", "argv": ["zsh"], "pid": 4242])]
+    check(try await seen("hc:t1")?.process == nil, "hc gate: the shell in the foreground -> no program to bind to")
+    fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "permission")]
+    check(try await seen("hc:t1")?.process == "4242@1", "hc gate: no foreground, the terminal's own program is the agent -> its pid")
+
     // No pid at all: nothing stable to bind to, so no.
     fake.terminals = [FakeHC.terminal("t1", pid: nil, status: "blocked", kind: "permission")]
     let bare = try await seen("hc:t1")

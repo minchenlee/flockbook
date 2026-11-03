@@ -70,14 +70,30 @@ public enum HCMapper {
     /// Agent kind from the foreground process (what runs now), then the start argv. Interpreters (`node …/codex`)
     /// are looked through: their first non-flag argument names the program.
     static func kind(_ t: Term) -> String? {
-        for argv in [[t.fgName ?? ""] + t.fgArgv, t.argv] where !argv.isEmpty {
-            var words = argv.filter { !$0.isEmpty }.map { ($0 as NSString).lastPathComponent }
-            if let first = words.first, wrappers.contains(first) || wrappers.contains(words.dropFirst().first ?? "") {
-                words = words.filter { !$0.hasPrefix("-") && !wrappers.contains($0) }
-            }
-            for w in words.prefix(2) { if let k = knownKinds[w] { return k } }
-        }
+        for argv in [[t.fgName ?? ""] + t.fgArgv, t.argv] { if let k = kind(argv: argv) { return k } }
         return nil
+    }
+
+    /// The agent kind one command line names, if any.
+    static func kind(argv: [String]) -> String? {
+        var words = argv.filter { !$0.isEmpty }.map { ($0 as NSString).lastPathComponent }
+        if let first = words.first, wrappers.contains(first) || wrappers.contains(words.dropFirst().first ?? "") {
+            words = words.filter { !$0.hasPrefix("-") && !wrappers.contains($0) }
+        }
+        for w in words.prefix(2) { if let k = knownKinds[w] { return k } }
+        return nil
+    }
+
+    /// The agent's process, for a paired device's key gate: the foreground pid when the foreground program is the agent;
+    /// with no foreground read, the terminal's pid only when the terminal's own program is the agent. Anything else
+    /// (a shell, a child of the agent in front, no pid): nil, so paired keys fail closed.
+    static func process(_ t: Term, kind k: String?) -> String? {
+        guard let k else { return nil }
+        let hasForeground = t.fgPid != nil || t.fgName != nil || !t.fgArgv.isEmpty
+        let pid = hasForeground ? (kind(argv: [t.fgName ?? ""] + t.fgArgv) == k ? t.fgPid : nil)
+                                : (kind(argv: t.argv) == k ? t.pid : nil)
+        guard let pid, pid > 0 else { return nil }
+        return "\(pid)@\(t.created)"
     }
 
     /// hc reports only what the program said (OSC 7501; pi too, live 2026-11-02). No report yet = unknown, never idle.
@@ -106,7 +122,7 @@ public enum HCMapper {
         }
         var a = Agent(name: name, kind: kind, status: status(t.status), sessionId: nil, title: title,
                       backend: .hc, statusKind: statusKind)
-        if let pid = t.fgPid ?? t.pid, pid > 0 { a.process = "\(pid)@\(t.created)" }
+        a.process = process(t, kind: k)
         return a
     }
 
