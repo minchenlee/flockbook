@@ -13,3 +13,5 @@ One short line: what this release is about.
 - Claude Code: a tab whose conversation went on in a new log (`continued-in`) shows the new log, instead of "Waiting for the lead's log" or a conversation that stopped.
 
 ### ⚙️ Changes
+
+- Phone app: a black and white frosted-glass look with no blue (orange, green and red still mean needs you, done and error). The bar floats as a capsule, and opening an agent turns its row into the bar.

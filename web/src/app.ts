@@ -339,11 +339,12 @@ async function follow(): Promise<void> {
   const want = route();
   if (want === state.watching) { render(); return; }
   if (state.watching) request({ type: "unwatch", pane: state.watching });
+  const from = state.watching;
   state.watching = want;
   cancelRound();
   following = true;   // an agent opens at its newest message
   if (state.banner && state.banner.pane === want) state.banner = null;
-  render();
+  navigate(from, want, render);
   if (want) await request({ type: "watch", pane: want });
 }
 addEventListener("hashchange", follow);
@@ -512,8 +513,8 @@ function find(pane: string): { w: Workspace; t: Tab; p: Pane } | undefined {
 // The app's StatusGlyph shapes: needs you = orange disc with "!", done = green disc with a check, working = faint ring
 // with a blue arc (turns), idle = hollow ring.
 const glyphs: Record<Status, string> = {
-  blocked: '<circle cx="8" cy="8" r="8" class="g-needs"/><path d="M8 4.2v4.6" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="11.6" r="1.15" fill="#fff"/>',
-  done: '<circle cx="8" cy="8" r="8" class="g-done"/><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  blocked: '<circle cx="8" cy="8" r="8" class="g-needs"/><path d="M8 4.2v4.6" stroke="#111" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="11.6" r="1.15" fill="#111"/>',
+  done: '<circle cx="8" cy="8" r="8" class="g-done"/><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#111" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   working: '<circle cx="8" cy="8" r="6" fill="none" class="g-ring" stroke-width="2"/><circle cx="8" cy="8" r="6" fill="none" class="g-arc" stroke-width="2" stroke-linecap="round" stroke-dasharray="11.3 100" transform="rotate(-90 8 8)"/>',
   idle: '<circle cx="8" cy="8" r="6.6" fill="none" class="g-idle" stroke-width="1.3"/>',
   unknown: '<circle cx="8" cy="8" r="6.6" fill="none" class="g-idle" stroke-width="1.3" stroke-dasharray="2 2"/>',
@@ -622,6 +623,79 @@ function render(): void {
   noteSeenRow();
   dropPictures();
   toBottom();
+  morphGlyphs();
+  cardIn();
+}
+
+// --- Morphs. Opening an agent, its row turns into the bar and its glyph and title fly into it (View Transitions);
+// without them (Safari before 18) the conversation opens out of the row's box. A status glyph that changes pops into
+// its new shape; a new prompt card rises in. Reduce Motion: none of it, the screen just changes.
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+const EASE = "cubic-bezier(.2, .85, .2, 1)", SPRING = "cubic-bezier(.34, 1.4, .64, 1)";
+type Transition = { finished: Promise<void>; ready: Promise<void>; updateCallbackDone: Promise<void> };
+let morphing = false;   // one transition at a time: a render during one just happens
+type TransitionDoc = Document & { startViewTransition?: (update: () => void) => Transition };
+function rowParts(pane: string): (Element | null)[] {
+  const r = document.getElementById(`row-${pane}`);
+  return r ? [r, r.querySelector(":scope > .dot"), r.querySelector(".row-title")] : [];
+}
+function barParts(): (Element | null)[] {
+  const b = app.querySelector(":scope > section.conversation > .top");
+  return b ? [b, b.querySelector(".bar-title > .dot"), b.querySelector(".bar-title > span:last-child")] : [];
+}
+function named(parts: (Element | null)[], on: boolean): void {
+  ["fb-sheet", "fb-dot", "fb-title"].forEach((n, i) => (parts[i] as HTMLElement | null)?.style.setProperty("view-transition-name", on ? n : ""));
+}
+/** Runs `update` (the render that changes screens), morphing from the row of the agent opened or closed. */
+function navigate(from: string | null, to: string | null, update: () => void): void {
+  const pane = to ?? from;
+  const before = pane && !still.matches && !split() && state.token && state.welcomed ? (to ? rowParts(pane) : barParts()) : [];
+  if (!pane || !before.length || !before[0]) { update(); return; }
+  const after = (): (Element | null)[] => (to ? barParts() : rowParts(pane));
+  const doc = document as TransitionDoc;
+  if (doc.startViewTransition) {
+    if (document.visibilityState !== "visible" || morphing) { update(); return; }
+    morphing = true;
+    named(before, true);
+    const t = doc.startViewTransition(() => { named(before, false); update(); named(after(), true); });
+    // A skipped or timed-out transition still ran (or runs) the update; only the animation is lost.
+    t.ready.catch(() => {});
+    t.updateCallbackDone.catch(() => {});
+    t.finished.catch(() => {}).then(() => { morphing = false; named(after(), false); });
+    return;
+  }
+  const box = before[0].getBoundingClientRect();
+  update();
+  const section = app.querySelector<HTMLElement>(":scope > section.conversation");
+  if (to && section?.animate) {
+    const r = section.getBoundingClientRect();
+    const start = `inset(${box.top - r.top}px ${r.right - box.right}px ${r.bottom - box.bottom}px ${box.left - r.left}px round 18px)`;
+    section.animate([{ clipPath: start, opacity: .6 }, { clipPath: "inset(0px 0px 0px 0px round 0px)", opacity: 1 }], { duration: 420, easing: EASE });
+  } else if (!to) {
+    document.getElementById(`row-${pane}`)?.animate?.([{ transform: "scale(1.04)", opacity: .5 }, { transform: "none", opacity: 1 }], { duration: 380, easing: EASE });
+  }
+}
+/** The last glyph seen for each row and bar: a changed one pops into its new shape. */
+const glyphSeen = new Map<string, string>();
+function morphGlyphs(): void {
+  for (const d of app.querySelectorAll<HTMLElement>(".row[data-pane] > .dot, section.conversation > .top .bar-title > .dot")) {
+    const row = d.closest<HTMLElement>(".row"), key = row ? `row:${row.dataset.pane}` : `bar:${d.closest<HTMLElement>("section")?.dataset.pane}`;
+    const s = d.classList[1], was = glyphSeen.get(key);
+    glyphSeen.set(key, s);
+    if (was && was !== s && !still.matches && d.animate) {
+      d.animate([{ transform: "scale(.2) rotate(-90deg)", opacity: 0 }, { transform: "scale(1.2)", opacity: 1, offset: .6 }, { transform: "none", opacity: 1 }],
+        { duration: 520, easing: EASE });
+    }
+  }
+}
+/** Each prompt card rises in once, the first time it shows (cards are made anew on each render). */
+const cardsShown = new Set<string>();
+function cardIn(): void {
+  const c = app.querySelector<HTMLElement>(":scope > section.conversation > .card[data-prompt]");
+  const key = c?.dataset.prompt;
+  if (!c || !key || cardsShown.has(key)) return;
+  cardsShown.add(key);
+  if (!still.matches && c.animate) c.animate([{ transform: "translateY(14px) scale(.97)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 360, easing: SPRING });
 }
 function putBack(anchor: { id: string; top: number }): void {
   const row = [...document.querySelectorAll<HTMLElement>(".items > [data-id]")].find((e) => e.dataset.id === anchor.id);
@@ -1098,6 +1172,7 @@ function conversationScreen(pane: string): HTMLElement {
   if (v.queue && status === "working") items.push(queueView(pane, v.queue));
 
   const card = v.approval ? approvalCard(pane, v.approval) : v.question ? questionCard(pane, v.question, v.items) : null;
+  card?.setAttribute("data-prompt", `${pane}:${v.approval?.id ?? v.question?.id}`);
   const pill = noticed ? h("div", { class: "earlier-pill glass-float", role: "status" }, h("span", { class: "spin", "aria-hidden": "true" }), "Loading earlier…") : null;
   // The rows go in when the screen is put in the page (`keepScreen`, `fillItems`): putting the row nodes on hand in a
   // new list here would take them out of the page.

@@ -1,26 +1,36 @@
-/* The Mac app's look (DESIGN.md §2–4, §9; Sources/HerdrDesk Glass.swift, Reading.swift, StatusViews.swift).
-   Colours: the macOS 26 system colours the app uses, resolved in light and dark (NSColor in sRGB). */
+/* Black and white liquid glass (the Mac app's type and layout, DESIGN.md; its look on the phone: no blue accent).
+   Ink (black in light, white in dark) takes the accent's place; orange, green and red keep the status meanings.
+   Every text colour on glass passes WCAG AA over a pure white or pure black backdrop (the tint alone carries it). */
 :root {
   color-scheme: light dark;
-  --bg: #ffffff;                                  /* textBackgroundColor */
-  --label: rgba(0, 0, 0, .847);                   /* labelColor */
-  --label-2: rgba(0, 0, 0, .498);                 /* secondaryLabelColor */
-  --label-3: rgba(0, 0, 0, .259);                 /* tertiaryLabelColor */
-  --sep: rgba(0, 0, 0, .098);                     /* separatorColor */
-  --primary: 0, 0, 0;                             /* Color.primary, for .opacity(x) fills */
-  --accent: #007aff;                              /* controlAccentColor */
-  --blue: #0088ff; --orange: #ff8d28; --green: #34c759; --red: #ff383c;   /* systemBlue / Orange / Green / Red */
-  --link: #0060c8; --code-fill: #f4f4f6; --code-text: #1d1d1f;           /* ReadingColor */
-  /* Materials (DESIGN §9): bars and floating controls are frosted glass; content stays legible. */
-  --glass-bar: rgba(248, 248, 251, .62);
+  --bg: #efeff1;
+  --label: rgba(0, 0, 0, .88);
+  --label-2: rgba(0, 0, 0, .6);
+  --label-3: rgba(0, 0, 0, .28);
+  --sep: rgba(0, 0, 0, .09);
+  --primary: 0, 0, 0;                             /* for rgba(var(--primary), x) fills */
+  --ink: #0d0d0e; --ink-text: #ffffff;            /* primary buttons, the working arc, selection, focus */
+  --orange: #ff8d28; --green: #34c759; --red: #ff383c;   /* systemOrange / Green / Red */
+  --on-status: #111111;                           /* marks and text on a status fill (AA on all three) */
+  --link: var(--label); --code-fill: rgba(255, 255, 255, .6); --code-text: #1d1d1f;
+  /* A soft grey wash under everything, so the glass always has something to blur. */
+  --wash: radial-gradient(45% 22% at 8% 12%, rgba(0, 0, 0, .09), transparent 70%), radial-gradient(40% 20% at 96% 36%, rgba(0, 0, 0, .07), transparent 70%),
+    radial-gradient(55% 22% at 18% 70%, rgba(0, 0, 0, .06), transparent 70%), radial-gradient(40% 18% at 85% 92%, rgba(0, 0, 0, .05), transparent 70%);
+  /* Materials: bars, rows, cards and the composer are frosted glass with a lit top edge. */
+  --glass-bar: rgba(255, 255, 255, .62);
   --glass-float: rgba(255, 255, 255, .66);
-  --solid-bar: #f8f8fb; --solid-float: #ffffff;   /* no backdrop-filter, or Reduce Transparency */
-  --blur: blur(28px) saturate(180%);
-  --label-2-glass: rgba(0, 0, 0, .62);            /* stronger labels on glass (DESIGN §9) */
-  --shadow-card: 0 6px 28px rgba(0, 0, 0, .12);   /* .shadow(.black.opacity(0.12), radius: 14, y: 6) */
-  --shadow-float: 0 4px 20px rgba(0, 0, 0, .08);  /* composer: radius 10, y 4, 8% */
-  /* Radii (Reading.swift `Radius`). */
-  --r-key: 5px; --r-control: 6px; --r-card: 12px; --r-bubble: 16px;
+  --solid-bar: #f9f9fa; --solid-float: #fafafb;   /* no backdrop-filter, or Reduce Transparency */
+  --blur: blur(30px) saturate(140%) brightness(1.04);
+  --edge: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 0 0 .5px rgba(255, 255, 255, .5), 0 0 0 .5px rgba(0, 0, 0, .09);
+  --label-2-glass: rgba(0, 0, 0, .72);            /* stronger labels on glass */
+  --bubble: rgba(255, 255, 255, .7); --bubble-edge: inset 0 1px 0 #fff, 0 0 0 .5px rgba(0, 0, 0, .07), 0 4px 14px rgba(0, 0, 0, .06);
+  --shadow-card: 0 12px 36px rgba(0, 0, 0, .14), 0 2px 6px rgba(0, 0, 0, .06);
+  --shadow-float: 0 8px 26px rgba(0, 0, 0, .10), 0 1px 4px rgba(0, 0, 0, .05);
+  /* Radii: larger than the Mac's, the capsule look. */
+  --r-key: 5px; --r-control: 10px; --r-card: 18px; --r-bubble: 22px;
+  /* Motion: a spring for presses and shapes, an ease-out for moves. */
+  --spring: cubic-bezier(.34, 1.4, .64, 1);
+  --ease: cubic-bezier(.2, .85, .2, 1);
   /* Type: the app's text styles at their iOS sizes; reading text at the app's size M (16 / 26). */
   --large-title: 700 28px/1.2 var(--font); --title3: 600 20px/1.3 var(--font); --headline: 600 17px/1.3 var(--font);
   --body: 400 17px/1.35 var(--font); --callout: 400 16px/1.35 var(--font); --subhead: 400 15px/1.35 var(--font);
@@ -28,32 +38,45 @@
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
 }
+@supports (transition-timing-function: linear(0, 1)) {
+  :root { --spring: linear(0, .009, .035 2.1%, .141, .281 6.7%, .723 12.9%, .938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%,
+    1.129 32.8%, 1.051 39.6%, 1.017 43.1%, .991, .977 51%, .974 53.8%, .975 57.1%, .997 69.8%, 1.003 76.9%, 1); }
+}
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1e1e;
-    --label: rgba(255, 255, 255, .847); --label-2: rgba(255, 255, 255, .549); --label-3: rgba(255, 255, 255, .247);
-    --sep: rgba(255, 255, 255, .098); --primary: 255, 255, 255;
-    --accent: #007aff; --blue: #0091ff; --orange: #ff9230; --green: #30d158; --red: #ff4245;
-    --link: #5aa9ff; --code-fill: #232326; --code-text: #e8e8ea;
-    --glass-bar: rgba(38, 38, 42, .60); --glass-float: rgba(48, 48, 52, .62);
-    --solid-bar: #26262a; --solid-float: #303034;
-    --label-2-glass: rgba(255, 255, 255, .60);
-    --shadow-card: 0 6px 28px rgba(0, 0, 0, .36); --shadow-float: 0 4px 20px rgba(0, 0, 0, .3);
+    --bg: #08080a;
+    --label: rgba(255, 255, 255, .92); --label-2: rgba(255, 255, 255, .6); --label-3: rgba(255, 255, 255, .28);
+    --sep: rgba(255, 255, 255, .1); --primary: 255, 255, 255;
+    --ink: #f3f3f4; --ink-text: #08080a;
+    --orange: #ff9230; --green: #30d158; --red: #ff4245;
+    --code-fill: rgba(255, 255, 255, .06); --code-text: #e8e8ea;
+    --wash: radial-gradient(45% 22% at 8% 12%, rgba(255, 255, 255, .09), transparent 70%), radial-gradient(40% 20% at 96% 36%, rgba(255, 255, 255, .07), transparent 70%),
+      radial-gradient(55% 22% at 18% 70%, rgba(255, 255, 255, .06), transparent 70%), radial-gradient(40% 18% at 85% 92%, rgba(255, 255, 255, .05), transparent 70%);
+    --glass-bar: rgba(40, 40, 44, .70); --glass-float: rgba(48, 48, 52, .72);
+    --solid-bar: #2a2a2e; --solid-float: #323236;
+    --blur: blur(30px) saturate(140%) brightness(.8);
+    --edge: inset 0 1px 0 rgba(255, 255, 255, .16), inset 0 0 0 .5px rgba(255, 255, 255, .06), 0 0 0 .5px rgba(255, 255, 255, .12);
+    --label-2-glass: rgba(255, 255, 255, .78);
+    --bubble: rgba(255, 255, 255, .11); --bubble-edge: inset 0 1px 0 rgba(255, 255, 255, .14);
+    --shadow-card: 0 12px 36px rgba(0, 0, 0, .6), 0 2px 6px rgba(0, 0, 0, .3); --shadow-float: 0 8px 26px rgba(0, 0, 0, .5);
   }
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root { --glass-bar: var(--solid-bar); --glass-float: var(--solid-float); }
 }
 @media (prefers-reduced-transparency: reduce) {
-  :root { --glass-bar: var(--solid-bar); --glass-float: var(--solid-float); --blur: none; }
+  :root { --glass-bar: var(--solid-bar); --glass-float: var(--solid-float); --blur: none; --wash: none; }
 }
 .glass-bar, .glass-float { -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.glass-float { box-shadow: var(--edge), var(--shadow-float); }
 .glass-bar { background: var(--glass-bar); }
 .glass-float { background: var(--glass-float); }
 
 * { box-sizing: border-box; }
 /* No scroll anchoring by the browser: the page keeps the top row in place itself when older rows come in (app.ts). */
 html { -webkit-text-size-adjust: 100%; background: var(--bg); overflow-anchor: none; }
+/* The wash stays put while the page scrolls (a fixed layer: iOS ignores background-attachment: fixed). */
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: var(--wash); pointer-events: none; }
 body { margin: 0; background: var(--bg); color: var(--label); font: var(--body); overflow-x: hidden; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
 main { max-width: 760px; margin: 0 auto; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); }
 button { font: inherit; color: inherit; }
@@ -68,22 +91,27 @@ a { color: var(--link); }
 /* Status glyphs (StatusGlyph): one shape and one colour per state. */
 .dot { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; }
 .dot svg { width: 100%; height: 100%; display: block; }
-.g-needs { fill: var(--orange); } .g-done { fill: var(--green); } .g-ring { stroke: rgba(var(--primary), .15); } .g-arc { stroke: var(--blue); } .g-idle { stroke: var(--label-3); }
+.g-needs { fill: var(--orange); } .g-done { fill: var(--green); } .g-ring { stroke: rgba(var(--primary), .15); } .g-arc { stroke: var(--ink); } .g-idle { stroke: var(--label-3); }
 .dot.working svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dot.working svg { animation: none; } }
 
-/* Buttons: macOS bordered (gray) and bordered prominent (accent), radius `control`, phone-size targets. */
+/* Buttons: gray and ink (no accent colour), radius `control`, phone-size targets. They give on touch and spring back. */
 .primary, .secondary, .quiet { border: none; border-radius: var(--r-control); padding: 10px 16px; min-height: 44px; font: var(--body); font-weight: 500; cursor: pointer; }
-.primary { background: var(--accent); color: #fff; }
+.primary { background: var(--ink); color: var(--ink-text); }
 .secondary { background: rgba(var(--primary), .08); color: var(--label); }
 .quiet { background: none; color: var(--label-2); font: var(--caption); min-height: 32px; display: block; margin: 0 auto 8px; }
 button:disabled { opacity: .35; cursor: default; }
-:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.primary, .secondary, .back, .row, .option, .notify, .attach, .chip summary, .viewer-close, .banner {
+  transition: transform .45s var(--spring), background-color .2s, color .2s, opacity .2s; -webkit-user-select: none; user-select: none; }
+:is(.primary, .secondary, .back, .option, .notify, .attach, .chip summary, .viewer-close, .banner):active:not(:disabled) { transform: scale(.95); transition-duration: .12s; }
+.row:active { transform: scale(.97); transition-duration: .12s; }
+@media (prefers-reduced-motion: reduce) { :is(.primary, .secondary, .back, .row, .option, .notify, .attach, .chip summary, .viewer-close, .banner) { transition: none; transform: none !important; } }
 
 /* Fields: the app's inline field (primary 5 % fill, hairline). */
 .field { width: 100%; font: var(--body); padding: 10px 12px; border-radius: var(--r-control); border: .5px solid rgba(var(--primary), .12); background: rgba(var(--primary), .05); color: var(--label); }
-.field:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 80%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 80%, transparent); }
+.field:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
 ::placeholder { color: var(--label-2); }
 
 /* Pairing. */
@@ -95,16 +123,21 @@ button:disabled { opacity: .35; cursor: default; }
 /* The conversation's bar: sticky frosted glass across the full width (the toolbar row). */
 .top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: 0 -16px; padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; border-bottom: .5px solid var(--sep); }
+/* A phone: the bar floats as a capsule under the status bar; a fade keeps the clock readable over the rows. */
+main:not(.split) .top { top: calc(env(safe-area-inset-top) + 6px); margin: 6px -6px 0; padding: 6px 14px 6px 6px; border: 0; border-radius: 26px;
+  box-shadow: var(--edge), var(--shadow-float); }
+main:not(.split) .conversation::before { content: ""; position: sticky; top: 0; z-index: 2; display: block; pointer-events: none;
+  height: calc(env(safe-area-inset-top) + 6px); margin: 0 -16px calc(-6px - env(safe-area-inset-top)); background: linear-gradient(var(--bg) 55%, transparent); }
 .top h1 { margin: 0; font: var(--large-title); }
 /* The list's large title: plain content, it scrolls away. */
 .list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: calc(env(safe-area-inset-top) + 18px) 0 2px; }
 .list-head h1 { margin: 0; font: var(--large-title); }
 .level { font: var(--caption); font-weight: 500; padding: 3px 9px; border-radius: 99px; background: rgba(var(--primary), .1); color: var(--label-2-glass); }
-.level.input { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.level.input { background: var(--ink); color: var(--ink-text); }
 .head-pills { display: flex; align-items: center; gap: 6px; }
 .notify { font: var(--caption); font-weight: 500; padding: 3px 9px; border-radius: 99px; border: 0; cursor: pointer;
-  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+  background: var(--ink); color: var(--ink-text); }
 .notify.on { background: rgba(var(--primary), .1); color: var(--label-2-glass); }
 .notify:disabled { opacity: .5; cursor: default; }
 
@@ -115,8 +148,8 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
   font: 600 11px/1 var(--font); background: rgba(var(--primary), .1); color: rgba(var(--primary), .7); }
 .group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px; min-height: 60px; text-align: left; cursor: pointer;
-  border-radius: var(--r-card); border: 1px solid rgba(var(--primary), .09); }
-.needs .row { border-color: color-mix(in srgb, var(--orange) 50%, transparent); }
+  border-radius: var(--r-card); border: 0; }
+.needs .row { box-shadow: var(--edge), 0 0 0 1px color-mix(in srgb, var(--orange) 60%, transparent), var(--shadow-float); }
 .row:active { background: rgba(var(--primary), .08); }
 .row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .row-title, .row-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -126,7 +159,7 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
 
 /* Conversation (reading.md: user = gray bubble, agent = plain prose). */
 .bar { justify-content: flex-start; }
-.back { border: none; background: none; color: var(--accent); padding: 6px 4px; min-height: 36px; cursor: pointer; flex: none; font: var(--body); }
+.back { border: none; background: none; color: var(--label); border-radius: 99px; padding: 6px 4px; min-height: 36px; cursor: pointer; flex: none; font: var(--body); }
 .bar-title { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--headline); }
 .bar-title span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-stack { display: flex; flex-direction: column; min-width: 0; }
@@ -138,7 +171,7 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
 .items { display: flex; flex-direction: column; gap: 14px; padding: 20px 0 12px; font: var(--reading); }
 .msg p { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg p:last-child { margin-bottom: 0; }
-.msg.user { align-self: flex-end; max-width: 80%; background: rgba(var(--primary), .08); padding: 10px 14px; border-radius: var(--r-bubble); }
+.msg.user { align-self: flex-end; max-width: 80%; background: var(--bubble); box-shadow: var(--bubble-edge); padding: 10px 14px; border-radius: var(--r-bubble); }
 .msg.assistant { color: var(--label); }
 .msg pre, .card pre.code { background: var(--code-fill); color: var(--code-text); font-size: 13px; line-height: 20px; padding: 12px 14px; border-radius: var(--r-card); border: 1px solid rgba(var(--primary), .09); margin: 8px 0; }
 .msg :not(pre) > code { font-size: 14px; background: rgba(var(--primary), .08); padding: 1px 4px; border-radius: 4px; }
@@ -172,7 +205,7 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
 .msg th { font-weight: 600; background: rgba(var(--primary), .04); }
 .msg tbody tr:last-child td { border-bottom: none; }
 .msg td code, .msg th code { font-size: 13px; overflow-wrap: anywhere; }
-.status-line { text-align: center; color: var(--label-3); font: var(--caption); font-variant-numeric: tabular-nums; margin: 0; }
+.status-line { text-align: center; color: var(--label-2); font: var(--caption); font-variant-numeric: tabular-nums; margin: 0; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font: var(--subhead); }
 .chip summary { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: 99px; background: rgba(var(--primary), .07);
@@ -193,11 +226,11 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
 .screen pre { margin-top: 6px; font-size: 12px; line-height: 18px; }
 
 /* Prompt cards: floating glass, approval tinted orange (ApprovalCard, QuestionCard). */
-.card { border-radius: var(--r-card); padding: 16px; margin: 4px 0 14px; box-shadow: var(--shadow-card); }
+.card { border-radius: var(--r-card); padding: 16px; margin: 4px 0 14px; box-shadow: var(--edge), var(--shadow-card); }
 .card.approval { background: linear-gradient(color-mix(in srgb, var(--orange) 8%, transparent), color-mix(in srgb, var(--orange) 8%, transparent)), var(--glass-float); }
 .card.question { border-radius: var(--r-bubble); border: .5px solid rgba(var(--primary), .1); }
 .card-head { display: flex; align-items: center; gap: 10px; font: var(--headline); }
-.ask { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-control); background: var(--orange); color: #fff; font: 700 17px/1 var(--font); }
+.ask { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-control); background: var(--orange); color: var(--on-status); font: 700 17px/1 var(--font); }
 .card p { margin: 10px 0 0; }
 .card pre.command { font-size: 15px; line-height: 21px; padding: 8px 10px; border-radius: var(--r-control); background: rgba(var(--primary), .05); margin: 12px 0 0; }
 .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
@@ -209,24 +242,24 @@ legend { font: var(--title3); margin-bottom: 12px; padding: 0; }
   padding: 10px 12px 10px 44px; min-height: 44px; cursor: pointer; }
 .option + .option::after { content: ""; position: absolute; left: 44px; right: 0; top: 0; border-top: .5px solid var(--sep); }
 .option::before { content: ""; position: absolute; left: 12px; top: 12px; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(var(--primary), .3); box-sizing: border-box; }
-.option[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.option[aria-pressed="true"]::before { border: 5px solid var(--accent); }
+.option[aria-pressed="true"] { background: rgba(var(--primary), .08); }
+.option[aria-pressed="true"]::before { border: 5px solid var(--ink); }
 .option-label { font: var(--body); font-weight: 500; }
 .option-detail { font: var(--callout); color: var(--label-2); }
-.rec { font: var(--caption); font-weight: 500; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 1px 6px; border-radius: 99px; margin-left: 8px; }
+.rec { font: var(--caption); font-weight: 500; color: var(--label); background: rgba(var(--primary), .1); padding: 1px 6px; border-radius: 99px; margin-left: 8px; }
 .other { margin-top: 8px; }
 
 /* Composer: floating glass, round send button (Composer.swift). One line: a pill (radius = half its 45 px height, the
    buttons concentric with its ends). More lines or images: the same radius on a taller box, a rounded rectangle. The
    text field's height eases between the two (fitText). */
 .composer { position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 2; display: flex; flex-direction: column; gap: 8px;
-  margin-top: 8px; padding: 6px; border-radius: 22.5px; box-shadow: var(--shadow-float); border: .5px solid rgba(var(--primary), .1); }
+  margin-top: 8px; padding: 6px; border-radius: 22.5px; box-shadow: var(--edge), var(--shadow-float); }
 .composer textarea { flex: 1; box-sizing: border-box; font: var(--body); line-height: 22px; resize: none; height: 32px; min-height: 32px; max-height: 40vh;
   padding: 5px 2px; border: none; background: none; color: var(--label); overflow-y: hidden; transition: height .18s ease-out; }
 @media (prefers-reduced-motion: reduce) { .composer textarea { transition: none; } }
 .composer textarea:focus { outline: none; }
 .composer .send { flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; border-radius: 50%; display: grid; place-items: center; font: 700 17px/1 var(--font); }
-.composer .send:disabled { background: rgba(var(--primary), .08); color: var(--label-3); opacity: 1; }
+.composer .send:disabled { background: rgba(var(--primary), .08); color: var(--label-3); opacity: 1; transform: scale(.88); }
 .composer-row { display: flex; gap: 8px; align-items: flex-end; }
 .composer .attach { flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; border: none; border-radius: 50%; display: grid; place-items: center;
   background: rgba(var(--primary), .06); color: var(--label-2); font: 400 22px/1 var(--font); }
@@ -256,6 +289,8 @@ legend { font: var(--title3); margin-bottom: 12px; padding: 0; }
 /* The chevron: two borders of a small square, turned; centred in its button (a text glyph sat low). */
 .chev { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.75px 1.75px 0; transform: translateY(-2px) rotate(45deg); }
 .chev.up { transform: translateY(2px) rotate(-135deg); }
+/* The list row keeps its text chevron (the rule above is the status line's). */
+.row > .chev { width: auto; height: auto; border: 0; transform: none; color: var(--label-3); font-size: 22px; line-height: 1; }
 .status-time { font: var(--caption); color: var(--label-2); padding: 0 4px; }
 @media (prefers-color-scheme: dark) { .statusline { --tag: #2e2e2e; --warn: #ffa04a; } }
 .status-foot { position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 2; margin-top: 8px; padding: 6px; border-radius: 18px; }
@@ -266,7 +301,7 @@ legend { font: var(--title3); margin-bottom: 12px; padding: 0; }
   display: grid; place-items: center; background: rgba(var(--primary), .08); color: var(--label-2); }
 .thumb-remove { position: absolute; top: -5px; right: -5px; width: 22px; height: 22px; min-height: 0; padding: 0; border: none; border-radius: 50%;
   background: rgba(0, 0, 0, .6); color: #fff; font: 600 15px/1 var(--font); display: grid; place-items: center; }
-#composer-progress { width: calc(100% - 8px); margin-left: 8px; height: 4px; accent-color: var(--accent); }
+#composer-progress { width: calc(100% - 8px); margin-left: 8px; height: 4px; accent-color: var(--ink); }
 
 /* Alerts. */
 .banner { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 8px); z-index: 5; display: flex; align-items: center; gap: 10px;
@@ -302,7 +337,7 @@ main.split.side-shown { --side: calc(320px + env(safe-area-inset-left)); --gl: 1
 .side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 4; width: var(--side); overflow-y: auto; overscroll-behavior: contain;
   padding: 0 16px calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   background: var(--solid-bar); border-right: .5px solid var(--sep); }
-.side .row[aria-current="page"] { background: color-mix(in srgb, var(--accent) 14%, var(--solid-float)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.side .row[aria-current="page"] { background: color-mix(in srgb, var(--label) 9%, var(--solid-float)); box-shadow: 0 0 0 1.5px var(--ink); }
 .side .head-pills { flex-wrap: wrap; justify-content: flex-end; }
 .split .top { margin: 0 calc(-1 * var(--gr)) 0 calc(-1 * var(--gl)); padding-left: var(--gl); padding-right: var(--gr); background: var(--solid-bar); }
 .split .conversation > :not(.top, .earlier-pill) { max-width: 760px; margin-left: auto; margin-right: auto; }
@@ -330,5 +365,13 @@ main.split.side-shown { --side: calc(320px + env(safe-area-inset-left)); --gl: 1
 .viewer.settling img { transition: transform .25s ease-out; }
 @media (prefers-reduced-motion: reduce) { .viewer.settling, .viewer.settling img { transition: none; } }
 .viewer-close { position: fixed; top: max(10px, env(safe-area-inset-top)); right: 12px; z-index: 1; border: none; border-radius: 99px;
-  padding: 8px 16px; min-height: 36px; font: var(--headline); color: var(--accent); background: var(--glass-float); box-shadow: var(--shadow-float); cursor: pointer; }
+  padding: 8px 16px; min-height: 36px; font: var(--headline); color: var(--label); background: var(--glass-float); box-shadow: var(--shadow-float); cursor: pointer; }
 .viewer-status { position: fixed; top: 50%; left: 0; right: 0; text-align: center; margin: 0; color: var(--label-2); font: var(--callout); }
+
+/* Morphs (app.ts `navigate`, `morphGlyphs`, `cardIn`). Opening an agent: its row becomes the bar, its glyph and title fly
+   into the bar (View Transitions, iOS 18); the rest cross-fades. Without View Transitions the conversation opens out of
+   the row's box (clip-path). Reduce Motion: none of it. */
+::view-transition-group(*) { animation-duration: .46s; animation-timing-function: var(--ease); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .26s; }
+::view-transition-old(fb-sheet), ::view-transition-new(fb-sheet) { height: 100%; }
+@media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
