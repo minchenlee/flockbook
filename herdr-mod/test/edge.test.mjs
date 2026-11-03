@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fake, log, reset } from "./stub/herdr.mjs";
 import { fakeCx } from "./fake-cx.mjs";
-import { peekAtEdge, endPeek, peekClosed, toggleSidebar, sidebarShown } from "../mods/flockbook/state.js";
+import { peekAtEdge, endPeek, peekClosed, toggleSidebar, sidebarShown, noteWindowHeight } from "../mods/flockbook/state.js";
 
 test("the pointer at the left edge floats the sidebar over the content; leaving closes it", () => {
   reset(); fake.shared["flockbook.sidebar"] = false;
@@ -50,5 +50,26 @@ test("the panel's side view closes itself when the pointer leaves it", async () 
   assert.ok(el._h.on_hover, "watches the pointer");
   el._h.on_hover(false);
   assert.deepEqual(log.closed, ["o9"]);
+  fake.props = undefined;
+});
+
+test("the panel is as tall as the window, less a gap above and below", () => {
+  reset(); fake.shared["flockbook.sidebar"] = false;
+  noteWindowHeight({ width: 900, height: 820 });
+  peekAtEdge({ position: { x: 0, y: 5 } });
+  assert.equal(log.overlays.at(-1).height, 820 - 16);
+});
+
+test("the panel slides in: first drawn left of its spot, then moved to it with a spring", async () => {
+  reset(); fake.shared["flockbook.sidebar"] = false;
+  fake.props = { view: "side", peek: true, overlay: "o9" };
+  const { SideView } = await import("../mods/flockbook/side.js");
+  const cx = fakeCx(); const v = new SideView(cx);
+  const first = v.render(cx);
+  assert.ok(first._a.left < 0, "starts out of view");
+  cx.timers.filter((x) => x.once).forEach((x) => x.f(cx));
+  const next = v.render(cx);
+  assert.equal(next._a.left, 0);
+  assert.ok(next._a.spring);
   fake.props = undefined;
 });

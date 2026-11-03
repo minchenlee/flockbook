@@ -36,10 +36,16 @@ export function toggleSidebar() {
 export const KEY_PEEK = "flockbook.sidebar.peek";
 export const EDGE_PX = 4;
 export const PEEK_W = 260, PEEK_GAP = 8;
+// A popup is as tall as its content unless given px, so the views note the window's height.
+export const KEY_WIN_H = "flockbook.window.height";
+export function noteWindowHeight(size) {
+  const h = Math.round(size?.height ?? 0);
+  if (h > 0 && shared(KEY_WIN_H) !== h) setShared(KEY_WIN_H, h);
+}
 export function peekAtEdge(e) {
   if (sidebarShown() || shared(KEY_PEEK) || (e?.position?.x ?? 99) > EDGE_PX) return;
   const id = openOverlay({ mod: "flockbook", props: { view: "side", peek: true }, kind: "popup", frame: "none",
-    at: { x: PEEK_GAP, y: PEEK_GAP }, width: PEEK_W, height: 0.98 });
+    at: { x: PEEK_GAP, y: PEEK_GAP }, width: PEEK_W, height: (shared(KEY_WIN_H) ?? 800) - PEEK_GAP * 2 });
   setShared(KEY_PEEK, id);
 }
 export function endPeek() {

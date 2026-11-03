@@ -3,7 +3,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, run, openOverlay, closeOverlay, props } from "herdr";
 import { openMenu, spaceItems } from "./menu.js";
-import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, peekClosed } from "./state.js";
+import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, peekClosed, PEEK_W, SPRING } from "./state.js";
 import { statusMark, lightsRoom } from "./top.js";
 
 // Status marks for a space's tabs: all of them up to 5, else the first 3 and "+N".
@@ -22,7 +22,13 @@ export function monogram(name) {
 
 export class SideView {
   // `peek`: this copy is the panel that floats over the content (a popup opened at the left edge).
-  constructor(_cx) { this.peek = props()?.peek === true ? props().overlay ?? null : null; this.floating = props()?.peek === true; }
+  constructor(cx) {
+    this.peek = props()?.peek === true ? props().overlay ?? null : null;
+    this.floating = props()?.peek === true;
+    // Slide in: the first frame left of its spot, then a spring to it.
+    this.slid = !this.floating;
+    if (!this.slid) cx?.timer?.after?.(16, (cx2) => { this.slid = true; cx2?.notify?.(); });
+  }
 
   // The panel goes when the pointer leaves it.
   leave() {
@@ -73,7 +79,8 @@ export class SideView {
     const root = v_flex().id("side-root").size_full().px(8).pb(8).gap(2)
       .on_hover((h) => { if (!h) this.leave(); });
     // Floating: the panel draws its own surface, as Herdr draws no frame around it.
-    if (this.floating) root.bg(t.chrome).rounded(14).border(1).border_color(t.border).shadow_lg();
+    if (this.floating) root.bg(t.chrome).rounded(14).border(1).border_color(t.border).shadow_lg()
+      .relative().left(this.slid ? 0 : -PEEK_W).when(this.slid, (el) => el.spring("left", SPRING));
     return root
       .child(header)
       .child(row("side-new", "plus", "New tab", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
