@@ -35,3 +35,4 @@ One short line: what this release is about.
 - Herdr app mod: the agent's terminal window has a cleaner title bar (name, "Terminal", a round close button) and rounder corners.
 - Herdr app mod: "Loading earlier messages" shows under the top bar's tabs instead of behind them.
 - Herdr app mod: the sidebar that slides in from the left edge is now the full sidebar (same height and Workspaces list), not a short popup.
+- Herdr app mod: code blocks and tables in chat replies now have rounded corners. Code text in these boxes cannot be selected yet.

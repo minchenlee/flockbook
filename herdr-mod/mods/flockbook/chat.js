@@ -11,6 +11,7 @@ import * as sidecar from "./sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
 import { Composer } from "./composer.js";
+import { markdownView } from "./mdblocks.js";
 import { Cards, wanted } from "./cards.js";
 import { startTop, overBar, BAR_H } from "./top.js";
 
@@ -132,7 +133,7 @@ export class ChatView {
 
   // A row's content, without the list's fixed height. No handlers: list rows cannot have any.
   body(row, t) {
-    const md = (text) => TextView.markdown(`md-${row.id}`, text || "").selectable(true);
+    const md = (text) => markdownView(row.id, text || "", t);
     switch (row.k) {
       case "user":
         return h_flex().w_full().justify_end().py(8)
