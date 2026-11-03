@@ -1,0 +1,323 @@
+//! Swift: `Cards.swift`. `card`, `approve`, `answer`, `send`: the approval and question cards and the composer.
+//!
+//! Reading is safe any time. Keys go out only on the owner's action (`approve`, `answer`), and only after a fresh
+//! read shows the same request the mod showed: the mod passes the card's `request` id back, and a different card on
+//! screen is refused with `changed`, nothing sent.
+
+use crate::answered::FeedAnswered;
+use crate::rows::{self, FeedQuestion};
+use crate::tail;
+use herdrkit::approval::{self, PaneState};
+use herdrkit::hc::HcClient;
+use herdrkit::keygate::{self, KeyGate};
+use herdrkit::models::*;
+use herdrkit::question_adapter;
+use serde::Serialize;
+use serde_json::Value;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+pub struct Card {
+    #[serde(rename = "type")]
+    pub t: &'static str,
+    /// "approval", "question", or None (no card).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The id to pass back to `approve` / `answer`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<FeedQuestion>,
+    /// Questions known only by their header. `answer` reads them first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread: Option<usize>,
+    /// An approval this sidecar already answered that is still on screen: no buttons.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answered: Option<bool>,
+}
+
+impl Card {
+    pub fn none() -> Card {
+        Card { t: "card", ..Default::default() }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct Done {
+    #[serde(rename = "type")]
+    pub t: &'static str,
+    /// "sent", "unconfirmed", "changed", "no-identity", "answered", "failed".
+    pub result: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl Done {
+    pub fn new(result: &str, message: Option<&str>) -> Done {
+        Done { t: "done", result: result.into(), message: message.map(String::from) }
+    }
+}
+
+/// As the hub gates a paired device's keys: before each key the pane must still show the agent read now (same kind
+/// and the same program). No agent: fail closed.
+pub fn gate(pane: &Pane) -> KeyGate {
+    let has = pane.agent.is_some();
+    KeyGate::new(pane.agent.clone(), Some(Arc::new(move || has)))
+}
+
+pub fn agent_changed() -> Done {
+    Done::new("changed", Some("another agent is in this pane now; nothing was sent"))
+}
+pub fn no_identity() -> Done {
+    Done::new(
+        "no-identity",
+        Some("Flockbook cannot tell this agent from another program in this terminal, so it sends nothing. Use the terminal."),
+    )
+}
+/// Why the gate said no: the agent changed, or it has no identity to check, which no retry fixes.
+pub fn refused(pane: &Pane) -> Done {
+    if pane.agent.as_ref().map(KeyGate::has_identity) == Some(true) {
+        agent_changed()
+    } else {
+        no_identity()
+    }
+}
+pub fn already_answered() -> Done {
+    Done::new("answered", Some("this approval was already answered; waiting for the agent to move on"))
+}
+
+pub enum Current {
+    /// `pending`: the log's pending call, passed to `respond_if_open` (which matches it with the box again).
+    Approval { id: String, title: String, command: String, tool: String, pending: Option<PermissionRequest> },
+    Question(QuestionRequest),
+}
+
+pub fn current<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>) -> Option<Current> {
+    look(pane, screen, log).0
+}
+
+/// `.1`: the screen was read and the approval rules ran on it (a failed read is no evidence of anything).
+pub fn look<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>) -> (Option<Current>, bool) {
+    let Some(agent) = &pane.agent else { return (None, false) };
+    let items = log.and_then(|l| tail::read(l, None, tail::BYTES).ok()).map(|r| tail::items(&r.lines)).unwrap_or_default();
+    let (mut perm, mut question): (Option<PermissionRequest>, Option<QuestionRequest>) = (None, None);
+    for it in items.iter().rev() {
+        match &it.kind {
+            ItemKind::PermissionRequest(p) if perm.is_none() && p.state == PermissionState::Pending => perm = Some(p.clone()),
+            ItemKind::Question(q) if question.is_none() && q.state == QuestionState::Pending => question = Some(q.clone()),
+            _ => {}
+        }
+    }
+    // The app's rules: the card is the prompt box on screen; the log's call only when it is that box (same tool and
+    // command). A log that lags the screen still names the call before, and its id must never answer the next prompt.
+    let mut read = false;
+    if approval::check_approval(Some(agent), perm.is_some()) {
+        if let Ok(text) = screen.visible_text(&pane.id) {
+            read = true;
+            let state = PaneState {
+                agent_kind: agent.kind.clone(),
+                blocked: agent.status == AgentStatus::Blocked,
+                pending_tool_use_id: perm.as_ref().map(|p| p.tool_use_id.clone()),
+                screen: text.clone(),
+                pending_tool: perm.as_ref().map(|p| p.tool_name.clone()),
+                pending_command: perm.as_ref().map(|p| p.command.clone()),
+            };
+            if approval::prompt(&state, true).is_some() {
+                let on_screen = approval::screen_request(&text, &agent.kind);
+                if let Some(card) = approval::card_request(perm.as_ref(), on_screen.as_ref()) {
+                    let title = if card.title.is_empty() { "Approval needed".to_string() } else { card.title.clone() };
+                    return (
+                        Some(Current::Approval { id: card.tool_use_id, title, command: card.command, tool: card.tool_name, pending: perm }),
+                        true,
+                    );
+                }
+            }
+        }
+    }
+    // A question in the log: answered by a message (Codex async) any time, or by keys while the agent waits.
+    if let Some(q) = question {
+        if q.delivery == Delivery::Message || agent.status == AgentStatus::Blocked {
+            return (Some(Current::Question(q)), read);
+        }
+    }
+    if approval::read_question(Some(agent)) {
+        if let Ok(Some(q)) = question_adapter::pending_question(screen, &pane.id) {
+            return (Some(Current::Question(q)), read);
+        }
+    }
+    (None, read)
+}
+
+/// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click).
+pub fn card<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>) -> Card {
+    let (mut now, read) = look(pane, screen, log);
+    if all {
+        if let Some(Current::Question(q)) = &now {
+            if q.unread() > 0 {
+                if let Ok(Some(full)) = question_adapter::load_all_questions(screen, &pane.id, Some(&gate(pane)), Some(q)) {
+                    now = Some(Current::Question(full));
+                }
+            }
+        }
+    }
+    // The claims of prompts that surely left the screen go (only after a read that worked); one still there shows
+    // as answered.
+    let answered = FeedAnswered::new(cache);
+    let blocked = pane.agent.as_ref().is_some_and(|a| a.status == AgentStatus::Blocked);
+    if read {
+        match &now {
+            Some(Current::Approval { command, tool, .. }) => answered.seen(&pane.id, Some((tool, command))),
+            _ => answered.seen(&pane.id, None),
+        }
+    }
+    match now {
+        Some(Current::Approval { id, title, command, tool, .. }) => {
+            let claimed = answered.is_claimed(&pane.id, &id, &tool, &command, blocked, SystemTime::now());
+            Card {
+                t: "card",
+                kind: Some("approval".into()),
+                request: Some(id),
+                title: Some(title),
+                command: Some(rows::cut(&command, rows::TEXT_CAP)),
+                tool: Some(tool),
+                answered: claimed.then_some(true),
+                ..Default::default()
+            }
+        }
+        Some(Current::Question(q)) => {
+            let row = rows::row(&ConversationItem::new(&q.tool_use_id, ItemKind::Question(q.clone()), None));
+            Card {
+                t: "card",
+                kind: Some("question".into()),
+                request: Some(q.tool_use_id.clone()),
+                question: row.question,
+                unread: Some(q.unread()),
+                ..Default::default()
+            }
+        }
+        None => Card::none(),
+    }
+}
+
+pub fn approve<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, request: &str, allow: bool, cache: Option<&Path>) -> Done {
+    let changed = || Done::new("changed", Some("the approval on screen is not the one shown"));
+    let Some(agent) = &pane.agent else { return changed() };
+    let Some(Current::Approval { id, command, tool, pending, .. }) = current(pane, screen, log) else { return changed() };
+    if id != request {
+        return changed();
+    }
+    if !keygate::passes(screen, Some(&gate(pane)), &pane.id, None, None) {
+        return refused(pane);
+    }
+    // One answer per prompt, across runs and views: claimed before the key; kept when the key went out or may still
+    // land; given back when nothing went out.
+    let answered = FeedAnswered::new(cache);
+    let blocked = agent.status == AgentStatus::Blocked;
+    if !answered.claim(&pane.id, &id, &tool, &command, blocked, SystemTime::now()) {
+        return already_answered();
+    }
+    // The screen is read again right before the key, and the key goes only while the box is still this id.
+    match approval::respond_if_open(screen, &pane.id, &id, allow, &agent.kind, blocked, pending.as_ref(), Some(&gate(pane))) {
+        Ok(true) => Done::new("sent", None),
+        Ok(false) => {
+            answered.release(&pane.id, &id);
+            Done::new("changed", Some("the prompt on screen is not the one shown"))
+        }
+        Err(HerdrError::Timeout(_)) => {
+            // hc may still hold the key for its typing-quiet rule: not "nothing sent". The claim stays while blocked.
+            answered.hold(&pane.id, &id);
+            Done::new("unconfirmed", Some("no answer in time; the key may still arrive"))
+        }
+        Err(_) => {
+            answered.release(&pane.id, &id);
+            Done::new("failed", Some("herdr-core did not take the keys"))
+        }
+    }
+}
+
+/// `[{"picks":[0]}, {"picks":[], "other":"text"}]`: one per question, option indexes from 0.
+pub fn parse_answers(json: &str) -> Option<Vec<QuestionAnswer>> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let a = v.as_array()?;
+    let mut out = vec![];
+    for o in a {
+        let o = o.as_object()?;
+        let picks = match o.get("picks") {
+            None => vec![],
+            Some(p) => {
+                let arr = p.as_array()?;
+                let mut v = vec![];
+                for x in arr {
+                    // Swift `as? [Int]`: whole numbers only.
+                    v.push(x.as_i64().or_else(|| x.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))?);
+                }
+                v
+            }
+        };
+        let other = o.get("other").and_then(Value::as_str).map(String::from);
+        out.push(QuestionAnswer { picks, other });
+    }
+    Some(out)
+}
+
+pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, request: &str, answers: &[QuestionAnswer]) -> Done {
+    let Some(Current::Question(mut q)) = current(pane, screen, log) else {
+        return Done::new("changed", Some("the question on screen is not the one shown"));
+    };
+    if q.tool_use_id != request {
+        return Done::new("changed", Some("the question on screen is not the one shown"));
+    }
+    let g = gate(pane);
+    let r = (|| -> Result<Option<Done>, HerdrError> {
+        if q.unread() > 0 {
+            match question_adapter::load_all_questions(screen, &pane.id, Some(&g), Some(&q))? {
+                Some(all) => q = all,
+                None => return Ok(Some(Done::new("changed", Some("the question went away")))),
+            }
+        }
+        if answers.len() != q.questions.len() {
+            return Ok(Some(Done::new("failed", Some(&format!("{} answers for {} questions", answers.len(), q.questions.len()))))));
+        }
+        question_adapter::answer_question(screen, &pane.id, &q, answers, Some(&g))?;
+        Ok(None)
+    })();
+    match r {
+        Ok(Some(d)) => d,
+        Ok(None) => Done::new("sent", None),
+        Err(HerdrError::KeyGateStop) => refused(pane),
+        Err(HerdrError::Question(QuestionFailure::NotOnScreen)) => Done::new("changed", Some("the question is not on screen")),
+        Err(e) => Done::new("failed", Some(&e.to_string())),
+    }
+}
+
+/// The composer: the text, with each file in `files` named in it.
+pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: Option<&Path>, expect_kind: Option<&str>, expect_path: Option<&str>) -> Done {
+    // The agent the owner was reading: another agent, or a new conversation, in this terminal now gets nothing.
+    if let Some(k) = expect_kind {
+        if Some(k) != pane.agent.as_ref().map(|a| a.kind.as_str()) {
+            return agent_changed();
+        }
+    }
+    if let Some(p) = expect_path {
+        if Some(p.to_string()) != log.map(|l| l.to_string_lossy().into_owned()) {
+            return Done::new("changed", Some("another agent or conversation is in this pane now; nothing was sent"));
+        }
+    }
+    if !keygate::passes(client, Some(&gate(pane)), &pane.id, None, None) {
+        return refused(pane);
+    }
+    let r = if files.is_empty() { client.deliver(text, &pane.id) } else { client.deliver_files(text, &pane.id, files) };
+    match r {
+        DeliveryOutcome::Sent => Done::new("sent", None),
+        DeliveryOutcome::Unconfirmed => Done::new("unconfirmed", Some("no answer in time; the text may still arrive")),
+        DeliveryOutcome::Failed => Done::new("failed", Some("herdr-core did not take the text")),
+    }
+}

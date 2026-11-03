@@ -112,6 +112,47 @@ jobs:
         working-directory: herdr-mod
         run: npm test
 
+  # The Rust sidecar (rust/): flockbook-modfeed and the herdrkit crate, on Linux and Windows (the mod's other OSes).
+  # Windows builds and runs the checks that need no Unix socket (herdr-core's Windows endpoint is a TODO).
+  rust:
+    name: Rust sidecar (${{ matrix.os }})
+    needs: gate
+    if: ${{ needs.gate.outputs.skip != '1' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+      - name: cargo build
+        run: cargo build --locked
+      - name: cargo test
+        run: cargo test --locked
+      # The mod's Node tests again, this time also against the Rust binary (sidecar.real.test.mjs).
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
+      - name: npm test with the Rust sidecar
+        if: runner.os == 'Linux'
+        working-directory: herdr-mod
+        env:
+          FLOCKBOOK_MODFEED: ${{ github.workspace }}/rust/target/debug/flockbook-modfeed
+        run: npm test
+
   # The offline checks in 3 groups at once (SHARD in scripts/ui-checks.sh); one group when `only` names checks.
   # 3 groups here and 2 on macOS 15: 5 macOS jobs, the most that run at the same time.
   ui:
