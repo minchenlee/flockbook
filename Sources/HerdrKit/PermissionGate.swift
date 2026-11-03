@@ -8,10 +8,11 @@ public enum PermissionGate {
 
     /// The whole prompt shape, not just the words: a line "Do you want …?" followed within a few lines by the option
     /// "1. Yes", and no question-picker footer ("Type something", "Chat about this"). "1" answers either, so a question
-    /// menu read as an approval would pick its first option. Grok Build's prompt is its own box
-    /// (`ApprovalNotice.grokBox`).
+    /// menu read as an approval would pick its first option. Grok Build's and agy's prompts are their own boxes
+    /// (`ApprovalNotice.grokBox`, `agyBox`).
     public static func screenShowsPrompt(_ screenText: String) -> Bool {
         if ApprovalNotice.grokBox(screenText) != nil { return true }
+        if ApprovalNotice.agyBox(screenText) != nil { return true }
         if screenText.contains("Chat about this") || screenText.contains("Type something") { return false }
         let lines = screenText.components(separatedBy: "\n").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "│|┃ \t")) }
         let yes = /^(?:❯\s*)?1\.\s+Yes\b.*/

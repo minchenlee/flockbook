@@ -23,7 +23,8 @@ public struct LeadSwap: Sendable, Hashable {
 /// socket path matches no pane. Panes show herdr's `agent_session` as it is: `resolve` finds nothing, and `leads`
 /// judges every named Claude session a lead's log (teammate logs are not held back remotely).
 /// hc Claude panes also watch the mtime of `<pid>.json`: Claude rewrites its `sessionId` there on /clear or /resume
-/// without a new process.
+/// without a new process. agy panes run `lsof` on every recheck: /new and /resume open another `presence/<id>.lock`
+/// in the same process.
 public actor SessionResolver {
     public struct Proc: Sendable, Hashable {
         public var pid: Int32
@@ -59,6 +60,9 @@ public actor SessionResolver {
     public private(set) var verdictReads = 0
     private let claudeDir: String
     private let piAgentDir: String
+    private let agyDir: String
+    /// `lsof` of a process tree (injected by checks).
+    private let lsof: @Sendable ([Int32]) -> [String]
     /// Unresolved panes are tried again after this; resolved ones are re-checked (pid still the same) after `recheck`.
     private let retry: TimeInterval
     private let recheck: TimeInterval
@@ -69,9 +73,12 @@ public actor SessionResolver {
                 projectsDir: String = SessionLog.defaultDir(agent: "claude"),
                 claudeDir: String = NSHomeDirectory() + "/.claude/sessions",
                 piAgentDir: String = NSHomeDirectory() + "/.pi/agent",
-                retry: TimeInterval = 5, recheck: TimeInterval = 30, verdictCap: Int = 8 << 20, remote: RemoteHost? = nil) {
+                agyDir: String = NSHomeDirectory() + "/.gemini/antigravity-cli",
+                retry: TimeInterval = 5, recheck: TimeInterval = 30, verdictCap: Int = 8 << 20, remote: RemoteHost? = nil,
+                openFiles: (@Sendable ([Int32]) -> [String])? = nil) {
         self.socketPath = socketPath; self.codexDir = codexDir; self.projectsDir = projectsDir; self.verdictCap = verdictCap
-        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir
+        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir; self.agyDir = agyDir
+        self.lsof = openFiles ?? { Self.openFiles(pids: $0) }
         self.retry = retry; self.recheck = recheck; self.remote = remote != nil
     }
 
@@ -264,8 +271,9 @@ public actor SessionResolver {
             let ordered = due.map { ($0, agentOf($0)) }
                 .sorted { ($0.1?.start ?? .distantFuture, $0.0.paneId) < ($1.1?.start ?? .distantFuture, $1.0.paneId) }
             for (n, agent) in ordered {
+                // agy: /new or /resume swaps the presence lock in the same process, so every recheck reads it again.
                 if let old = cache[n.paneId], let path = old.path, old.pid != nil, old.pid == agent?.pid, !pidFileChanged(n, old),
-                   n.kind != "pi" || FileManager.default.fileExists(atPath: path) {
+                   n.kind != "agy", n.kind != "pi" || FileManager.default.fileExists(atPath: path) {
                     cache[n.paneId]?.checked = now
                     cache[n.paneId]?.needPids = n.pids
                     continue
@@ -300,7 +308,11 @@ public actor SessionResolver {
             return Self.isClaimed(hit.sid, claimed) ? (nil, hit.pid) : (hit.sid, hit.pid)
         }
         let tree = Self.subtree(agent.pid, procs: procs)
-        let open = Self.openFiles(pids: tree)
+        let open = lsof(tree)
+        if n.kind == "agy" {   // agy keeps no log open: its presence lock names the conversation
+            guard let p = Self.agyLogPath(openFiles: open, dataDir: agyDir), !Self.isClaimed(p, claimed) else { return (nil, nil) }
+            return (p, nil)
+        }
         let grok = n.kind == "grok" ? Self.grokHome(agent.line) : nil
         if let p = Self.logPath(openFiles: open, kind: n.kind, grokHome: grok), !Self.isClaimed(p, claimed) { return (p, nil) }
         if let grok {   // Grok Build lists its running sessions with their pids
@@ -454,6 +466,21 @@ public actor SessionResolver {
             }
         })
         return hits.count == 1 ? hits.first : nil
+    }
+
+    /// agy holds `<dataDir>/presence/<conversation id>.lock` open while a conversation is active (none before the first
+    /// prompt). Exactly one such lock, and its `brain/<id>/.system_generated/logs/transcript_full.jsonl` exists: that path.
+    public static func agyLogPath(openFiles: [String],
+                                  dataDir: String = NSHomeDirectory() + "/.gemini/antigravity-cli") -> String? {
+        let dir = dataDir + "/presence/"
+        let ids = Set(openFiles.compactMap { p -> String? in
+            guard p.hasPrefix(dir), p.hasSuffix(".lock") else { return nil }
+            let id = String(p.dropFirst(dir.count).dropLast(5))
+            return UUID(uuidString: id) != nil ? id.lowercased() : nil
+        })
+        guard ids.count == 1, let id = ids.first else { return nil }
+        let path = "\(dataDir)/brain/\(id)/.system_generated/logs/transcript_full.jsonl"
+        return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
     /// A path counts as claimed when it, or its session id (the file name ends in `<id>.jsonl`), is in `claimed`.

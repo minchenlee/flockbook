@@ -3,8 +3,8 @@ import Foundation
 /// Allow / Deny buttons on the "needs you" system notification for a permission prompt.
 ///
 /// Buttons only for a permission prompt on screen (`PermissionGate`): input is on and the agent is blocked. The id is the
-/// log's pending tool call, or the prompt box on screen when there is none (a Claude without a transcript). Claude Code and
-/// Grok Build only: their keys are verified (`ApprovalKeys`, `grokKey`). A question picker never gets buttons (the tab opens). An action re-reads
+/// log's pending tool call, or the prompt box on screen when there is none (a Claude without a transcript). Claude Code,
+/// Grok Build and agy's command prompt only: their keys are verified (`ApprovalKeys`, `grokKey`). A question picker never gets buttons (the tab opens). An action re-reads
 /// the pane first and answers only the prompt the notification was posted for; otherwise the tab opens.
 public enum ApprovalNotice {
     public static let category = "approval"
@@ -42,6 +42,13 @@ public enum ApprovalNotice {
             let onScreen = grokID(box)
             guard let logged = s.pendingToolUseId, !logged.isEmpty, !box.command.isEmpty,
                   sameCall(tool: s.pendingTool, command: s.pendingCommand, "Bash", box.command) else { return [onScreen] }
+            return [logged, onScreen]
+        }
+        if s.agentKind == "agy" {
+            guard writes, s.blocked, let box = agyBox(s.screen) else { return [] }
+            let onScreen = agyID(box)
+            guard let logged = s.pendingToolUseId, !logged.isEmpty,
+                  sameCall(tool: s.pendingTool, command: s.pendingCommand, box.tool, box.command) else { return [onScreen] }
             return [logged, onScreen]
         }
         guard writes, s.blocked, s.agentKind == "claude",
@@ -148,9 +155,42 @@ public enum ApprovalNotice {
             guard let box = grokBox(screen) else { return nil }
             return PermissionRequest(title: box.title, command: box.command, toolName: box.command.isEmpty ? "" : "Bash", toolUseId: grokID(box), state: .pending)
         }
+        if agent == "agy" {
+            guard let box = agyBox(screen) else { return nil }
+            return PermissionRequest(title: box.header, command: box.command, toolName: box.tool, toolUseId: agyID(box), state: .pending)
+        }
         guard let box = screenBox(screen), let id = screenPrompt(screen) else { return nil }
         return PermissionRequest(title: box.clipped ? clippedTitle : box.header, command: box.command, toolName: box.tool, toolUseId: id, state: .pending)
     }
+
+    /// agy 1.4.12's command prompt (live 2026-11-02): below the box's rule, "Requesting permission for:", the command,
+    /// "Run this command?", rows "1. Yes, run command" … "N. No, cancel" with the cursor ">" on one row, then the key
+    /// line "↑/↓ Navigate …". Only this prompt is read: its keys (`1`, Escape) are the verified ones. A box whose top
+    /// is off screen, or any other layout, is not read (no buttons; answer in the terminal). `lines`: the box without
+    /// the cursor, which moves while the prompt stays.
+    static func agyBox(_ screen: String) -> ScreenBox? {
+        let raw = screen.components(separatedBy: "\n")
+        let trim: (String) -> String = { $0.trimmingCharacters(in: .whitespaces) }
+        guard let ask = raw.lastIndex(where: { trim($0) == "Run this command?" }),
+              let req = raw[..<ask].lastIndex(where: { trim($0) == "Requesting permission for:" }),
+              let rule = raw[..<req].lastIndex(where: { trim($0).hasPrefix("─") }),
+              raw[(rule + 1)..<req].allSatisfy({ trim($0).isEmpty }) else { return nil }
+        let command = raw[(req + 1)..<ask].map(trim).filter { !$0.isEmpty }
+        guard !command.isEmpty else { return nil }
+        var rows: [String] = [], cursor: [Int] = [], at = ask + 1
+        while at < raw.count, let m = trim(raw[at]).wholeMatch(of: /^(>\s*)?(\d+)\.\s+(.*)$/) {
+            guard Int(m.2) == rows.count + 1 else { return nil }
+            if m.1 != nil { cursor.append(rows.count) }
+            rows.append("\(m.2). \(m.3)")
+            at += 1
+        }
+        guard rows.first == "1. Yes, run command", rows.last?.hasSuffix(". No, cancel") == true, cursor.count == 1,
+              let key = raw[at...].first(where: { !trim($0).isEmpty }), trim(key).hasPrefix("↑/↓ Navigate") else { return nil }
+        let lines = ["Requesting permission for:"] + command + ["Run this command?"] + rows
+        return ScreenBox(header: "Run this command?", tool: "Bash", command: command.joined(separator: "\n"), lines: lines)
+    }
+
+    static func agyID(_ box: ScreenBox) -> String { hashID("tool:agy\n" + box.lines.joined(separator: "\n")) }
 
     /// Grok Build 1.0.67's permission prompt (live): its last "┃" block holds "› <what it does>", the command on "│"
     /// lines, then rows "N (○) text", (●) on the row with focus; right below the block its key line "1/N:select …
