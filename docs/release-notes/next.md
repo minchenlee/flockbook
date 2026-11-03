@@ -17,6 +17,8 @@ One short line: what this release is about.
 
 ### 🔒 Security
 
+- Question cards: reading the other questions of a picker now checks before every key that the pane still shows the same agent and question; if another agent took the pane, nothing more is sent and the card says so. The same check now guards Allow/Deny, answers and replies sent from the Herdr app mod.
+
 ### 🐛 Bug Fixes
 
 - Claude Code: words that Claude Code logs as thinking right before a tool call now show in the conversation, as in the terminal.

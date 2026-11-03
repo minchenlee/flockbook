@@ -75,6 +75,10 @@ func checksModFeedCards() async throws {
     let k1 = keys().count
     _ = await FeedCards.card(pane: mpane, screen: hc, log: nil, all: true)
     check(keys().count == k1, "modfeed card --all: gated, another agent in the pane, no keys (\(keys().suffix(3)))")
+    // The Mac card's Show all (TabScreen) goes through the same gate: another agent, KeyGateStop, no keys.
+    var macStopped = false
+    do { _ = try await hc.loadAllQuestionsGated(pane: mpane, expect: nil, allowed: { true }) } catch is KeyGateStop { macStopped = true } catch {}
+    check(macStopped && keys().count == k1, "mac card load all: gated, another agent, stopped before any key (\(keys().suffix(3)))")
     // The same agent: the gate lets the walk start (the fake screen does not move, so it stops after that).
     fake.terminals = [FakeHC.terminal("t1", status: "blocked", kind: "question")]
     _ = await FeedCards.card(pane: mpane, screen: hc, log: nil, all: true)

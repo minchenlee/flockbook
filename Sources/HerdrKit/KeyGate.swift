@@ -31,6 +31,13 @@ extension PaneScreen {
         return true
     }
 
+    /// The question card's "read all" on the Mac: the picker walk gated as a paired device's keys, on the agent the
+    /// pane shows now. Another agent in the pane before a key: `KeyGateStop`, that key and the rest not sent.
+    public func loadAllQuestionsGated(pane: Pane, expect: QuestionRequest?, allowed: (@MainActor @Sendable () -> Bool)?) async throws -> QuestionRequest? {
+        guard let agent = pane.agent else { throw KeyGateStop() }
+        return try await loadAllQuestions(paneId: pane.id, gate: KeyGate(agent: agent, allowed: allowed), expect: expect)
+    }
+
     /// Throws `KeyGateStop` when `passes` says no.
     func gated(_ gate: KeyGate?, paneId: String, screen ok: (@Sendable (String) -> Bool)? = nil) async throws {
         guard await passes(gate, paneId: paneId, screen: ok) else { throw KeyGateStop() }
