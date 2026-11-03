@@ -1394,3 +1394,6 @@ pub fn load_all_questions<S: PaneScreen + ?Sized>(
     Ok(Some(full))
 }
 
+
+#[cfg(test)]
+mod tests;
