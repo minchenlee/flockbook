@@ -104,8 +104,10 @@ public enum HCMapper {
             title = t.statusMsg.isEmpty ? "error" : "error: \(t.statusMsg)"
             statusKind = "error"
         }
-        return Agent(name: name, kind: kind, status: status(t.status), sessionId: nil, title: title,
-                     backend: .hc, statusKind: statusKind)
+        var a = Agent(name: name, kind: kind, status: status(t.status), sessionId: nil, title: title,
+                      backend: .hc, statusKind: statusKind)
+        if let pid = t.fgPid ?? t.pid, pid > 0 { a.process = "\(pid)@\(t.created)" }
+        return a
     }
 
     static func pane(_ t: Term, title: String? = nil) -> Pane {

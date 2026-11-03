@@ -50,7 +50,15 @@ extension PaneScreen {
 extension HerdrBackend {
     /// The pane's agent now (fresh snapshot), when it is `seen`: same kind and the same session id. Without a session
     /// id there is nothing stable to bind to (herdr gives no other agent identity), so nil: paired keys fail closed.
+    /// hc: the same kind and the same program in the terminal (`Agent.process`); none reported: nil.
     func freshAgent(_ seen: Agent, paneId: String) async -> Agent? {
+        // hc: no session id from hc (the store finds it in the log); the same program in the terminal instead.
+        if seen.backend == .hc {
+            guard let process = seen.process, let ws = try? await snapshot(),
+                  let a = ws.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.id == paneId })?.agent,
+                  a.backend == .hc, a.kind == seen.kind, a.process == process else { return nil }
+            return a
+        }
         guard let sid = seen.sessionId, !sid.isEmpty,
               let ws = try? await snapshot(), let a = ws.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.id == paneId })?.agent,
               a.kind == seen.kind, a.sessionId == sid else { return nil }

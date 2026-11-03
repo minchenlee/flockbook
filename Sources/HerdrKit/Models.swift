@@ -35,6 +35,9 @@ public struct Agent: Sendable, Hashable {
     /// hc only: what a `blocked` agent waits for, as the program said (`permission`, `question`, `auth`), or `error`
     /// for a program that reported 7501 `error` (status shows `done`; `title` reads "error: <msg>"). Nil otherwise.
     public var statusKind: String?
+    /// hc only: the program in the terminal (foreground pid, else the terminal's pid, plus the terminal's start time).
+    /// A paired device's key gate binds to it: hc gives no session id, the store finds it in the log. Nil otherwise.
+    public var process: String?
     public init(name: String, kind: String, status: AgentStatus, sessionId: String?, title: String,
                 backend: BackendKind = .tui, statusKind: String? = nil) {
         self.name = name; self.kind = kind; self.status = status; self.sessionId = sessionId; self.title = title
