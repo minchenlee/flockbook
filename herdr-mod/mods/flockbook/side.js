@@ -2,7 +2,8 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, run, openOverlay } from "herdr";
-import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar } from "./state.js";
+import { openMenu, spaceItems } from "./menu.js";
+import { needing, showNeeds, showOverview, shownScreen, icon, showSpace, toggleSidebar, endPeek } from "./state.js";
 import { statusMark, lightsRoom } from "./top.js";
 
 // Status marks for a space's tabs: all of them up to 5, else the first 3 and "+N".
@@ -44,6 +45,7 @@ export class SideView {
       return h_flex().id(`space-${s.id}`).h(34).px(10).gap(9).items_center().rounded(7)
         .bg(s.active ? t.selected : t.chrome).hover((x) => x.bg(s.active ? t.selected : t.hover))
         .on_mouse_down("left", stop).on_click(() => showSpace(s.id))
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(spaceItems(s)); })
         .child(div().size(22).flex_none().rounded(6).flex().items_center().justify_center().text_size(10.5).font_semibold()
           .bg(t.raised).border(1).border_color(t.border).text_color(t.muted).child(monogram(s.name)))
         .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(s.active ? t.foreground : t.muted).child(s.name))
@@ -58,7 +60,8 @@ export class SideView {
       .child(div().id("side-toggle").size(28).flex_none().flex().items_center().justify_center().rounded(14)
         .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", stop).on_click(() => toggleSidebar()).child(svg(icon("sidebar")).size(16)));
-    return v_flex().size_full().px(8).pb(8).gap(2)
+    return v_flex().id("side-root").size_full().px(8).pb(8).gap(2)
+      .on_hover((h) => { if (!h) endPeek(); })
       .child(header)
       .child(row("side-new", "plus", "New tab", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .child(row("side-needs", "bell", "Needs you", () => showNeeds(), badge, screen === "needs"))

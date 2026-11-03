@@ -2,8 +2,9 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, shared, setShared } from "herdr";
-import { tabLabel, tabAgents, agentName, openTab, icon, FADE } from "./state.js";
-import { statusMark } from "./top.js";
+import { tabLabel, tabAgents, agentName, openTab, icon, FADE, watchEdge } from "./state.js";
+import { openMenu, tabItems } from "./menu.js";
+import { statusMark, startTop, overBar, BAR_H } from "./top.js";
 
 export const KEY_GROUP = "flockbook.overview.group";   // "status" | "space"
 const CARD_MIN = 300, GAP = 12, MAX_W = 1220;
@@ -50,6 +51,7 @@ export function groups(items, by) {
 export class OverviewView {
   constructor(cx) {
     this.width = 900;
+    this.top = {}; startTop(cx, this.top);
     // The "13m" labels age; redraw twice a minute.
     cx?.timer?.every?.(30000, (cx) => cx.notify());
   }
@@ -62,6 +64,7 @@ export class OverviewView {
     return h_flex().id(`ov-${tab.id}`).w(w).h(64).px(16).gap(12).items_center().flex_none().rounded(12)
       .bg(t.raised).border(1).border_color(t.border).hover((s) => s.bg(t.hover))
       .on_click(() => openTab(space.id, tab))
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(tabItems(tab, { agent: a ?? null, spaceId: space.id, list: (space.tabs ?? []).filter((x) => !x.settled) })); })
       .child(h_flex().size(20).flex_none().items_center().justify_center().child(statusMark(tab.status, t)))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(h_flex().gap(8).items_center()
@@ -95,7 +98,7 @@ export class OverviewView {
       .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child(g.title))
       .child(h_flex().flex_wrap().gap(GAP).children(g.items.map((it) => this.card(it, t, w))));
 
-    const body = v_flex().w(inner).gap(28).pt(36).pb(48)
+    const body = v_flex().w(inner).gap(28).pt(BAR_H + 20).pb(48)
       .child(h_flex().items_start()
         .child(v_flex().flex_1().gap(4)
           .child(div().text_size(26).font_semibold().text_color(t.foreground).child(greeting(new Date().getHours())))
@@ -105,8 +108,12 @@ export class OverviewView {
       .children(items.length ? groups(items, by).map(section)
         : [div().pt(40).text_size(13).text_color(t.muted).child("No tabs yet. Start one with +.")]);
 
-    return v_flex().id("overview").size_full().bg(t.background)
+    return watchEdge(v_flex().id("overview").size_full().bg(t.background))
+      
       .on_size_change((size, cx) => { if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
-      .child(v_flex().id("overview-scroll").size_full().items_center().overflow_y_scrollbar().child(body));
+      .relative()
+      .child(v_flex().id("overview-scroll").size_full().items_center().overflow_y_scrollbar()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(body))
+      .child(overBar(t));
   }
 }

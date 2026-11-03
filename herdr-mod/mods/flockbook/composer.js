@@ -63,6 +63,12 @@ export function withFiles(text, files) {
   return text ? `${text} ${paths}` : paths;
 }
 
+// ⌘V (no other modifier).
+export function pasteKey(e) {
+  const m = e?.modifiers ?? {};
+  return e?.key === "v" && Boolean(m.platform || m.cmd) && !m.shift && !m.alt && !m.control;
+}
+
 export class Composer {
   // One input box, made here: herdr-app does not let a view make input state while it draws.
   // Each agent's unsent text and files are kept in `drafts` and swapped in when the agent changes.
@@ -114,6 +120,16 @@ export class Composer {
     this.files = this.files.concat(add); this.note = null; cx.notify();
   }
 
+  // ⌘V with no text on the clipboard: the sidecar saves the clipboard's image as a PNG, attached
+  // like a picked file. Text pastes stay the box's own.
+  async pasteImage(cx) {
+    const r = await sidecar.pasteImage();
+    const path = r.error ? null : r.lines.find((l) => l.type === "image")?.path;
+    if (r.error) this.note = { text: r.error.message, bad: true };
+    if (path) this.addFiles([path], cx);
+    cx.notify();
+  }
+
   async pick(cx) {
     const r = await chooseFiles();
     if (r.error) this.note = { text: r.error, bad: true };
@@ -160,6 +176,7 @@ export class Composer {
       .child(div().id(`file-x-${i}`).size(16).flex().items_center().justify_center().rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => { this.files = this.files.filter((f) => f !== p); cx.notify(); }).child("×"));
     return v_flex().id("composer").w_full().px(16).pb(14).pt(6).gap(6).items_center()
+      .on_key_down((e, cx) => { if (pasteKey(e) && cx.read_from_clipboard?.() === undefined) cx.spawn((cx) => this.pasteImage(cx)); })
       .child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag)))
       .child(v_flex().id("box").w_full().max_w(800).rounded(16).bg(t.raised).border(1).border_color(t.border).shadow_sm().px(12).pt(10).pb(8).gap(6)
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))

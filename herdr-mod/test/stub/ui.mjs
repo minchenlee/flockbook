@@ -10,7 +10,10 @@ const mk = (tag) => {
       return (...a) => {
         if (k === "child") t.kids.push(a[0]);
         else if (k === "children") t.kids.push(...a[0]);
-        else if (k.startsWith("on_") || k === "hover") t._h[k] = a[a.length - 1];
+        else if (k.startsWith("on_") || k === "hover") {
+          if (k === "on_mouse_down" && a[0] === "right") t._h.on_mouse_down_right = a[a.length - 1];
+          else t._h[k] = a[a.length - 1];
+        }
         else if (k === "when") return a[0] ? a[1](p) : p;
         else if (k === "track_scroll") t.track = a[0];
         else t._a[k] = a.length <= 1 ? a[0] : a;

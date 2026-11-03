@@ -8,8 +8,9 @@ import { ChatView } from "./chat.js";
 import { NeedsView } from "./needs.js";
 import { TermBar } from "./termbar.js";
 import { OverviewView } from "./overview.js";
+import { MenuView } from "./menu.js";
 
-const VIEWS = { top: TopView, side: SideView, chat: ChatView, needs: NeedsView, termbar: TermBar, overview: OverviewView };
+const VIEWS = { top: TopView, side: SideView, chat: ChatView, needs: NeedsView, termbar: TermBar, overview: OverviewView, menu: MenuView };
 
 export default class Flockbook extends View {
   // The block's props come from props(); init's first argument is not them.

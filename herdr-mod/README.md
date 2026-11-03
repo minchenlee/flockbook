@@ -11,14 +11,20 @@ version comes close or leaves the feature out.
 
 | Path | What it is |
 |---|---|
-| `layouts/flockbook.json` | The window: a hidden sidebar, a top bar, and a stack with the chat and "Needs you" screens. |
-| `mods/flockbook/` | One mod with four views. Each layout block picks one with `props.view`: `top`, `side`, `chat`, `needs`. |
+| `layouts/flockbook.json` | The window: a hidden sidebar and a stack of screens (chat, Needs you, Overview, the tab's panes). Each screen draws the top bar. |
+| `mods/flockbook/` | One mod with several views. Each layout block picks one with `props.view`: `top`, `side`, `chat`, `needs`, `overview`; popups use `termbar` and `menu`. |
+| `themes/` | Flockbook and Flockbook Mac themes, dark and light. |
 | `test/` | Node tests with fake `gpui-kit`, `gpui-base` and `herdr` modules. |
 | `keys.json` | The Flockbook shortcuts, in a `layout:flockbook` section (while this layout shows). Do not add a `mod:flockbook` section: with one, no key worked. |
 | `install-isolated.sh` | Copies the layout, the mod, the keys and the sidecar into a test herdr-app home. |
 
-The chat view reads conversations through a sidecar, `flockbook-modfeed`, built from the Flockbook
-repo (HerdrKit). The mod finds it at `<herdr-app home>/flockbook/bin/flockbook-modfeed`.
+The chat view reads conversations through a sidecar, `flockbook-modfeed`, built from this repo
+(`swift build -c release --product flockbook-modfeed`). The mod finds it at
+`<herdr-app home>/flockbook/bin/flockbook-modfeed`. Its protocol is in `docs/protocol.md`.
+
+The layout and the mod work only together: the layout names the mod's views, and the mod expects
+the layout's ids (`sidebar`, `screen`, `chat`, `tab`). The mod alone draws nothing (`place` is
+`none`); the layout alone shows empty blocks where the views should be. The keys and themes are optional.
 
 A mod cannot import files from another mod's folder, so all views live in one mod.
 
@@ -45,4 +51,4 @@ npm test
 
 ## Release notes
 
-Each change people can see adds one line to `docs/release-notes/next.md`.
+Each change people can see adds one line to the repo's `docs/release-notes/next.md`.

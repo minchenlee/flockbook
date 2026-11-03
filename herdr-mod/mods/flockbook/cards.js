@@ -31,9 +31,19 @@ export function answersFor(question, picks, others) {
 
 export const MAX_QUESTIONS = 4;
 
+// A digit key's number (1-9), or null.
+export function digit(e) {
+  const m = e?.modifiers ?? {};
+  if (m.platform || m.cmd || m.control || m.alt) return null;
+  return /^[1-9]$/.test(e?.key ?? "") ? Number(e.key) : null;
+}
+
 export class Cards {
   // The "other answer" boxes are made here, once: a view may not make input state while it draws.
-  constructor() {
+  // `cx`: for the card's own focus, so 1-9 and Enter reach it and not the reply box.
+  constructor(cx) {
+    this.focus = cx?.focus_handle?.() ?? null;
+    this.canFocus = () => true;   // the chat says no while you type a reply
     this.byAgent = new Map();
     this.address = null;   // whose card the boxes belong to now
     this.others = Array.from({ length: MAX_QUESTIONS }, (_v, qi) => {
@@ -72,13 +82,58 @@ export class Cards {
     try {
       const r = await sidecar.card(address);
       const line = r.error ? null : r.lines.find((l) => l.type === "card");
-      const card = line && line.kind ? line : null;
+      let card = line && line.kind ? line : null;
+      // The screen shows one question at a time; keep the full set read with "Show all".
+      if (card && e.card && card.request === e.card.request && card.unread > 0 && !e.card.unread) card = e.card;
+      const fresh = card && card.request !== e.card?.request;
       if (JSON.stringify(card) !== JSON.stringify(e.card)) {
         if (card?.request !== e.card?.request) { e.picks = new Map(); e.others = new Map(); e.note = null; if (this.address === address) this.others.forEach((i) => i.set_value("")); }
         e.card = card; cx.notify();
       }
+      // A new card takes the keyboard (1-9, Enter), unless you are typing a reply.
+      if (fresh && address === this.shown && this.focus && this.canFocus()) this.focus.focus();
       if (!e.read) { e.read = true; cx.notify(); }
     } finally { e.busy = false; }
+  }
+
+  // "Show all N questions": walks the picker's tabs (keys go out, on this click only) and keeps the full card.
+  async loadAll(cx, address) {
+    const e = this.entry(address);
+    if (e.sending || !e.card?.unread) return;
+    e.sending = true; e.note = null; cx.notify();
+    try {
+      const r = await sidecar.card(address, true);
+      const line = r.error ? null : r.lines.find((l) => l.type === "card");
+      if (line?.kind === "question" && line.request === e.card.request && !line.unread) e.card = line;
+      else e.note = r.error?.message || "Could not read the other questions. Answer them in the agent's terminal.";
+    } finally { e.sending = false; cx.notify(); }
+  }
+
+  // 1-9 picks an option of the first question without a pick (a multi-choice one: toggles);
+  // on an approval 1 allows once and 2 denies. Enter sends the answer. True when it took the key.
+  key_down(e, cx, address) {
+    const en = this.byAgent.get(address), c = en?.card;
+    if (!c || en.sending) return false;
+    const n = digit(e);
+    if (c.kind === "approval") {
+      if (n === 1 || n === 2) { cx.spawn((cx) => this.approve(cx, address, n === 1)); return true; }
+      return false;
+    }
+    const qs = c.question?.questions ?? [];
+    if (e?.key === "enter") {
+      if (c.unread > 0) return false;
+      if (answersFor(c.question, en.picks, en.others)) { cx.spawn((cx) => this.answer(cx, address)); return true; }
+      return false;
+    }
+    if (n === null) return false;
+    let qi = qs.findIndex((_q, i) => !(en.picks.get(i)?.size) && !(en.others.get(i) ?? "").trim());
+    if (qi < 0) qi = qs.length - 1;
+    const q = qs[qi];
+    if (!q || n > (q.options ?? []).length) return false;
+    const s = new Set(q.multi ? en.picks.get(qi) ?? [] : []);
+    if (s.has(n - 1)) s.delete(n - 1); else s.add(n - 1);
+    en.picks.set(qi, s); cx.notify();
+    return true;
   }
 
   async act(cx, address, run) {
@@ -118,7 +173,14 @@ export class Cards {
       .border(1).border_color(primary && !off ? t.accent : t.border)
       .when(!off, (el) => el.hover((s) => s.opacity(0.9)).on_click((_e, cx) => cx.spawn((cx) => action(cx))))
       .child(label);
-    const box = v_flex().id(id).w_full().max_w(800).p(14).gap(10).rounded(14).bg(t.raised).border(1).border_color(t.border).shadow_sm();
+    const focused = Boolean(this.focus?.is_focused?.());
+    const box = v_flex().id(id).w_full().max_w(800).p(14).gap(10).rounded(14).bg(t.raised).border(1)
+      .border_color(focused ? t.accent : t.border).shadow_sm();
+    if (this.focus) box.track_focus(this.focus)
+      .on_mouse_down("left", () => this.focus.focus())
+      .on_key_down((ev, cx) => { if (this.key_down(ev, cx, address)) cx.stop_propagation(); });
+    const hint = (n) => div().size(18).flex_none().rounded(5).border(1).border_color(t.border).flex().items_center().justify_center()
+      .text_size(10.5).text_color(t.muted).child(String(n));
     const head = (text) => h_flex().gap(8).items_center()
       .child(div().size(8).flex_none().rounded(4).bg(t.blocked))
       .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child(text));
@@ -129,8 +191,8 @@ export class Cards {
       if (c.command) box.child(div().id(`${id}-command`).max_h(140).overflow_y_scrollbar().px(10).py(8).rounded(8).bg(t.background)
         .text_size(12.5).font_family("Menlo").text_color(t.foreground).child(c.command));
       box.child(h_flex().gap(8)
-        .child(button("allow", e.sending ? "Sending…" : "Allow once", true, (cx) => this.approve(cx, address, true), e.sending))
-        .child(button("deny", "Deny", false, (cx) => this.approve(cx, address, false), e.sending)));
+        .child(button("allow", e.sending ? "Sending…" : "1  Allow once", true, (cx) => this.approve(cx, address, true), e.sending))
+        .child(button("deny", "2  Deny", false, (cx) => this.approve(cx, address, false), e.sending)));
       const n = tail(); if (n) box.child(n);
       return box;
     }
@@ -155,7 +217,8 @@ export class Cards {
           .child(v_flex().flex_1().min_w(0)
             .child(h_flex().gap(6).child(div().text_size(13).text_color(t.foreground).child(o.label || ""))
               .when(Boolean(o.recommended), (el) => el.child(div().text_size(11).text_color(t.accent).child("Recommended"))))
-            .when(Boolean(o.detail), (el) => el.child(div().text_size(12).text_color(t.muted).child(o.detail)))));
+            .when(Boolean(o.detail), (el) => el.child(div().text_size(12).text_color(t.muted).child(o.detail))))
+          .when(oi < 9, (el) => el.child(hint(oi + 1))));
       });
       // The boxes are shared by every card; fill them with this card's text when it is shown.
       const input = this.others[qi];
@@ -164,12 +227,16 @@ export class Cards {
       box.child(sec);
     });
     if (c.unread > 0) {
-      box.child(h_flex().gap(6).items_center().text_size(12.5).text_color(t.muted)
-        .child(svg(icon("bell")).size(12))
-        .child(`${c.unread} more question${c.unread === 1 ? "" : "s"} follow. Answer them in the agent's terminal.`));
+      const total = q.questions.length + c.unread;
+      box.child(h_flex().gap(10).items_center()
+        .child(button("all", e.sending ? "Reading…" : `Show all ${total} questions`, true, (cx) => this.loadAll(cx, address), e.sending))
+        .child(div().text_size(12.5).text_color(t.muted)
+          .child(`${c.unread} more question${c.unread === 1 ? " follows" : "s follow"}. Answer them all here, then send.`)));
     } else {
       const ready = Boolean(answersFor(q, e.picks, e.others));
-      box.child(h_flex().gap(8).child(button("answer", e.sending ? "Sending…" : "Send answer", true, (cx) => this.answer(cx, address), !ready || e.sending)));
+      box.child(h_flex().gap(10).items_center()
+        .child(button("answer", e.sending ? "Sending…" : "Send answer", true, (cx) => this.answer(cx, address), !ready || e.sending))
+        .child(div().text_size(12).text_color(t.dim).child(q.questions.length ? "1-9 picks · Enter sends" : "")));
     }
     const n = tail(); if (n) box.child(n);
     return box;

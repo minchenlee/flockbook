@@ -3,13 +3,15 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme } from "herdr";
-import { needing, agentName, showAgent, icon } from "./state.js";
+import { needing, agentName, showAgent, icon, watchEdge } from "./state.js";
 import { Cards } from "./cards.js";
+import { startTop, overBar, BAR_H } from "./top.js";
 
 export class NeedsView {
   constructor(cx) {
     this.picked = null;
-    this.cards = new Cards();
+    this.cards = new Cards(cx);
+    this.top = {}; startTop(cx, this.top);
     this.shown = null;   // the agent on the right, from the last render
     cx.timer.every(500, (cx) => this.tick(cx));
   }
@@ -21,8 +23,16 @@ export class NeedsView {
     if (cur) cx.spawn((cx) => this.cards.poll(cx, cur.address, true));
   }
 
+  // The screen with the bar drawn over it. Presses on the content don't drag the window.
   render(cx) {
     const t = theme();
+    const stop = (_e, cx) => cx.stop_propagation();
+    return v_flex().id("needs-screen").relative().size_full().bg(t.background)
+      .child(div().size_full().pt(BAR_H).on_mouse_down("left", stop).child(this.content(t)))
+      .child(overBar(t));
+  }
+
+  content(t) {
     const list = needing();
     if (!list.length) {
       return v_flex().size_full().items_center().justify_center().gap(8).text_color(t.muted)
@@ -43,7 +53,8 @@ export class NeedsView {
           .child(div().truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · waits for you`)))
         .child(div().size(8).flex_none().rounded(4).bg(t.blocked));
     };
-    return h_flex().size_full().min_h(0)
+    return watchEdge(h_flex().id("needs-root").size_full().min_h(0))
+      
       .child(v_flex().id("needs-list").w(340).flex_none().h_full().p(10).gap(2).border_r(1).border_color(t.border)
         .overflow_y_scrollbar()
         .child(div().px(4).pb(6).text_size(15).font_semibold().text_color(t.foreground).child(`Needs you · ${list.length}`))

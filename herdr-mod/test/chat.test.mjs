@@ -206,7 +206,12 @@ test("reaching the top asks for older rows once and keeps the same row in view",
     ? jl(header, { type: "older", path: "/logs/s.jsonl", start: 0, count: 2 }, user("u0", "old"), asst("a0", "older"), end)
     : jl(header, { ...logLine("c1"), start: 4000 }, { type: "splice", at: 0, count: 2 }, user("u1", "a"), asst("a1", "b"), end);
   const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
-  v.render(cx); lastList._args.render({ start: 0, end: 1 });
+  let el = v.render(cx); lastList._args.render({ start: 0, end: 1 });
+  assert.ok(!v.wantOlder, "the first row on screen alone loads nothing");
+  const wheel = (n) => (n?._h?.on_scroll_wheel ? n : (n?.kids ?? []).map(wheel).find(Boolean));
+  wheel(el)._h.on_scroll_wheel({ delta: { x: 0, y: -40 } }, cx);
+  assert.ok(!v.wantOlder, "scrolling down loads nothing");
+  wheel(el)._h.on_scroll_wheel({ delta: { x: 0, y: 40 } }, cx);
   assert.equal(v.wantOlder, true);
   calls.length = 0;
   await v.tick(cx); await cx.settle();

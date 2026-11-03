@@ -83,12 +83,37 @@ test("question card: pick options, then Send answer sends the answers in order",
   assert.ok(acts[0].includes("toolu_q"));
 });
 
-test("a question with unread ones says to answer in the terminal, without a send button", async () => {
-  cardNow = { ...question, unread: 2 };
+test("a question with unread ones: Show all reads every question (card --all), then Send answer shows", async () => {
+  const first = { ...question, unread: 1, question: { ...question.question, questions: question.question.questions.slice(0, 1) } };
+  cardNow = first;
   const cx = fakeCx(); const c = new Cards(); await c.poll(cx, "t1", true);
-  const el = c.view("t1", T);
-  assert.match(textOf(el), /2 more questions follow/);
+  let el = c.view("t1", T);
+  assert.match(textOf(el), /Show all 2 questions.*1 more question follows/);
   assert.equal(byId(el, "card-answer"), null);
+  fake.exec = ((prev) => (cmd, args) => args.includes("--all") ? (acts.push(args), jl(header("card"), question, end)) : prev(cmd, args))(fake.exec);
+  byId(el, "card-all")._h.on_click({}, cx); await cx.settle();
+  assert.ok(acts.some((a) => a.includes("--all")));
+  await c.poll(cx, "t1", true, true);   // the screen still shows one question; the full card stays
+  el = c.view("t1", T);
+  assert.match(textOf(el), /Which sizes\?/);
+  assert.ok(byId(el, "card-answer"));
+});
+
+test("keys: 1-9 pick in the first open question, Enter sends; approval 1 allows, 2 denies", async () => {
+  cardNow = question;
+  const cx = fakeCx(); const c = new Cards(); await c.poll(cx, "t1", true);
+  const key = (k, mods = {}) => c.key_down({ key: k, modifiers: mods }, cx, "t1");
+  assert.equal(key("enter"), false, "nothing picked yet");
+  assert.equal(key("2"), true);
+  assert.equal(key("1", { platform: true }), false, "cmd-1 is the tab key");
+  assert.equal(key("7"), false, "no 7th option");
+  key("1"); key("3");
+  assert.equal(key("enter"), true); await cx.settle();
+  const i = acts[0].indexOf("--answers");
+  assert.deepEqual(JSON.parse(acts[0][i + 1]), [{ picks: [1] }, { picks: [0, 2] }]);
+  cardNow = approval; await c.poll(cx, "t1", true, true);
+  assert.equal(key("2"), true); await cx.settle();
+  assert.ok(acts.at(-1).includes("--deny"));
 });
 
 test("not wanted: the card is dropped and card is not read", async () => {

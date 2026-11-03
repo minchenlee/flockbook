@@ -13,7 +13,7 @@ test("every layout block shows the flockbook mod with a known view, or the shown
   const mods = blocks(layout).filter((b) => b.content.mod);
   const views = mods.map((b) => { assert.equal(b.content.mod, "flockbook"); return b.content.props.view; });
   assert.deepEqual(views.sort(), ["chat", "needs", "overview", "side", "top"]);
-  assert.deepEqual(blocks(layout).filter((b) => !b.content.mod).map((b) => [b.id, b.content.tab]), [["tab", "active"]]);
+  assert.deepEqual(blocks(layout).filter((b) => !b.content.mod).map((b) => [b.id, b.content.tab]), [["tab-panes", "active"]]);
 });
 
 test("keys.json binds only commands that exist, in the flockbook layout's section only", () => {

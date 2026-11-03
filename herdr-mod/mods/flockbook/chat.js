@@ -4,7 +4,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
 import { theme, run } from "herdr";
-import { currentAgent, icon, SPIN_MS, FADE, shownScreen } from "./state.js";
+import { currentAgent, icon, SPIN_MS, FADE, shownScreen, watchEdge } from "./state.js";
 import { Appear } from "./motion.js";
 import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
@@ -12,6 +12,7 @@ import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
 import { Composer } from "./composer.js";
 import { Cards, wanted } from "./cards.js";
+import { startTop, overBar, BAR_H } from "./top.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
@@ -44,8 +45,10 @@ export class ChatView {
     this.busy = false;
     this.lastPoll = 0;
     this.composer = new Composer(cx);
+    this.top = {}; startTop(cx, this.top);
     this.appear = new Appear();
-    this.cards = new Cards();
+    this.cards = new Cards(cx);
+    this.cards.canFocus = () => this.composer?.empty !== false;
     this.switchTo(currentAgent()?.address ?? null);
     cx.spawn((cx) => this.poll(cx));
     cx.timer.every(CHECK_MS, (cx) => this.tick(cx));
@@ -56,7 +59,7 @@ export class ChatView {
 
   // Every chat opens at its newest message, also one read before.
   switchTo(address) {
-    this.address = address;
+    this.address = address; this.cards.shown = address;
     if (address && !this.feeds.has(address)) this.feeds.set(address, emptyFeed(address));
     this.follow = true; this.open = new Set();
     this.toNewest();
@@ -226,15 +229,21 @@ export class ChatView {
 
   list(t, f) {
     const rows = f.rows, n = rows.length;
-    const sizes = rows.map((r) => this.height(r));
+    // The first row starts below the bar; the rest scroll up under it.
+    const sizes = rows.map((r, i) => this.height(r) + (i === 0 ? BAR_H : 0));
     const box = v_flex().relative().flex_1().min_h(0)
-      .on_scroll_wheel((e, cx) => { if (this.follow && e?.delta?.y > 0) { this.follow = false; cx.notify(); } })
+      .on_scroll_wheel((e, cx) => {
+        const up = e?.delta?.y > 0;
+        if (this.follow && up) { this.follow = false; cx.notify(); }
+        // Older rows load only when you scroll up while the first row is on screen.
+        if (up && this.topSeen && f.start) this.wantOlder = true;
+      })
       .child(v_virtual_list("chat", n, sizes, (i) => rows[i].id, (range) => {
         const t0 = now();
         if (range.end >= n) this.follow = true;
-        else if (range.start === 0 && f.start) this.wantOlder = true;
+        this.topSeen = range.start === 0 && range.end < n;
         const out = [];
-        for (let i = range.start; i < range.end; i++) out.push(this.item(rows[i], t));
+        for (let i = range.start; i < range.end; i++) out.push(i === 0 ? div().w_full().pt(BAR_H).child(this.item(rows[i], t)) : this.item(rows[i], t));
         record("chat.rows", now() - t0, range.end - range.start);
         return out;
       }).track_scroll(this.scroll).on_item_click((key, cx) => this.click(key, cx)))
@@ -271,17 +280,21 @@ export class ChatView {
     else if (!f.loaded) main = this.center(t, "Loading…");
     else if (!f.rows.length) main = this.center(t, f.path ? "No messages yet." : "No conversation yet. Send the first message.");
     else main = this.list(t, f);
-    return v_flex().id("root").size_full().min_w(0).bg(t.background)
+    const stop = (_e, cx) => cx.stop_propagation();
+    return watchEdge(v_flex().id("root").relative().size_full().min_w(0).bg(t.background))
       .on_size_change((size, cx) => { if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
       .on_drop((e, cx) => this.composer.addFiles(e?.paths, cx))
       // The chat input keeps ⌘⌥↑/↓ from the app's keys, so the chat switches spaces itself.
       .on_key_down((e, cx) => { const go = spaceKey(e); if (go) { cx.stop_propagation?.(); run(go); } })
       // Another agent's chat fades in; a new card fades in and rises into place.
-      .child(v_flex().flex_1().min_h(0).child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
+      // Presses on the content don't drag the window (the block has window_drag for the bar).
+      .child(v_flex().flex_1().min_h(0).on_mouse_down("left", stop)
+        .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
       .when(Boolean(f) && f.error?.code !== "not-agent", (el) => {
         const card = this.cards.view(this.address, t, "chat-card");
-        if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
-        return el.child(this.composer.render(currentAgent(), t));
-      });
+        if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
+        return el.child(div().w_full().on_mouse_down("left", stop).child(this.composer.render(currentAgent(), t)));
+      })
+      .child(overBar(t));
   }
 }

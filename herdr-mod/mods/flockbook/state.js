@@ -26,9 +26,27 @@ export const KEY_SIDEBAR = "flockbook.sidebar";
 export const sidebarShown = () => shared(KEY_SIDEBAR) === true;
 export function toggleSidebar() {
   const show = !sidebarShown();
+  setShared(KEY_PEEK, false);
   setShared(KEY_SIDEBAR, show);
   run(show ? "layout.show" : "layout.hide", { id: "sidebar" });
 }
+// The pointer at the window's left edge opens the sidebar for a peek; it closes again when the
+// pointer leaves it. A click on the sidebar button keeps it open (toggleSidebar clears the peek).
+export const KEY_PEEK = "flockbook.sidebar.peek";
+export const EDGE_PX = 4;
+export function peekAtEdge(e) {
+  if (sidebarShown() || (e?.position?.x ?? 99) > EDGE_PX) return;
+  setShared(KEY_PEEK, true); setShared(KEY_SIDEBAR, true);
+  run("layout.show", { id: "sidebar" });
+}
+export function endPeek() {
+  if (!shared(KEY_PEEK)) return;
+  setShared(KEY_PEEK, false); setShared(KEY_SIDEBAR, false);
+  run("layout.hide", { id: "sidebar" });
+}
+// Adds the edge watch to a view's root.
+export const watchEdge = (el) => el.on_mouse_move((e) => peekAtEdge(e));
+
 export async function loadSidebar() {
   if (shared(KEY_SIDEBAR) !== undefined) return;
   let hidden = true;
@@ -73,7 +91,8 @@ export function tabLabel(tab) {
 }
 
 // The screen for a tab: the chat when an agent runs in it, else the tab's own terminals.
-export const screenFor = (tab) => (tab && tabAgents(tab.id).length ? "chat" : "tab");
+// The chat for a tab with an agent in one pane; the tab's panes once it is split (or for a shell).
+export const screenFor = (tab) => (tab && tabAgents(tab.id).length && (tab.panes ?? 1) <= 1 ? "chat" : "tab");
 
 export function showTab(tab) {
   setShared(KEY_AGENT, null);

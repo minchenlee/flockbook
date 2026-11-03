@@ -40,7 +40,8 @@ export async function call(cmd, args = []) {
 export const feed = (terminal, cursor) => call("feed", ["--terminal", terminal, "--cache", cachePath(), ...(cursor ? ["--cursor", cursor] : [])]);
 export const older = (terminal, before, path) => call("feed", ["--terminal", terminal, "--before", String(before), "--path", path]);
 export const status = (terminal) => call("status", ["--terminal", terminal, "--cache", cachePath()]);
-export const card = (terminal) => call("card", ["--terminal", terminal, "--cache", cachePath()]);
+export const card = (terminal, all = false) => call("card", ["--terminal", terminal, ...(all ? ["--all"] : []), "--cache", cachePath()]);
 export const approve = (terminal, request, allow) => call("approve", ["--terminal", terminal, "--request", request, allow ? "--allow" : "--deny", "--cache", cachePath()]);
 export const answer = (terminal, request, answers) => call("answer", ["--terminal", terminal, "--request", request, "--answers", JSON.stringify(answers), "--cache", cachePath()]);
+export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 export const send = (terminal, text, files = []) => call("send", ["--terminal", terminal, "--text", text, ...files.flatMap((f) => ["--file", f])]);

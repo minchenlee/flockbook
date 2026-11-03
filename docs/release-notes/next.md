@@ -5,6 +5,13 @@ One short line: what this release is about.
 
 ### ✨ New
 - Herdr app mod (herdr-mod/): a Flockbook layout, mod, keys and themes for the Herdr app, with tab capsules, chat with cards and older messages on scroll-up, Overview, and the flockbook-modfeed sidecar.
+- Herdr app mod: question cards take 1-9 to pick and Enter to send, and "Show all N questions" reads a picker's other questions so you can answer them all from the chat.
+- Herdr app mod: older messages load only when you scroll up past the first one, not while you read.
+- Herdr app mod: ⌘V with an image on the clipboard attaches it to the reply.
+- Herdr app mod: move the pointer to the window's left edge to peek the sidebar; it closes when the pointer leaves.
+- Herdr app mod: the top bar floats over the chat, Overview and Needs you; only its capsules have a background.
+- Herdr app mod: right-click a tab, a workspace or an Overview card for its actions (rename, move, split, put away, close).
+- Herdr app mod: a split tab shows its panes; the bar's panes button switches between the chat and the panes.
 - herdr-core: terminals of herdr-core (the official Herdr app's core) show beside the herdr server's, grouped by the app's spaces and tabs, with their conversations, approval and question cards, layout changes, other machines and scrollback.
 - Antigravity CLI (agy): agy panes show their conversation from the agy transcript, with tool calls and their results, and its command prompts get the approval card and notification buttons, and its single-choice questions the question card.
 

@@ -98,3 +98,22 @@ test("the chat shows the composer, and a drop on it attaches files", async () =>
   el = v.render(cx);
   assert.match(textOf(byId(el, "file-0")), /shot\.png/);
 });
+
+test("⌘V with an image and no text on the clipboard attaches the sidecar's PNG; a text paste does not ask", async () => {
+  const asked = [];
+  fake.exec = (cmd, args) => {
+    if (args[0] === "paste-image") { asked.push(args); return jl(header("paste-image"), { type: "image", path: "/home/test/.config/herdr-app/flockbook/paste/paste-1.png" }, end); }
+    return jl(header(args[0]), end);
+  };
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  const key = { key: "v", modifiers: { platform: true } };
+  cx.read_from_clipboard = () => "some text";
+  byId(v.render(cx), "composer")._h.on_key_down(key, cx); await cx.settle();
+  assert.equal(asked.length, 0);
+  cx.read_from_clipboard = () => undefined;
+  byId(v.render(cx), "composer")._h.on_key_down({ key: "v", modifiers: { platform: true, shift: true } }, cx); await cx.settle();
+  assert.equal(asked.length, 0, "⇧⌘V is not a paste");
+  byId(v.render(cx), "composer")._h.on_key_down(key, cx); await cx.settle();
+  assert.deepEqual(asked[0].slice(0, 3), ["paste-image", "--dir", "/home/test/.config/herdr-app/flockbook/paste"]);
+  assert.match(textOf(byId(v.render(cx), "file-0")), /paste-1\.png/);
+});
