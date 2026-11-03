@@ -32,6 +32,7 @@ OFFLINE=(
     "tabdrag|tabdrag-test: PASS|--test-tabdrag"
     "panemenu|panemenu-test: PASS|--test-panemenu"
     "composer|composer-test: PASS|--test-composer"
+    "send-unconfirmed|unconfirmed-test: PASS|--test-send-unconfirmed"
     "sidebar|sidebar-test: PASS|--test-sidebar"
     "sidebar-layout|sidebar-layout: PASS|--test-sidebar-layout"
     "root-width|root-width: PASS|--test-root-width"

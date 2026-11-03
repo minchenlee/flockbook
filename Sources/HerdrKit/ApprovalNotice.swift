@@ -269,7 +269,8 @@ public enum ApprovalNotice {
     }
 }
 
-extension HerdrClient {
+/// On both backends (TUI `pane.read` / `pane.send_text`, hc `terminal.read` / `terminal.keys`).
+extension PaneScreen {
     /// The approval card's input, sent only if `prompt` is still open: the pane is read again right before the keys.
     /// False: nothing sent. The notification buttons and the hub both answer through this.
     public func respondIfOpen(paneId: String, prompt: String, allow: Bool, agentKind: String, blocked: Bool, pending: PermissionRequest?, gate: KeyGate? = nil) async throws -> Bool {
@@ -297,7 +298,8 @@ extension HerdrClient {
     /// was given (a Down may have moved the focus only).
     func respondGrok(paneId: String, screenPrompt: String, allow: Bool, gate: KeyGate?) async throws -> Bool {
         var moved = false
-        for _ in 0..<20 {
+        // hc may hold a key for its typing-quiet rule (about 3 s): wait longer there for the focus to move.
+        for _ in 0..<(backend == .hc ? 60 : 20) {
             let screen = try await visibleText(paneId: paneId)
             guard let box = ApprovalNotice.grokBox(screen), ApprovalNotice.grokID(box) == screenPrompt else { return false }
             let key = ApprovalNotice.grokKey(screen, allow: allow)
@@ -309,6 +311,8 @@ extension HerdrClient {
             moved = true
             try await Task.sleep(for: .milliseconds(150))
         }
+        // hc: the Down went out but the focus never showed on "No, reject": not "nothing sent" (`unconfirmed`).
+        if moved, backend == .hc { throw HerdrError.timeout("grok: the focus did not reach No, reject") }
         return false
     }
 

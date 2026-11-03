@@ -61,6 +61,8 @@ public struct PulledText: Codable, Hashable, Sendable {
     public func drop(device: String) { remove { $0.device == device } }
     /// Texts of panes that are gone (`panes`: the panes there are now): no composer of theirs is left.
     public func prune(panes: Set<String>) { remove { !panes.contains($0.pane) } }
+    /// Removes the texts of panes `gone` says are gone (`HerdrStore.paneGone`: per backend).
+    public func prune(gone: (String) -> Bool) { remove { gone($0.pane) } }
 
     private func remove(_ gone: (PulledText) -> Bool) {
         let before = all.count

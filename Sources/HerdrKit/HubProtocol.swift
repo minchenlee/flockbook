@@ -87,9 +87,12 @@ public enum Hub {
 
     /// Only the Mac answers this question: it was read from the screen (switch above), or herdr gives the agent no
     /// session (the app found its log by path), so a key gate cannot bind to the agent and every key would stop.
+    /// hc gives no session either; there the gate binds to the program in the terminal when hc reports its pid.
     public static func answerOnMac(_ q: QuestionRequest, agent: Agent?) -> Bool {
         if !screenQuestionsRemote, screenRead(q) { return true }
         guard let agent else { return false }
+        // hc: the gate binds to the program in the terminal (`Agent.process`), not to a session id.
+        if agent.backend == .hc { return agent.process == nil }
         return agent.sessionResolved || (agent.sessionId ?? "").isEmpty
     }
 
@@ -656,14 +659,16 @@ public struct HubItem: Codable, Hashable, Sendable {
     }
 }
 
-extension HerdrClient {
+extension PaneScreen {
     /// Right before remote text is typed: a fresh snapshot and screen. True only when the pane still has an agent, it
     /// is not blocked, and nothing on screen would take the text as a choice (`Hub.screenTakesKeys`). Read-only.
-    /// With `agent`: the pane must still show that agent (same kind and session), not one that took its place.
+    /// With `agent`: the pane must still show that agent (same kind and session; on hc the same program, `Agent.process`),
+    /// not one that took its place.
     public func readyForText(paneId: String, agent seen: Agent? = nil) async -> Bool {
         guard let ws = try? await snapshot(),
               let agent = ws.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.id == paneId })?.agent, agent.status != .blocked,
-              seen.map({ $0.kind == agent.kind && $0.sessionId == agent.sessionId }) ?? true,
+              seen.map({ $0.kind == agent.kind && ($0.backend == .hc ? $0.process != nil && $0.process == agent.process
+                                                                      : $0.sessionId == agent.sessionId) }) ?? true,
               let screen = try? await visibleText(paneId: paneId) else { return false }
         return !Hub.screenTakesKeys(screen)
     }

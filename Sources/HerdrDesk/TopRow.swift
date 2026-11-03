@@ -195,7 +195,7 @@ struct TabPill: View {
     @Environment(\.islandHost) private var host
 
     var body: some View {
-        let closable = (selected || hover) && model.writesEnabled
+        let closable = (selected || hover) && model.writesEnabled && model.layoutOK(tab)
         // One field at a time, in the active copy (two focused fields would take focus from each other and end the rename).
         let renaming = model.renamingTabID == tab.id && model.islandActive(host)
         let probes = TabProbe.writes(host, model)
@@ -246,7 +246,7 @@ struct TabPill: View {
             if !renaming {
                 TabMouseView(
                     onSelect: { if let ws = model.workspace { model.select(tab: tab, in: ws) } },
-                    onRename: { if model.writesEnabled, let ws = model.workspace { model.select(tab: tab, in: ws); model.renamingTabID = tab.id } },
+                    onRename: { if model.writesEnabled, model.layoutOK(tab), let ws = model.workspace { model.select(tab: tab, in: ws); model.renamingTabID = tab.id } },
                     menu: { model.tabMenu(tab) },
                     onDrag: onDrag, onDrop: onDrop)
                     .probe { r in
@@ -440,7 +440,7 @@ struct PlusButton<Content: View>: View {
         Button { model.plus() } label: { label(action) }
             .help(action.help)
             .accessibilityLabel(action.accessibilityLabel)
-            .disabled(!model.writesEnabled)
+            .disabled(!model.layoutEnabled)
     }
 }
 

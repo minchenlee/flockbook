@@ -177,6 +177,9 @@ struct ComposerView: View {
     /// When set, sends through this instead of `onSend` and learns whether herdr took the message. On failure the
     /// text and images come back into the composer (unless the owner already typed something new) with a note.
     var deliver: ((String) async -> Bool)? = nil
+    /// Like `deliver`, with a third outcome: `unconfirmed` (the request went out, no answer in time) keeps the text out
+    /// of the composer and says "sent, not confirmed". Takes precedence over `deliver`.
+    var deliverResult: ((String) async -> DeliveryOutcome)? = nil
     /// Overrides the "Reply to <agent>" placeholder.
     var placeholder: String? = nil
     /// Changes when the owner asks for the field (an unfocused pane's composer was clicked): take keyboard focus.
@@ -190,9 +193,9 @@ struct ComposerView: View {
     var pasteboard: NSPasteboard = .general
     init(agentName: String, readOnly: Bool = false, branch: String? = nil, draft: ComposerDraft = ComposerDraft(),
          onSend: @escaping (String) -> Void, onDraft: @escaping (ComposerDraft) -> Void = { _ in }, probe: PlaceholderProbe? = nil, pasteboard: NSPasteboard = .general,
-         deliver: ((String) async -> Bool)? = nil, placeholder: String? = nil, focusRequest: Int = 0, remote: RemoteHost? = nil,
+         deliver: ((String) async -> Bool)? = nil, deliverResult: ((String) async -> DeliveryOutcome)? = nil, placeholder: String? = nil, focusRequest: Int = 0, remote: RemoteHost? = nil,
          uploadFolder: String = RemoteUpload.defaultFolder) {
-        self.pasteboard = pasteboard; self.deliver = deliver; self.placeholder = placeholder; self.focusRequest = focusRequest
+        self.pasteboard = pasteboard; self.deliver = deliver; self.deliverResult = deliverResult; self.placeholder = placeholder; self.focusRequest = focusRequest
         self.remote = remote; self.uploadFolder = uploadFolder
         self.agentName = agentName; self.readOnly = readOnly; self.branch = branch
         self.onSend = onSend; self.onDraft = onDraft; self.probe = probe
@@ -339,15 +342,25 @@ struct ComposerView: View {
         let sent = (text: text, images: images)
         text = ""; images = []   // files stay: the agent reads them; they are purged after 7 days
         sendError = nil
-        guard let deliver else { onSend(message); return }
+        let deliverResult = self.deliverResult ?? deliver.map { d in { (m: String) async -> DeliveryOutcome in await d(m) ? .sent : .failed } }
+        guard let deliverResult else { onSend(message); return }
         Task {
-            guard !(await deliver(message)) else { return }
+            switch await deliverResult(message) {
+            case .sent: return
+            case .unconfirmed:
+                returnedText = ""
+                withAnimation(.easeOut(duration: 0.2)) { sendError = Self.unconfirmedNote }
+                return
+            case .failed: break
+            }
             if text.isEmpty && images.isEmpty { text = sent.text; images = sent.images }
             returnedText = text
             let why = MessageSender.takeFailure(message).map { "Not sent. \($0) Press Return to try again." }
             withAnimation(.easeOut(duration: 0.2)) { sendError = why ?? "Not sent: herdr did not take the message. Press Return to try again." }
         }
     }
+    static let unconfirmedNote = "Sent, not confirmed: no answer in time. Check the terminal before you send it again."
+
     private func removeImage(_ url: URL) {
         PasteImages.remove(url)
         images.removeAll { $0 == url }

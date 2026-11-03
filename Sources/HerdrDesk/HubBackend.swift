@@ -26,7 +26,7 @@ import Foundation
     /// The store does not say if the log has more; the client learns it from `loadEarlier`.
     func hasEarlier(session: String) -> Bool { true }
     func loadEarlier(session: String) async -> EarlierLoadResult { await store.loadEarlier(for: session) }
-    func screen(pane: String) async -> String? { try? await store.client.visibleText(paneId: pane) }
+    func screen(pane: String) async -> String? { try? await model.screen(paneId: pane)?.visibleText(paneId: pane) }
 
     /// The composer's image folder: `MessageSender` waits for the agent's image marker on paths in it.
     var imageDirectory: URL? { PasteImages.directory }
@@ -41,13 +41,21 @@ import Foundation
         guard model.claim(id) else { return .changed }
         defer { model.release(id) }
         if let hook = model.sendHook { return await hook(id, text) ? .sent : .failed }
+        guard let reader = model.screen(paneId: id) else { return .failed }
         // herdr has no compare-and-send: this read and the keys are two calls, so a small window stays.
-        guard await store.client.readyForText(paneId: id, agent: agent) else { return .changed }
+        guard await reader.readyForText(paneId: id, agent: agent) else { return .changed }
         guard may() else { return .failed }
         // Every image must still be a file of ours; else nothing is sent (it would go as plain text).
         guard images.allSatisfy({ ImagePaste.ownFile($0.path) }) else { return .failed }
         model.noteSent(id)
         let message = ([text] + images.map(ComposerHandle.quoted)).filter { !$0.isEmpty }.joined(separator: " ")
+        if let hc = reader as? HCClient {
+            // hc types the whole message in one `terminal.send`: files go first (another machine: a call each), then
+            // the gate once, right before the text. Unconfirmed (no answer in time) counts as sent: the core may still
+            // type it, so a retry could send it twice.
+            return await hc.sendFromDevice(text: message, to: id, files: HCClient.localFiles(in: message, under: PasteImages.directory.path),
+                                           gate: KeyGate(agent: agent, allowed: may))
+        }
         return await MessageSender.send(message, to: id, client: store.client, kind: agent.kind,
                                         gate: KeyGate(agent: agent, allowed: may)) ? .sent : .failed
     }
@@ -58,9 +66,12 @@ import Foundation
     func approve(pane id: String, prompt: String, allow: Bool, agent: Agent, allowed: @escaping @MainActor @Sendable () -> Bool) async -> Bool {
         let model = model
         let gate = KeyGate(agent: agent, allowed: { model.writesEnabled && allowed() })
-        guard model.writesEnabled, allowed(), let p = pane(id), let a = p.agent else { return false }
-        guard (try? await store.client.respondIfOpen(paneId: id, prompt: prompt, allow: allow, agentKind: a.kind,
-                                                    blocked: a.status == .blocked, pending: model.pendingRequest(p), gate: gate)) == true else { return false }
+        guard model.writesEnabled, allowed(), let p = pane(id), let a = p.agent, let reader = model.screen(paneId: id) else { return false }
+        // One answer per prompt with the card and the notification buttons (`ApprovalSender`). Unconfirmed (hc held the
+        // keys past their timeout) counts as answered: they may still land, so the phone must not send them again.
+        let r = await model.approvals.answer(paneId: id, via: reader, prompt: prompt, allow: allow, agentKind: a.kind,
+                                             blocked: a.status == .blocked, pending: model.pendingRequest(p), gate: gate)
+        guard r == .sent || r == .unconfirmed else { return false }
         try? await Task.sleep(for: .seconds(1))
         await store.refresh()
         if let p = pane(id) { await model.checkPrompt(for: p) }
@@ -75,6 +86,7 @@ import Foundation
     func pullQueued(pane id: String, agent: Agent, log: ClaudeQueueLog, keep: @escaping @MainActor @Sendable (String) -> Bool,
                     allowed: @escaping @MainActor @Sendable () -> Bool) async -> QueuePull.Outcome {
         let model = model
+        guard HCMapper.address(fromPaneId: id) == nil else { return .refused(AppModel.hcPullNote) }
         guard model.claim(id) else { return .refused("A pull or a send of this pane is running. Nothing was sent.") }
         model.pulling.insert(id)
         defer { model.pulling.remove(id); model.release(id) }
@@ -108,17 +120,21 @@ import Foundation
         let model = model
         let gate = KeyGate(agent: agent, allowed: { model.writesEnabled && allowed() })
         guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
-        var q = question
-        if q.unread > 0 {
-            // Bound to the request the client answered: another request on screen now (even with as many questions) is refused.
-            guard let full = try await store.client.loadAllQuestions(paneId: id, gate: gate, expect: question),
-                  QuestionAdapter.sameRequest(full, as: question) else { throw QuestionAdapter.Failure.notOnScreen }
-            q = full
+        // One hold of the pane's lock from the first navigation key to the last answer key: no other picker keys
+        // (the Mac card, a send) land in between.
+        try await model.withPane(id) {
+            var q = question
+            if q.unread > 0 {
+                // Bound to the request the client answered: another request on screen now (even with as many questions) is refused.
+                guard let full = try await model.loadKeys(pane: id, gate: gate, expect: question),
+                      QuestionAdapter.sameRequest(full, as: question) else { throw QuestionAdapter.Failure.notOnScreen }
+                q = full
+            }
+            guard answers.count == q.questions.count else {
+                throw QuestionAdapter.Failure.unsupported("\(q.questions.count) questions, \(answers.count) answers")
+            }
+            guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
+            try await model.answerKeys(pane: id, request: q, answers: answers, gate: gate)
         }
-        guard answers.count == q.questions.count else {
-            throw QuestionAdapter.Failure.unsupported("\(q.questions.count) questions, \(answers.count) answers")
-        }
-        guard model.writesEnabled, allowed() else { throw QuestionAdapter.Failure.unsupported("input is off") }
-        try await store.client.answerQuestion(paneId: id, request: q, answers: answers, gate: gate)
     }
 }

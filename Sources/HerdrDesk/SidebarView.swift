@@ -102,7 +102,7 @@ struct SidebarView: View {
                 // Same path as the island's + and ⌘T: a new tab in the current workspace.
                 Button { model.newTab() } label: { SidebarLine(title: "New tab", symbol: "square.and.pencil") }
                     .buttonStyle(.plain)
-                    .disabled(!model.writesEnabled || model.workspace == nil)
+                    .disabled(!model.layoutEnabled || model.workspace == nil)
                     .help("New tab (⌘T)")
                     .probe { ChromeProbe.rows["New tab"] = $0 }
                 // The Needs-you count keeps the app's one orange badge (a list .badge is plain text, without the fill).

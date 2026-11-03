@@ -25,6 +25,8 @@ struct MenuEntries: View {
 extension AppModel {
     func tabMenu(_ t: Tab) -> [MenuEntry] {
         let w = writesEnabled
+        let overview = MenuEntry(id: "overview", title: "Show in Overview", symbol: "square.grid.2x2") { [self] in screen = .overview }
+        if !layoutOK(t) { return [overview] }   // hc "Other terminals": not in the official app's layout
         return [
             MenuEntry(id: "rename", title: "Rename…", symbol: "pencil", enabled: w) { [self] in renamingTabID = t.id },
             MenuEntry(id: "moveLeft", title: "Move left", symbol: "arrow.left", enabled: w && tabIndex(t).map { $0 > 0 } == true) { [self] in moveTab(t, by: -1) },
@@ -33,7 +35,7 @@ extension AppModel {
             MenuEntry(id: "close", title: "Close tab", symbol: "xmark", enabled: w, destructive: true) { [self] in closeTab(t) },
             MenuEntry(id: "splitRight", title: "Split right", symbol: "rectangle.split.2x1", enabled: w) { [self] in split(tab: t, .right) },
             MenuEntry(id: "splitDown", title: "Split down", symbol: "rectangle.split.1x2", enabled: w) { [self] in split(tab: t, .down) },
-            MenuEntry(id: "overview", title: "Show in Overview", symbol: "square.grid.2x2") { [self] in screen = .overview },
+            overview,
         ]
     }
 
@@ -46,6 +48,7 @@ extension AppModel {
 
     func workspaceMenu(_ ws: Workspace) -> [MenuEntry] {
         let w = writesEnabled
+        if !layoutOK(ws) { return [] }
         return [
             MenuEntry(id: "rename", title: "Rename…", symbol: "pencil", enabled: w) { [self] in renamingWorkspaceID = ws.id },
             MenuEntry(id: "newTab", title: "New tab in workspace", symbol: "square.and.pencil", enabled: w) { [self] in newTab(in: ws) },
@@ -54,55 +57,68 @@ extension AppModel {
     }
 
     func split(tab t: Tab, _ dir: SplitDirection) {
-        guard writesEnabled, let fid = focusedPaneID(in: t) else { return }
+        guard writesEnabled, layoutOK(t), let fid = focusedPaneID(in: t) else { return }
         splitDirection = dir.rawValue
         if let hook = workspaceHook { hook("split", "\(t.id) \(dir.rawValue)"); return }
-        Task { try? await store.client.split(paneId: fid, direction: dir); await store.refresh() }
+        runLayout(t.backend, "Split") { try await $0.split(paneId: fid, direction: dir) }
     }
 
     /// Moves the tab to `index` (final 0-based position) in its workspace.
     func moveTab(_ t: Tab, to index: Int) {
-        guard writesEnabled else { return }
+        guard writesEnabled, layoutOK(t) else { return }
         if let hook = workspaceHook { hook("moveTab", "\(t.id) \(index)"); return }
-        Task { try? await store.client.moveTab(t.id, toIndex: index); await store.refresh() }
+        let id = t.id
+        runLayout(t.backend, "Move tab") { try await $0.moveTab(id, toIndex: index) }
     }
 
     func beginNewWorkspace() { if writesEnabled { newWorkspaceOpen = true } }
 
+    /// Where a new workspace goes when the sheet does not say: the TUI when it is connected, else herdr-core.
+    var defaultNewWorkspaceBackend: BackendKind { store.tuiConnected || !store.hcConnected ? .tui : .hc }
+
     /// Creates the workspace (one tab, one shell pane), then selects it here.
-    func createWorkspace(name: String, cwd: String) {
+    func createWorkspace(name: String, cwd: String, on backend: BackendKind? = nil) {
         guard writesEnabled else { return }
         let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let hook = workspaceHook { hook("create", label); return }
+        let b = backend ?? defaultNewWorkspaceBackend
+        if let hook = workspaceHook { hook(b == .hc ? "create-hc" : "create", label); return }
+        guard let l = store.layout(b) else { return }
         Task {
-            guard let id = try? await store.client.createWorkspace(label: label.isEmpty ? nil : label, cwd: cwd.isEmpty ? nil : cwd, focus: false) else { return }
-            await store.refresh()
-            select(workspace: id)
+            do {
+                let id = try await l.createWorkspace(label: label.isEmpty ? nil : label, cwd: cwd.isEmpty ? nil : cwd, focus: false)
+                await store.refresh()
+                select(workspace: id)
+            } catch {
+                notice = "New workspace failed: \(error)"
+                await store.refresh()
+            }
         }
     }
 
     func rename(_ ws: Workspace, to label: String) {
         renamingWorkspaceID = nil
         let t = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard writesEnabled, !t.isEmpty, t != ws.label else { return }
+        guard writesEnabled, layoutOK(ws), !t.isEmpty, t != ws.label else { return }
         if let hook = workspaceHook { hook("rename", "\(ws.id) \(t)"); return }
-        Task { try? await store.client.renameWorkspace(id: ws.id, to: t); await store.refresh() }
+        let id = ws.id
+        runLayout(ws.backend, "Rename workspace") { try await $0.renameWorkspace(id: id, to: t) }
     }
 
     func newTab(in ws: Workspace) {
-        guard writesEnabled else { return }
+        guard writesEnabled, layoutOK(ws) else { return }
         if let hook = workspaceHook { hook("newTab", ws.id); return }
-        let cwd = ws.tabs.first?.panes.first?.cwd
+        let cwd = ws.tabs.first?.panes.first?.cwd, id = ws.id
         select(workspace: ws.id)
-        Task { try? await store.client.createTab(workspaceId: ws.id, label: nil, cwd: cwd); await store.refresh() }
+        runLayout(ws.backend, "New tab") { try await $0.createTab(workspaceId: id, label: nil, cwd: cwd) }
     }
 
     func close(_ ws: Workspace) {
         closingWorkspace = nil
-        guard writesEnabled else { return }
+        guard writesEnabled, layoutOK(ws) else { return }
         if let hook = workspaceHook { hook("close", ws.id); return }
         if workspaceID == ws.id, let other = store.workspaces.first(where: { $0.id != ws.id }) { select(workspace: other.id) }
-        Task { try? await store.client.closeWorkspace(id: ws.id); await store.refresh() }
+        let id = ws.id
+        runLayout(ws.backend, "Close workspace") { try await $0.closeWorkspace(id: id) }
     }
 }
 
@@ -114,9 +130,11 @@ struct NewWorkspaceSheet: View {
     @State private var name = ""
     @State private var folder = NSHomeDirectory()
     @State private var hostFolder = ""
+    @State private var backend: BackendKind?
     @FocusState private var focused: Bool
 
-    private var remote: RemoteHost? { model.store.session.remote }
+    /// The herdr session's host, for a workspace on the herdr server; an hc workspace's folder is on this Mac.
+    private var remote: RemoteHost? { (backend ?? model.defaultNewWorkspaceBackend) == .hc ? nil : model.store.session.remote }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -132,6 +150,14 @@ struct NewWorkspaceSheet: View {
                     Button("Choose…") { choose() }
                 }
             }
+            // Both runtimes connected: say where the workspace goes.
+            if model.store.tuiConnected && model.store.hcConnected {
+                Picker("Runs on", selection: Binding(get: { backend ?? model.defaultNewWorkspaceBackend }, set: { backend = $0 })) {
+                    Text("Herdr TUI").tag(BackendKind.tui)
+                    Text("herdr-core").tag(BackendKind.hc)
+                }
+                .pickerStyle(.segmented)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { model.newWorkspaceOpen = false }.keyboardShortcut(.cancelAction)
@@ -144,7 +170,7 @@ struct NewWorkspaceSheet: View {
 
     private func create() {
         model.newWorkspaceOpen = false
-        model.createWorkspace(name: name, cwd: remote == nil ? folder : hostFolder.trimmingCharacters(in: .whitespacesAndNewlines))
+        model.createWorkspace(name: name, cwd: remote == nil ? folder : hostFolder.trimmingCharacters(in: .whitespacesAndNewlines), on: backend)
     }
 
     private func choose() {

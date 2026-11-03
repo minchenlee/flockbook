@@ -48,15 +48,17 @@ enum HeadlessTest {
             print("test: card = \(card.map { "\($0.title) | \($0.command) | \($0.toolUseId)" } ?? "none") canRespond = \(model.promptVisible.contains(pane.id)) same id = \(card?.toolUseId == bound?.prompt)")
         }
         guard let bound else { NSApp.terminate(nil); return }
+        // The pane's own backend (hc or TUI), as the buttons use.
+        let screen: any PaneScreen = model.screen(paneId: bound.pane) ?? model.store.client
         let action = (allow ? ApprovalNotice.Action.allow : .deny).rawValue
         let stale = await model.answerNotice(action: action, paneID: bound.pane, prompt: "toolu_stale")
         try? await Task.sleep(for: .seconds(1))
-        let still = await model.store.client.checkPrompt(paneId: bound.pane)
+        let still = await screen.checkPrompt(paneId: bound.pane)
         print("test: stale prompt id -> sent = \(stale), prompt still on screen = \(still)")
         let sent = await model.answerNotice(action: action, paneID: bound.pane, prompt: bound.prompt)
         try? await Task.sleep(for: .seconds(4))
         let after = model.store.workspaces.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.id == paneId })
-        let gone = await !model.store.client.checkPrompt(paneId: bound.pane)
+        let gone = await !screen.checkPrompt(paneId: bound.pane)
         print("test: \(allow ? "allow" : "deny") -> sent = \(sent), prompt gone = \(gone), status = \(after?.agent?.status.rawValue ?? "none") notice = \(model.notice ?? "-")")
         NSApp.terminate(nil)
     }

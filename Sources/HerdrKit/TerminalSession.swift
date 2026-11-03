@@ -47,6 +47,23 @@ public final class TerminalSession: @unchecked Sendable {
     private var wantRows: Int?
     private var lastSize: (cols: Int, rows: Int)?
     private var showed = false        // a frame came in some run: from then on a missing herdr is a moment (an upgrade), not final
+    /// herdr-core mode: the stream is a `terminal.attach` channel instead of the herdr CLI process.
+    private var hcClient: HCClient?
+    private var attachment: HCAttachment?
+    /// hc: a control session watches (observe attach, never resizes the user's terminal) until the user types. The
+    /// first keys switch it to a controller: the watching channel closes, a controller attach opens with the view's
+    /// size, then the keys go out. `controlling` stays on for the session (reconnects come back `resumed`).
+    private var controlling = false
+    private var attachIsController = false
+    private var upgrading = false
+    private var pendingInput: [(data: Data, at: Date)] = []
+    private var overflowNoted = false
+    /// The queue overflowed during this upgrade: it was dropped, and keys typed until the upgrade ends are dropped too
+    /// (a line must go whole or not at all).
+    private var pendingDropped = false
+    /// Keys queued while a controller attach opens: dropped (and reported) once older than this, and beyond `pendingCap`.
+    var pendingWindow: TimeInterval = 5
+    var pendingCap = 256
     private var bracketed = true      // herdr frames do not carry DEC private modes (see README); assume yes until a frame says ?2004l
 
     /// `launcher` replaces `<herdr> --session <name>` (tests use a fake script). `find` gives herdr's full path.
@@ -68,6 +85,14 @@ public final class TerminalSession: @unchecked Sendable {
         (events, cont) = AsyncStream.makeStream(of: TerminalEvent.self, bufferingPolicy: .unbounded)
         signal(SIGPIPE, SIG_IGN)
         cont.onTermination = { [weak self] _ in self?.stop() }
+    }
+
+    /// herdr-core terminal (`t7`, `machine/t7`): the same events over an attach stream. The first chunk is a full frame
+    /// (the core's first paint) with the pty size; later chunks are increments. `observe` attaches watch-only.
+    public convenience init(hcTerminal address: String, client: HCClient, mode: Mode = .control(takeover: false),
+                            cols: Int? = nil, rows: Int? = nil) {
+        self.init(terminalId: address, session: .named("hc"), mode: mode, cols: cols, rows: rows, launcher: [])
+        self.hcClient = client
     }
 
     deinit { stop() }
@@ -135,6 +160,10 @@ public final class TerminalSession: @unchecked Sendable {
     public func start() {
         let go = lock.withLock { () -> Bool in defer { started = true }; return !started && !stopped }
         guard go else { return }
+        if let hc = hcClient {
+            Task.detached { [self] in await runHC(hc) }
+            return
+        }
         Task.detached { [self] in
             let attempt = Locked(0)
             while !lock.withLock({ stopped }) {
@@ -154,11 +183,64 @@ public final class TerminalSession: @unchecked Sendable {
     @discardableResult
     public func send(bytes: [UInt8]) -> Bool {
         guard !bytes.isEmpty else { return true }
+        if hcClient != nil {
+            guard mode != .observe else { return false }
+            let d = Data(bytes)
+            enum Step { case send(HCAttachment), upgrade(HCAttachment?), queued, overflow(first: Bool), refuse }
+            let step = lock.withLock { () -> Step in
+                if stopped { return .refuse }
+                // While the controller attach opens (and until its queue is flushed), keys queue: order is kept.
+                if upgrading {
+                    guard !pendingDropped, pendingInput.count < pendingCap else {
+                        pendingInput = []; pendingDropped = true
+                        defer { overflowNoted = true }; return .overflow(first: !overflowNoted)
+                    }
+                    pendingInput.append((d, Date())); return .queued
+                }
+                if attachIsController, let a = attachment { return .send(a) }
+                if controlling { return .refuse }   // a controller between reconnects: keys would land late
+                // Focus and mouse reports come from looking, not typing: they never take the terminal over.
+                if Self.isReportOnly(bytes) { return .refuse }
+                controlling = true; upgrading = true; pendingInput = [(d, Date())]; overflowNoted = false; pendingDropped = false
+                defer { attachment = nil }
+                return .upgrade(attachment)
+            }
+            switch step {
+            case .send(let a): a.send(d); return true
+            case .upgrade(let old): old?.close(); return true   // runHC reattaches as a controller and flushes
+            case .queued: return true
+            case .overflow(let first):
+                if first { cont.yield(.notice("Some keys were not sent: the terminal was still connecting.")) }
+                return false
+            case .refuse: return false
+            }
+        }
         return writeJSON(["type": "terminal.input", "bytes": Data(bytes).base64EncodedString()])
     }
 
     @discardableResult
     public func send(text: String) -> Bool { send(bytes: Array(text.utf8)) }
+
+    /// Bytes that are only terminal reports the view sends by itself: focus in/out (`CSI I`, `CSI O`), X10 mouse
+    /// (`CSI M` + 3 bytes), SGR mouse (`CSI < n;n;n M|m`). Keys, text and paste are not.
+    public static func isReportOnly(_ bytes: [UInt8]) -> Bool {
+        var i = 0
+        func at(_ k: Int) -> UInt8? { i + k < bytes.count ? bytes[i + k] : nil }
+        while i < bytes.count {
+            guard at(0) == 0x1B, at(1) == 0x5B, let c = at(2) else { return false }
+            switch c {
+            case 0x49, 0x4F: i += 3                                   // I, O
+            case 0x4D: guard i + 6 <= bytes.count else { return false }; i += 6   // M b x y
+            case 0x3C:                                                // < digits ; digits ; digits M|m
+                var j = i + 3
+                while j < bytes.count, (0x30...0x39).contains(bytes[j]) || bytes[j] == 0x3B { j += 1 }
+                guard j < bytes.count, j > i + 3, bytes[j] == 0x4D || bytes[j] == 0x6D else { return false }
+                i = j + 1
+            default: return false
+            }
+        }
+        return !bytes.isEmpty
+    }
 
     /// Pastes text. Wrapped in bracketed paste (default: `bracketedPaste`); otherwise newlines become CR.
     @discardableResult
@@ -172,6 +254,11 @@ public final class TerminalSession: @unchecked Sendable {
     public func resize(cols: Int, rows: Int) {
         guard cols > 0, rows > 0 else { return }
         lock.withLock { wantCols = cols; wantRows = rows }
+        if hcClient != nil {
+            // Only a controller sets the size; a watcher just remembers it for the controller attach.
+            if mode != .observe, let a = lock.withLock({ attachIsController ? attachment : nil }) { a.resize(cols: cols, rows: rows) }
+            return
+        }
         writeJSON(["type": "terminal.resize", "cols": cols, "rows": rows])
     }
 
@@ -189,6 +276,8 @@ public final class TerminalSession: @unchecked Sendable {
     @discardableResult
     public func wheel(lines: Int, up: Bool, eventPerLine: Bool = false) -> Bool {
         guard mode != .observe, lines > 0 else { return false }
+        // hc streams raw bytes and never encodes input; the app cannot see the program's mouse mode, so send nothing.
+        if hcClient != nil { return false }
         let dir = up ? "up" : "down"
         if eventPerLine {
             var ok = true
@@ -220,6 +309,7 @@ public final class TerminalSession: @unchecked Sendable {
 
     /// Gives the input back (the pty returns to the other client's size) and ends the stream.
     public func release() {
+        if hcClient != nil { stop(); return }   // CLOSE detaches; the core keeps the program running
         lock.withLock { stopped = true }
         writeJSON(["type": "terminal.release"])
         // the process answers closed(detached) and exits; stop() is the fallback if it does not
@@ -228,7 +318,10 @@ public final class TerminalSession: @unchecked Sendable {
 
     /// Ends the session without telling herdr (the process is terminated).
     public func stop() {
-        let p = lock.withLock { () -> Process? in stopped = true; defer { proc = nil; stdin = nil }; return proc }
+        let (p, att) = lock.withLock { () -> (Process?, HCAttachment?) in
+            stopped = true; defer { proc = nil; stdin = nil; attachment = nil }; return (proc, attachment)
+        }
+        att?.close()
         if let p, p.isRunning { p.terminate() }
         cont.finish()
     }
@@ -251,6 +344,91 @@ public final class TerminalSession: @unchecked Sendable {
     // MARK: process
 
     private enum Outcome { case final, retry }
+
+    /// CLOSE reasons after which the terminal is gone for good. Anything else (a kept terminal lost, waiting for its
+    /// new shell; a dropped connection) is retried with backoff, like the herdr CLI channel.
+    /// attach error kinds that a retry cannot fix (the terminal is gone or ended, the machine is unknown, the connection
+    /// is not framed). `unavailable` and dropped connections are retried.
+    static let hcFinalErrors: Set<String> = ["not_found", "usage", "finished", "machine_unknown", "needs_framed"]
+    static let hcFinalReasons: Set<String> = ["exited", "killed", "server_stop", "host_shutdown", "holder_lost", "stopped_by_restart"]
+
+    /// Sends the keys queued during the upgrade, oldest first, and only then lets new keys go straight to the channel
+    /// (`upgrading` stays on until the queue is empty, so a key typed meanwhile queues behind them). Keys older than
+    /// `pendingWindow` are dropped (a long failed upgrade must not replay old Enter presses) and reported.
+    /// Dropping is all or nothing: once one queued key expired (or the queue overflowed), the whole queue goes, so a
+    /// slowly typed line never loses its start and still sends the rest plus Enter.
+    private func flushPending(_ att: HCAttachment) {
+        var dropping = false, expired = false
+        while true {
+            let (batch, overflowed) = lock.withLock { () -> ([(data: Data, at: Date)], Bool) in
+                defer { pendingInput = [] }
+                let o = pendingDropped
+                if pendingInput.isEmpty { upgrading = false; pendingDropped = false }
+                return (pendingInput, o)
+            }
+            if overflowed { dropping = true }   // already reported when it overflowed
+            if batch.isEmpty { break }
+            let now = Date()
+            if !dropping, batch.contains(where: { now.timeIntervalSince($0.at) > pendingWindow }) { dropping = true; expired = true }
+            if !dropping { for k in batch { att.send(k.data) } }
+        }
+        if expired { cont.yield(.notice("Keys typed while the terminal was connecting were not sent (waited too long).")) }
+    }
+
+    private func runHC(_ hc: HCClient) async {
+        var attempt = 0
+        var seq = 0
+        var resumed = false   // the last controller attach dropped: come back resumed
+        while !lock.withLock({ stopped }) {
+            var final: String?
+            var wasUpgrade = false
+            do {
+                let (c, r, control) = lock.withLock { (wantCols ?? 80, wantRows ?? 24, controlling) }
+                let att = try await hc.attach(terminal: terminalId, cols: c, rows: r, observe: !control,
+                                              resumed: control && resumed)
+                let stop = lock.withLock { () -> Bool in
+                    if stopped { return true }
+                    // Keys typed while this (watching) attach was in flight: take control right away.
+                    if !control && upgrading { return false }
+                    attachment = att; attachIsController = control; lastSize = (att.cols, att.rows)
+                    return false
+                }
+                if stop { att.close(); break }
+                if !control && lock.withLock({ upgrading }) { att.close(); continue }
+                if control { flushPending(att) }
+                var first = true
+                for try await chunk in att.bytes {
+                    attempt = 0
+                    seq += 1
+                    lock.withLock {
+                        if let on = chunk.range(of: Data("\u{1b}[?2004h".utf8), options: .backwards),
+                           chunk.range(of: Data("\u{1b}[?2004l".utf8), options: .backwards).map({ $0.lowerBound < on.lowerBound }) ?? true {
+                            bracketed = true
+                        } else if chunk.range(of: Data("\u{1b}[?2004l".utf8)) != nil { bracketed = false }
+                    }
+                    let n = chunk.count
+                    cont.yield(.frame(TerminalFrame(seq: seq, full: first, width: first ? att.cols : 0, height: first ? att.rows : 0,
+                                                    bytes: chunk, ack: FrameAck { att.consumed(n) })))
+                    first = false   // CREDIT goes out when the view calls frame.consumed()
+                }
+                wasUpgrade = lock.withLock { () -> Bool in
+                    if attachment === att { attachment = nil; attachIsController = false }
+                    return upgrading && !control
+                }
+                if control { resumed = true }   // a controller that comes back is a reconnect
+                if let reason = att.closeReason?["reason"] as? String, Self.hcFinalReasons.contains(reason) { final = reason }
+            } catch HerdrError.server(let code, let message) where Self.hcFinalErrors.contains(code) {
+                final = code == "not_found" || code == "usage" ? "not found: \(message)" : "\(code): \(message)"
+            } catch {}
+            if let final { cont.yield(.closed(reason: final)); break }
+            if lock.withLock({ stopped }) { break }
+            if wasUpgrade { continue }   // the watcher closed to make room for the controller: no backoff
+            attempt += 1
+            cont.yield(.reconnecting(attempt: attempt))
+            try? await Task.sleep(for: .milliseconds(min(2000, 250 << min(attempt - 1, 3))))
+        }
+        cont.finish()
+    }
 
     private func runOnce(onFrame: @escaping @Sendable () -> Void) async -> Outcome {
         let (cols, rows) = lock.withLock { () -> (Int?, Int?) in (wantCols, wantRows) }

@@ -30,8 +30,20 @@ public struct Agent: Sendable, Hashable {
     public var sessionResolved = false
     /// Herdr names an agent-team teammate's log (or one not judged a lead's) for this pane: what the pane shows instead.
     public var team: TeamNote?
-    public init(name: String, kind: String, status: AgentStatus, sessionId: String?, title: String) {
+    /// Which runtime runs this agent. Routes input and decides which actions exist.
+    public var backend: BackendKind
+    /// hc only: what a `blocked` agent waits for, as the program said (`permission`, `question`, `auth`), or `error`
+    /// for a program that reported 7501 `error` (status shows `done`; `title` reads "error: <msg>"). Nil otherwise.
+    public var statusKind: String?
+    /// hc only: the agent's process in the terminal (`HCMapper.process`): its pid plus the terminal's creation time
+    /// (`created_ms`, 0 when hc gives none). The creation time is the terminal's, not the program's, so it does not
+    /// guard against a pid reused inside one terminal; hc gives no process start time.
+    /// A paired device's key gate binds to it: hc gives no session id, the store finds it in the log. Nil otherwise.
+    public var process: String?
+    public init(name: String, kind: String, status: AgentStatus, sessionId: String?, title: String,
+                backend: BackendKind = .tui, statusKind: String? = nil) {
         self.name = name; self.kind = kind; self.status = status; self.sessionId = sessionId; self.title = title
+        self.backend = backend; self.statusKind = statusKind
     }
 }
 
@@ -54,8 +66,13 @@ public struct Pane: Identifiable, Sendable, Hashable {
     public var agent: Agent?
     /// Name set with `renamePane`. Nil when the pane has none.
     public var label: String?
-    public init(id: String, terminalId: String, cwd: String, agent: Agent?, label: String? = nil) {
-        self.id = id; self.terminalId = terminalId; self.cwd = cwd; self.agent = agent; self.label = label
+    public var backend: BackendKind
+    /// hc only: the foreground process, then the terminal's own process (for finding the agent's session log).
+    public var processIds: [Int32]
+    public init(id: String, terminalId: String, cwd: String, agent: Agent?, label: String? = nil, backend: BackendKind = .tui,
+                processIds: [Int32] = []) {
+        self.id = id; self.terminalId = terminalId; self.cwd = cwd; self.agent = agent; self.label = label; self.backend = backend
+        self.processIds = processIds
     }
 }
 
@@ -65,8 +82,9 @@ public struct Tab: Identifiable, Sendable, Hashable {
     public var number: Int
     public var panes: [Pane]
     public var status: AgentStatus
-    public init(id: String, label: String, number: Int, panes: [Pane], status: AgentStatus) {
-        self.id = id; self.label = label; self.number = number; self.panes = panes; self.status = status
+    public var backend: BackendKind
+    public init(id: String, label: String, number: Int, panes: [Pane], status: AgentStatus, backend: BackendKind = .tui) {
+        self.id = id; self.label = label; self.number = number; self.panes = panes; self.status = status; self.backend = backend
     }
 }
 
@@ -74,8 +92,10 @@ public struct Workspace: Identifiable, Sendable, Hashable {
     public var id: String
     public var label: String
     public var tabs: [Tab]
-    public init(id: String, label: String, tabs: [Tab]) {
-        self.id = id; self.label = label; self.tabs = tabs
+    /// `.hc`: a read-only group built from the official app's labels; no layout actions.
+    public var backend: BackendKind
+    public init(id: String, label: String, tabs: [Tab], backend: BackendKind = .tui) {
+        self.id = id; self.label = label; self.tabs = tabs; self.backend = backend
     }
 }
 
@@ -87,6 +107,20 @@ public struct TerminalFrame: Sendable {
     public var width: Int
     public var height: Int
     public var bytes: Data
+    /// hc only: grants the core flow-control credit for these bytes. Nil on the TUI channel.
+    var ack: FrameAck? = nil
+
+    /// Call once the view has processed `bytes` (fed them to the terminal). On hc this sends CREDIT, so the core only
+    /// sends more as fast as the view keeps up; an unconsumed backlog stops at the core's window (256 KiB). Once per frame.
+    public func consumed() { ack?.fire() }
+}
+
+/// Runs its action at most once.
+final class FrameAck: @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (() -> Void)?
+    init(_ action: @escaping @Sendable () -> Void) { self.action = action }
+    func fire() { let a = lock.withLock { () -> (() -> Void)? in defer { action = nil }; return action }; a?() }
 }
 
 /// One tool call behind a chip. `input` and `output` are cut at 4 KB (a trailing "…" marks the cut).

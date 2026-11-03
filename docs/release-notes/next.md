@@ -4,6 +4,7 @@
 One short line: what this release is about.
 
 ### ✨ New
+- herdr-core: terminals of herdr-core (the official Herdr app's core) show beside the herdr server's, grouped by the app's spaces and tabs, with their conversations, approval and question cards, layout changes, other machines and scrollback.
 
 ### 🔒 Security
 

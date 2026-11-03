@@ -57,3 +57,8 @@ enum Support {
         return (found, escaped, counts)
     }
 }
+
+extension Support {
+    static func bytes(_ b: [UInt8]) -> Data { Data(b) }
+    static func array(_ d: Data) -> [UInt8] { [UInt8](d) }
+}

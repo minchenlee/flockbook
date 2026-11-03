@@ -174,7 +174,7 @@ changes. `HerdrKitChecks --agents-live <kinds>` prints `session=id|path|none` pe
 
 ## Permission prompts
 - The log parser emits a `permissionRequest` (state `.pending`) for the newest tool call with no result. It replaces that call's chip. Once the result arrives, it becomes a chip again.
-- Pending does **not** mean a prompt: a running tool looks the same. Call `await client.checkPrompt(paneId:)` (reads the screen, looks for "Do you want"). True → Approval card + Allow/Deny. False → show a "Running <tool>…" chip.
+- Pending does **not** mean a prompt: a running tool looks the same. Call `await client.checkPrompt(paneId:)` (reads the screen, looks for the prompt shape: a "Do you want …?" line followed by "1. Yes", and no question-picker footer). True → Approval card + Allow/Deny. False → show a "Running <tool>…" chip.
 - Run `checkPrompt` when an item is pending or `agent.status == .blocked`. Send keys only when it returns true.
 
 ## Approval keystrokes

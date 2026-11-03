@@ -17,6 +17,8 @@ enum HubLiveTest {
         try? await Task.sleep(for: .seconds(3))
         await model.store.refresh()
         var ok = true
+        // The pane's own backend (hc or TUI), as the hub uses.
+        let screen: any PaneScreen = model.screen(paneId: paneId) ?? model.store.client
         func step(_ what: String, _ pass: Bool) { print("test-hub: \(pass ? "ok" : "FAIL") \(what)"); ok = ok && pass }
 
         let devices = MemoryDeviceStore()
@@ -56,7 +58,7 @@ enum HubLiveTest {
             step("send while the approval is open -> promptOpen", errorCode(await c.untilReply().last) == .promptOpen)
             try? await c.send(#"{"v":1,"type":"approve","id":"a0","pane":"\#(paneId)","prompt":"toolu_stale","allow":\#(allow)}"#)
             step("approve with a stale id -> stale", errorCode(await c.untilReply().last) == .stale)
-            let still = await model.store.client.checkPrompt(paneId: paneId)
+            let still = await screen.checkPrompt(paneId: paneId)
             step("prompt still on screen after the refusals", still)
             try? await c.send(#"{"v":1,"type":"approve","id":"a1","pane":"\#(paneId)","prompt":"\#(a.id)","allow":\#(allow)}"#)
             step("\(allow ? "allow" : "deny") with the current id -> ok", await c.untilReply(8).last.map(isOK) == true)
@@ -81,8 +83,8 @@ enum HubLiveTest {
                 step("screen-read question: marked onMac, answer -> \(r.map { isOK($0) ? "ok" : "\(String(describing: errorCode($0)))" } ?? "nothing")",
                      r.map(isOK) == false && errorCode(r) == .failed)
                 try? await Task.sleep(for: .seconds(1))
-                let screen = (try? await model.store.client.visibleText(paneId: paneId)) ?? ""
-                step("picker still open, nothing chosen", QuestionAdapter.claudeScreen(screen)?.question.text == q.questions.first?.text)
+                let shown = (try? await screen.visibleText(paneId: paneId)) ?? ""
+                step("picker still open, nothing chosen", QuestionAdapter.claudeScreen(shown)?.question.text == q.questions.first?.text)
             } else {
                 if case .reply(let rr)? = r, let e = rr.error { print("test-hub: answer error: \(e.code) \(e.message)") }
                 step("answer with the open id -> \(r.map { isOK($0) ? "ok" : "\(String(describing: errorCode($0)))" } ?? "nothing")", r.map(isOK) == true)
@@ -121,7 +123,7 @@ enum HubLiveTest {
             }
             step("\(pushed ?? "no") push after the send", pushed != nil)
             if image {
-                let text = (try? await model.store.client.readScrollback(paneId: paneId, lines: 40, ansi: false).text) ?? ""
+                let text = (screen is HerdrClient ? try? await model.store.client.readScrollback(paneId: paneId, lines: 40, ansi: false).text : try? await screen.visibleText(paneId: paneId)) ?? ""
                 step("the agent took the image as an attachment ([Image #n] on screen)", text.contains("[Image #"))
             }
         }

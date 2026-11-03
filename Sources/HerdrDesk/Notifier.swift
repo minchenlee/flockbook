@@ -33,12 +33,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Call on every workspace update. The first call only records the current state.
     func update(_ workspaces: [Workspace]) {
-        var now: Set<String> = []
-        var fresh: [(Workspace, Tab)] = []
-        for ws in workspaces { for t in ws.tabs where t.status == .blocked {
-            now.insert(t.id)
-            if let known, !known.contains(t.id) { fresh.append((ws, t)) }
-        } }
+        let (now, fresh) = BlockedTabs.fresh(known: known, in: workspaces)
         let isFirst = known == nil
         known = now
         guard !isFirst, available else { return }
