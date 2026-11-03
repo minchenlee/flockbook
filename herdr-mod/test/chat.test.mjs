@@ -59,6 +59,21 @@ test("estimates: wide characters wrap sooner; code and headings add height", () 
   assert.ok(rowHeight({ k: "assistant", text: "line\n\n".repeat(400) }, 600) > 4000);
 });
 
+test("estimates: code boxes and tables are guessed at their drawn height (no wrap margin, no gap)", () => {
+  // codeBox: 6 px margin + 10 px padding + 1 px border, each side; 19 px per line.
+  assert.equal(markdownHeight("```\na\nb\nc\n```", 600), 3 * 19 + 34);
+  // table: 6 px margin + 1 px border each side; a row is 8 + 21 + 8 px plus a 1 px line (1 px high on the head row, on purpose).
+  assert.equal(markdownHeight("| A | B |\n|---|---|\n| a | b |", 600), 14 + 17 + 21 + 17 + 21);
+  // Only the prose keeps the 8% wrap margin, so a long answer with code is not guessed far too tall.
+  const prose = "word ".repeat(30);
+  const code = "```\n" + "x = 1\n".repeat(30) + "```";
+  // The blank lines around a box add nothing: the box's own margin is the gap.
+  const both = markdownHeight(`${prose}\n\n${code}\n\n${prose}`, 600);
+  assert.ok(Math.abs(both - (2 * markdownHeight(prose, 600) + markdownHeight(code, 600))) <= 1, `${both}`);  // 1 px: rounding
+  // Between two paragraphs the blank line stays a 10 px gap.
+  assert.equal(markdownHeight("a\n\nb", 600), Math.ceil(2 * 22 * 1.08 + 10));
+});
+
 test("chipIcon maps SF Symbols names to the mod's icons", () => {
   assert.match(chipIcon("terminal"), /terminal\.svg$/);
   assert.match(chipIcon("doc.text"), /doc\.svg$/);

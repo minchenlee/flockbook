@@ -1,6 +1,7 @@
 // Row heights for the virtual list, guessed from the text (the list needs them before layout).
 // Body text: 14 px, 22 px per line. Over-guessing leaves a gap; under-guessing cuts the row, so the
-// guesses lean high: wide Latin letters, and 8% on top for word wrap.
+// guesses lean high: wide Latin letters, and 8% on top of the prose for word wrap. Code boxes and
+// tables get their drawn height, with no 8%: on a long answer full of code the 8% left a big gap.
 export const READ_W = 760;  // the reading column's width at most
 export const GUTTER = 24;   // each side of the column
 
@@ -18,16 +19,20 @@ export function wrapLines(text, width, fs = 14) {
 
 export function markdownHeight(text, width) {
   const LH = 22, CODE_LH = 19;
-  let h = 0, inCode = false, prevBlank = true;
+  let h = 0, p = 0, inCode = false, prevBlank = true;  // h: drawn exactly; p: prose, wraps
+  // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
+  let gap = 0;
+  const box = () => { h -= gap; gap = 0; };
   const lines = String(text).split("\n");
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li].replace(/\t/g, "    ");
-    if (/^\s*```/.test(line)) { h += inCode ? 16 : 34; inCode = !inCode; continue; }
-    if (inCode) { h += CODE_LH * Math.max(1, wrapLines(line, width - 24, 13)); continue; }
-    if (!line.trim()) { if (!prevBlank) h += 10; prevBlank = true; continue; }
-    prevBlank = false;
+    // A code box as mdblocks.js draws it: 6 px margin, 10 px padding and a 1 px border, each side.
+    if (/^\s*```/.test(line)) { if (!inCode) { box(); h += 34; } else prevBlank = true; inCode = !inCode; continue; }
+    if (inCode) { h += CODE_LH * Math.max(1, wrapLines(line, width - 30, 13)); continue; }
+    if (!line.trim()) { if (!prevBlank) { h += 10; gap = 10; } prevBlank = true; continue; }
+    prevBlank = false; gap = 0;
     let m;
-    if ((m = /^(#{1,6})\s/.exec(line))) { const size = [26, 22, 19, 17, 15, 14][m[1].length - 1]; h += wrapLines(line, width, size) * size * 1.4 + 12; continue; }
+    if ((m = /^(#{1,6})\s/.exec(line))) { const size = [26, 22, 19, 17, 15, 14][m[1].length - 1]; p += wrapLines(line, width, size) * size * 1.4 + 12; continue; }
     if (/^\s*\|/.test(line) && li + 1 < lines.length && TABLE_SEP.test(lines[li + 1])) {
       // A table as mdblocks.js draws it: 6 px above and below, a 1 px frame; each row 8 px padding top
       // and bottom plus a 1 px line, as tall as its tallest cell at the colWidths widths.
@@ -36,17 +41,16 @@ export function markdownHeight(text, width) {
       while (j < lines.length && /^\s*\|/.test(lines[j])) rows.push(tableCells(lines[j++]));
       const n = Math.max(...rows.map((r) => r.length));
       const ws = colWidths(width, rows, n);
-      h += 14;
+      box(); h += 14;
       for (const r of rows) h += 17 + 21 * Math.max(1, ...ws.map((w, c) => wrapLines(r[c] ?? "", w - 24, 13.5)));
-      li = j - 1; prevBlank = false;
+      li = j - 1; prevBlank = true;
       continue;
     }
-    if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) { h += wrapLines(line, width - 24 - m[1].length * 8) * LH + 6; continue; }
-    if (/^>\s?/.test(line)) { h += wrapLines(line, width - 24) * LH; continue; }
-    h += wrapLines(line, width) * LH;
+    if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) { p += wrapLines(line, width - 24 - m[1].length * 8) * LH + 6; continue; }
+    if (/^>\s?/.test(line)) { p += wrapLines(line, width - 24) * LH; continue; }
+    p += wrapLines(line, width) * LH;
   }
-  if (inCode) h += 16;
-  return Math.ceil(h * 1.08);
+  return Math.ceil(h + p * 1.08);
 }
 
 const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;

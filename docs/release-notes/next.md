@@ -43,3 +43,4 @@ One short line: what this release is about.
 - Fix: Herdr app mod says "cannot tell this agent from another program" (not "another agent is in this pane") when an agent has no process or session id to check, and the composer keeps the text for every reply that did not send.
 - Security: Herdr app mod approvals stay answered when the screen cannot be read for a moment or the pane is resized, and while a key held by herdr-core may still arrive; only a screen without that prompt lets it be answered again.
 - Security: Herdr app mod replies go only to the agent and conversation the chat showed. If another agent (or a new conversation) took the terminal before Send, nothing is typed and the text stays in the box.
+- Fix: Herdr app mod chat no longer leaves a large blank gap under a long reply with code blocks or tables; their height is now guessed at the size they are drawn.
