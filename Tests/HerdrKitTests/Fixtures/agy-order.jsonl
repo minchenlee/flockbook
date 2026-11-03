@@ -1,0 +1,17 @@
+{"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-11-02T03:00:00Z", "content": "<USER_REQUEST>\nTidy the demo.\n</USER_REQUEST>"}
+{"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:01Z", "tool_calls": [{"name": "view_file", "args": {"AbsolutePath": "/tmp/demo/a.txt"}}]}
+{"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:02Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\nA"}
+{"step_index": 4, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:04Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\nB"}
+{"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:03Z", "tool_calls": [{"name": "view_file", "args": {"AbsolutePath": "/tmp/demo/b.txt"}}]}
+{"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:05Z", "tool_calls": [{"name": "write_to_file", "args": {"TargetFile": "/tmp/demo/c.txt"}}]}
+{"step_index": 7, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:07Z", "tool_calls": [{"name": "write_to_file", "args": {"TargetFile": "/tmp/demo/d.txt"}}]}
+{"step_index": 8, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:08Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\nD"}
+{"step_index": 10, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:10Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\ntask"}
+{"step_index": 9, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:09Z", "tool_calls": [{"name": "manage_task", "args": {}}]}
+{"step_index": 11, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:11Z", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "echo x"}}, {"name": "run_command", "args": {"CommandLine": "echo y"}}]}
+{"step_index": 12, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:12Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\nX"}
+{"step_index": 13, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:13Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\nY"}
+{"step_index": 14, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:14Z", "tool_calls": [{"name": "run_command", "args": {"CommandLine": "echo z"}}]}
+{"step_index": 16, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:16Z", "tool_calls": [{"name": "ask_question", "args": {"questions": [{"is_multi_select": false, "options": ["Red", "Blue"], "question": "Red or blue?"}]}}]}
+{"step_index": 17, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-02T03:00:17Z", "content": "Created At: 2026-11-02T11:00:00+08:00\nCompleted At: 2026-11-02T11:00:01+08:00\nA1: Blue"}
+{"step_index": 18, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-11-02T03:00:18Z", "content": "Done."}

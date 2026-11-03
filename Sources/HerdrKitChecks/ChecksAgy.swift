@@ -35,6 +35,27 @@ import Foundation
     check(describe(SessionLog.parse(lines: [plain, tagged])) == ["user:hi"], "agy: plain prompt kept, tagged-only dropped")
 }
 
+// Results pair by step_index (call i of PLANNER step p ↔ GENERIC p+1+i), not by line order. Line order
+// from a real transcript: a result line before its call (4 before 3, 10 before 9), a call with no result (5: slot 6
+// passed), two calls in one step, and a question after an unanswered call.
+@MainActor func checksAgyOrder() async throws {
+    let al = String(decoding: fixture("agy-order.jsonl"), as: UTF8.self).split(separator: "\n").map(String.init)
+    let items = SessionLog.parse(lines: al)
+    let calls = chipCalls(items)
+    check(calls.map { $0.output ?? "nil" } == ["A", "B", "Not run", "D", "task", "X", "Y", "Not run"]
+          && calls.map(\.isError) == [false, false, true, false, false, false, false, true],
+          "agy: results by step_index \(calls.map { $0.output ?? "nil" })")
+    check(!items.contains { if case .permissionRequest = $0.kind { return true }; return false }, "agy: no false pending call \(describe(items))")
+    let qs = items.compactMap { if case .question(let q) = $0.kind { return q.state }; return nil }
+    check(qs == [.answered(["Blue"])], "agy: the question takes its own result \(qs)")
+    var p = ConversationParser()
+    for l in al { p.feed(line: l) }
+    check(!p.hasOpenToolUse && p.items().map(\.id) == items.map(\.id), "agy: incremental feed = batch, nothing open")
+    // A late result still fills a call whose slot had passed.
+    let late = SessionLog.parse(lines: al + [#"{"step_index":6,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-11-02T03:00:19Z","content":"C"}"#])
+    check(chipCalls(late)[2].output == "C" && chipCalls(late)[2].isError == false, "agy: late result fills the call")
+}
+
 // Log from the process: agy holds `presence/<conversation id>.lock` open; the transcript sits under `brain/<id>`.
 @MainActor func checksAgyResolver() async throws {
     typealias R = SessionResolver

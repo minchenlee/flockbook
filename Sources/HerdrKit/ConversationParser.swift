@@ -17,6 +17,7 @@ public struct ConversationParser: Sendable {
     public private(set) var continuedIn: String?
     var thought: (id: String, message: String?, text: String)?   // Claude thinking with words, until its message's next block
     var pi = PiState()                               // pi entry tree (see ConversationParser+Pi.swift)
+    var agy = AgyState()                             // agy result slots (see ConversationParser+Agy.swift)
     var grok = GrokState()                           // Grok Build chunk merging (see ConversationParser+Grok.swift)
     /// Claude Code's queue of messages typed while it works (`queue-operation` lines).
     public private(set) var queue = ClaudeQueueLog()
