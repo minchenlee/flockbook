@@ -3,10 +3,17 @@
 //! and never sends input, keys, resize, takeover or any mutating method.
 //!
 //!     cargo run -p herdr-core --example snapshot -- [--session NAME]
+#![cfg_attr(not(unix), allow(unused_imports))]
 
 use herdr_core::{AgentStatus, HerdrClient, HerdrSession};
 use std::collections::BTreeMap;
 
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("herdr serves a Unix socket: this probe runs on Unix only");
+}
+
+#[cfg(unix)]
 fn main() {
     let session = HerdrSession::from_process();
     let label = session.name.clone().unwrap_or_else(|| "(default / from env)".into());

@@ -142,6 +142,17 @@ func checksModFeedReview() async throws {
     fake.setScreen("t1", claudeBox("cat notes"))
     let fresh = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: id5, allow: true, cache: cache)
     check(fresh.result == "sent" && keys().count == kr + 1, "review1 re-check: after a read with no box, the prompt can be answered again (\(fresh))")
+    // Re-review 2: another run is claiming in this folder now: "busy", not "answered", and no key; then it works.
+    fake.setScreen("t1", claudeBox("cat busy"))
+    let bid = await FeedCards.card(pane: pane, screen: hc, log: nil, cache: cache).request ?? ""
+    let lockFd = open(claims.appendingPathComponent(fnv1a(pane.id)).appendingPathComponent(".lock").path, O_RDWR | O_CREAT, 0o600)
+    check(lockFd >= 0 && flock(lockFd, LOCK_EX) == 0, "re-review 2: setup, another run holds the claim lock")
+    let kb = keys().count
+    let busy = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: bid, allow: true, cache: cache)
+    check(busy.result == "busy" && busy.message != nil && keys().count == kb, "re-review 2: busy, no key (\(busy))")
+    close(lockFd)
+    let after = await FeedCards.approve(pane: pane, screen: hc, log: nil, request: bid, allow: true, cache: cache)
+    check(after.result == "sent" && keys().count == kb + 1, "re-review 2: the next press sends (\(after))")
 
     // 3. A Claude conversation went on in a new log (the old one ends with `continued-in`; herdr keeps the old id).
     // A cache hit must give the new log too, not the old, frozen one, so the chat does not flip between them.

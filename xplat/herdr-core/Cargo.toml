@@ -10,10 +10,20 @@ description = "Rust port of the Herdr link core: models, snapshot parsing, line-
 serde.workspace = true
 serde_json.workspace = true
 regex = "1.12"
+unicode-segmentation = "1"
 notify = { version = "7.0.0", default-features = false, features = ["macos_fsevent"] }
 base64 = "0.22.1"
+sha2 = "0.10"
 chrono = { version = "0.4.43", default-features = false, features = ["clock", "std"] }
 
-# Windows process table (uncompiled on this host; see src/resolver/windows.rs)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+# Windows: the process table (sysinfo; see src/resolver/windows.rs) and the file index that stands in for the inode
+# (windows-sys; see `file_number` in src/resolver.rs).
 [target.'cfg(windows)'.dependencies]
 sysinfo = { version = "0.32.1", default-features = false, features = ["system"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }

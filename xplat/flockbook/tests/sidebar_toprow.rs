@@ -151,8 +151,8 @@ fn tab(i: usize, label: &str, status: AgentStatus, panes: usize) -> Tab {
         id: format!("p{i}-{k}"),
         terminal_id: format!("t{i}-{k}"),
         cwd: "/work".into(),
-        agent: (k == 0).then(|| Agent { name: format!("agent-{i}"), kind: "claude".into(), status, session_id: None, title: label.into() }),
-        label: None,
+        agent: (k == 0).then(|| Agent { name: format!("agent-{i}"), kind: "claude".into(), status, session_id: None, title: label.into(), ..Default::default() }),
+        label: None, ..Default::default()
     };
     Tab { id: format!("tab{i}"), label: label.into(), number: i as i64, panes: (0..panes).map(pane).collect(), status }
 }

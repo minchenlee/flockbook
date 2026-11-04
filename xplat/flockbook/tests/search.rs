@@ -162,7 +162,7 @@ fn open_from_any_screen_shows_search() {
 
 fn big_item(id: &str, needle: &str) -> ConversationItem {
     let filler = "lorem ipsum dolor sit amet ".repeat(8000);
-    ConversationItem { id: id.into(), kind: ItemKind::AssistantText(format!("{filler} {needle} {filler}")), timestamp: Some(1.0) }
+    ConversationItem { id: id.into(), kind: ItemKind::AssistantText(format!("{filler} {needle} {filler}")), timestamp: Some(1.0), ..Default::default() }
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn a_small_corpus_is_built_once_and_rebuilt_only_when_a_conversation_changes() {
     input(&mut a, "drawer");
     assert_eq!(a.state.search.ui_corpus_builds, 1, "same conversations: one build");
     let pane = a.state.selected_pane().unwrap().id.clone();
-    std::sync::Arc::make_mut(a.state.conversations.get_mut(&pane).unwrap()).push(ConversationItem { id: "new1".into(), kind: ItemKind::UserText("brand new words".into()), timestamp: Some(2.0) });
+    std::sync::Arc::make_mut(a.state.conversations.get_mut(&pane).unwrap()).push(ConversationItem { id: "new1".into(), kind: ItemKind::UserText("brand new words".into()), timestamp: Some(2.0), ..Default::default() });
     input(&mut a, "brand new");
     assert_eq!(a.state.search.ui_corpus_builds, 2, "a new item changes the signature");
     assert!(a.state.search.messages.iter().any(|h| h.item == "new1"));

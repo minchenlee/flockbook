@@ -1,3 +1,4 @@
+#![cfg(unix)] // a fake herdr server on a Unix socket
 //! Port of ChecksTerminal.swift (checksTerminalSession, checksScroll, checksStoreTiming).
 //! Everything runs against fakes: a shell script that stands in for `herdr terminal session ...`, canned JSON, and the
 //! in-test fake herdr socket. Live writes to a real herdr are for the `c9-input-test` session only and never happen here.

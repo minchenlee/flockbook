@@ -2,14 +2,8 @@
 #![allow(dead_code)]
 
 use herdr_core::{ConversationItem, ItemKind, ToolCall};
-use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Tests/HerdrKitTests/Fixtures")
@@ -58,6 +52,21 @@ pub fn temp_dir(tag: &str) -> PathBuf {
     std::fs::create_dir_all(&d).unwrap();
     d
 }
+
+#[cfg(unix)]
+pub use fake::*;
+
+/// The fake herdr server: Unix only (herdr serves a Unix socket).
+#[cfg(unix)]
+mod fake {
+use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 /// A tiny herdr stand-in on a Unix socket (port of the Swift `FakeHerdr`).
 /// Answers `session.snapshot` with one workspace labelled `label`, keeps `events.subscribe`
@@ -179,4 +188,6 @@ fn serve(mut c: UnixStream, st: Arc<State>) {
             return;
         }
     }
+}
+
 }

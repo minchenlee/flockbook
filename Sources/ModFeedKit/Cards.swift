@@ -32,6 +32,8 @@ public enum FeedCards {
     /// which no retry fixes.
     static func refused(_ pane: Pane) -> Done { pane.agent.map(KeyGate.hasIdentity) == true ? agentChanged : noIdentity }
     static let alreadyAnswered = Done(result: "answered", message: "this approval was already answered; waiting for the agent to move on")
+    /// Another press of this prompt (another view, or a double key) was being handled: nothing went out from this one.
+    static let busy = Done(result: "busy", message: "Another press was being handled at the same moment, so this one sent nothing. Press again.")
 
     enum Current {
         /// `pending`: the log's pending call, passed to `respondIfOpen` (which matches it with the box again).
@@ -118,7 +120,11 @@ public enum FeedCards {
         // One answer per prompt, across runs and views: claimed before the key; kept when the key went out or may
         // still land (hc held it); given back when nothing went out.
         let answered = FeedAnswered(cache: cache)
-        guard answered.claim(terminal: pane.id, id: id, tool: tool, command: command, blocked: agent.status == .blocked) else { return alreadyAnswered }
+        switch answered.claim(terminal: pane.id, id: id, tool: tool, command: command, blocked: agent.status == .blocked) {
+        case .got: break
+        case .taken: return alreadyAnswered
+        case .busy: return busy
+        }
         // As the app's buttons: the screen is read again right before the key, and the key goes only while the box on
         // screen is still this id (Grok: its own keys, each checked against the focus).
         do {

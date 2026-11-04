@@ -198,8 +198,8 @@ pub fn detect(app: &App) -> Option<Card> {
                 }
             }
             if agent.kind == "claude" {
-                if let Some(shown) = screen.and_then(herdr_core::question::claude_screen) {
-                    let q = herdr_core::question::screen_request(shown.headers, vec![shown.question]);
+                if let Some((headers, shown)) = screen.and_then(herdr_core::question::claude_screen) {
+                    let q = herdr_core::question::screen_request(&headers, vec![shown]);
                     let can_send = st.actions.is_some() && q.unread() == 0;
                     return Some(Card::Question { key: format!("{}:{}", pane.id, q.tool_use_id), pane: pane.id.clone(), agent: agent.name.clone(), q, can_send });
                 }

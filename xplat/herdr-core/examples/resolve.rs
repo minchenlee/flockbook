@@ -3,12 +3,18 @@
 //! Sends only `session.snapshot`; never input, keys, resize or takeover.
 //!
 //!     cargo run -p herdr-core --example resolve -- [--session NAME]
+#![cfg_attr(not(unix), allow(unused_imports))]
 
 use herdr_core::resolver::{agent_process, default_source, Need, SessionResolver};
 use herdr_core::{HerdrClient, HerdrSession};
 use std::collections::HashSet;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("herdr serves a Unix socket: this probe runs on Unix only");
+}
+
+#[cfg(unix)]
 fn main() {
     let session = HerdrSession::from_process();
     let workspaces = match HerdrClient::new(&session).snapshot() {
@@ -25,17 +31,16 @@ fn main() {
 
     let needs: Vec<Need> = panes
         .iter()
-        .filter_map(|p| p.agent.as_ref().map(|a| Need { pane_id: p.id.clone(), kind: a.kind.clone(), cwd: p.cwd.clone() }))
+        .filter_map(|p| p.agent.as_ref().map(|a| Need::new(&p.id, &a.kind, &p.cwd, p.process_ids.clone())))
         .collect();
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-    let resolved = SessionResolver::for_host(session.socket_path.clone()).resolve(&needs, &HashSet::new(), now);
+    let resolved = SessionResolver::new(&session.socket_path).resolve(&needs, &HashSet::new());
 
     println!("processes seen: {}", procs.len());
     println!("panes: {}", panes.len());
     println!("panes with an agent process: {with_agent}");
     println!("panes with an agent (snapshot): {}", needs.len());
     println!("panes with a resolved log path: {}", resolved.len());
-    for kind in ["claude", "codex", "cursor", "pi"] {
+    for kind in ["claude", "codex", "cursor", "pi", "grok", "agy"] {
         let asked = needs.iter().filter(|n| n.kind == kind).count();
         let got = needs.iter().filter(|n| n.kind == kind && resolved.contains_key(&n.pane_id)).count();
         println!("  {kind}: {asked} asked, {got} resolved");

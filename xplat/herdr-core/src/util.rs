@@ -1,149 +1,77 @@
-//! Small helpers shared by the parsers: ISO 8601 times, 4 KB cut, Swift-style pretty JSON.
+//! Helpers shared by the parsers, ported from HerdrKit: ISO 8601 times, the 4 KB cut, Foundation-style pretty JSON,
+//! Swift `String` semantics (`text`) and `JSONSerialization` casts (`json`).
 
-use serde_json::{ser::Formatter, Value};
-use std::io;
+pub mod json;
+pub mod text;
 
-/// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's algorithm).
-pub(crate) fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
+use std::sync::OnceLock;
+
+use chrono::NaiveDate;
+use regex::Regex;
+use serde_json::{Map, Value};
+
+/// A point in time, UTC (Swift's `Date`). The Swift-port modules (resolver, status line) use it; the parsers keep
+/// seconds since the epoch (`f64`).
+pub type Date = chrono::DateTime<chrono::Utc>;
+
+fn time_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+            .unwrap()
+    })
 }
 
-/// ISO 8601 with or without fractional seconds, `Z` or `±hh:mm`. Seconds since the Unix epoch.
+/// ISO 8601 with or without fractional seconds (`2026-10-09T01:02:03.456Z`), to the millisecond (further digits are
+/// dropped, as Foundation's formatter does). Seconds since the Unix epoch.
 pub fn parse_time(s: &str) -> Option<f64> {
-    let b = s.as_bytes();
-    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || !(b[10] == b'T' || b[10] == b' ') || b[13] != b':' || b[16] != b':' {
-        return None;
-    }
-    let num = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
-    let (y, mo, d, h, mi, sec) = (num(0, 4)?, num(5, 7)?, num(8, 10)?, num(11, 13)?, num(14, 16)?, num(17, 19)?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
-        return None;
-    }
-    let mut i = 19;
-    let mut frac = 0.0;
-    if b.get(i) == Some(&b'.') {
-        let start = i + 1;
-        i = start;
-        while i < b.len() && b[i].is_ascii_digit() {
-            i += 1;
-        }
-        if i == start {
+    let c = time_re().captures(s)?;
+    let n = |i: usize| c[i].parse::<u32>().ok();
+    let ms = c.get(7).map(|f| {
+        let digits: String = f.as_str()[1..].chars().chain("000".chars()).take(3).collect();
+        digits.parse::<u32>().unwrap_or(0)
+    });
+    let local = NaiveDate::from_ymd_opt(c[1].parse().ok()?, n(2)?, n(3)?)?.and_hms_milli_opt(n(4)?, n(5)?, n(6)?, ms.unwrap_or(0))?;
+    let zone = &c[8];
+    let off: i64 = if zone == "Z" {
+        0
+    } else {
+        let digits: String = zone[1..].chars().filter(char::is_ascii_digit).collect();
+        let h: i64 = digits[..2].parse().ok()?;
+        let m: i64 = digits[2..].parse().ok()?;
+        if h > 23 || m > 59 {
             return None;
         }
-        frac = format!("0.{}", &s[start..i]).parse().ok()?;
-    }
-    let off = match s.get(i..)? {
-        "Z" | "z" => 0,
-        "" => return None,
-        r => {
-            let sign = match r.as_bytes()[0] {
-                b'+' => 1,
-                b'-' => -1,
-                _ => return None,
-            };
-            let digits: String = r[1..].chars().filter(|c| *c != ':').collect();
-            if digits.len() != 4 {
-                return None;
-            }
-            sign * (digits[..2].parse::<i64>().ok()? * 3600 + digits[2..].parse::<i64>().ok()? * 60)
+        let v = h * 3600 + m * 60;
+        if zone.starts_with('-') {
+            -v
+        } else {
+            v
         }
     };
-    let days = days_from_civil(y, mo, d);
-    Some((days * 86400 + h * 3600 + mi * 60 + sec - off) as f64 + frac)
+    let utc = local - chrono::Duration::seconds(off);
+    Some(utc.and_utc().timestamp_millis() as f64 / 1000.0)
 }
 
 pub const MAX_DETAIL: usize = 4096;
 
-/// Cuts to 4 KB of UTF-8 on a character boundary and appends "…".
+/// Cuts to 4 KB of UTF-8 on a Character (grapheme cluster) boundary and appends "…".
 pub fn cut(s: &str) -> String {
     if s.len() <= MAX_DETAIL {
         return s.to_string();
     }
+    // Step back from byte 4096 to the start of a character.
     let mut i = MAX_DETAIL;
-    while !s.is_char_boundary(i) {
+    while i > 0 && !text::is_boundary(s, i) {
         i -= 1;
     }
     format!("{}…", &s[..i])
 }
 
-/// Pretty JSON, sorted keys (serde_json's map is a BTreeMap), `"key" : value` like Foundation prints it.
-pub fn pretty_json(o: &serde_json::Map<String, Value>) -> String {
-    let mut out = Vec::new();
-    let mut ser = serde_json::Serializer::with_formatter(&mut out, SwiftPretty::default());
-    if serde::Serialize::serialize(o, &mut ser).is_err() {
-        return String::new();
-    }
-    String::from_utf8(out).unwrap_or_default()
-}
-
-#[derive(Default)]
-struct SwiftPretty {
-    depth: usize,
-    has_value: bool,
-}
-
-impl SwiftPretty {
-    fn indent<W: ?Sized + io::Write>(&self, w: &mut W) -> io::Result<()> {
-        for _ in 0..self.depth {
-            w.write_all(b"  ")?;
-        }
-        Ok(())
-    }
-}
-
-impl Formatter for SwiftPretty {
-    fn begin_array<W: ?Sized + io::Write>(&mut self, w: &mut W) -> io::Result<()> {
-        self.depth += 1;
-        self.has_value = false;
-        w.write_all(b"[")
-    }
-    fn end_array<W: ?Sized + io::Write>(&mut self, w: &mut W) -> io::Result<()> {
-        self.depth -= 1;
-        if self.has_value {
-            w.write_all(b"\n")?;
-            self.indent(w)?;
-        }
-        self.has_value = true;
-        w.write_all(b"]")
-    }
-    fn begin_array_value<W: ?Sized + io::Write>(&mut self, w: &mut W, first: bool) -> io::Result<()> {
-        w.write_all(if first { b"\n" } else { b",\n" })?;
-        self.indent(w)
-    }
-    fn end_array_value<W: ?Sized + io::Write>(&mut self, _w: &mut W) -> io::Result<()> {
-        self.has_value = true;
-        Ok(())
-    }
-    fn begin_object<W: ?Sized + io::Write>(&mut self, w: &mut W) -> io::Result<()> {
-        self.depth += 1;
-        self.has_value = false;
-        w.write_all(b"{")
-    }
-    fn end_object<W: ?Sized + io::Write>(&mut self, w: &mut W) -> io::Result<()> {
-        self.depth -= 1;
-        if self.has_value {
-            w.write_all(b"\n")?;
-            self.indent(w)?;
-        }
-        self.has_value = true;
-        w.write_all(b"}")
-    }
-    fn begin_object_key<W: ?Sized + io::Write>(&mut self, w: &mut W, first: bool) -> io::Result<()> {
-        w.write_all(if first { b"\n" } else { b",\n" })?;
-        self.indent(w)
-    }
-    fn begin_object_value<W: ?Sized + io::Write>(&mut self, w: &mut W) -> io::Result<()> {
-        w.write_all(b" : ")
-    }
-    fn end_object_value<W: ?Sized + io::Write>(&mut self, _w: &mut W) -> io::Result<()> {
-        self.has_value = true;
-        Ok(())
-    }
+/// `JSONSerialization` pretty JSON (`[.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]`): sorted keys,
+/// `"key" : value`.
+pub fn pretty_json(o: &Map<String, Value>) -> String {
+    json::pretty_obj(o)
 }
 
 #[cfg(test)]
@@ -155,15 +83,18 @@ mod tests {
         assert_eq!(parse_time("1970-01-01T00:00:00Z"), Some(0.0));
         assert_eq!(parse_time("2026-10-09T01:02:10Z"), Some(1791507730.0));
         assert_eq!(parse_time("2026-10-09T09:02:10+08:00"), Some(1791507730.0));
+        assert_eq!(parse_time("2026-10-09T09:02:10+0800"), Some(1791507730.0));
         assert_eq!(parse_time("2026-10-09T01:02:10.5Z"), Some(1791507730.5));
+        assert_eq!(parse_time("2026-10-09T01:02:10.123456Z"), Some(1791507730.123), "to the millisecond");
         assert_eq!(parse_time("garbage"), None);
         assert_eq!(parse_time("2026-13-09T01:02:10Z"), None);
+        assert_eq!(parse_time("2026-10-09 01:02:10Z"), None, "a space for the T is not ISO 8601");
     }
 
     #[test]
     fn pretty_matches_foundation_style() {
-        let v: Value = serde_json::from_str(r#"{"b":[1,2],"a":"/x","c":{}}"#).unwrap();
+        let v: Value = serde_json::from_str(r#"{"b":[1,2],"a":"/x","c":{},"d":2.0}"#).unwrap();
         let s = pretty_json(v.as_object().unwrap());
-        assert_eq!(s, "{\n  \"a\" : \"/x\",\n  \"b\" : [\n    1,\n    2\n  ],\n  \"c\" : {}\n}");
+        assert_eq!(s, "{\n  \"a\" : \"/x\",\n  \"b\" : [\n    1,\n    2\n  ],\n  \"c\" : {\n\n  },\n  \"d\" : 2\n}");
     }
 }

@@ -247,3 +247,18 @@ test("an agent Flockbook cannot tell apart: the card shows the sidecar's reason,
   assert.doesNotMatch(note, /Another agent/);
   fake.result = undefined; fake.message = undefined;
 });
+
+test("another press was being handled at the same moment: it says press again, and the buttons stay on", async () => {
+  cardNow = approval;
+  const cx = fakeCx(); const c = new Cards(); await c.poll(cx, "t1", true);
+  const n = acts.length;
+  fake.result = "busy"; fake.message = "Another press was being handled at the same moment, so this one sent nothing. Press again.";
+  byId(c.view("t1", T), "card-allow")._h.on_click({}, cx); await cx.settle();
+  const el = c.view("t1", T);
+  assert.match(textOf(byId(el, "card-note")), /Press again/);
+  assert.doesNotMatch(textOf(el), /Answer sent/, "not shown as answered");
+  fake.result = undefined; fake.message = undefined;
+  assert.notEqual(byId(el, "card-allow")._h.on_click, undefined, "Allow is still on");
+  byId(el, "card-allow")._h.on_click({}, cx); await cx.settle();
+  assert.equal(acts.length, n + 2, "the second press goes to the sidecar");
+});

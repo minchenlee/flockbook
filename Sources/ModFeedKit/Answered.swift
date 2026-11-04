@@ -26,7 +26,7 @@ public struct FeedAnswered: Sendable {
     private func marks(_ terminal: String) -> [(url: URL, mark: Mark?)] {
         guard let folder = folder(terminal),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
-        return names.map { n in
+        return names.filter { !$0.hasPrefix(".") }.map { n in   // "." names: a claim being made, the lock
             let u = folder.appendingPathComponent(n)
             return (u, (try? Data(contentsOf: u)).flatMap { try? JSONDecoder().decode(Mark.self, from: $0) })
         }
@@ -47,18 +47,84 @@ public struct FeedAnswered: Sendable {
         return m.id == id || (m.tool == tool && m.command == Self.flat(command))
     }
 
-    /// Made before the key. False: this prompt (its id, or its tool and command) is claimed already.
-    public func claim(terminal: String, id: String, tool: String, command: String, blocked: Bool, now: Date = Date()) -> Bool {
-        guard let folder = folder(terminal), let url = file(terminal, id) else { return true }
-        if isClaimed(terminal: terminal, id: id, tool: tool, command: command, blocked: blocked, now: now) { return false }
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: url)   // not live (isClaimed above): its time is over
-        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
-        guard fd >= 0 else { return errno != EEXIST }  // EEXIST: another run claimed it just now; else as without a cache
-        let data = (try? JSONEncoder().encode(Mark(id: id, tool: tool, command: Self.flat(command), held: false))) ?? Data()
-        _ = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+    /// A file that does not parse and is younger than this may be another run's claim mid-write (an older sidecar
+    /// wrote it in two steps): it is not removed.
+    static let unreadGrace: TimeInterval = 1
+    /// How often, and how long apart, a claim tries the lock while another run holds it.
+    static let lockTries = 10
+    static let lockWait: useconds_t = 20_000
+
+    /// An unreadable file younger than `unreadGrace`. A time in the future (a clock set back) counts by how far off
+    /// it is: it never keeps a file for good.
+    private func freshUnread(_ url: URL, _ mark: Mark?, now: Date) -> Bool {
+        guard mark == nil,
+              let made = try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date else { return false }
+        return abs(now.timeIntervalSince(made)) < Self.unreadGrace
+    }
+
+    /// What `claim` found.
+    public enum Claim: Equatable, Sendable {
+        /// This run claimed the prompt: send the key.
+        case got
+        /// The prompt is claimed already.
+        case taken
+        /// Another run is claiming in this folder now: nothing is decided, the user can press again.
+        case busy
+    }
+
+    private enum Took { case held(Int32), busy, unavailable }
+
+    /// An OS lock (`flock`) on `.lock`, held while one run claims. The kernel lets it go when its run ends, dead or
+    /// not, so no run ever breaks another's lock and its file time means nothing. The file is never removed: a
+    /// removed file could let two runs lock two different files.
+    private func takeLock(_ folder: URL) -> Took {
+        let fd = open(folder.appendingPathComponent(".lock").path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return .unavailable }
+        for i in 0..<Self.lockTries {
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 { return .held(fd) }
+            guard errno == EWOULDBLOCK else { close(fd); return .unavailable }
+            if i + 1 < Self.lockTries { usleep(Self.lockWait) }
+        }
         close(fd)
-        return true
+        return .busy
+    }
+
+    /// Made before the key. `.taken`: this prompt (its id, or its tool and command) is claimed already. `.busy`:
+    /// another run is claiming in this folder right now and did not finish in time; no key goes out.
+    ///
+    /// Runs under a lock in the folder: two runs that press at the same moment never both claim. The mark is
+    /// written to a temp file and then hard-linked to the claim name, so the claim never exists without its content.
+    /// A file there that did not parse is removed only when older than `unreadGrace`.
+    public func claim(terminal: String, id: String, tool: String, command: String, blocked: Bool, now: Date = Date()) -> Claim {
+        guard let folder = folder(terminal), let url = file(terminal, id) else { return .got }
+        if isClaimed(terminal: terminal, id: id, tool: tool, command: command, blocked: blocked, now: now) { return .taken }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // A folder that takes no lock file at all (not writable): as without a cache, the same as before.
+        var lockFd: Int32 = -1
+        switch takeLock(folder) {
+        case .held(let fd): lockFd = fd
+        case .busy: return .busy
+        case .unavailable: break
+        }
+        defer { if lockFd >= 0 { close(lockFd) } }   // closing lets the lock go
+        if isClaimed(terminal: terminal, id: id, tool: tool, command: command, blocked: blocked, now: now) { return .taken }
+        if FileManager.default.fileExists(atPath: url.path) {
+            let mark = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(Mark.self, from: $0) }
+            if freshUnread(url, mark, now: now) { return .taken }
+            try? FileManager.default.removeItem(at: url)   // not live (isClaimed above): its time is over
+        }
+        let tmp = folder.appendingPathComponent(".claim-\(getpid())-\(UInt64(Date().timeIntervalSince1970 * 1e9))")
+        let data = (try? JSONEncoder().encode(Mark(id: id, tool: tool, command: Self.flat(command), held: false))) ?? Data()
+        let fd = open(tmp.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        guard fd >= 0 else { return .got }   // as without a cache
+        let n = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        close(fd)
+        guard n == data.count else { unlink(tmp.path); return .got }
+        let linked = link(tmp.path, url.path)
+        let err = errno
+        unlink(tmp.path)
+        if linked == 0 { return .got }
+        return err == EEXIST ? .taken : .got   // EEXIST: another run claimed it just now; else as without a cache
     }
 
     /// The key may still land (hc held it): the claim lasts while the agent stays blocked.
@@ -82,7 +148,9 @@ public struct FeedAnswered: Sendable {
     /// A screen read that worked shows `box` (nil: no approval box): the claims of other prompts go, as they left the
     /// screen. Never called when the read failed: that is no evidence.
     public func seen(terminal: String, box: (tool: String, command: String)?) {
+        let now = Date()
         for (url, m) in marks(terminal) {
+            if freshUnread(url, m, now: now) { continue }
             if let box, let m, m.tool == box.tool, m.command == Self.flat(box.command) { continue }
             try? FileManager.default.removeItem(at: url)
         }

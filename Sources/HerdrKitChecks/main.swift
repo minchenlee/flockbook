@@ -209,6 +209,7 @@ try await checksHCMirrorRootSafe()
 try checksModFeed()
 try await checksModFeedCards()
 try await checksModFeedReview()
+try checksClaimRace()
 checksBackendPlan()
 try await checksBackendStore()
 

@@ -6,8 +6,13 @@
 pub mod client;
 pub mod conversation;
 pub mod error;
+pub mod fake;
+pub mod hc;
+pub mod keygate;
+pub mod log_image;
 pub mod model;
 pub mod question;
+pub mod screen;
 pub mod session;
 pub mod snapshot;
 pub mod transport;
@@ -17,18 +22,15 @@ pub use client::{EventStream, HerdrClient};
 #[cfg(unix)]
 pub use client::UnixConnector;
 pub use conversation::{parse_lines, ConversationParser};
-pub use error::HerdrError;
+pub use error::{HerdrError, QuestionFailure};
+pub use screen::{all_panes, DeliveryOutcome, PaneScreen};
 pub use model::*;
 pub use session::HerdrSession;
 pub use transport::{Connector, LineSocket, Transport};
 
-/// Text Claude Code draws on its permission prompt (port of `PermissionGate`).
-pub const PROMPT_MARKER: &str = "Do you want";
-
-/// Does the pane's visible screen show a permission prompt? Only the screen tells a prompt from a running tool.
-pub fn screen_shows_prompt(screen_text: &str) -> bool {
-    screen_text.contains(PROMPT_MARKER)
-}
+/// Swift `PermissionGate`: the prompt marker and the whole-prompt check (only the screen tells a prompt from a
+/// running tool). One implementation, in `approval`.
+pub use approval::{screen_shows_prompt, PROMPT_MARKER};
 
 pub mod approval;
 pub mod scrollback;
@@ -36,4 +38,5 @@ pub mod store;
 pub mod terminal;
 pub mod resolver;
 pub mod session_log;
+pub mod statusline;
 pub use terminal::TerminalFrame;

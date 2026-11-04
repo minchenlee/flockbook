@@ -989,6 +989,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "flockbook-modfeed"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "herdr-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1394,11 +1406,16 @@ version = "0.0.0"
 dependencies = [
  "base64",
  "chrono",
+ "libc",
  "notify",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "sysinfo",
+ "tempfile",
+ "unicode-segmentation",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
