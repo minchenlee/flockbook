@@ -48,8 +48,10 @@ fn at(secs: i64) -> Date {
     DateTime::<Utc>::from_timestamp(secs, 0).unwrap()
 }
 
+/// A path as text, with `/` on Windows too (the resolver builds its paths with `/`; both name the same file there).
 fn s(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
+    let t = p.to_string_lossy().into_owned();
+    if cfg!(windows) { t.replace('\\', "/") } else { t }
 }
 
 #[test]
