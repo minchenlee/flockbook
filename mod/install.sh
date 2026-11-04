@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
 done
 [ -z "$helper" ] || [ -f "$helper" ] || { echo "STOP: no helper at $helper" >&2; exit 1; }
 # /usr/bin/python3 without the Command Line Tools opens an install dialog; check first.
-if [ "$(command -v python3 || true)" = /usr/bin/python3 ] && ! xcode-select -p >/dev/null 2>&1; then
+if [ "$(uname)" = Darwin ] && [ "$(command -v python3 || true)" = /usr/bin/python3 ] && ! xcode-select -p >/dev/null 2>&1; then
   echo "STOP: this script needs python3. Install the Command Line Tools (xcode-select --install) and run it again." >&2
   exit 1
 fi
