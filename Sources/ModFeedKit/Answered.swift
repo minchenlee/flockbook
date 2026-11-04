@@ -78,7 +78,7 @@ public struct FeedAnswered: Sendable {
     /// not, so no run ever breaks another's lock and its file time means nothing. The file is never removed: a
     /// removed file could let two runs lock two different files.
     private func takeLock(_ folder: URL) -> Took {
-        let fd = open(folder.appendingPathComponent(".lock").path, O_RDWR | O_CREAT, 0o600)
+        let fd = open(folder.appendingPathComponent(".lock").path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
         guard fd >= 0 else { return .unavailable }
         for i in 0..<Self.lockTries {
             if flock(fd, LOCK_EX | LOCK_NB) == 0 { return .held(fd) }
