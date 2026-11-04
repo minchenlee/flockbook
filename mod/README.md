@@ -2,6 +2,8 @@
 
 <img src="preview.png" alt="Flockbook in herdr-app: the sidebar, a conversation with tool chips, and the composer" width="800">
 
+More screenshots (cards, Needs you, Overview, attachments, the terminal, menus and the floating sidebar) are in the [repository README](../README.md#flockbook-for-the-herdr-app).
+
 Flockbook's reading view, rebuilt as a herdr-app layout and mod. It shows each coding agent as a
 conversation instead of a terminal: a floating tab bar with one pill per agent, chat bubbles,
 tool-call chips, a status tag row, and a composer.
