@@ -12,3 +12,4 @@ One short line: what this release is about.
 ### 🐛 Bug Fixes
 
 ### ⚙️ Changes
+- The Herdr app mod source moved from `herdr-mod/` to `mod/`. The release zip name does not change.
