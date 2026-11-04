@@ -41,20 +41,50 @@ pub fn bind(port: u16) -> std::io::Result<TcpListener> {
     TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
 }
 
+/// The connections held at once, at most `max`.
+#[derive(Clone)]
+pub struct Slots {
+    open: Arc<AtomicUsize>,
+    max: usize,
+}
+
+/// One connection's place in `Slots`; given back when dropped, also when the connection's thread panics.
+pub struct Slot(Arc<AtomicUsize>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl Slots {
+    pub fn new(max: usize) -> Slots {
+        Slots { open: Arc::new(AtomicUsize::new(0)), max }
+    }
+    /// A place, or None when `max` are held.
+    pub fn take(&self) -> Option<Slot> {
+        if self.open.fetch_add(1, Ordering::SeqCst) >= self.max {
+            self.open.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Slot(self.open.clone()))
+    }
+    pub fn held(&self) -> usize {
+        self.open.load(Ordering::SeqCst)
+    }
+}
+
 /// Serves until the process ends.
 pub fn serve(listener: TcpListener, settings: Settings) {
     let settings = Arc::new(settings);
-    let open = Arc::new(AtomicUsize::new(0));
+    let slots = Slots::new(MAX_CONNECTIONS);
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            open.fetch_sub(1, Ordering::SeqCst);
-            continue; // dropped: closed
-        }
-        let (s, o) = (settings.clone(), open.clone());
+        let Some(slot) = slots.take() else { continue }; // dropped: closed
+        let s = settings.clone();
         std::thread::spawn(move || {
+            let _slot = slot;
             connection(stream, &s);
-            o.fetch_sub(1, Ordering::SeqCst);
         });
     }
 }
@@ -269,4 +299,29 @@ fn socket_loop(mut s: TcpStream, head: &Head, rest: Vec<u8>, settings: &Settings
     }
     let _ = ws.close(None);
     let _ = ws.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A connection thread that panics gives its place back: after more panics than places, a new connection is
+    /// still taken.
+    #[test]
+    fn a_panic_gives_the_place_back() {
+        let slots = Slots::new(4);
+        for _ in 0..10 {
+            let slot = slots.take().expect("a place is free");
+            let t = std::thread::spawn(move || {
+                let _slot = slot;
+                panic!("a connection broke");
+            });
+            assert!(t.join().is_err());
+        }
+        assert_eq!(slots.held(), 0);
+        let held: Vec<Slot> = (0..4).map(|_| slots.take().unwrap()).collect();
+        assert!(slots.take().is_none(), "at most max at once");
+        drop(held);
+        assert!(slots.take().is_some());
+    }
 }

@@ -27,13 +27,17 @@ Approve, answer and send go only with `POST /api`:
 
 - The body must be JSON.
 - The `Origin` must be the page's own `https://` origin.
+- When the browser sends `Sec-Fetch-Site`, it must be `same-origin`. Older browsers do not send it, and then
+  the Origin rule alone decides.
 - A page from another site that is open in your browser therefore cannot use your Tailscale identity (CSRF).
 
 ## Limits
 
-- Another program of your user on this machine can connect to 127.0.0.1 and send any header, the
-  identity header included. That is the trust it already has: it can run `hc` and send keys itself.
-  Do not run `serve` on a machine you share with users you do not trust.
+- Any program on this machine, of any user, can connect to 127.0.0.1 (loopback is shared by all users)
+  and send any header, the identity header included.
+  - For your own programs, that is the trust they already have: they can run `hc` and send keys themselves.
+  - Other users of the machine are not kept out. Do not run `serve` on a machine you share with users you do
+    not trust.
 - Not in this version: pictures, older rows, the agent's queue, image upload, and notifications.
   The helper answers those requests with "Not offered by this helper."
 

@@ -8,9 +8,12 @@
 //! - The socket and the API (they read the agents and send keys): the page's `Origin` must be this host, so a page
 //!   from another site open in the owner's browser cannot use the owner's identity (CSRF, socket hijacking).
 //! - The API is `POST` with a JSON body only (a cross-site form cannot send one without a preflight we never allow).
+//! - `Sec-Fetch-Site`, when the browser sends it, must be `same-origin`; without it (older browsers) the Origin rule
+//!   alone decides.
 //!
-//! Limit: another program of this user on this machine can connect to 127.0.0.1 and send any header. That is the
-//! same trust it already has (it can run hc itself).
+//! Limit: any program on this machine, of any user (loopback is shared), can connect to 127.0.0.1 and send any
+//! header. For this user's own programs that is the trust they already have (they can run hc); other users of the
+//! machine are not kept out (SERVE.md).
 
 /// What a request asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
