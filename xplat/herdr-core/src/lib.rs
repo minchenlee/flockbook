@@ -9,6 +9,7 @@ pub mod error;
 pub mod fake;
 pub mod hc;
 pub mod keygate;
+pub mod log_image;
 pub mod model;
 pub mod question;
 pub mod screen;

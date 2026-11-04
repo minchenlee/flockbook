@@ -2,32 +2,47 @@
 //! conversation is the branch that ends at the newest entry. Lines are fed in file order; when an entry hangs off an
 //! earlier entry (an edited or retried turn), the items are rebuilt from that branch.
 
-use super::*;
+use std::collections::HashMap;
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct PiState {
-    /// entry id -> parent id ("" = root)
-    parent: HashMap<String, String>,
-    /// entry id -> line, only for entries that render
-    lines: HashMap<String, String>,
+use serde_json::Value;
+
+use crate::util::json::{self, Obj};
+use super::{command_text, cut, label, pretty_json, result_text, summary, text, ConversationParser};
+use crate::log_image;
+use crate::model::{ConversationItem, ItemKind, ToolCall};
+
+#[derive(Clone, Debug, Default)]
+pub struct PiState {
+    parent: HashMap<String, String>,       // entry id -> parent id ("" = root)
+    lines: HashMap<String, String>,        // entry id -> line, only for entries that render
+    offsets: HashMap<String, Option<u64>>, // entry id -> the line's byte offset (picture refs), when known
     last: Option<String>,
     replaying: bool,
 }
 
-pub(super) const PI_TYPES: [&str; 10] = [
-    "session", "message", "model_change", "thinking_level_change", "custom", "custom_message", "session_info", "compaction", "context_edit", "branch_summary",
+pub const PI_TYPES: [&str; 10] = [
+    "session",
+    "message",
+    "model_change",
+    "thinking_level_change",
+    "custom",
+    "custom_message",
+    "session_info",
+    "compaction",
+    "context_edit",
+    "branch_summary",
 ];
 
-fn renders(o: &Obj) -> bool {
-    match s_of(o, "type") {
-        Some("message") => o.get("message").and_then(|m| m.get("role")).and_then(Value::as_str) != Some("system"),
-        Some("compaction" | "custom_message") => true,
+pub fn pi_renders(o: &Obj) -> bool {
+    match json::str_(o.get("type")) {
+        Some("message") => json::str_(json::obj(o.get("message")).and_then(|m| m.get("role"))) != Some("system"),
+        Some("compaction") | Some("custom_message") => true,
         _ => false,
     }
 }
 
 /// pi's built-in tools under Claude Code's names, so chips and verbs read the same.
-fn pi_tool(name: &str) -> String {
+pub fn pi_tool(name: &str) -> &str {
     match name {
         "bash" => "Bash",
         "read" => "Read",
@@ -36,40 +51,40 @@ fn pi_tool(name: &str) -> String {
         "grep" => "Grep",
         "find" | "ls" => "Glob",
         "subagent" | "subagent_start" => "Agent",
-        n => n,
+        _ => name,
     }
-    .into()
 }
 
 impl ConversationParser {
-    pub(super) fn feed_pi(&mut self, o: &Obj, line: &str) {
-        if s_of(o, "type") == Some("session") {
+    pub(super) fn feed_pi(&mut self, o: &Obj, line: &str, offset: Option<u64>) {
+        if json::str_(o.get("type")) == Some("session") {
             return; // header: not in the tree
         }
-        let Some(id) = s_of(o, "id") else { return };
-        let parent = s_of(o, "parentId");
+        let Some(id) = json::str_(o.get("id")) else { return };
+        let parent = json::str_(o.get("parentId"));
         if !self.pi.replaying {
             if let (Some(parent), Some(last)) = (parent, self.pi.last.as_deref()) {
                 if parent != last && self.pi.parent.contains_key(parent) {
-                    let parent = parent.to_string();
-                    self.rebuild_pi(&parent);
+                    self.rebuild_pi(parent);
                 }
             }
         }
         self.pi.parent.insert(id.into(), parent.unwrap_or("").into());
         self.pi.last = Some(id.into());
-        if !self.pi.replaying && renders(o) {
+        if !self.pi.replaying && pi_renders(o) {
             self.pi.lines.insert(id.into(), line.into());
+            self.pi.offsets.insert(id.into(), offset);
         }
         self.render_pi(o, id);
     }
 
     /// Items become the branch from the root to `leaf` (replayed from the kept lines).
     fn rebuild_pi(&mut self, leaf: &str) {
-        let mut chain: Vec<&str> = Vec::new();
-        let mut cur = leaf;
+        let mut chain: Vec<String> = vec![];
+        let mut cur = leaf.to_string();
         while !cur.is_empty() && chain.len() <= self.pi.parent.len() {
-            let Some(up) = self.pi.parent.get(cur) else { break };
+            let Some(up) = self.pi.parent.get(&cur) else { break };
+            let up = up.clone();
             chain.push(cur);
             cur = up;
         }
@@ -77,8 +92,8 @@ impl ConversationParser {
         fresh.pi = self.pi.clone();
         fresh.pi.replaying = true;
         for id in chain.iter().rev() {
-            if let Some(l) = self.pi.lines.get(*id) {
-                fresh.feed(l);
+            if let Some(l) = self.pi.lines.get(id) {
+                fresh.feed_at(l, self.pi.offsets.get(id).copied().flatten());
             }
         }
         fresh.pi.replaying = false;
@@ -87,98 +102,121 @@ impl ConversationParser {
     }
 
     fn render_pi(&mut self, o: &Obj, id: &str) {
-        match s_of(o, "type") {
+        match json::str_(o.get("type")) {
             Some("compaction") => {
                 self.flush();
-                self.done.push(ConversationItem { id: id.into(), kind: ItemKind::Status("Context compacted".into()), timestamp: self.line_ts, ..Default::default() });
+                self.done.push(ConversationItem::new(id, ItemKind::Status("Context compacted".into()), self.line_ts));
             }
             Some("custom_message") => {
                 // extension notices shown in pi's TUI (e.g. a background subagent finished)
-                if o.get("display").and_then(Value::as_bool) != Some(true) {
+                if json::bool_(o.get("display")) != Some(true) {
                     return;
                 }
-                let text = result_text(o.get("content"));
-                let Some(first) = text.trim().lines().find(|l| !l.is_empty()) else { return };
+                let all = result_text(o.get("content"));
+                let Some(first) = text::first_line(text::trim(&all)) else { return };
                 self.flush();
-                self.done.push(ConversationItem { id: id.into(), kind: ItemKind::Status(first.chars().take(160).collect()), timestamp: self.line_ts, ..Default::default() });
+                self.done.push(ConversationItem::new(id, ItemKind::Status(text::prefix(first, 160).into()), self.line_ts));
             }
             Some("message") => {
-                if let Some(Value::Object(m)) = o.get("message") {
-                    self.render_pi_message(m, id);
-                }
+                let Some(m) = json::obj(o.get("message")) else { return };
+                self.render_pi_message(m, id);
             }
             _ => {}
         }
     }
 
     fn render_pi_message(&mut self, m: &Obj, id: &str) {
-        let blocks: Vec<Obj> = match m.get("content") {
-            Some(Value::String(s)) => {
-                let mut b = Obj::new();
-                b.insert("type".into(), "text".into());
-                b.insert("text".into(), s.clone().into());
-                vec![b]
-            }
-            c => obj_array(c).map(|v| v.into_iter().cloned().collect()).unwrap_or_default(),
+        let string_block: Obj;
+        let blocks: Vec<&Obj> = if let Some(b) = json::objs(m.get("content")) {
+            b
+        } else if let Some(s) = json::str_(m.get("content")) {
+            let mut b = Obj::new();
+            b.insert("type".into(), Value::from("text"));
+            b.insert("text".into(), Value::from(s));
+            string_block = b;
+            vec![&string_block]
+        } else {
+            vec![]
         };
-        match s_of(m, "role") {
+        match json::str_(m.get("role")) {
             Some("user") => {
-                for (i, b) in blocks.iter().enumerate().filter(|(_, b)| s_of(b, "type") == Some("text")) {
-                    let text = s_of(b, "text").unwrap_or("").trim();
-                    if text.is_empty() {
+                for (i, b) in blocks.iter().enumerate() {
+                    if json::str_(b.get("type")) != Some("text") {
+                        continue;
+                    }
+                    let t = text::trim(json::str_(b.get("text")).unwrap_or(""));
+                    if t.is_empty() {
                         continue;
                     }
                     self.flush();
-                    self.done.push(ConversationItem { id: format!("{id}-{i}"), kind: ItemKind::UserText(text.into()), timestamp: self.line_ts, ..Default::default() });
+                    self.done.push(ConversationItem::new(&format!("{id}-{i}"), ItemKind::UserText(t.into()), self.line_ts));
                 }
             }
             Some("assistant") => {
                 for (i, b) in blocks.iter().enumerate() {
-                    match s_of(b, "type") {
+                    match json::str_(b.get("type")) {
                         Some("text") => {
-                            let text = s_of(b, "text").unwrap_or("").trim();
-                            if text.is_empty() {
+                            let t = text::trim(json::str_(b.get("text")).unwrap_or(""));
+                            if t.is_empty() {
                                 continue;
                             }
                             self.flush();
-                            self.done.push(ConversationItem { id: format!("{id}-{i}"), kind: ItemKind::AssistantText(text.into()), timestamp: self.line_ts, ..Default::default() });
+                            self.done.push(ConversationItem::new(
+                                &format!("{id}-{i}"),
+                                ItemKind::AssistantText(t.into()),
+                                self.line_ts,
+                            ));
                         }
                         Some("toolCall") => {
-                            let name = pi_tool(s_of(b, "name").unwrap_or("tool"));
-                            let input = b.get("arguments").and_then(Value::as_object).cloned().unwrap_or_default();
-                            let call_id = s_of(b, "id").map(String::from).unwrap_or_else(|| format!("{id}-{i}"));
-                            self.open_pi_call(&call_id, &name, &input, &format!("{id}-{i}"));
+                            let name = pi_tool(json::str_(b.get("name")).unwrap_or("tool")).to_string();
+                            let empty = Obj::new();
+                            let input = json::obj(b.get("arguments")).unwrap_or(&empty);
+                            let key = format!("{id}-{i}");
+                            let call = json::str_(b.get("id")).map(str::to_string).unwrap_or_else(|| key.clone());
+                            self.open_pi_call(&call, &name, input, &key);
                         }
                         _ => {} // thinking: hidden, as for Claude Code
                     }
                 }
-                match s_of(m, "stopReason") {
+                match json::str_(m.get("stopReason")) {
                     Some("error") => {
-                        let msg = s_of(m, "errorMessage").unwrap_or("").lines().find(|l| !l.is_empty()).unwrap_or("");
-                        let text = if msg.is_empty() { "Error".to_string() } else { format!("Error: {}", msg.chars().take(160).collect::<String>()) };
+                        let msg = text::first_line(json::str_(m.get("errorMessage")).unwrap_or("")).unwrap_or("");
+                        let s = if msg.is_empty() { "Error".to_string() } else { format!("Error: {}", text::prefix(msg, 160)) };
                         self.flush();
-                        self.done.push(ConversationItem { id: format!("{id}-err"), kind: ItemKind::Status(text), timestamp: self.line_ts, ..Default::default() });
+                        self.done.push(ConversationItem::new(&format!("{id}-err"), ItemKind::Status(s), self.line_ts));
                     }
                     Some("aborted") => {
                         self.flush();
-                        self.done.push(ConversationItem { id: format!("{id}-err"), kind: ItemKind::Status("Interrupted".into()), timestamp: self.line_ts, ..Default::default() });
+                        self.done.push(ConversationItem::new(
+                            &format!("{id}-err"),
+                            ItemKind::Status("Interrupted".into()),
+                            self.line_ts,
+                        ));
                     }
                     _ => {}
                 }
             }
             Some("toolResult") => {
-                let Some(call) = s_of(m, "toolCallId") else { return };
-                let is_error = m.get("isError").and_then(Value::as_bool).unwrap_or(false);
-                self.close_call(call, &result_text(m.get("content")), is_error);
+                let Some(call) = json::str_(m.get("toolCallId")) else { return };
+                let offset = self.line_offset;
+                if let Some(c) = self.call_by_id.get_mut(call) {
+                    c.output = Some(cut(&result_text(m.get("content"))));
+                    c.is_error = json::bool_(m.get("isError")).unwrap_or(false);
+                    c.images = log_image::refs(&log_image::found_message(m), offset).into_iter().map(|p| p.1).collect();
+                }
+                self.close_call(call);
             }
             Some("bashExecution") => {
                 // the user ran `!command` in pi
-                let cmd = s_of(m, "command").unwrap_or("");
+                let cmd = json::str_(m.get("command")).unwrap_or("");
                 let mut input = Obj::new();
-                input.insert("command".into(), cmd.into());
+                input.insert("command".into(), Value::from(cmd));
                 self.open_pi_call(id, "Bash", &input, id);
-                let failed = m.get("exitCode").and_then(Value::as_i64).unwrap_or(0) != 0;
-                self.close_call(id, s_of(m, "output").unwrap_or(""), failed);
+                if let Some(c) = self.call_by_id.get_mut(id) {
+                    c.output = Some(cut(json::str_(m.get("output")).unwrap_or("")));
+                    c.is_error = json::int(m.get("exitCode")).unwrap_or(0) != 0;
+                }
+                self.close_call(id);
             }
             _ => {} // system prompt
         }
@@ -188,13 +226,7 @@ impl ConversationParser {
         if self.run.is_empty() {
             self.run_key = key.into();
         }
-        self.run.push(RunEntry { label: label_for(name), tool: name.into(), id: id.into() });
-        self.set_call_ts(id);
-        self.open_tool_uses.insert(id.into(), command_text(name, input));
-        self.open_order.push(id.into());
-        self.call_by_id.insert(
-            id.into(),
-            ToolCall { id: id.into(), tool_name: name.into(), summary: summary(name, input), input: cut(&pretty_json(input)), output: None, is_error: false, ..Default::default() },
-        );
+        let call = ToolCall::new(id, name, &summary(name, input), &cut(&pretty_json(input)));
+        self.open_call(id, name, label(name), Some(command_text(name, input)), call);
     }
 }

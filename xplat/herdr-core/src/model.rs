@@ -151,6 +151,13 @@ pub struct ToolCall {
     pub images: Vec<ImageRef>,
 }
 
+impl ToolCall {
+    /// A call without its result yet.
+    pub fn new(id: &str, tool_name: &str, summary: &str, input: &str) -> ToolCall {
+        ToolCall { id: id.into(), tool_name: tool_name.into(), summary: summary.into(), input: input.into(), ..Default::default() }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ToolChip {
     /// Stable across `items()` calls (derived from the run key and the label).
@@ -293,4 +300,11 @@ pub struct ConversationItem {
     pub timestamp: Option<f64>,
     /// userText: the pictures the owner attached, in order.
     pub images: Vec<ImageRef>,
+}
+
+impl ConversationItem {
+    /// An item without pictures.
+    pub fn new(id: &str, kind: ItemKind, timestamp: Option<f64>) -> Self {
+        ConversationItem { id: id.into(), kind, timestamp, images: Vec::new() }
+    }
 }
