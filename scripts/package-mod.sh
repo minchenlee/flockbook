@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dist/Flockbook-herdr-mod-<VERSION>.zip: the Herdr app layout, mod, themes, keys and install script
-# from mod/, plus a universal flockbook-modfeed (the mod's helper) in bin/.
+# from herdr-app/, plus a universal flockbook-modfeed (the mod's helper) in bin/.
 #   VERSION=0.7.0 scripts/package-mod.sh
 # Signing: ad-hoc by default. With SIGN_ID set: Developer ID, hardened runtime, timestamp.
 # Notarization: with NOTARIZE=1 and APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID, the zip goes to Apple's
@@ -26,8 +26,8 @@ mkdir -p "$STAGE/bin" dist
 lipo -create "${EXES[@]}" -output "$STAGE/bin/flockbook-modfeed"
 lipo -info "$STAGE/bin/flockbook-modfeed"
 # What a person installs; the tests, the docs folder and package.json stay in the repo.
-cp -R mod/layouts mod/mods mod/themes "$STAGE/"
-cp mod/keys.json mod/install.sh mod/install-isolated.sh mod/README.md mod/RECIPE.md mod/preview.png "$STAGE/"
+cp -R herdr-app/layouts herdr-app/mods herdr-app/themes "$STAGE/"
+cp herdr-app/keys.json herdr-app/install.sh herdr-app/install-isolated.sh herdr-app/README.md herdr-app/RECIPE.md herdr-app/preview.png "$STAGE/"
 cp LICENSE "$STAGE/"
 
 if [ -n "${SIGN_ID:-}" ]; then
