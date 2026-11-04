@@ -144,7 +144,9 @@ test("a tall row shows in full: its whole guessed height, no Show all", async ()
 test("messages for a missing sidecar, a wrong protocol and a non-agent terminal", async () => {
   const show = async (exec) => { reset(); fake.spaces = [space()]; fake.agents = [agent("t1", "idle")]; fake.exec = exec;
     const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); return textOf(v.render(cx)); };
-  assert.match(await show(null), /sidecar did not answer/);
+  const missing = await show(null);
+  assert.match(missing, /sidecar did not answer/);
+  assert.match(missing, /helper is missing\. Get it from github\.com\/minchenlee\/flockbook\/releases\./);
   assert.match(await show(() => jl({ ...header, protocol: 2 }, end)), /protocol 2; this mod needs 1/);
   assert.match(await show(() => jl(header, { type: "error", code: "not-agent", message: "t1 runs no agent" }, { type: "end", ok: false })), /runs no agent/);
   assert.match(await show(() => jl(header, logLine("c1", null), { type: "splice", at: 0, count: 0 }, end)), /No conversation yet/);

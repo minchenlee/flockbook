@@ -18,13 +18,19 @@ The reading view runs inside the Herdr app window, with no change to the app:
 - **Tab bar**: one capsule per tab, with its status: working, waiting for you, done or idle.
 - **Approval and question cards**: answer a permission prompt or a question above the reply box.
 - **Needs you** lists every agent that waits. **Overview** shows every tab as a card.
+
+<p>
+<img src="mod/preview-needs.png" alt="Needs you: the agents that wait, and the question one of them asks" width="49%">
+<img src="mod/preview-overview.png" alt="Overview: every tab as a card, grouped by workspace" width="49%">
+</p>
+
 - **Sidebar** with your spaces. It is hidden and slides out from the window's left edge (⌘B keeps it open).
 
 A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat.
 
 The cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
 
-**Status: preview.** Each [release](https://github.com/minchenlee/flockbook/releases/latest) has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and the helper. Install it into a test Herdr app home, never your real one. See [mod/README.md](mod/README.md). [mod/RECIPE.md](mod/RECIPE.md) describes every part of it.
+**Status: preview.** Each [release](https://github.com/minchenlee/flockbook/releases/latest) has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and the helper. Its `install.sh` puts them into your Herdr app home and never overwrites what you have; run it with `--dry-run` first. See [mod/README.md](mod/README.md). [mod/RECIPE.md](mod/RECIPE.md) describes every part of it.
 
 ## Flockbook for Mac
 

@@ -217,7 +217,7 @@ export class ChatView {
       core: "herdr-core did not answer. Trying again.",
       locate: "This agent's conversation was not found yet.",
       read: "This agent's conversation could not be read.",
-      "no-sidecar": "The Flockbook helper is missing. Install it again.",
+      "no-sidecar": "The Flockbook helper is missing. Get it from github.com/minchenlee/flockbook/releases.",
       protocol: "The Flockbook helper does not match this version. Install both again.",
     }[err.code] ?? "The conversation could not be loaded.";
     return v_flex().size_full().items_center().justify_center().gap(6).px(32)

@@ -14,8 +14,10 @@ a card. The sidebar is hidden and slides out from the window's left edge.
 The window has no title bar. The macOS window buttons sit at 18, 22. The theme is black and white
 (`flockbook` dark, `flockbook-light` light); the Mac themes (`flockbook-mac`, `flockbook-mac-light`)
 use blue `#007aff` for working, green `#34c759` for done and orange `#ff9500` for blocked.
-Dark colors: canvas `#000000`, chrome `#0b0b0b`, raised `#161616`, hover `#1c1c1c`, selected
-`#262626`, border `#363636`, muted `#9a9a9a`, dim `#5f5f5f`, accent and foreground `#ededed`.
+Dark colors: the window shows `#0b0b0b` behind the chat and the sidebar alike (the theme names
+canvas `#000000` and chrome `#0b0b0b`; the window paints both `#0b0b0b`), raised `#161616`, hover
+`#1c1c1c`, selected `#262626`, border `#363636`, muted `#9a9a9a`, dim `#5f5f5f`, accent and
+foreground `#ededed`.
 
 Left to right:
 
@@ -135,9 +137,13 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   `flockbook.sidebar`, `flockbook.overview`, `flockbook.move-left`, `flockbook.move-right`.
 - **Shipped mods**: `new-menu` (the + popup, 250 × 512).
 - **Programs**:
-  - `flockbook-modfeed`, a helper at `<herdr-app home>/flockbook/bin/flockbook-modfeed`. Build it
-    from <https://github.com/minchenlee/flockbook> with
-    `swift build -c release --product flockbook-modfeed`. It reads each agent's session log
+  - `flockbook-modfeed`, a helper program at `<herdr-app home>/flockbook/bin/flockbook-modfeed`
+    (make it executable). The gallery copies only `layouts/` and `mods/`, so get the helper on its
+    own: the signed universal build is `bin/flockbook-modfeed` in `Flockbook-herdr-mod-<version>.zip`
+    at <https://github.com/minchenlee/flockbook/releases>; or build it from that repo with
+    `swift build -c release --product flockbook-modfeed` (macOS, Swift 6) and copy
+    `.build/release/flockbook-modfeed`. The zip's `install.sh --helper bin/flockbook-modfeed` puts
+    it there. It reads each agent's session log
     (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`,
     `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to herdr-core (`hc`) to read
     screens and send keys and text. Commands: `feed`, `status`, `card`, `approve`, `answer`,
@@ -156,8 +162,13 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 
 - The mod alone draws nothing, and the layout alone shows empty blocks. Copy both, and the themes
   the layout names.
-- Without the helper, the chat says "The Flockbook helper is missing. Install it again." Every
-  other view still works.
+- Without the helper, the chat says "The Flockbook helper is missing. Get it from
+  github.com/minchenlee/flockbook/releases." Every other view still works.
+- Tell the person before adding it: the mod runs programs (`exec` of the helper and `osascript`;
+  the helper runs `hc` and sends keys and text to agents' terminals, only on a press or a key), and
+  reads files outside its folder: the agents' session logs (`~/.claude/projects/`,
+  `~/.codex/sessions/` and the others under Programs) and `<herdr-app home>/layouts/.state/`. It
+  does not reach the network.
 - Do not add a `mod:flockbook` section to `keys.json`: with one, no key worked.
 - `layout()` is the file, not the live tree. Keep the shown screen and the sidebar state in shared
   state, and select the screen outright.
@@ -182,6 +193,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 
 ## Done when
 
+- `<herdr-app home>/flockbook/bin/flockbook-modfeed version` prints a JSON line with `"protocol"`.
 - `herdr-app check mods/flockbook` passes, and `layout.switch {"name": "flockbook"}` shows the bar
   with one pill per tab of the shown space, each with its status mark.
 - A tab with a Claude Code agent shows its conversation, at the newest message, and a new reply
