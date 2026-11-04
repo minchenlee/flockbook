@@ -11,8 +11,8 @@
 //! question keys from `herdr_core::question::steps`. This file only runs them, like Swift's `answerQuestion`.
 
 use herdr_core::approval::{ALLOW_ONCE, DENY};
-use herdr_core::question::{self, Failure, Step};
-use herdr_core::{screen_shows_prompt, QuestionAnswer, QuestionRequest};
+use herdr_core::question::{self, Step};
+use herdr_core::{screen_shows_prompt, HerdrError, QuestionAnswer, QuestionFailure as Failure, QuestionRequest};
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -532,7 +532,10 @@ fn wait_screen(actions: &dyn PaneActions, pane: &str, timeout: Duration, ok: imp
 /// delivery): checks the picker shows the first question (else nothing is sent), sends each step waiting for the next
 /// question, then checks the picker is gone.
 pub fn answer_question(actions: &dyn PaneActions, pane: &str, q: &QuestionRequest, answers: &[QuestionAnswer]) -> Result<(), String> {
-    let steps = question::steps(q, answers).map_err(|f| problem_text(&f))?;
+    let steps = question::steps(q, answers).map_err(|e| match e {
+        HerdrError::Question(f) => problem_text(&f),
+        e => e.to_string(),
+    })?;
     let screen = actions.read_screen(pane)?;
     if !question::screen_shows(q, &screen) {
         return Err(problem_text(&Failure::NotOnScreen));
