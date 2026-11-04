@@ -1,3 +1,4 @@
+#![cfg(unix)] // a fake herdr server on a Unix socket
 //! Client tests against the in-test fake herdr (replaces the Swift FakeHerdr / store-timing use).
 mod common;
 use common::*;

@@ -6,6 +6,7 @@
 
 use crate::error::HerdrError;
 use crate::model::Workspace;
+#[cfg(unix)]
 use crate::session::HerdrSession;
 use crate::snapshot;
 use crate::transport::{Connector, LineSocket};

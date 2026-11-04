@@ -14,6 +14,12 @@ notify = { version = "7.0.0", default-features = false, features = ["macos_fseve
 base64 = "0.22.1"
 chrono = { version = "0.4.43", default-features = false, features = ["clock", "std"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
 # Windows process table (uncompiled on this host; see src/resolver/windows.rs)
 [target.'cfg(windows)'.dependencies]
 sysinfo = { version = "0.32.1", default-features = false, features = ["system"] }

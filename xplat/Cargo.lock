@@ -1394,11 +1394,13 @@ version = "0.0.0"
 dependencies = [
  "base64",
  "chrono",
+ "libc",
  "notify",
  "regex",
  "serde",
  "serde_json",
  "sysinfo",
+ "tempfile",
 ]
 
 [[package]]

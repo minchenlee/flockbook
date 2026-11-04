@@ -6,8 +6,12 @@
 pub mod client;
 pub mod conversation;
 pub mod error;
+pub mod fake;
+pub mod hc;
+pub mod keygate;
 pub mod model;
 pub mod question;
+pub mod screen;
 pub mod session;
 pub mod snapshot;
 pub mod transport;
@@ -17,7 +21,8 @@ pub use client::{EventStream, HerdrClient};
 #[cfg(unix)]
 pub use client::UnixConnector;
 pub use conversation::{parse_lines, ConversationParser};
-pub use error::HerdrError;
+pub use error::{HerdrError, QuestionFailure};
+pub use screen::{all_panes, DeliveryOutcome, PaneScreen};
 pub use model::*;
 pub use session::HerdrSession;
 pub use transport::{Connector, LineSocket, Transport};

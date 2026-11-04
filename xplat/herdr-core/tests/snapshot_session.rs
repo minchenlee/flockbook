@@ -1,3 +1,4 @@
+#![cfg(unix)] // a fake herdr server on a Unix socket
 //! Ports of `checksSnapshot`, `checksSession`, `checksPaneLabel` (HerdrKitChecks/ChecksCore.swift).
 mod common;
 use common::*;
