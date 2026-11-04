@@ -112,21 +112,22 @@ jobs:
         working-directory: mod
         run: npm test
 
-  # The Rust sidecar (rust/): flockbook-modfeed and the herdrkit crate, on Linux and Windows (the mod's other OSes).
-  # Windows builds and runs the checks that need no Unix socket (herdr-core's Windows endpoint is a TODO).
+  # The Rust workspace (xplat/): herdr-core and flockbook-modfeed (the mod's sidecar), on Linux and Windows (the mod's
+  # other OSes). Linux runs every crate, the iced app included; Windows runs herdr-core and the sidecar (checks that
+  # need a Unix socket are Unix only; herdr-core's Windows endpoint is a TODO).
   rust:
-    name: Rust sidecar (${{ matrix.os }})
+    name: Rust xplat (${{ matrix.os }})
     needs: gate
     if: ${{ needs.gate.outputs.skip != '1' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        working-directory: rust
+        working-directory: xplat
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -135,12 +136,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            rust/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
-      - name: cargo build
-        run: cargo build --locked
-      - name: cargo test
-        run: cargo test --locked
+            xplat/target
+          key: cargo-xplat-${{ runner.os }}-${{ hashFiles('xplat/Cargo.lock') }}
+          restore-keys: cargo-xplat-${{ runner.os }}-
+      - name: cargo test (all crates)
+        if: runner.os == 'Linux'
+        run: cargo test --workspace --locked
+      - name: cargo test (herdr-core, flockbook-modfeed)
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p herdr-core -p flockbook-modfeed
       # The mod's Node tests again, this time also against the Rust binary (sidecar.real.test.mjs).
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
@@ -150,8 +154,53 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: mod
         env:
-          FLOCKBOOK_MODFEED: ${{ github.workspace }}/rust/target/debug/flockbook-modfeed
+          FLOCKBOOK_MODFEED: ${{ github.workspace }}/xplat/target/debug/flockbook-modfeed
         run: npm test
+
+  # Parity: the Swift and the Rust flockbook-modfeed on the same synthetic fixtures and a fake herdr-core
+  # (scripts/modfeed-parity). Every command's output and the keys and text it sent must match. macOS: Swift needs it.
+  parity:
+    name: Sidecar parity (Swift vs Rust)
+    needs: gate
+    if: ${{ needs.gate.outputs.skip != '1' }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-parity-${{ runner.os }}-xcode26.1.1-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-xcode26.1.1-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            xplat/target
+          key: cargo-parity-${{ runner.os }}-${{ hashFiles('xplat/Cargo.lock') }}
+      - name: Build both sidecars
+        run: |
+          swift build --product flockbook-modfeed
+          cargo build --locked --manifest-path xplat/Cargo.toml -p flockbook-modfeed
+      - name: Compare
+        run: |
+          python3 scripts/modfeed-parity/parity.py \
+            --a "$(swift build --show-bin-path)/flockbook-modfeed" \
+            --b xplat/target/debug/flockbook-modfeed \
+            --report build/modfeed-parity.json
+      - name: Upload the comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modfeed-parity-${{ github.run_id }}
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: warn
+          path: build/modfeed-parity.json
 
   # The offline checks in 3 groups at once (SHARD in scripts/ui-checks.sh); one group when `only` names checks.
   # 3 groups here and 2 on macOS 15: 5 macOS jobs, the most that run at the same time.
