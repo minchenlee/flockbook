@@ -3,11 +3,18 @@
 //! Sends only `session.snapshot`; never input, keys, resize or takeover.
 //!
 //!     cargo run -p herdr-core --example resolve -- [--session NAME]
+#![cfg_attr(not(unix), allow(unused_imports))]
 
 use herdr_core::resolver::{agent_process, default_source, Need, SessionResolver};
 use herdr_core::{HerdrClient, HerdrSession};
 use std::collections::HashSet;
 
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("herdr serves a Unix socket: this probe runs on Unix only");
+}
+
+#[cfg(unix)]
 fn main() {
     let session = HerdrSession::from_process();
     let workspaces = match HerdrClient::new(&session).snapshot() {
