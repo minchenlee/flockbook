@@ -1,0 +1,519 @@
+//! The phone page's protocol (remote protocol v1, `web/src/protocol.ts`; the Mac app's `HubSession.swift`) on the
+//! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt), ping. Approve, answer and send
+//! come only over `POST /api` (`post`); on the socket they are refused. Pictures, older rows, the queue, uploads and
+//! notifications are not offered: those requests get a `failed` reply.
+//!
+//! Every read and every key goes through `cli::run`, the same code the mod's sidecar runs, so the claims, the
+//! screen checks and the results are the mod's.
+
+use crate::cli;
+use herdr_core::hc::{HcClient, HcSession};
+use herdr_core::{AgentStatus, PaneScreen, Workspace};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+
+/// The newest rows sent per conversation (the Mac hub's window).
+pub const WINDOW: usize = 100;
+/// The longest text `send` takes, and the longest own answer to a question (the Mac hub's limits).
+pub const MAX_SEND: usize = 16_000;
+pub const MAX_OTHER: usize = 2_000;
+
+/// The requests that send keys: only `POST /api` takes them.
+pub const KEYS: [&str; 3] = ["approve", "answer", "send"];
+
+/// Settings of one `serve`.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// `--cache`: the sidecar's cache and its `answered/` claims.
+    pub cache: Option<String>,
+    /// `--read-only`: level `read`; every key request is refused.
+    pub read_only: bool,
+    /// The name the page shows.
+    pub hub: String,
+}
+
+/// One command of the sidecar, run in this process: its lines after `header`, without `end`.
+pub fn run(argv: &[String]) -> Vec<Value> {
+    let text = cli::run(argv);
+    text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["type"] != "header" && v["type"] != "end").collect()
+}
+
+fn status(s: AgentStatus) -> &'static str {
+    match s {
+        AgentStatus::Idle => "idle",
+        AgentStatus::Working => "working",
+        AgentStatus::Blocked => "blocked",
+        AgentStatus::Done => "done",
+        AgentStatus::Unknown => "unknown",
+    }
+}
+
+/// herdr-core's workspaces as the page reads them (`HubWorkspace`).
+pub fn snapshot(ws: &[Workspace]) -> Value {
+    Value::Array(
+        ws.iter()
+            .map(|w| {
+                json!({"id": w.id, "label": w.label, "tabs": w.tabs.iter().map(|t| json!({
+                    "id": t.id, "label": t.label, "number": t.number, "status": status(t.status),
+                    "panes": t.panes.iter().map(|p| {
+                        let mut o = json!({"id": p.id, "cwd": p.cwd});
+                        if let Some(l) = &p.label { o["label"] = json!(l); }
+                        if let Some(a) = &p.agent {
+                            let mut ag = json!({"name": a.name, "kind": a.kind, "status": status(a.status), "title": a.title});
+                            if let Some(s) = &a.session_id { ag["session"] = json!(s); }
+                            o["agent"] = ag;
+                        }
+                        o
+                    }).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>()})
+            })
+            .collect(),
+    )
+}
+
+/// ISO 8601 UTC with milliseconds (the Mac hub's `Hub.time`), from milliseconds since 1970.
+fn time(ms: &Value) -> Option<String> {
+    let ms = ms.as_i64()?;
+    chrono::DateTime::from_timestamp_millis(ms).map(|d| d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+}
+
+/// A `question` object of the sidecar as the page reads it (`QuestionRequest`), with the id to answer it by.
+fn question(q: &Value, id: &str) -> Value {
+    let qs: Vec<Value> = q["questions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|k| {
+            let opts: Vec<Value> = k["options"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|o| {
+                    let mut x = json!({"label": o["label"].as_str().unwrap_or("")});
+                    if let Some(d) = o["detail"].as_str().filter(|d| !d.is_empty()) {
+                        x["detail"] = json!(d);
+                    }
+                    if o["recommended"] == true {
+                        x["recommended"] = json!(true);
+                    }
+                    x
+                })
+                .collect();
+            json!({"id": k["id"].as_str().unwrap_or(""), "header": k["header"].as_str().unwrap_or(""), "text": k["text"].as_str().unwrap_or(""),
+                   "multiSelect": k["multi"] == true, "options": opts})
+        })
+        .collect();
+    let headers: Vec<Value> = qs.iter().map(|k| k["header"].clone()).collect();
+    let mut out = json!({"id": id, "agent": q["agent"].as_str().unwrap_or(""), "delivery": if q["delivery"] == "message" { "message" } else { "picker" },
+                         "state": q["state"].as_str().unwrap_or("pending"), "headers": headers, "questions": qs});
+    if let Some(a) = q["answers"].as_array() {
+        out["answers"] = Value::Array(a.clone());
+    }
+    out
+}
+
+/// One `row` of `feed` as a conversation item (`Item`); `sep` and `footer` rows have none (the page shows times).
+pub fn item(row: &Value) -> Option<Value> {
+    let id = row["id"].as_str()?;
+    let mut o = match row["k"].as_str()? {
+        k @ ("user" | "assistant" | "status") => json!({"id": id, "kind": k, "text": row["text"].as_str().unwrap_or("")}),
+        "tools" => {
+            let chips: Vec<Value> = row["chips"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|c| {
+                    let calls: Vec<Value> = c["calls"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, x)| {
+                            json!({"id": format!("{id}-{i}"), "tool": x["name"].as_str().unwrap_or(""), "summary": x["summary"].as_str().unwrap_or(""),
+                                   "done": x["done"] == true, "error": x["error"] == true})
+                        })
+                        .collect();
+                    json!({"symbol": c["symbol"].as_str().unwrap_or(""), "text": c["text"].as_str().unwrap_or(""), "calls": calls})
+                })
+                .collect();
+            json!({"id": id, "kind": "tools", "tools": chips})
+        }
+        "perm" => {
+            let p = &row["perm"];
+            json!({"id": id, "kind": "approval", "approval": {"id": p["toolUseId"].as_str().unwrap_or(id), "tool": p["tool"].as_str().unwrap_or(""),
+                   "title": p["title"].as_str().unwrap_or(""), "command": p["command"].as_str().unwrap_or(""),
+                   "state": if p["state"] == "pending" { "pending" } else { "resolved" }}})
+        }
+        "question" => {
+            let q = &row["question"];
+            json!({"id": id, "kind": "question", "question": question(q, q["toolUseId"].as_str().unwrap_or(id))})
+        }
+        _ => return None,
+    };
+    if let Some(t) = time(&row["ts"]) {
+        o["time"] = json!(t);
+    }
+    Some(o)
+}
+
+/// The `card` line as a `prompt` push: what the agent waits for on screen now, keyed by the card's `request` (the id
+/// `approve` and `answer` take back). An answered approval still drawn is no prompt (the mod shows no buttons).
+pub fn prompt(pane: &str, card: Option<&Value>) -> Value {
+    let mut p = json!({"type": "prompt", "pane": pane});
+    let Some(c) = card else { return p };
+    let request = c["request"].as_str().unwrap_or("");
+    match c["kind"].as_str() {
+        Some("approval") if c["answered"] != true => {
+            p["approval"] = json!({"id": request, "tool": c["tool"].as_str().unwrap_or(""), "title": c["title"].as_str().unwrap_or(""),
+                                   "command": c["command"].as_str().unwrap_or(""), "state": "pending"});
+        }
+        Some("question") => p["question"] = question(&c["question"], request),
+        _ => {}
+    }
+    p
+}
+
+pub fn ok(re: &str) -> Value {
+    json!({"type": "reply", "re": re, "ok": true})
+}
+
+pub fn fail(re: &str, code: &str, message: &str) -> Value {
+    json!({"type": "reply", "re": re, "ok": false, "error": {"code": code, "message": message}})
+}
+
+/// The Mac hub's `Hub.inputProblem`: too long, or a control character other than newline and tab.
+pub fn input_problem(text: &str, limit: usize) -> Option<String> {
+    if text.chars().count() > limit {
+        return Some(format!("Text over {limit} characters."));
+    }
+    text.chars()
+        .find(|&c| ((c as u32) < 0x20 && c != '\n' && c != '\t') || (0x7f..=0x9f).contains(&(c as u32)))
+        .map(|c| format!("Text with control character U+{:04X}.", c as u32))
+}
+
+/// A sidecar `done` (or `error`) as the reply to a key request.
+fn done_reply(re: &str, lines: &[Value]) -> Value {
+    if let Some(e) = lines.iter().find(|l| l["type"] == "error") {
+        let code = if e["code"] == "no-terminal" || e["code"] == "not-agent" { "notFound" } else { "failed" };
+        return fail(re, code, e["message"].as_str().unwrap_or("The helper could not do it."));
+    }
+    let Some(d) = lines.iter().find(|l| l["type"] == "done") else { return fail(re, "failed", "The helper gave no answer.") };
+    let msg = d["message"].as_str();
+    match d["result"].as_str().unwrap_or("") {
+        "sent" => ok(re),
+        "changed" => fail(re, "stale", msg.unwrap_or("The prompt changed. Nothing was sent.")),
+        "answered" => fail(re, "stale", msg.unwrap_or("This prompt was answered already. Nothing was sent.")),
+        "unconfirmed" => fail(re, "failed", "herdr-core did not answer in time. It may still arrive: check before sending again."),
+        _ => fail(re, "failed", msg.unwrap_or("It did not go out.")),
+    }
+}
+
+/// What one pane's conversation looks like on this connection.
+#[derive(Default)]
+struct Feed {
+    cursor: Option<String>,
+    rows: Vec<Value>,
+    sent: Option<Vec<Value>>,
+    prompt: Option<Value>,
+}
+
+/// One page connection (or one POST): its watched panes and what it was sent last.
+pub struct Session {
+    cfg: Config,
+    pub welcomed: bool,
+    watched: Vec<String>,
+    feeds: HashMap<String, Feed>,
+    last_snapshot: Option<Value>,
+    workspaces: Vec<Workspace>,
+}
+
+impl Session {
+    pub fn new(cfg: Config) -> Session {
+        Session { cfg, welcomed: false, watched: vec![], feeds: HashMap::new(), last_snapshot: None, workspaces: vec![] }
+    }
+
+    fn level(&self) -> &'static str {
+        if self.cfg.read_only {
+            "read"
+        } else {
+            "input"
+        }
+    }
+
+    fn base(&self, cmd: &str, pane: &str) -> Vec<String> {
+        let mut a = vec![cmd.to_string(), "--terminal".into(), pane.to_string()];
+        if let Some(c) = &self.cfg.cache {
+            a.push("--cache".into());
+            a.push(c.clone());
+        }
+        a
+    }
+
+    /// herdr-core's workspaces now; empty when it does not answer.
+    fn load(&mut self) -> Value {
+        let session = HcSession::resolve_env();
+        self.workspaces = if session.is_available() { HcClient::new(session, 8, 22).snapshot().unwrap_or_default() } else { vec![] };
+        snapshot(&self.workspaces)
+    }
+
+    fn pane(&self, id: &str) -> Option<&herdr_core::Pane> {
+        self.workspaces.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).find(|p| p.id == id || p.terminal_id == id)
+    }
+
+    /// A socket message. Key requests are refused here (`post` takes them).
+    pub fn receive(&mut self, data: &str) -> Vec<Value> {
+        let (m, id) = match parse(data) {
+            Ok(x) => x,
+            Err(r) => return vec![r],
+        };
+        let ty = m["type"].as_str().unwrap_or("");
+        if ty == "hello" {
+            self.welcomed = true;
+            let snap = self.load();
+            self.last_snapshot = Some(snap.clone());
+            let session = std::env::var("HC_SESSION").ok().filter(|s| !s.is_empty());
+            let mut w = json!({"type": "welcome", "hub": self.cfg.hub, "hubVersion": crate::protocol::SIDECAR_VERSION, "level": self.level()});
+            if let Some(s) = session {
+                w["session"] = json!(s);
+            }
+            return vec![w, json!({"type": "snapshot", "workspaces": snap}), ok(&id)];
+        }
+        if !self.welcomed {
+            return vec![fail(&id, "unauthorized", "Send hello first.")];
+        }
+        match ty {
+            "ping" => vec![json!({"type": "pong"}), ok(&id)],
+            "watch" => {
+                let pane = m["pane"].as_str().unwrap_or("").to_string();
+                self.load();
+                if self.pane(&pane).is_none() {
+                    return vec![fail(&id, "notFound", &format!("No pane {pane}."))];
+                }
+                if !self.watched.contains(&pane) {
+                    self.watched.push(pane.clone());
+                }
+                self.feeds.insert(pane.clone(), Feed::default());
+                let mut out = self.pushes(&pane);
+                out.push(ok(&id));
+                out
+            }
+            "unwatch" => {
+                let pane = m["pane"].as_str().unwrap_or("");
+                self.watched.retain(|p| p != pane);
+                self.feeds.remove(pane);
+                vec![ok(&id)]
+            }
+            t if KEYS.contains(&t) => vec![fail(&id, "badRequest", "Keys go with POST /api on this helper.")],
+            "pair" => vec![fail(&id, "badRequest", "This helper needs no pairing: Tailscale says who you are.")],
+            "pulledAck" | "pushUnsubscribe" => vec![ok(&id)],
+            _ => vec![fail(&id, "failed", "Not offered by this helper.")],
+        }
+    }
+
+    /// `POST /api`: one key request; the reply (and nothing else).
+    pub fn post(&mut self, data: &str) -> Vec<Value> {
+        let (m, id) = match parse(data) {
+            Ok(x) => x,
+            Err(r) => return vec![r],
+        };
+        let ty = m["type"].as_str().unwrap_or("");
+        if !KEYS.contains(&ty) {
+            return vec![fail(&id, "badRequest", "POST /api takes approve, answer and send.")];
+        }
+        if self.cfg.read_only {
+            return vec![fail(&id, "readOnly", "This helper was started with --read-only.")];
+        }
+        let pane = m["pane"].as_str().unwrap_or("").to_string();
+        self.load();
+        let Some(p) = self.pane(&pane).cloned() else { return vec![fail(&id, "notFound", &format!("No pane {pane}."))] };
+        if p.agent.is_none() {
+            return vec![fail(&id, "readOnly", "Remote input goes to agents only.")];
+        }
+        let lines = match ty {
+            "approve" => {
+                let (Some(prompt), Some(allow)) = (m["prompt"].as_str(), m["allow"].as_bool()) else {
+                    return vec![fail(&id, "badRequest", "approve needs prompt and allow.")];
+                };
+                let mut a = self.base("approve", &p.terminal_id);
+                a.extend(["--request".into(), prompt.into(), if allow { "--allow" } else { "--deny" }.into()]);
+                run(&a)
+            }
+            "answer" => {
+                let (Some(q), Some(answers)) = (m["question"].as_str(), m["answers"].as_array()) else {
+                    return vec![fail(&id, "badRequest", "answer needs question and answers.")];
+                };
+                let mut list = vec![];
+                for a in answers {
+                    let picks: Vec<i64> = a["picks"].as_array().map(|p| p.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+                    let mut x = json!({"picks": picks});
+                    if let Some(o) = a["other"].as_str() {
+                        if let Some(why) = input_problem(o, MAX_OTHER) {
+                            return vec![fail(&id, "badRequest", &why)];
+                        }
+                        x["other"] = json!(o);
+                    }
+                    list.push(x);
+                }
+                let mut a = self.base("answer", &p.terminal_id);
+                a.extend(["--request".into(), q.into(), "--answers".into(), Value::Array(list).to_string()]);
+                run(&a)
+            }
+            _ => {
+                let Some(text) = m["text"].as_str().filter(|t| !t.is_empty()) else { return vec![fail(&id, "badRequest", "send needs text.")] };
+                if let Some(why) = input_problem(text, MAX_SEND) {
+                    return vec![fail(&id, "badRequest", &why)];
+                }
+                if m["attachments"].as_array().is_some_and(|a| !a.is_empty()) {
+                    return vec![fail(&id, "badRequest", "This helper takes no pictures yet.")];
+                }
+                run(&["send".into(), "--terminal".into(), p.terminal_id.clone(), "--text".into(), text.into()])
+            }
+        };
+        vec![done_reply(&id, &lines)]
+    }
+
+    /// Pushes since the last call: a changed snapshot, and new rows and prompts of the watched panes.
+    pub fn tick(&mut self) -> Vec<Value> {
+        if !self.welcomed {
+            return vec![];
+        }
+        let snap = self.load();
+        let mut out = vec![];
+        if self.last_snapshot.as_ref() != Some(&snap) {
+            self.last_snapshot = Some(snap.clone());
+            out.push(json!({"type": "snapshot", "workspaces": snap}));
+        }
+        for pane in self.watched.clone() {
+            out.extend(self.pushes(&pane));
+        }
+        out
+    }
+
+    fn pushes(&mut self, pane: &str) -> Vec<Value> {
+        let Some(p) = self.pane(pane).cloned() else { return vec![] };
+        let mut out = vec![];
+        let terminal = p.terminal_id.clone();
+        let mut argv = self.base("feed", &terminal);
+        let cursor = self.feeds.get(pane).and_then(|f| f.cursor.clone());
+        if let Some(c) = &cursor {
+            argv.extend(["--cursor".into(), c.clone()]);
+        }
+        let lines = run(&argv);
+        let feed = self.feeds.entry(pane.to_string()).or_default();
+        let mut session = pane.to_string();
+        for l in &lines {
+            match l["type"].as_str() {
+                Some("log") => {
+                    feed.cursor = l["cursor"].as_str().map(String::from);
+                    if let Some(path) = l["path"].as_str() {
+                        session = path.to_string();
+                    }
+                }
+                Some("splice") => {
+                    let at = l["at"].as_u64().unwrap_or(0) as usize;
+                    feed.rows.truncate(at.min(feed.rows.len()));
+                }
+                Some("row") => feed.rows.push(l.clone()),
+                _ => {}
+            }
+        }
+        let items: Vec<Value> = feed.rows.iter().filter_map(item).collect();
+        let tail: Vec<Value> = items[items.len().saturating_sub(WINDOW)..].to_vec();
+        if feed.sent.as_ref() != Some(&tail) {
+            out.push(json!({"type": "conversation", "pane": pane, "session": session, "mode": "replace", "items": tail, "hasEarlier": false}));
+            feed.sent = Some(tail);
+        }
+        // The screen is read only when there may be a prompt: the agent is blocked, or the log ends with a question.
+        let blocked = p.agent.as_ref().is_some_and(|a| a.status == AgentStatus::Blocked);
+        let asks = feed.rows.last().is_some_and(|r| r["k"] == "question" && r["question"]["state"] == "pending");
+        let card = if blocked || asks { run(&self.base("card", &terminal)).into_iter().find(|l| l["type"] == "card") } else { None };
+        let pr = prompt(pane, card.as_ref());
+        let feed = self.feeds.entry(pane.to_string()).or_default();
+        if feed.prompt.as_ref() != Some(&pr) {
+            feed.prompt = Some(pr.clone());
+            out.push(pr);
+        }
+        out
+    }
+}
+
+/// A client message: protocol 1, an id. Errors are the reply to send.
+/// A `Value`, not a `Map`: a missing field indexes as null (a `Map` index panics).
+fn parse(data: &str) -> Result<(Value, String), Value> {
+    let v: Value = serde_json::from_str(data).map_err(|_| fail("", "badRequest", "Not a protocol 1 client message."))?;
+    let id = v["id"].as_str().unwrap_or("").to_string();
+    let Value::Object(m) = v else { return Err(fail("", "badRequest", "Not a protocol 1 client message.")) };
+    if m.get("v").and_then(Value::as_i64) != Some(1) {
+        return Err(fail(&id, "unsupportedVersion", "This helper speaks protocol 1."));
+    }
+    if id.is_empty() || m.get("type").and_then(Value::as_str).is_none() {
+        return Err(fail(&id, "badRequest", "Not a protocol 1 client message."));
+    }
+    Ok((Value::Object(m), id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rows_to_items() {
+        let u = item(&json!({"id": "u1", "k": "user", "text": "hi", "ts": 1793670000000_i64, "type": "row"})).unwrap();
+        assert_eq!(u, json!({"id": "u1", "kind": "user", "text": "hi", "time": "2026-11-03T01:40:00.000Z"}));
+        assert!(item(&json!({"id": "f1", "k": "footer", "text": "x"})).is_none());
+        assert!(item(&json!({"id": "s1", "k": "sep", "text": "x"})).is_none());
+        let t = item(&json!({"id": "a1-t3", "k": "tools", "chips": [{"symbol": "terminal", "text": "Ran a command",
+            "calls": [{"name": "Bash", "summary": "ls", "done": true, "error": false, "output": "ok"}]}]})).unwrap();
+        assert_eq!(t["tools"][0]["calls"][0], json!({"id": "a1-t3-0", "tool": "Bash", "summary": "ls", "done": true, "error": false}));
+        let p = item(&json!({"id": "p1", "k": "perm", "perm": {"toolUseId": "toolu_1", "tool": "Bash", "title": "Bash command", "command": "rm", "state": "pending"}})).unwrap();
+        assert_eq!(p["approval"], json!({"id": "toolu_1", "tool": "Bash", "title": "Bash command", "command": "rm", "state": "pending"}));
+    }
+
+    #[test]
+    fn cards_to_prompts() {
+        assert_eq!(prompt("hc:t1", None), json!({"type": "prompt", "pane": "hc:t1"}));
+        let a = json!({"type": "card", "kind": "approval", "request": "r1", "tool": "Bash", "title": "Bash command", "command": "rm -rf build"});
+        assert_eq!(prompt("hc:t1", Some(&a))["approval"]["id"], "r1");
+        let mut done = a.clone();
+        done["answered"] = json!(true);
+        assert!(prompt("hc:t1", Some(&done)).get("approval").is_none(), "an answered prompt shows no buttons");
+        let q = json!({"type": "card", "kind": "question", "request": "screen-1", "question": {"agent": "claude", "delivery": "picker", "state": "pending",
+            "toolUseId": "screen-1", "questions": [{"id": "Pick?", "header": "Color", "text": "Pick?", "multi": false,
+            "options": [{"label": "Red", "detail": "warm", "recommended": true}, {"label": "Blue", "detail": "", "recommended": false}]}]}});
+        let pq = prompt("hc:t1", Some(&q));
+        assert_eq!(pq["question"]["id"], "screen-1");
+        assert_eq!(pq["question"]["headers"], json!(["Color"]));
+        assert_eq!(pq["question"]["questions"][0]["options"], json!([{"label": "Red", "detail": "warm", "recommended": true}, {"label": "Blue"}]));
+    }
+
+    #[test]
+    fn replies() {
+        assert_eq!(done_reply("c1", &[json!({"type": "done", "result": "sent"})]), ok("c1"));
+        assert_eq!(done_reply("c1", &[json!({"type": "done", "result": "changed"})])["error"]["code"], "stale");
+        assert_eq!(done_reply("c1", &[json!({"type": "error", "code": "no-terminal", "message": "x"})])["error"]["code"], "notFound");
+        assert_eq!(input_problem("a\u{1b}[2J", 100).as_deref(), Some("Text with control character U+001B."));
+        assert!(input_problem("line\n\tok", 100).is_none());
+        assert!(input_problem(&"x".repeat(11), 10).is_some());
+    }
+
+    #[test]
+    fn socket_refuses_keys() {
+        let mut s = Session::new(Config { cache: None, read_only: false, hub: "test".into() });
+        s.welcomed = true;
+        for t in KEYS {
+            let r = s.receive(&json!({"v": 1, "id": "c1", "type": t, "pane": "hc:t1", "prompt": "x", "allow": true, "text": "x"}).to_string());
+            assert_eq!(r, vec![fail("c1", "badRequest", "Keys go with POST /api on this helper.")]);
+        }
+        assert_eq!(s.receive(r#"{"v":2,"id":"c2","type":"ping"}"#)[0]["error"]["code"], "unsupportedVersion");
+        // Missing fields are null, never a panic.
+        assert_eq!(s.receive(r#"{"v":1,"id":"c5","type":"unwatch"}"#), vec![ok("c5")]);
+        assert_eq!(s.post(r#"{"v":1,"id":"c6","type":"send"}"#)[0]["re"], "c6");
+        let mut ro = Session::new(Config { cache: None, read_only: true, hub: "test".into() });
+        assert_eq!(ro.post(r#"{"v":1,"id":"c3","type":"send","pane":"hc:t1","text":"x"}"#)[0]["error"]["code"], "readOnly");
+        assert_eq!(ro.post(r#"{"v":1,"id":"c4","type":"watch","pane":"hc:t1"}"#)[0]["error"]["code"], "badRequest");
+    }
+}

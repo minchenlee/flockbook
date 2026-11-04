@@ -1,0 +1,85 @@
+# `flockbook-modfeed serve`: the phone page from the helper
+
+`serve` shows the Flockbook phone page (the same page the Mac app serves) from the Rust helper, on macOS
+and Linux, without the Mac app. It reads agents and sends keys through herdr-core, the same way as the
+mod's sidecar commands.
+
+It is **off** until you start it. It installs nothing.
+
+## How it is reached
+
+- It listens on **127.0.0.1 only**. No option sets another address.
+- Other devices reach it only through **Tailscale Serve**, which adds HTTPS and the caller's identity.
+- It does no TLS and no pairing, and it never changes your Tailscale settings.
+
+Every request must carry `Tailscale-User-Login`, and that login must be the account given with `--user`.
+Otherwise the answer is 403. Serve removes any copy of that header that the caller sends.
+
+Funnel is refused:
+
+- Serve marks a Funnel request with `Tailscale-Funnel-Request` and sends no identity with it.
+- So a Funnel request gets 403, even if you turn Funnel on by mistake.
+- Do not use `tailscale funnel` for this port.
+
+The socket (`/ws`) only reads.
+
+Approve, answer and send go only with `POST /api`:
+
+- The body must be JSON.
+- The `Origin` must be the page's own `https://` origin.
+- A page from another site that is open in your browser therefore cannot use your Tailscale identity (CSRF).
+
+## Limits
+
+- Another program of your user on this machine can connect to 127.0.0.1 and send any header, the
+  identity header included. That is the trust it already has: it can run `hc` and send keys itself.
+  Do not run `serve` on a machine you share with users you do not trust.
+- Not in this version: pictures, older rows, the agent's queue, image upload, and notifications.
+  The helper answers those requests with "Not offered by this helper."
+
+## Start it
+
+```sh
+# 1. The helper, as your user (herdr-core is found as the app finds it: HC_SOCKET, HC_SESSION).
+flockbook-modfeed serve --user you@example.com            # port 8787
+
+# 2. Tailscale Serve in front of it (HTTPS on your tailnet name). Not `tailscale funnel`.
+tailscale serve --bg 8787
+```
+
+Open `https://<machine>.<tailnet>.ts.net/` on the phone.
+
+`--user` is your login as `tailscale whois <phone's tailscale IP>` shows it.
+
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--user <login>` | The one Tailscale account allowed. Needed. |
+| `--port <n>` | The port on 127.0.0.1 (8787). |
+| `--cache <file>` | The sidecar's cache and its `answered/` claims (`~/.flockbook/serve/cache.json`). |
+| `--origin https://<host>` | An extra page origin to accept. Use it when a proxy changes `Host`. By default the `Origin` must name `Host` or `X-Forwarded-Host`. |
+| `--read-only` | The page only reads. Approve, answer and send are refused. |
+
+## Run it at login (not installed for you)
+
+`--print` writes a service file for the options you give. Read the file before you install it.
+
+macOS (launchd):
+
+```sh
+flockbook-modfeed serve --print launchd --user you@example.com > ~/Library/LaunchAgents/dev.flockbook.serve.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.flockbook.serve.plist
+# stop: launchctl bootout gui/$(id -u)/dev.flockbook.serve
+```
+
+Linux (systemd, as your user):
+
+```sh
+mkdir -p ~/.config/systemd/user
+flockbook-modfeed serve --print systemd --user you@example.com > ~/.config/systemd/user/flockbook-serve.service
+systemctl --user daemon-reload && systemctl --user enable --now flockbook-serve
+# stop: systemctl --user disable --now flockbook-serve
+```
+
+`tailscale serve --bg` keeps its setting across restarts. `tailscale serve reset` removes it.
