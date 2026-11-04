@@ -47,8 +47,9 @@ main() {
   mkdir "$tmp/remote"
   for t in $TARGETS; do
     f="flockbook-modfeed-$t"
-    want="$(awk -v f="$f" '$2 == f || $2 == "*" f { print $1; exit }' "$tmp/SHA256SUMS")"
-    [ -n "$want" ] || die "SHA256SUMS has no line for $f"
+    n="$(awk -v f="$f" '$2 == f || $2 == "*" f { n++ } END { print n + 0 }' "$tmp/SHA256SUMS")"
+    [ "$n" = 1 ] || die "SHA256SUMS has $n lines for $f (want exactly one)"
+    want="$(awk -v f="$f" '$2 == f || $2 == "*" f { print $1 }' "$tmp/SHA256SUMS")"
     mkdir "$tmp/remote/$t"
     curl -fsSL "$base/$f" -o "$tmp/remote/$t/flockbook-modfeed" || die "cannot download $base/$f"
     have="$(sum "$tmp/remote/$t/flockbook-modfeed")"

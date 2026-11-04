@@ -367,3 +367,16 @@ fn a_remote_sums_line_that_leaves_the_folder_is_refused() {
     assert_eq!(r.status.code(), Some(1));
     assert_eq!(fs::read_dir(&s.app).unwrap().count(), 0);
 }
+
+#[test]
+fn a_remote_sums_file_naming_a_target_twice_is_refused() {
+    let s = sandbox();
+    let dir = remote_dir(&s, None);
+    let sums = read(dir.join("SHA256SUMS"));
+    let first = sums.lines().next().unwrap().to_string();
+    fs::write(dir.join("SHA256SUMS"), format!("{sums}{first}\n")).unwrap();
+    let r = s.run(&["--home", s.app_s(), "--remote", dir.to_str().unwrap()]);
+    assert_eq!(r.status.code(), Some(1));
+    assert!(err(&r).contains("twice"), "{}", err(&r));
+    assert_eq!(fs::read_dir(&s.app).unwrap().count(), 0);
+}

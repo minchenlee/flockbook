@@ -107,6 +107,9 @@ fn read_remote(dir: &Path) -> Result<(Vec<Remote>, Vec<u8>), String> {
         if !valid_target(target) || sum.len() != 64 || !sum.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(format!("STOP: {} has a line I do not understand: {line}", sums_path.display()));
         }
+        if out.iter().any(|r: &Remote| r.target == target) {
+            return Err(format!("STOP: {} names {target} twice", sums_path.display()));
+        }
         let file = dir.join(target).join("flockbook-modfeed");
         let bytes = fs::read(&file).map_err(|e| format!("STOP: the helper for {target} is missing ({}: {e})", file.display()))?;
         if sha(&bytes) != sum.to_ascii_lowercase() {
