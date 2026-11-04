@@ -61,7 +61,7 @@ From the repo (in its root):
 
 ```sh
 swift build -c release --product flockbook-modfeed
-mod/install.sh --helper .build/release/flockbook-modfeed
+herdr-app/install.sh --helper .build/release/flockbook-modfeed
 ```
 
 From the gallery (herdr.dev/layouts): the agent copies only `layouts/` and `mods/`. Get the

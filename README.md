@@ -10,7 +10,7 @@ It comes in two forms: a **layout and mod for the Herdr app**, where new work go
 
 ## Flockbook for the Herdr app
 
-<img src="mod/preview.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
+<img src="herdr-app/preview.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
 
 The reading view runs inside the Herdr app window, with no change to the app:
 
@@ -22,24 +22,24 @@ The reading view runs inside the Herdr app window, with no change to the app:
 - **Terminal**: the agent's real terminal is one key away (⌃`).
 
 <table>
-<tr><td width="50%" valign="top"><img src="mod/preview-approval.png" alt="An approval card above the reply box: the command, Allow once and Deny"><br><sub><b>Approval card</b>: allow or deny a permission prompt above the reply box (1 / 2).</sub></td><td width="50%" valign="top"><img src="mod/preview-needs.png" alt="Needs you: the agents that wait, and the question one of them asks"><br><sub><b>Needs you</b>: every agent that waits, with its question or approval card.</sub></td></tr>
-<tr><td width="50%" valign="top"><img src="mod/preview-overview.png" alt="Overview: every tab as a card, grouped by workspace"><br><sub><b>Overview</b>: every tab as a card, by status or by workspace.</sub></td><td width="50%" valign="top"><img src="mod/preview-attach.png" alt="Two attached files above the reply box"><br><sub><b>Reply box</b>: drop files or click + to attach them; ⌘V pastes an image.</sub></td></tr>
-<tr><td width="50%" valign="top"><img src="mod/preview-terminal.png" alt="The agent's real terminal in a floating window over the chat"><br><sub><b>Terminal</b>: ⌃` opens the agent's real terminal over the chat.</sub></td><td width="50%" valign="top"><img src="mod/preview-menu.png" alt="The right-click menu of a tab"><br><sub><b>Tab menu</b>: right-click a tab to rename or move it, open its terminal, put it away or close it.</sub></td></tr>
-<tr><td width="50%" valign="top"><img src="mod/preview-sidebar.png" alt="The floating sidebar over the chat"><br><sub><b>Floating sidebar</b>: hidden, it slides out when the pointer reaches the window's left edge.</sub></td><td width="50%"></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-approval.png" alt="An approval card above the reply box: the command, Allow once and Deny"><br><sub><b>Approval card</b>: allow or deny a permission prompt above the reply box (1 / 2).</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-needs.png" alt="Needs you: the agents that wait, and the question one of them asks"><br><sub><b>Needs you</b>: every agent that waits, with its question or approval card.</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-overview.png" alt="Overview: every tab as a card, grouped by workspace"><br><sub><b>Overview</b>: every tab as a card, by status or by workspace.</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-attach.png" alt="Two attached files above the reply box"><br><sub><b>Reply box</b>: drop files or click + to attach them; ⌘V pastes an image.</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-terminal.png" alt="The agent's real terminal in a floating window over the chat"><br><sub><b>Terminal</b>: ⌃` opens the agent's real terminal over the chat.</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-menu.png" alt="The right-click menu of a tab"><br><sub><b>Tab menu</b>: right-click a tab to rename or move it, open its terminal, put it away or close it.</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-sidebar.png" alt="The floating sidebar over the chat"><br><sub><b>Floating sidebar</b>: hidden, it slides out when the pointer reaches the window's left edge.</sub></td><td width="50%"></td></tr>
 </table>
 
 A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat. The cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
 
 ### Install
 
-Download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper. Unzip it, then:
+Download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper. (It is also listed in the [Herdr layout gallery](https://herdr.dev/layouts/minchenlee/flockbook--herdr-app/).) Unzip it, then:
 
 ```sh
 ./install.sh --dry-run --helper bin/flockbook-modfeed   # see what it does
 ./install.sh --helper bin/flockbook-modfeed
 ```
 
-`install.sh` never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. [mod/README.md](mod/README.md) has the details, and [mod/RECIPE.md](mod/RECIPE.md) describes every part of the mod.
+`install.sh` never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. [herdr-app/README.md](herdr-app/README.md) has the details, and [herdr-app/RECIPE.md](herdr-app/RECIPE.md) describes every part of the mod.
 
 **Status: preview.** Built and tried on macOS. Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi and Antigravity CLI (agy).
 
