@@ -10,6 +10,7 @@ One short line: what this release is about.
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
+- Two presses of Allow at the same moment (two views, or a double key) could each send a key; now only one does.
 
 ### ⚙️ Changes
 - The Herdr app mod source moved from `herdr-mod/` to `mod/`. The release zip name does not change.
