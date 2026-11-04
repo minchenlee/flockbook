@@ -40,6 +40,11 @@ echo
 echo "Requires macOS 15 or later and a running Herdr. Universal (Apple silicon + Intel)."
 echo "Phone features need Tailscale or your local network."
 echo
+echo "**Flockbook for the Herdr app (preview, macOS and Linux):** \`curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | sh\`"
+echo "(add \`-s -- --dry-run\` after \`sh\` to see the plan first). It checks the helper against \`SHA256SUMS\` before it runs anything."
+echo "Or download \`Flockbook-herdr-mod-$VERSION.zip\`, unzip it and run \`./install.sh --dry-run\`, then \`./install.sh\`."
+echo "Windows is not supported yet."
+echo
 echo "Unofficial: not affiliated with, endorsed by, or supported by Herdr, Inc."
 if [ -n "$PREV_TAG" ]; then
   echo

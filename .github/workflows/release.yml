@@ -1,5 +1,18 @@
 name: Release
 
+# Tag push (git tag vX.Y.Z && git push origin vX.Y.Z) runs, in order:
+#  1. helpers (helpers.yml): the Rust flockbook-modfeed, stripped, for universal-apple-darwin,
+#     x86_64-unknown-linux-musl and aarch64-unknown-linux-musl. Each runs `version`; the protocols must match;
+#     the mod zip is packaged and both installs are tried on macOS, Linux x86_64 and Linux arm64.
+#  2. build (macOS): the app (signed, notarized when the secrets are there), then scripts/package-mod.sh with
+#     those helpers: Flockbook-herdr-mod-<version>.zip (bin/ = the macOS helper, signed; remote/<target>/ = all
+#     three, remote/SHA256SUMS), and the one-line install's assets dist/install.sh and
+#     dist/flockbook-modfeed-<target>. dist/SHA256SUMS covers the app, the zip, the helpers and install.sh.
+#  3. publish: one GitHub release with Flockbook-<version>.zip/.dmg, Flockbook-herdr-mod-<version>.zip,
+#     install.sh, flockbook-modfeed-<target> (x3), SHA256SUMS and appcast.xml (notarized builds only).
+# The one-line install then works from releases/latest/download/install.sh. workflow_dispatch rebuilds an
+# existing tag. To try the helpers without a release: push a ci/ branch (helpers.yml runs on its own).
+
 on:
   push:
     tags:
@@ -19,6 +32,8 @@ jobs:
   # The Rust flockbook-modfeed for every platform (the Herdr app mod's helper).
   helpers:
     uses: ./.github/workflows/helpers.yml
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
   # Signed + notarized universal Flockbook.app as .zip and .dmg. Signing: import the
   # Developer ID cert into a temporary keychain, sign with hardened runtime, notarize, staple. Without secrets: ad-hoc sign, no notarization,
@@ -38,6 +53,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      # The Rust helpers from the helpers job: helpers/<target>/flockbook-modfeed.
+      - name: Download the helpers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: helper-*
+          merge-multiple: true
+          path: helpers
 
       - name: Resolve tag and version
         env:

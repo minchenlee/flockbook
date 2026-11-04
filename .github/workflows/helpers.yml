@@ -6,6 +6,11 @@ name: helpers
 # The release calls this; run it by hand (workflow_dispatch) to try a branch. It never publishes anything.
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: "What to build (the release passes its tag); empty: the triggering ref"
+        type: string
+        default: ""
   workflow_dispatch:
   # A ci/ branch tries it before main has this file (workflow_dispatch needs it on main).
   push:
@@ -41,6 +46,8 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -73,6 +80,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -103,6 +112,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@v4
         with:
           pattern: helper-*
