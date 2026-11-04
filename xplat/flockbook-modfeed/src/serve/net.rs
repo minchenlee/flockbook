@@ -25,6 +25,9 @@ pub const MAX_BODY: usize = 1 << 20;
 pub const MAX_CONNECTIONS: usize = 32;
 /// A socket that has not said hello by then is closed; a head that does not end by then too.
 pub const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+/// A message (or a response) that is not written by then ends the connection: the peer stopped reading. A deadline
+/// for the whole write, not per call: a peer that takes a few bytes now and then keeps a per-call timeout from firing.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often the socket's pushes go out.
 pub const TICK: Duration = Duration::from_secs(1);
 
@@ -178,6 +181,7 @@ fn mime(name: &str) -> &'static str {
 
 fn connection(mut s: TcpStream, settings: &Settings) {
     let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
     let Some((head, rest)) = read_head(&mut s) else {
         text(&mut s, "400 Bad Request", "Bad request");
         return;
@@ -269,17 +273,20 @@ fn socket_loop(mut s: TcpStream, head: &Head, rest: Vec<u8>, settings: &Settings
     let mut config = WebSocketConfig::default();
     config.max_message_size = Some(MAX_BODY);
     config.max_frame_size = Some(MAX_BODY);
-    let mut ws = WebSocket::from_partially_read(s, rest, Role::Server, Some(config));
+    let mut ws = WebSocket::from_partially_read(Timed { s, until: Instant::now() + WRITE_TIMEOUT }, rest, Role::Server, Some(config));
     let mut session = Session::new(settings.hub.clone());
     let opened = Instant::now();
     let mut last_tick = Instant::now();
     loop {
         let mut out = vec![];
+        // `read` first flushes what is queued: that flush gets the deadline too.
+        ws.get_mut().until = Instant::now() + WRITE_TIMEOUT;
         match ws.read() {
             Ok(Message::Text(t)) => out = session.receive(t.as_str()),
             Ok(Message::Close(_)) => break,
             Ok(Message::Binary(_)) => break,
             Ok(_) => {}
+            // The read timeout only (a stalled write is BrokenPipe, see `Timed`).
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(_) => break,
         }
@@ -291,12 +298,18 @@ fn socket_loop(mut s: TcpStream, head: &Head, rest: Vec<u8>, settings: &Settings
             out.extend(session.tick());
         }
         for m in out {
+            // A message the peer did not take in WRITE_TIMEOUT ends here.
+            ws.get_mut().until = Instant::now() + WRITE_TIMEOUT;
             if ws.send(Message::text(m.to_string())).is_err() {
                 return;
             }
         }
-        let _ = ws.flush();
+        ws.get_mut().until = Instant::now() + WRITE_TIMEOUT;
+        if ws.flush().is_err() {
+            return;
+        }
     }
+    ws.get_mut().until = Instant::now() + WRITE_TIMEOUT;
     let _ = ws.close(None);
     let _ = ws.flush();
 }
@@ -323,5 +336,36 @@ mod tests {
         assert!(slots.take().is_none(), "at most max at once");
         drop(held);
         assert!(slots.take().is_some());
+    }
+}
+
+/// The socket with a deadline for writes (`until`). Each write waits at most until then; past it, or when a write
+/// stalls, the error is BrokenPipe, so it never reads as the socket's short read timeout (WouldBlock, TimedOut).
+struct Timed {
+    s: TcpStream,
+    until: Instant,
+}
+
+impl Read for Timed {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.s.read(buf)
+    }
+}
+
+impl Write for Timed {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let stalled = || std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the peer stopped reading");
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(stalled());
+        }
+        self.s.set_write_timeout(Some(left))?;
+        match self.s.write(buf) {
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Err(stalled()),
+            r => r,
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.s.flush()
     }
 }

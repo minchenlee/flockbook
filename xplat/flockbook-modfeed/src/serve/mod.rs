@@ -97,7 +97,8 @@ fn unit_arg(s: &str) -> String {
 }
 
 /// A service file for `program` with these options. Printed only; the owner installs it (SERVE.md).
-pub fn service(kind: &str, program: &str, o: &Options) -> String {
+/// `home`: the user's home folder (launchd writes the log to `~/Library/Logs`; systemd keeps it in the journal).
+pub fn service(kind: &str, program: &str, home: &str, o: &Options) -> String {
     let args = args_of(o);
     if kind == "launchd" {
         let mut s = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n");
@@ -106,7 +107,7 @@ pub fn service(kind: &str, program: &str, o: &Options) -> String {
             s += &format!("    <string>{}</string>\n", xml(&a));
         }
         s += "  </array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n";
-        s += "  <key>StandardErrorPath</key><string>/tmp/flockbook-serve.log</string>\n</dict>\n</plist>\n";
+        s += &format!("  <key>StandardErrorPath</key><string>{}</string>\n</dict>\n</plist>\n", xml(&format!("{home}/Library/Logs/flockbook-modfeed-serve.log")));
         return s;
     }
     let line: Vec<String> = std::iter::once(program.to_string()).chain(args).map(|a| unit_arg(&a)).collect();
@@ -127,7 +128,12 @@ pub fn main(args: &[String]) -> i32 {
     };
     if let Some(kind) = o.print.clone() {
         let program = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "flockbook-modfeed".into());
-        print!("{}", service(&kind, &program, &o));
+        let home = herdr_core::hc::session::home_dir(&herdr_core::hc::session::process_env());
+        if kind == "launchd" && home.is_empty() {
+            eprintln!("serve: HOME is not set (the log goes to ~/Library/Logs)");
+            return 1;
+        }
+        print!("{}", service(&kind, &program, &home, &o));
         return 0;
     }
     if o.cache.is_none() {
@@ -180,10 +186,13 @@ mod tests {
     #[test]
     fn service_files() {
         let o = parse(&a(&["--user", "me@example.com", "--port", "9000", "--read-only"])).unwrap();
-        let l = service("launchd", "/opt/fb/flockbook-modfeed", &o);
+        let l = service("launchd", "/opt/fb/flockbook-modfeed", "/h/me", &o);
+        assert!(l.contains("<key>StandardErrorPath</key><string>/h/me/Library/Logs/flockbook-modfeed-serve.log</string>"));
+        assert!(!l.contains("/tmp"), "no log in /tmp");
         assert!(l.contains("<string>/opt/fb/flockbook-modfeed</string>\n    <string>serve</string>"));
         assert!(l.contains("<string>me@example.com</string>") && l.contains("<string>9000</string>") && l.contains("<string>--read-only</string>"));
-        let s = service("systemd", "/opt/fb/flockbook-modfeed", &o);
+        let s = service("systemd", "/opt/fb/flockbook-modfeed", "/home/me", &o);
+        assert!(!s.contains("StandardError") && !s.contains("/tmp"), "systemd: the journal");
         assert!(s.contains("ExecStart=\"/opt/fb/flockbook-modfeed\" \"serve\" \"--user\" \"me@example.com\" \"--port\" \"9000\" \"--read-only\""));
         assert!(!s.contains("0.0.0.0") && !l.contains("0.0.0.0"));
     }

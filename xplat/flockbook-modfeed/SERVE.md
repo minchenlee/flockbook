@@ -31,6 +31,11 @@ Approve, answer and send go only with `POST /api`:
   the Origin rule alone decides.
 - A page from another site that is open in your browser therefore cannot use your Tailscale identity (CSRF).
 
+`send` names the agent and the conversation the page showed. When another agent or another conversation is
+in that pane now, nothing is sent (the same check as the mod's `send --expect-kind`, `--expect-path`).
+
+A connection whose peer stops reading is closed after 5 s without progress on a message.
+
 ## Limits
 
 - Any program on this machine, of any user, can connect to 127.0.0.1 (loopback is shared by all users)
@@ -74,6 +79,7 @@ macOS (launchd):
 ```sh
 flockbook-modfeed serve --print launchd --user you@example.com > ~/Library/LaunchAgents/dev.flockbook.serve.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.flockbook.serve.plist
+# log: ~/Library/Logs/flockbook-modfeed-serve.log
 # stop: launchctl bootout gui/$(id -u)/dev.flockbook.serve
 ```
 
@@ -83,6 +89,7 @@ Linux (systemd, as your user):
 mkdir -p ~/.config/systemd/user
 flockbook-modfeed serve --print systemd --user you@example.com > ~/.config/systemd/user/flockbook-serve.service
 systemctl --user daemon-reload && systemctl --user enable --now flockbook-serve
+# log: journalctl --user -u flockbook-serve
 # stop: systemctl --user disable --now flockbook-serve
 ```
 

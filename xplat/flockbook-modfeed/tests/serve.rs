@@ -239,14 +239,14 @@ fn socket_reads_and_keys_go_with_post() {
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()[0]["ok"], false);
     assert_eq!(fake.keys().len(), 1);
     // Send over POST types the text.
-    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p3", "type": "send", "pane": id, "text": "hello"}));
+    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p3", "type": "send", "pane": id, "text": "hello", "agent": "claude"}));
     let r: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(r[0]["re"], "p3");
     assert_eq!(r[0]["ok"], true, "{r}");
     assert_eq!(fake.calls("terminal.send").len(), 1, "the text went once");
     // Control characters are refused before anything goes out.
     let sends = fake.calls("terminal.send").len();
-    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p4", "type": "send", "pane": id, "text": "x\u{1b}[2J"}));
+    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p4", "type": "send", "pane": id, "text": "x\u{1b}[2J", "agent": "claude"}));
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()[0]["error"]["code"], "badRequest");
     assert_eq!(fake.calls("terminal.send").len(), sends);
 }
@@ -267,4 +267,85 @@ fn read_only_and_bind() {
     // Only loopback answers: the listener's address is 127.0.0.1.
     let (c, _) = http(srv.port, "GET", "/", &[("Host", HOST), ("Tailscale-User-Login", ME)], "");
     assert_eq!(c, 200);
+}
+
+/// Values from the page are never read as options: a prompt id "--allow" with allow false is a stale prompt, not
+/// an allow; a question id "--answers" is a stale question; a text "--terminal t9" is typed as it is.
+#[test]
+fn values_are_never_options() {
+    let fake = blocked_fake();
+    fake.set_terminals(vec![claude("t1", "blocked", "permission"), claude("t9", "idle", "")]);
+    let srv = start(&fake.path, &[]);
+    let reply = |m: Value| -> Value { serde_json::from_str::<Value>(&api(srv.port, &[], &m).1).unwrap()[0].clone() };
+    for (prompt, allow) in [("--allow", false), ("--deny", true), ("--allow --deny", true), ("t9", true)] {
+        let r = reply(json!({"v": 1, "id": "a", "type": "approve", "pane": "hc:t1", "prompt": prompt, "allow": allow}));
+        assert_eq!(r["error"]["code"], "stale", "prompt {prompt:?}: {r}");
+    }
+    assert!(fake.keys().is_empty(), "no key for a prompt that is not on screen");
+    let r = reply(json!({"v": 1, "id": "q", "type": "answer", "pane": "hc:t1", "question": "--answers", "answers": [{"picks": [0]}]}));
+    assert_eq!(r["error"]["code"], "stale", "{r}");
+    assert!(fake.keys().is_empty());
+    let r = reply(json!({"v": 1, "id": "s", "type": "send", "pane": "hc:t1", "text": "--terminal", "agent": "claude"}));
+    assert_eq!(r["ok"], true, "{r}");
+    let sent = fake.calls("terminal.send");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["terminal"], "t1", "to the pane asked, never t9");
+    assert_eq!(sent[0]["text"], "--terminal");
+}
+
+/// `send` names the agent the page showed: another agent in that pane now gets nothing (the mod's --expect-kind).
+#[test]
+fn send_checks_the_agent() {
+    let fake = blocked_fake();
+    let srv = start(&fake.path, &[]);
+    let r: Value = serde_json::from_str(&api(srv.port, &[], &json!({"v": 1, "id": "s", "type": "send", "pane": "hc:t1", "text": "hi", "agent": "codex"})).1).unwrap();
+    assert_eq!(r[0]["error"]["code"], "stale", "{r}");
+    let r: Value = serde_json::from_str(&api(srv.port, &[], &json!({"v": 1, "id": "s2", "type": "send", "pane": "hc:t1", "text": "hi"})).1).unwrap();
+    assert_eq!(r[0]["error"]["code"], "badRequest", "the agent is needed: {r}");
+    assert!(fake.calls("terminal.send").is_empty());
+}
+
+/// A masked client text frame (payload under 126 bytes).
+fn frame(text: &str) -> Vec<u8> {
+    let b = text.as_bytes();
+    assert!(b.len() < 126);
+    let mask = [1u8, 2, 3, 4];
+    let mut f = vec![0x81, 0x80 | b.len() as u8];
+    f.extend_from_slice(&mask);
+    f.extend(b.iter().enumerate().map(|(i, c)| c ^ mask[i % 4]));
+    f
+}
+
+/// A peer that asks but never reads: once the hub cannot write for its write timeout, it lets the connection go.
+/// Each hello is answered with a large snapshot (2000 terminals), so a few dozen small requests are megabytes the
+/// peer never takes: the hub's writes stall for sure, whatever the machine's load.
+#[test]
+fn a_peer_that_does_not_read_is_let_go() {
+    let fake = blocked_fake();
+    fake.set_terminals((0..2000).map(|i| claude(&format!("t{i}"), "idle", "")).collect());
+    let srv = start(&fake.path, &[]);
+    let mut s = TcpStream::connect(("127.0.0.1", srv.port)).unwrap();
+    let req = format!("GET /ws HTTP/1.1\r\nHost: {HOST}\r\nTailscale-User-Login: {ME}\r\nOrigin: https://{HOST}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    s.write_all(req.as_bytes()).unwrap();
+    let hello = frame(r#"{"v":1,"id":"h","type":"hello","token":"","client":"t","clientVersion":"1"}"#);
+    for _ in 0..60 {
+        s.write_all(&hello).unwrap();
+    }
+    // Long past the hub's write timeout, then read: what was sent, then the end. A hub still holding the
+    // connection would send the rest and then wait (the read times out).
+    std::thread::sleep(Duration::from_secs(15));
+    // A socket the hub already reset may refuse the option (macOS: EINVAL); then it has ended.
+    if s.set_read_timeout(Some(Duration::from_secs(10))).is_err() {
+        return;
+    }
+    let mut buf = vec![0u8; 1 << 16];
+    let ended = loop {
+        match s.read(&mut buf) {
+            Ok(0) => break true,
+            Ok(_) => continue,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => break false,
+            Err(_) => break true, // reset
+        }
+    };
+    assert!(ended, "the hub let the connection go");
 }

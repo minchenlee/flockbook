@@ -1528,7 +1528,9 @@ function composer(pane: string, promptOpen: boolean, agent?: string): HTMLElemen
     state.progress = list.some((a) => !a.uploaded) ? 0 : null;
     render();
     const failed = list.length ? await upload(list) : null;
-    const r = failed ? { ok: false, ...failed } : await request({ type: "send", pane, text, ...(list.length ? { attachments: list.map((a) => a.name) } : {}) });
+    const r = failed ? { ok: false, ...failed } : await request({ type: "send", pane, text, ...(list.length ? { attachments: list.map((a) => a.name) } : {}),
+      // The agent and conversation shown: the Rust helper sends nothing when another one is in the pane now.
+      ...(helper ? { agent: find(pane)?.p.agent?.kind, session: view(pane).session } : {}) });
     state.busy = false;
     state.progress = null;
     if (r.ok) {

@@ -333,34 +333,28 @@ impl Session {
         if p.agent.is_none() {
             return vec![fail(&id, "readOnly", "Remote input goes to agents only.")];
         }
-        let lines = match ty {
+        // Typed values to the sidecar's own functions (`cli::keys`): nothing from the page is parsed as an option.
+        let cache = self.cfg.cache.as_deref().map(std::path::Path::new);
+        let keys = match ty {
             "approve" => {
                 let (Some(prompt), Some(allow)) = (m["prompt"].as_str(), m["allow"].as_bool()) else {
                     return vec![fail(&id, "badRequest", "approve needs prompt and allow.")];
                 };
-                let mut a = self.base("approve", &p.terminal_id);
-                a.extend(["--request".into(), prompt.into(), if allow { "--allow" } else { "--deny" }.into()]);
-                run(&a)
+                cli::Keys::Approve { request: prompt.into(), allow }
             }
             "answer" => {
                 let (Some(q), Some(answers)) = (m["question"].as_str(), m["answers"].as_array()) else {
                     return vec![fail(&id, "badRequest", "answer needs question and answers.")];
                 };
-                let mut list = vec![];
                 for a in answers {
-                    let picks: Vec<i64> = a["picks"].as_array().map(|p| p.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
-                    let mut x = json!({"picks": picks});
-                    if let Some(o) = a["other"].as_str() {
-                        if let Some(why) = input_problem(o, MAX_OTHER) {
-                            return vec![fail(&id, "badRequest", &why)];
-                        }
-                        x["other"] = json!(o);
+                    if let Some(why) = a["other"].as_str().and_then(|o| input_problem(o, MAX_OTHER)) {
+                        return vec![fail(&id, "badRequest", &why)];
                     }
-                    list.push(x);
                 }
-                let mut a = self.base("answer", &p.terminal_id);
-                a.extend(["--request".into(), q.into(), "--answers".into(), Value::Array(list).to_string()]);
-                run(&a)
+                let Some(answers) = crate::cards::parse_answers(&Value::Array(answers.clone()).to_string()) else {
+                    return vec![fail(&id, "badRequest", "answers: one {picks, other} per question.")];
+                };
+                cli::Keys::Answer { request: q.into(), answers }
             }
             _ => {
                 let Some(text) = m["text"].as_str().filter(|t| !t.is_empty()) else { return vec![fail(&id, "badRequest", "send needs text.")] };
@@ -370,10 +364,17 @@ impl Session {
                 if m["attachments"].as_array().is_some_and(|a| !a.is_empty()) {
                     return vec![fail(&id, "badRequest", "This helper takes no pictures yet.")];
                 }
-                run(&["send".into(), "--terminal".into(), p.terminal_id.clone(), "--text".into(), text.into()])
+                // The agent the page showed, and its log (the conversation's `session`, when it is a log): another
+                // agent or another conversation in this pane now gets nothing (the mod's --expect-kind, --expect-path).
+                let Some(kind) = m["agent"].as_str().filter(|k| !k.is_empty()) else {
+                    return vec![fail(&id, "badRequest", "send needs agent: the agent kind the page shows.")];
+                };
+                let path = m["session"].as_str().filter(|s| !s.is_empty() && *s != pane && *s != p.terminal_id).map(String::from);
+                cli::Keys::Send { text: text.into(), expect_kind: Some(kind.into()), expect_path: path }
             }
         };
-        vec![done_reply(&id, &lines)]
+        let line = cli::keys(&p.terminal_id, cache, keys);
+        vec![done_reply(&id, std::slice::from_ref(&line))]
     }
 
     /// Pushes since the last call: a changed snapshot, and new rows and prompts of the watched panes.
