@@ -9,9 +9,13 @@
 //!   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
 //!   flockbook-modfeed paste-image --dir <folder>   (the clipboard's image as a PNG there; path null when none)
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
+//!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
+//!   flockbook-modfeed helper remove --machine <m>
+//!
+//! A terminal `m/tN` on another machine: the command runs there, in the helper there (`remote`). Rust only.
 
 use crate::protocol::{JsonLines, PROTOCOL_VERSION, SIDECAR_VERSION};
-use crate::{cards, feed, locate, paste, status};
+use crate::{cards, feed, locate, paste, remote, status};
 use herdr_core::hc::{HcClient, HcSession};
 use herdr_core::PaneScreen;
 use herdr_core::resolver::SessionResolver;
@@ -48,7 +52,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image"]}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper"]}));
             r.finish(true)
         }
         "paste-image" => {
@@ -65,6 +69,26 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => r.fail("write", &format!("cannot save the image: {e}")),
             }
         }
+        "helper" => {
+            let (Some(what), Some(machine)) = (args.first().cloned(), opt("--machine")) else {
+                return r.fail("usage", "helper needs install or remove, and --machine <m>");
+            };
+            let session = HcSession::resolve_env();
+            if !session.is_available() {
+                return r.fail("no-core", "herdr-core is not running");
+            }
+            let client = HcClient::new(session, 8, 22);
+            let cache = opt("--cache").map(PathBuf::from);
+            let done = match (what.as_str(), opt("--sha256")) {
+                ("install", Some(sha)) => remote::install(&client, &mut r.out, &machine, &sha, cache.as_deref()),
+                ("remove", _) => remote::remove(&client, &mut r.out, &machine, cache.as_deref()),
+                _ => return r.fail("usage", "helper install needs --sha256 <hex> (the one the user said yes to)"),
+            };
+            match done {
+                Ok(()) => r.finish(true),
+                Err((code, message)) => r.fail(code, &message),
+            }
+        }
         "feed" | "status" | "card" | "approve" | "answer" | "send" => {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
             let cache_path = opt("--cache").map(PathBuf::from);
@@ -75,6 +99,12 @@ pub fn run(argv: &[String]) -> String {
             }
             // exec gives the sidecar 30 s; a send that waits longer reports `unconfirmed`.
             let client = HcClient::new(session.clone(), 8, 22);
+            match remote::split(&terminal) {
+                Err(()) => return r.fail("bad_terminal", &format!("not a terminal address: {terminal}")),
+                // On another machine: the helper there answers, and its lines go back as they are.
+                Ok(Some((machine, there))) => return remote::forward(&client, &cmd, &args, &machine, &there, cache_url),
+                Ok(None) => {}
+            }
             let ws = match client.snapshot() {
                 Ok(ws) => ws,
                 Err(e) => return r.fail("core", &format!("herdr-core: {e}")),

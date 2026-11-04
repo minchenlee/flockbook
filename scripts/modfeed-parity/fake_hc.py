@@ -10,9 +10,11 @@ Also in the state:
   driven by the keys: digits pick or toggle, left/right move between questions, tab moves on, the review screen's
   `1` submits. Single choice and multiSelect without "Other" only.
 - "delay_keys": {addr: seconds}: `terminal.keys` answers that much later (a key hc held: the sidecar times out).
+- "machines": {name: home}: `machine.exec` with `on` runs its `argv` (or its `line` with `sh -c`) here, HOME set to that home and
+  HC_SOCKET to this fake (the machine's core is this one: its terminals are the plain addresses).
 - `terminal.put` answers a path on the remote machine: "/remote/tmp/<name>".
 """
-import json, os, socket, sys, threading, time
+import base64, json, os, socket, subprocess, sys, threading, time
 
 sock_path, state_path, calls_path = sys.argv[1], sys.argv[2], sys.argv[3]
 lock = threading.Lock()
@@ -137,7 +139,7 @@ def handle(conn):
             buf += chunk
         req = json.loads(buf.split(b"\n", 1)[0])
         method, params, rid = req.get("method"), req.get("params") or {}, req.get("id")
-        delay = 0
+        delay, run = 0, None
         with lock:
             with open(calls_path, "a") as f:
                 f.write(json.dumps({"method": method, "params": params}, sort_keys=True) + "\n")
@@ -167,12 +169,30 @@ def handle(conn):
                 reply = {"result": {"path": "/remote/tmp/" + str(params.get("name", ""))}}
             elif method == "doc.get":
                 reply = {"result": {"value": None}}
+            elif method == "machine.exec":
+                home = st.get("machines", {}).get(params.get("on") or "")
+                if home is None:
+                    reply = {"error": {"code": -32000, "message": "unknown machine", "data": {"kind": "machine_unknown"}}}
+                else:
+                    argv = params.get("argv") or ["sh", "-c", params.get("line") or ""]
+                    run, reply = (argv, home), None
             elif method == "machine.list":
                 reply = {"result": {"machines": []}}
             else:
                 reply = {"error": {"code": -32601, "message": "unknown method " + str(method)}}
         if delay:
             time.sleep(delay)  # outside the lock: other calls go on
+        if run:  # outside the lock: the helper there calls this fake too
+            env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": run[1], "HC_SOCKET": sock_path, "TZ": "UTC"}
+            try:
+                p = subprocess.run(run[0], cwd=run[1], env=env, capture_output=True, timeout=60)
+            except OSError:
+                p = None
+            if p is None:  # as hc: the program is not there
+                reply = {"error": {"code": -32000, "message": "spawn failed", "data": {"kind": "spawn_failed"}}}
+            else:
+                reply = {"result": {"code": p.returncode, "stdout": base64.b64encode(p.stdout).decode(),
+                                    "stderr": base64.b64encode(p.stderr).decode(), "truncated": False, "timed_out": False, "ms": 1}}
         reply.update({"jsonrpc": "2.0", "id": rid})
         conn.sendall((json.dumps(reply) + "\n").encode())
     finally:

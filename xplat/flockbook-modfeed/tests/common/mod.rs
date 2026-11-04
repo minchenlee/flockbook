@@ -20,6 +20,19 @@ pub struct State {
     pub send_delay: f64,
     /// Seconds `terminal.keys` takes before it answers (hc's typing-quiet rule can hold keys this long).
     pub keys_delay: f64,
+    /// Other machines (`machine.exec`, `file.write` with `on`): name -> its home and the socket of its core. A
+    /// command there runs here with `sh -c`, HOME set to that home and HC_SOCKET to that core.
+    pub machines: HashMap<String, (std::path::PathBuf, String)>,
+    /// What `uname -sm` gives there: Some((code, stdout)); None runs the real one.
+    pub uname: Option<(i32, String)>,
+    /// `machine.exec` answers that it ran out of time.
+    pub exec_timed_out: bool,
+    /// A Windows machine: no `uname` (argv `uname` gives `spawn_failed`).
+    pub windows: bool,
+    /// `file.write` changes the bytes on the way (the sum there must catch it).
+    pub corrupt_writes: bool,
+    /// `machine.exec` starts in `/`, not in the home there (hc does not promise the cwd).
+    pub exec_in_root: bool,
 }
 
 pub struct FakeHc {
@@ -89,8 +102,57 @@ impl FakeHc {
             .map(|(_, p)| p["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_string()).collect())
             .collect()
     }
+    pub fn add_machine(&self, name: &str, home: &std::path::Path, sock: &str) {
+        self.state.lock().unwrap().machines.insert(name.into(), (home.to_path_buf(), sock.into()));
+    }
     pub fn calls(&self, method: &str) -> Vec<Value> {
         self.state.lock().unwrap().calls.iter().filter(|(m, _)| m == method).map(|(_, p)| p.clone()).collect()
+    }
+}
+
+pub fn b64(d: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(d)
+}
+
+/// What `machine.exec` was given: `argv` (no shell) or `line` (`sh -c`).
+pub enum Run {
+    Argv(Vec<String>),
+    Line(String),
+}
+
+/// Runs it on this computer as that machine would: in its home, with its core. Err: an hc error kind.
+fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool, windows: bool, in_root: bool) -> Result<Value, String> {
+    if timed_out {
+        return Ok(json!({"code": null, "signal": 15, "stdout": "", "stderr": "", "truncated": false, "timed_out": true, "ms": 30000}));
+    }
+    let is_uname = match run {
+        Run::Argv(a) => a == &["uname".to_string(), "-sm".to_string()],
+        Run::Line(l) => l.trim() == "uname -sm",
+    };
+    if windows {
+        // cmd.exe would run a line, with POSIX quotes that mean nothing to it. Tests check no line got here.
+        return Err(if matches!(run, Run::Line(_)) { "line_on_windows" } else { "spawn_failed" }.into());
+    }
+    if let (Some((code, out)), true) = (uname, is_uname) {
+        return Ok(json!({"code": code, "stdout": b64(out.as_bytes()), "stderr": "", "truncated": false, "timed_out": false, "ms": 1}));
+    }
+    let mut c = match run {
+        Run::Argv(a) => {
+            let mut c = std::process::Command::new(&a[0]);
+            c.args(&a[1..]);
+            c
+        }
+        Run::Line(l) => {
+            let mut c = std::process::Command::new("sh");
+            c.arg("-c").arg(l);
+            c
+        }
+    };
+    c.current_dir(if in_root { std::path::Path::new("/") } else { home }).env_clear().env("HOME", home).env("HC_SOCKET", sock).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    match c.output() {
+        Ok(o) => Ok(json!({"code": o.status.code(), "stdout": b64(&o.stdout), "stderr": b64(&o.stderr), "truncated": false, "timed_out": false, "ms": 1})),
+        Err(_) => Err("spawn_failed".into()),
     }
 }
 
@@ -111,6 +173,42 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
             g.calls.push((m.clone(), p.clone()));
             match m.as_str() {
                 "terminal.list" => Some(reply(json!({"terminals": g.terminals, "hidden_finished": 0, "machines": []}))),
+                "terminal.put" => {
+                    let name = p["name"].as_str().unwrap_or("");
+                    Some(reply(json!({"path": format!("/remote/tmp/{name}"), "bytes": 1})))
+                }
+                "machine.exec" | "file.write" => {
+                    let on = p["on"].as_str().unwrap_or("").to_string();
+                    let Some((home, sock)) = g.machines.get(&on).cloned() else {
+                        let e = json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": format!("unknown machine \"{on}\""), "data": {"kind": "machine_unknown"}}});
+                        let _ = s.write_all(format!("{e}\n").as_bytes());
+                        continue;
+                    };
+                    if m == "file.write" {
+                        use base64::Engine;
+                        let path = home.join(p["path"].as_str().unwrap_or(""));
+                        let mut data = base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap_or("")).unwrap();
+                        if g.corrupt_writes {
+                            if let Some(b) = data.first_mut() {
+                                *b ^= 0xff;
+                            }
+                        }
+                        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                        std::fs::write(&path, &data).unwrap();
+                        Some(reply(json!({"path": path, "bytes": data.len()})))
+                    } else {
+                        let run = match p["argv"].as_array() {
+                            Some(a) => Run::Argv(a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()),
+                            None => Run::Line(p["line"].as_str().unwrap_or("").to_string()),
+                        };
+                        let (uname, timed_out, windows, in_root) = (g.uname.clone(), g.exec_timed_out, g.windows, g.exec_in_root);
+                        drop(g);
+                        Some(match exec_there(&run, &home, &sock, uname, timed_out, windows, in_root) {
+                            Ok(v) => reply(v),
+                            Err(kind) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": kind, "data": {"kind": kind}}}),
+                        })
+                    }
+                }
                 "terminal.read" => Some(match g.screens.get(&a) {
                     Some(t) => reply(json!({"text": t, "complete": true, "how": "screen", "why": null})),
                     None => err(format!("no terminal {a}")),

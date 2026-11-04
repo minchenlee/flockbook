@@ -49,12 +49,55 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
+| `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
+| `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 
 `card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
 `--cache` is a file the sidecar may read and write; the mod passes `<herdr-app home>/flockbook/cache.json`.
+
+### Terminals on another machine (`m/t7`; Rust sidecar only)
+
+The same helper runs on machine `m` with the same command and `--terminal t7`. First the sidecar
+finds the platform there with `uname -sm` (`argv`). A machine without a helper target (Windows,
+another CPU) gets `remote_helper_unsupported` and nothing else runs there. On Unix, hc `machine.exec`
+gets `argv` `["sh", "-c", <fixed script>, "sh", <command>, <values>…]`: the fixed script runs
+`"$HOME"/.local/share/flockbook/helper/<version>/flockbook-modfeed` (so the cwd of exec does not
+matter), and the values are only in `"$@"`, so the shell never reads them: `--text` reaches the helper
+exactly as given.
+Its lines come back unchanged, so `header`, `end` and everything between are the helper's there.
+The helper there keeps its own cache (`"$HOME"/.cache/flockbook/cache.json` there); this computer's
+`--cache` is not passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
+text names that copy. Only one level: `a/b/t7` is `bad_terminal`. The Swift sidecar does not do
+this: it answers `not-agent` for these terminals.
+
+The helper there must be this same version (`protocol` and `sidecar` both). It is never put on
+another machine without the user's yes:
+
+1. A command for `m/t7` answers `remote_helper_missing` (or `remote_helper_outdated`) with
+   `install`: `{"machine","target","path","bytes","sha256","source"}`, or `null` when this
+   Flockbook carries no helper for that platform.
+2. The mod shows a card with the machine, the path there, the size and the sha256. `source`
+   `"dev"` means the file is from `FLOCKBOOK_REMOTE_HELPERS` (a test or local build), not from the
+   installed Flockbook: the card says so.
+3. Only when the user presses Install: `helper install --machine m --sha256 <the card's sha256>`.
+   The sidecar reads the file again, checks it against `SHA256SUMS` and that sha256, and writes it
+   there in parts of at most 6 MiB with this run's own tag. Then one command there joins the parts,
+   computes the sha256, and only when it matches makes the file runnable and moves it in place.
+   When it does not match, the file is removed.
+4. `helper remove --machine m` removes `~/.local/share/flockbook/helper` there (every version).
+5. With `--cache <file>` the sidecar keeps `remote.json` beside that file: each machine's platform
+   and "no helper there" for 60 s, and the local file's sha256 while its path, size and mtime stay
+   the same. `helper install` and `remove` reset "no helper there". The install reads and checks the
+   whole file again in any case.
+
+The file comes from `<herdr-app home>/flockbook/remote/<target>/flockbook-modfeed`, with
+`SHA256SUMS` in `remote/` (`<sha256>  <target>/flockbook-modfeed`, a leading `./` is fine) or in
+`remote/<target>/`. A file that names the helper twice, or a sum that is not 64 hex digits, gives
+`checksum`.
+Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-apple-darwin`.
 
 ## Lines
 
@@ -93,14 +136,27 @@ owner presses a button, never on a timer. `send` types a message and presses Ent
 | `not-agent` | The terminal runs no agent (a plain shell). |
 | `locate` | Finding the session log failed. |
 | `read` | The log could not be read. |
+| `bad_terminal` | Not a terminal address (`a/b/t7`, `/t7`). |
+| `remote_helper_missing` | Machine `m` has no helper yet. `install`: what the install card shows, or `null`. |
+| `remote_helper_outdated` | The helper there is another version. `remote`: its `protocol` and `sidecar`; `install` as above. |
+| `remote_helper_unsupported` | No helper for that machine's platform (Windows, or another CPU). `message` says which. |
+| `remote_failed` | hc could not run it there: unknown machine, no answer in 30 s, or too much output. |
+| `checksum` | `helper install`: the file is not the one the user said yes to, or it arrived changed. Nothing was installed. |
 
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send"],"type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper"],"type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
+
+### `installed` (`helper install`), `removed` (`helper remove`)
+
+```json
+{"bytes":4371392,"machine":"box","parts":1,"path":"~/.local/share/flockbook/helper/0.1.0/flockbook-modfeed","sha256":"7ac5…","source":"release","type":"installed"}
+{"machine":"box","path":"~/.local/share/flockbook/helper","type":"removed"}
+```
 
 ### `log` (`feed`)
 

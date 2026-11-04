@@ -4,7 +4,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
 import { theme, run } from "herdr";
-import { currentAgent, icon, SPIN_MS, FADE, shownScreen, watchEdge, noteWindowHeight } from "./state.js";
+import { currentAgent, machineOf, icon, SPIN_MS, FADE, shownScreen, watchEdge, noteWindowHeight } from "./state.js";
 import { Appear } from "./motion.js";
 import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
@@ -14,6 +14,7 @@ import { Composer } from "./composer.js";
 import { markdownView } from "./mdblocks.js";
 import { Cards, wanted } from "./cards.js";
 import { startTop, overBar, BAR_H } from "./top.js";
+import { HelperUI, isRemoteProblem } from "./helpercard.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
@@ -50,6 +51,8 @@ export class ChatView {
     this.top = {}; startTop(cx, this.top);
     this.appear = new Appear();
     this.cards = new Cards(cx);
+    this.helper = new HelperUI();
+    this.refresh = (cx) => { this.lastPoll = 0; return this.poll(cx); };
     this.cards.canFocus = () => this.composer?.empty !== false;
     this.switchTo(currentAgent()?.address ?? null);
     cx.spawn((cx) => this.poll(cx));
@@ -74,6 +77,7 @@ export class ChatView {
     const screen = shownScreen();
     if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.toNewest(); cx.notify(); }
     this.screen = screen;
+    if (this.helper.changed()) cx.notify();
     cx.spawn((cx) => this.composer.pollStatus(cx));
     const agent = currentAgent();
     cx.spawn((cx) => this.cards.poll(cx, this.address, wanted(agent, this.feed()?.rows)));
@@ -210,6 +214,7 @@ export class ChatView {
 
   // A failed `feed` in words people can act on; the sidecar's own message small below.
   problem(t, err) {
+    if (isRemoteProblem(err)) return this.helper.problem(t, err, machineOf(this.address), this.refresh);
     const say = {
       "not-agent": "This terminal runs no agent.",
       "no-terminal": "This agent's terminal is gone.",
@@ -292,7 +297,9 @@ export class ChatView {
       // Presses on the content don't drag the window (the block has window_drag for the bar).
       .child(v_flex().flex_1().min_h(0).on_mouse_down("left", stop)
         .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
-      .when(Boolean(f) && f.error?.code !== "not-agent", (el) => {
+      .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
+        .on_mouse_down("left", stop).child(this.helper.removeCard(t, this.refresh))))
+      .when(Boolean(f) && f.error?.code !== "not-agent" && !isRemoteProblem(f.error), (el) => {
         const card = this.cards.view(this.address, t, "chat-card");
         if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
         return el.child(div().w_full().on_mouse_down("left", stop).child(this.composer.render(currentAgent(), t)));

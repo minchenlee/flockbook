@@ -5,6 +5,13 @@ import { agents, focused, shared, setShared, run, spaces, openOverlay, closeOver
 export const KEY_AGENT = "flockbook.agent";
 // The screen in the stack, as this mod last selected it (layout() is the file, not the live tree).
 export const KEY_SCREEN = "flockbook.screen";
+// The machine whose Flockbook helper the tab menu asked to remove (the chat asks first).
+export const KEY_REMOVE = "flockbook.helper.remove";
+// "box/t7" (or "hc:box/t7") → "box"; a local terminal → null. Only one level.
+export function machineOf(address) {
+  const p = String(address ?? "").replace(/^hc:/, "").split("/");
+  return p.length === 2 && p[0] && p[1] ? p[0] : null;
+}
 export const shownScreen = () => shared(KEY_SCREEN) ?? "chat";
 export function showScreen(child) {
   setShared(KEY_SCREEN, child);
