@@ -1,0 +1,25 @@
+[package]
+name = "flockbook-modfeed"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The Flockbook herdr-app mod's sidecar (mod/docs/protocol.md), on herdr-core."
+
+[[bin]]
+name = "flockbook-modfeed"
+path = "src/main.rs"
+
+[lib]
+name = "modfeedkit"
+path = "src/lib.rs"
+
+[dependencies]
+herdr-core = { path = "../herdr-core" }
+serde.workspace = true
+serde_json.workspace = true
+chrono = { version = "0.4.43", default-features = false, features = ["clock", "std"] }
+unicode-segmentation = "1"
+
+[dev-dependencies]
+tempfile = "3"

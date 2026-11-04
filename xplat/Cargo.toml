@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["herdr-core", "spike-select", "spike-virt", "spike-ime", "fb-ui", "flockbook"]
+members = ["herdr-core", "flockbook-modfeed", "spike-select", "spike-virt", "spike-ime", "fb-ui", "flockbook"]
 
 [workspace.package]
 edition = "2021"
