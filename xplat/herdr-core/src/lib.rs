@@ -27,13 +27,9 @@ pub use model::*;
 pub use session::HerdrSession;
 pub use transport::{Connector, LineSocket, Transport};
 
-/// Text Claude Code draws on its permission prompt (port of `PermissionGate`).
-pub const PROMPT_MARKER: &str = "Do you want";
-
-/// Does the pane's visible screen show a permission prompt? Only the screen tells a prompt from a running tool.
-pub fn screen_shows_prompt(screen_text: &str) -> bool {
-    screen_text.contains(PROMPT_MARKER)
-}
+/// Swift `PermissionGate`: the prompt marker and the whole-prompt check (only the screen tells a prompt from a
+/// running tool). One implementation, in `approval`.
+pub use approval::{screen_shows_prompt, PROMPT_MARKER};
 
 pub mod approval;
 pub mod scrollback;
