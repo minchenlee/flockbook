@@ -44,8 +44,9 @@ export const card = (terminal, all = false) => call("card", ["--terminal", termi
 export const approve = (terminal, request, allow) => call("approve", ["--terminal", terminal, "--request", request, allow ? "--allow" : "--deny", "--cache", cachePath()]);
 export const answer = (terminal, request, answers) => call("answer", ["--terminal", terminal, "--request", request, "--answers", JSON.stringify(answers), "--cache", cachePath()]);
 // Only after the user pressed Install on the card; `sha256` is the one the card showed.
-export const installHelper = (machine, sha256) => call("helper", ["install", "--machine", machine, "--sha256", sha256]);
-export const removeHelper = (machine) => call("helper", ["remove", "--machine", machine]);
+// `--cache`: the sidecar remembers machines beside it (a platform, a missing helper), and install or remove resets that.
+export const installHelper = (machine, sha256) => call("helper", ["install", "--machine", machine, "--sha256", sha256, "--cache", cachePath()]);
+export const removeHelper = (machine) => call("helper", ["remove", "--machine", machine, "--cache", cachePath()]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 // `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
 export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,

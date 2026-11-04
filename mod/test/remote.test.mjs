@@ -64,7 +64,7 @@ test("Install puts the helper there with the card's checksum, then the chat load
   byId(v.render(cx), "helper-install")._h.on_click({}, cx);
   assert.match(textOf(v.render(cx)), /Installing on box/);
   await cx.settle();
-  assert.deepEqual(calls.find((a) => a[0] === "helper"), ["helper", "install", "--machine", "box", "--sha256", SHA]);
+  assert.deepEqual(calls.find((a) => a[0] === "helper"), ["helper", "install", "--machine", "box", "--sha256", SHA, "--cache", "/home/test/.config/herdr-app/flockbook/cache.json"]);
   await v.tick(cx); await cx.settle();
   v.render(cx);
   assert.equal(v.feed().rows[0]?.text, "hello from box");
@@ -135,7 +135,7 @@ test("a remote tab's menu offers Remove helper; the chat asks before it removes"
   assert.match(textOf(el), /Remove the Flockbook helper from box\?/);
   assert.ok(!calls.some((a) => a[0] === "helper"), "nothing removed before a press");
   byId(el, "helper-remove")._h.on_click({}, cx); await cx.settle();
-  assert.deepEqual(calls.find((a) => a[0] === "helper"), ["helper", "remove", "--machine", "box"]);
+  assert.deepEqual(calls.find((a) => a[0] === "helper"), ["helper", "remove", "--machine", "box", "--cache", "/home/test/.config/herdr-app/flockbook/cache.json"]);
   assert.equal(fake.shared[KEY_REMOVE], null);
   // Cancel: nothing is removed.
   calls.length = 0; act(item); await v.tick(cx); await cx.settle();

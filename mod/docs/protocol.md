@@ -49,8 +49,8 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
-| `helper install` | `--machine <m> --sha256 <hex>` | `installed` |
-| `helper remove` | `--machine <m>` | `removed` |
+| `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
+| `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 
 `card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
@@ -60,7 +60,10 @@ owner presses a button, never on a timer. `send` types a message and presses Ent
 
 ### Terminals on another machine (`m/t7`; Rust sidecar only)
 
-The same helper runs on machine `m` (hc `machine.exec`) with the same command and `--terminal t7`.
+The same helper runs on machine `m` (hc `machine.exec` with `argv`, never a shell line: values such
+as `--text` reach it exactly as given) with the same command and `--terminal t7`. First the sidecar
+finds the platform there with `uname -sm` (also `argv`). A machine without a helper target (Windows,
+another CPU) gets `remote_helper_unsupported` and nothing else runs there.
 Its lines come back unchanged, so `header`, `end` and everything between are the helper's there.
 The helper there keeps its own cache (`~/.cache/flockbook/cache.json` there); `--cache` is not
 passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
@@ -77,12 +80,20 @@ another machine without the user's yes:
    `"dev"` means the file is from `FLOCKBOOK_REMOTE_HELPERS` (a test or local build), not from the
    installed Flockbook: the card says so.
 3. Only when the user presses Install: `helper install --machine m --sha256 <the card's sha256>`.
-   The sidecar reads the file again, checks it against `SHA256SUMS` and that sha256, writes it
-   there in parts of at most 6 MiB, checks the sha256 there, then makes it runnable.
+   The sidecar reads the file again, checks it against `SHA256SUMS` and that sha256, and writes it
+   there in parts of at most 6 MiB with this run's own tag. Then one command there joins the parts,
+   computes the sha256, and only when it matches makes the file runnable and moves it in place.
+   When it does not match, the file is removed.
 4. `helper remove --machine m` removes `~/.local/share/flockbook/helper` there (every version).
+5. With `--cache <file>` the sidecar keeps `remote.json` beside that file: each machine's platform
+   and "no helper there" for 60 s, and the local file's sha256 while its path, size and mtime stay
+   the same. `helper install` and `remove` reset "no helper there". The install reads and checks the
+   whole file again in any case.
 
 The file comes from `<herdr-app home>/flockbook/remote/<target>/flockbook-modfeed`, with
-`SHA256SUMS` in `remote/` (`<sha256>  <target>/flockbook-modfeed`) or in `remote/<target>/`.
+`SHA256SUMS` in `remote/` (`<sha256>  <target>/flockbook-modfeed`, a leading `./` is fine) or in
+`remote/<target>/`. A file that names the helper twice, or a sum that is not 64 hex digits, gives
+`checksum`.
 Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-apple-darwin`.
 
 ## Lines
