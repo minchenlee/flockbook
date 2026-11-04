@@ -7,6 +7,17 @@ name: helpers
 on:
   workflow_call:
   workflow_dispatch:
+  # A ci/ branch tries it before main has this file (workflow_dispatch needs it on main).
+  push:
+    branches: ["ci/**"]
+    paths:
+      - "xplat/flockbook-modfeed/**"
+      - "xplat/herdr-core/**"
+      - "xplat/Cargo.lock"
+      - "herdr-app/**"
+      - "scripts/package-mod.sh"
+      - "scripts/install-from-release.sh"
+      - ".github/workflows/helpers.yml"
 
 permissions:
   contents: read
