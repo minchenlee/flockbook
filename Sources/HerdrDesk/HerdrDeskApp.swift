@@ -64,12 +64,15 @@ struct HerdrDeskApp: App {
         } else {
             let env = ProcessInfo.processInfo.environment
             // herdr-core too, unless `--no-hc`. Headless runs (`--snapshot-live` too) follow hc only with an explicit
-            // `--hc-socket` (`HCSession.wanted`).
+            // `--hc-socket` (`HCSession.wanted`). The hc client exists whenever hc may run, so Settings > General >
+            // Backend can turn it on and off without a relaunch (`BackendSetting`).
             let wantHC = HCSession.wanted(arguments: args, headless: headless)
             // Launch flags (--session, --remote) win; otherwise the machine chosen in Settings > General (read once: a new
             // choice there relaunches the app, as the store, the phone server and notifications all hang on this session).
-            store = HerdrStore(session: RemoteMachines.launchSession(arguments: args, environment: env, defaults: AppDefaults.store),
-                               hc: wantHC ? HCSession.resolve(environment: env, arguments: args) : nil)
+            BackendSetting.headless = headless
+            let session = RemoteMachines.launchSession(arguments: args, environment: env, defaults: AppDefaults.store)
+            store = HerdrStore(session: session, hc: wantHC ? HCSession.resolve(environment: env, arguments: args) : nil,
+                               plan: BackendSetting.plan(session: session, headless: headless))
             // The Claude hook and status line act on the machine Claude Code runs on: the host, for a remote session.
             ClaudeHookSetup.launchRemote = store.session.remote
             // Headless checks on the default session never read this store (the scene shows no RootView): no polling of

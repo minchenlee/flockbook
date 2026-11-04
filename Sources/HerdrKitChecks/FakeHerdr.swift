@@ -13,6 +13,7 @@ final class FakeHerdr: @unchecked Sendable {
     private var open: [Int32] = []
     private var _label = "v0"
     private var _snapshots = 0
+    private var _accepts = 0
     private var _screen = ""
     private var _agents = "[]"
     private var _requests: [(method: String, params: [String: Any])] = []
@@ -24,6 +25,8 @@ final class FakeHerdr: @unchecked Sendable {
 
     var label: String { get { lock.withLock { _label } } set { lock.withLock { _label = newValue } } }
     var snapshotCount: Int { lock.withLock { _snapshots } }
+    /// Connections accepted so far (any request, events too).
+    var acceptCount: Int { lock.withLock { _accepts } }
     /// What `pane.read` returns as the visible screen.
     var screen: String { get { lock.withLock { _screen } } set { lock.withLock { _screen = newValue } } }
     /// The snapshot's `agents` array, as JSON.
@@ -47,7 +50,7 @@ final class FakeHerdr: @unchecked Sendable {
                 if c < 0 { return }
                 var one: Int32 = 1
                 setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-                lock.withLock { open.append(c) }
+                lock.withLock { open.append(c); _accepts += 1 }
                 Thread.detachNewThread { self.serve(c) }
             }
         }

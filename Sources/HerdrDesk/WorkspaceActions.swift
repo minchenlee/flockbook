@@ -73,8 +73,13 @@ extension AppModel {
 
     func beginNewWorkspace() { if writesEnabled { newWorkspaceOpen = true } }
 
-    /// Where a new workspace goes when the sheet does not say: the TUI when it is connected, else herdr-core.
-    var defaultNewWorkspaceBackend: BackendKind { store.tuiConnected || !store.hcConnected ? .tui : .hc }
+    /// Where a new workspace goes when the sheet does not say: the one backend the plan runs (Settings > General >
+    /// Backend); with both, the TUI when it is connected, else herdr-core.
+    var defaultNewWorkspaceBackend: BackendKind {
+        guard store.plan.tui else { return .hc }
+        guard store.plan.hc, store.hcClient != nil else { return .tui }
+        return store.tuiConnected || !store.hcConnected ? .tui : .hc
+    }
 
     /// Creates the workspace (one tab, one shell pane), then selects it here.
     func createWorkspace(name: String, cwd: String, on backend: BackendKind? = nil) {
@@ -150,8 +155,8 @@ struct NewWorkspaceSheet: View {
                     Button("Choose…") { choose() }
                 }
             }
-            // Both runtimes connected: say where the workspace goes.
-            if model.store.tuiConnected && model.store.hcConnected {
+            // Both runtimes followed (Settings > General > Backend) and connected: say where the workspace goes.
+            if model.store.plan.tui && model.store.plan.hc && model.store.tuiConnected && model.store.hcConnected {
                 Picker("Runs on", selection: Binding(get: { backend ?? model.defaultNewWorkspaceBackend }, set: { backend = $0 })) {
                     Text("Herdr TUI").tag(BackendKind.tui)
                     Text("herdr-core").tag(BackendKind.hc)

@@ -116,6 +116,35 @@ extension SnapshotRunner {
         let missing = Set(SettingsControl.allCases).subtracting(seen).subtracting([.autoUpdate])
         step("every control shows in some tab (missing: [\(names(missing))])", missing.isEmpty)
 
+        // Backend (General): a pop-up with the four choices that shows the stored one. A pick (what the pop-up's
+        // binding calls) is stored and the pop-up shows it. Offscreen a menu pick never reaches SwiftUI (no key window).
+        func backendPopup(_ win: NSWindow) -> NSPopUpButton? {
+            func popups(_ v: NSView) -> [NSPopUpButton] { (v as? NSPopUpButton).map { [$0] } ?? v.subviews.flatMap(popups) }
+            let row = SettingsProbe.controls[.backend] ?? .zero
+            guard let content = win.contentView else { return nil }
+            return popups(content).first { b in
+                let f = b.convert(b.bounds, to: nil)
+                return row.contains(CGPoint(x: f.midX, y: content.bounds.height - f.midY))
+            }
+        }
+        AppDefaults.store.set(BackendChoice.hcOnly.rawValue, forKey: BackendChoice.key)
+        var items: [String] = [], picked = "", repicked = "", inGeneral = false
+        _ = await shoot(SettingsSplit(fixed: .general), dark: false, to: nil) { win in
+            inGeneral = shown().contains(.backend)
+            items = backendPopup(win)?.itemTitles ?? []
+            picked = backendPopup(win)?.titleOfSelectedItem ?? ""
+            BackendSetting.pick(.both, store: nil)
+            try? await Task.sleep(for: .milliseconds(400))
+            repicked = backendPopup(win)?.titleOfSelectedItem ?? ""
+        }
+        step("backend: in General, a pop-up of [\(items.joined(separator: ", "))]", inGeneral && items == BackendChoice.allCases.map(\.label))
+        step("backend: shows the stored choice (\(picked))", picked == BackendChoice.hcOnly.label)
+        step("backend: a pick is stored and shown (\(repicked), stored \(AppDefaults.store.string(forKey: BackendChoice.key) ?? "nil"))",
+             repicked == BackendChoice.both.label && AppDefaults.store.string(forKey: BackendChoice.key) == BackendChoice.both.rawValue)
+        AppDefaults.store.removeObject(forKey: BackendChoice.key)
+        let remoteNote = BackendSetting.note(.hcOnly, flags: false, remote: true)
+        step("backend: on another machine, herdr-core only says its TUI stays on", remoteNote.contains("its herdr TUI stays on"))
+
         // The tab chosen last comes back, and a click on a tab chooses it.
         AppDefaults.store.set(SettingsTab.updates.rawValue, forKey: SettingsTab.key)
         var reopened: Set<SettingsControl> = [], clicked: Set<SettingsControl> = []

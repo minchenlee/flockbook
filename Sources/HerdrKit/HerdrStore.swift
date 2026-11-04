@@ -29,7 +29,10 @@ public final class HerdrStore {
     @ObservationIgnored private var hcSnapshotted = false
     /// Why the last snapshot failed, with the next step (`ConnectionCheck`). Nil while connected, or when the socket
     /// accepts but the request fails.
-    public private(set) var problem: ConnectionProblem?
+    public var problem: ConnectionProblem? { tuiProblem ?? hcProblem }
+    /// The TUI's problem (`ConnectionCheck`), and hc's (`hcNotRunning`) when the plan reports it.
+    private var tuiProblem: ConnectionProblem?
+    private var hcProblem: ConnectionProblem?
     /// Connected, but no `herdr` program where the app looks (`ConnectionCheck.programWarning`): terminals cannot start.
     /// Looked up once, on the first snapshot.
     public private(set) var programWarning: String?
@@ -86,12 +89,38 @@ public final class HerdrStore {
     }
 
     /// `hc`: also follow herdr-core at that socket (missing socket = normal, retried). Nil: TUI only.
-    public init(session: HerdrSession, hc: HCSession? = nil) {
+    public init(session: HerdrSession, hc: HCSession? = nil, plan: BackendPlan = .both) {
         self.session = session
+        var plan = plan
+        if hc == nil { plan.hc = false }   // nothing to follow
+        if !plan.tui && !plan.hc { plan.tui = true }
+        self.plan = plan
         self.client = HerdrClient(session: session)
         self.hcClient = hc.map { HCClient(session: $0) }
         self.bridge = RemoteBridge(session: session)
         self.resolver = SessionResolver(socketPath: session.socketPath, remote: session.remote)
+    }
+
+    /// Which loops run and when a silent backend is reported (Settings > General > Backend).
+    public private(set) var plan: BackendPlan
+    /// TUI diagnoses run so far, and TUI snapshot tries (checks).
+    @ObservationIgnored var diagnoses = 0
+    @ObservationIgnored var tuiTries = 0
+
+    /// Follows a new plan without a relaunch. False: it needs hc and this store has no hc client (relaunch).
+    @discardableResult
+    public func use(_ next: BackendPlan) -> Bool {
+        guard !next.hc || hcClient != nil else { return false }
+        guard next != plan else { return true }
+        let running = loop != nil || hcLoop != nil
+        stop()
+        plan = next
+        // The side that no longer runs leaves at once, with its problem.
+        if !next.tui { lastRaw = []; snapshotted = false; tuiProblem = nil }
+        if !next.hc { lastHCRaw = []; hcSnapshotted = false; hcProblem = nil }
+        compose()
+        if running { start() }
+        return true
     }
 
     /// Layout writes for that backend (nil: hc not configured).
@@ -259,21 +288,35 @@ public final class HerdrStore {
     @ObservationIgnored private var diagnosing = false
 
     public func start() {
-        guard loop == nil else { return }
-        if let bridge, !isPreview {
+        guard loop == nil, hcLoop == nil else { return }
+        if plan.tui, let bridge, !isPreview {
             do { try bridge.start() } catch {
-                if let host = session.remote { problem = .remote(.other("cannot open the relay socket: \(error)"), host: host, session: session.name) }
+                if let host = session.remote { tuiProblem = .remote(.other("cannot open the relay socket: \(error)"), host: host, session: session.name) }
             }
         }
-        loop = Task { [weak self] in await self?.run() }
-        if let hc = hcClient { hcLoop = Task { [weak self] in await self?.runHC(hc) } }
+        if plan.tui { loop = Task { [weak self] in await self?.run() } }
+        if plan.hc, let hc = hcClient { hcLoop = Task { [weak self] in await self?.runHC(hc) } }
     }
     @ObservationIgnored private var hcLoop: Task<Void, Never>?
+    /// hc answered or failed at least once since `start` (Automatic diagnoses a silent TUI only after that).
+    @ObservationIgnored private var hcTried = false
+
+    private func restartTUI() {
+        loop?.cancel()
+        loop = Task { [weak self] in await self?.run() }
+    }
+
+    private func restartHC() {
+        guard let hc = hcClient else { return }
+        hcLoop?.cancel()
+        hcLoop = Task { [weak self] in await self?.runHC(hc) }
+    }
 
     public func stop() {
         bridge?.stop()
         loop?.cancel(); loop = nil
         hcLoop?.cancel(); hcLoop = nil
+        hcTried = false
         refreshTask?.cancel(); hcRefreshTask?.cancel()
         for t in logTasks.values { t.cancel() }
         logTasks = [:]
@@ -295,17 +338,19 @@ public final class HerdrStore {
         }
         snapshotted = true
         snapshots += 1
-        if problem != nil { problem = nil }
+        if tuiProblem != nil { tuiProblem = nil }
         applySnapshot(raw)
     }
 
     /// Fresh snapshots from every backend.
     public func refresh() async {
-        await refreshTUI()
-        if hcClient != nil { await refreshHC() }
+        if plan.tui { await refreshTUI() }
+        if plan.hc, hcClient != nil { await refreshHC() }
     }
 
     func refreshTUI() async {
+        guard plan.tui else { return }
+        tuiTries += 1
         do {
             let raw = try await client.snapshot()
             took(raw)
@@ -313,8 +358,15 @@ public final class HerdrStore {
         } catch {
             tuiConnected = false
             updateConnected()
+            // Automatic, hc answers: a silent TUI shows nothing and is not diagnosed. Nor before hc's first try: it may
+            // answer (at launch the TUI loop is first).
+            guard plan.tuiDown(hcConnected: hcConnected) == .report, !(plan.quiet && plan.hc && !hcTried) else {
+                if tuiProblem != nil { tuiProblem = nil }
+                return
+            }
             let session = session
             let found: ConnectionProblem?
+            diagnoses += 1
             if session.remote != nil {
                 guard !diagnosing else { return }
                 diagnosing = true
@@ -323,16 +375,20 @@ public final class HerdrStore {
             } else {
                 found = await Task.detached { ConnectionCheck.diagnose(session: session) }.value
             }
-            if found != problem, !tuiConnected { problem = found }
+            if found != tuiProblem, !tuiConnected, plan.tuiDown(hcConnected: hcConnected) == .report { tuiProblem = found }
         }
     }
 
     func refreshHC() async {
-        guard let hc = hcClient else { return }
+        guard plan.hc, let hc = hcClient else { return }
         do {
             let raw = try await hc.snapshot()
             hcConnected = true
+            hcTried = true
             hcDownSince = nil
+            if hcProblem != nil { hcProblem = nil }
+            // hc answers again: a TUI problem kept from before (Automatic) goes.
+            if plan.tuiDown(hcConnected: true) == .hide, tuiProblem != nil { tuiProblem = nil }
             hcSnapshotted = true
             lastHCRaw = raw
             compose()
@@ -348,7 +404,14 @@ public final class HerdrStore {
     @ObservationIgnored private var hcDownSince: ContinuousClock.Instant?
     /// hc did not answer: not connected; past `hcStaleAfter` its panes leave the store.
     private func hcDown() {
+        hcTried = true
+        let was = hcConnected
         hcConnected = false
+        let p: ConnectionProblem? = plan.showsHCProblem && plan.hcDown(tuiConnected: tuiConnected) == .report
+            ? .hcNotRunning(socket: hcClient?.session.socketPath ?? "") : nil
+        if p != hcProblem { hcProblem = p }
+        // A TUI hidden while hc answered sleeps up to 30 s: now it is the only one left, try it at once.
+        if was, plan.tui, !tuiConnected, loop != nil { restartTUI() }
         let since = hcDownSince ?? .now
         hcDownSince = since
         if ContinuousClock.now - since >= hcStaleAfter, !lastHCRaw.isEmpty { lastHCRaw = []; compose() }
@@ -414,9 +477,10 @@ public final class HerdrStore {
 
     /// Reconnect: first retry after 100 ms, then doubling up to 1 s. A local Unix socket connect costs microseconds,
     /// so a short cap keeps the gap after a herdr restart under about a second. A remote host caps at 5 s: each try
-    /// starts an ssh.
+    /// starts an ssh. While the plan hides a silent TUI (Automatic, hc answers): from 2 s, backing off to 30 s.
     private func run() async {
-        var delay: UInt64 = 100_000_000
+        var delay: Duration = .milliseconds(100)
+        let cap: Duration = session.remote == nil ? .seconds(1) : .seconds(5)
         while !Task.isCancelled {
             // The relay socket could not open in `start` (e.g. the runtime folder): try again before each connect.
             if let bridge, !isPreview, !bridge.isRunning { try? bridge.start() }
@@ -430,26 +494,46 @@ public final class HerdrStore {
             defer { poll.cancel() }
             do {
                 for try await _ in client.events() {
-                    delay = 100_000_000
+                    delay = .milliseconds(100)
                     scheduleRefresh()
                 }
             } catch {}
+            let was = tuiConnected
             tuiConnected = false
             updateConnected()
-            try? await Task.sleep(nanoseconds: delay)
-            delay = min(delay * 2, session.remote == nil ? 1_000_000_000 : 5_000_000_000)
+            // An hc hidden while the TUI answered sleeps up to 30 s: now it is the only one left, try it at once.
+            if was, plan.hc, !hcConnected, hcLoop != nil { restartHC() }
+            delay = await backOff(delay, hidden: plan.tuiDown(hcConnected: hcConnected) == .hide, cap: cap)
         }
     }
 
-    /// Same loop for herdr-core. No socket file is normal (hc not installed or not running): check again every 2 s.
+    /// Sleeps before the next connect and returns the wait after that one (`BackendPlan.retry`). Hidden: at least
+    /// 2 s, backing off to 30 s; otherwise `delay` (at most `cap`), then doubled.
+    private func backOff(_ delay: Duration, hidden: Bool, cap: Duration) async -> Duration {
+        if hidden {
+            let wait = BackendPlan.retry(after: delay, hidden: true)
+            try? await Task.sleep(for: wait)
+            return wait
+        }
+        let wait = min(delay, cap)
+        try? await Task.sleep(for: wait)
+        return BackendPlan.retry(after: wait, hidden: false, cap: cap)
+    }
+
+    /// Same loop for herdr-core. No socket file is normal (hc not installed or not running): check again every 2 s
+    /// (backing off to 30 s while the plan hides a silent hc).
     private func runHC(_ hc: HCClient) async {
-        var delay: UInt64 = 100_000_000
+        var delay: Duration = .milliseconds(100)
+        var missing: Duration = .seconds(1)
         while !Task.isCancelled {
             guard hc.session.isAvailable else {
                 hcDown(); updateConnected()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                let hidden = plan.hcDown(tuiConnected: tuiConnected) == .hide
+                missing = hidden ? BackendPlan.retry(after: missing, hidden: true) : .seconds(2)
+                try? await Task.sleep(for: missing)
                 continue
             }
+            missing = .seconds(1)
             await refreshHC()
             let poll = Task { [weak self] in
                 while !Task.isCancelled {
@@ -460,15 +544,14 @@ public final class HerdrStore {
             defer { poll.cancel() }
             do {
                 for try await _ in hc.events() {
-                    delay = 100_000_000
+                    delay = .milliseconds(100)
                     scheduleHCRefresh()
                 }
             } catch {}
             poll.cancel()
             hcDown()
             updateConnected()
-            try? await Task.sleep(nanoseconds: delay)
-            delay = min(delay * 2, 1_000_000_000)
+            delay = await backOff(delay, hidden: plan.hcDown(tuiConnected: tuiConnected) == .hide, cap: .seconds(1))
         }
     }
 
