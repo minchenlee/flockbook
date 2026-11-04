@@ -31,6 +31,8 @@ pub struct State {
     pub windows: bool,
     /// `file.write` changes the bytes on the way (the sum there must catch it).
     pub corrupt_writes: bool,
+    /// `machine.exec` starts in `/`, not in the home there (hc does not promise the cwd).
+    pub exec_in_root: bool,
 }
 
 pub struct FakeHc {
@@ -120,7 +122,7 @@ pub enum Run {
 }
 
 /// Runs it on this computer as that machine would: in its home, with its core. Err: an hc error kind.
-fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool, windows: bool) -> Result<Value, String> {
+fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool, windows: bool, in_root: bool) -> Result<Value, String> {
     if timed_out {
         return Ok(json!({"code": null, "signal": 15, "stdout": "", "stderr": "", "truncated": false, "timed_out": true, "ms": 30000}));
     }
@@ -147,7 +149,7 @@ fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32,
             c
         }
     };
-    c.current_dir(home).env_clear().env("HOME", home).env("HC_SOCKET", sock).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    c.current_dir(if in_root { std::path::Path::new("/") } else { home }).env_clear().env("HOME", home).env("HC_SOCKET", sock).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     match c.output() {
         Ok(o) => Ok(json!({"code": o.status.code(), "stdout": b64(&o.stdout), "stderr": b64(&o.stderr), "truncated": false, "timed_out": false, "ms": 1})),
         Err(_) => Err("spawn_failed".into()),
@@ -199,9 +201,9 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
                             Some(a) => Run::Argv(a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()),
                             None => Run::Line(p["line"].as_str().unwrap_or("").to_string()),
                         };
-                        let (uname, timed_out, windows) = (g.uname.clone(), g.exec_timed_out, g.windows);
+                        let (uname, timed_out, windows, in_root) = (g.uname.clone(), g.exec_timed_out, g.windows, g.exec_in_root);
                         drop(g);
-                        Some(match exec_there(&run, &home, &sock, uname, timed_out, windows) {
+                        Some(match exec_there(&run, &home, &sock, uname, timed_out, windows, in_root) {
                             Ok(v) => reply(v),
                             Err(kind) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": kind, "data": {"kind": kind}}}),
                         })

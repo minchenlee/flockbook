@@ -39,6 +39,13 @@ fn helper_rel() -> String {
     format!("{HELPER_DIR}/{}/flockbook-modfeed", helper_version())
 }
 
+/// The fixed `sh -c` script for a forward: "$1" is the command, the rest are the values. With `cached`, the
+/// cache there (under $HOME) comes right after the command, so a value cannot stand in for it.
+fn forward_script(cached: bool) -> String {
+    let cache = if cached { format!(" --cache \"$HOME\"/{CACHE}") } else { String::new() };
+    format!("c=$1; shift; exec \"$HOME\"/{} \"$c\"{cache} \"$@\"", helper_rel())
+}
+
 /// `uname -sm` there -> the helper built for it. None: no helper for that platform (Windows has no `uname`).
 pub fn target_for(uname: &str) -> Option<&'static str> {
     let mut it = uname.split_whitespace();
@@ -351,8 +358,10 @@ pub fn forward(client: &HcClient, cmd: &str, args: &[String], machine: &str, ter
     if memo.missing_now(machine) {
         return with_install(client, cmd, machine, missing(machine), json!({}), &mut memo);
     }
-    // From that machine's home (exec's cwd): no $HOME, no shell, each value one argument.
-    let mut there: Vec<String> = vec![helper_rel(), cmd.to_string()];
+    // The platform is Unix now. `sh -c` with a fixed script finds the helper under $HOME (exec's cwd is not
+    // promised); every value goes in "$@" as one argument and the shell never reads it.
+    let mut cached = false;
+    let mut there: Vec<String> = vec![cmd.to_string()];
     let mut files: Vec<String> = vec![];
     let mut text: Option<(usize, String)> = None;
     let mut it = args.iter();
@@ -365,7 +374,7 @@ pub fn forward(client: &HcClient, cmd: &str, args: &[String], machine: &str, ter
             // This computer's cache path means nothing there: the helper there keeps its own.
             "--cache" => {
                 it.next();
-                there.extend(["--cache".to_string(), CACHE.to_string()]);
+                cached = true;
             }
             "--file" => files.extend(it.next().cloned()),
             "--text" => {
@@ -387,6 +396,7 @@ pub fn forward(client: &HcClient, cmd: &str, args: &[String], machine: &str, ter
         };
         there[slot] = typed;
     }
+    let there = [vec!["sh".to_string(), "-c".into(), forward_script(cached), "sh".into()], there].concat();
     let ran = match exec(client, machine, Run::Argv(&there)) {
         Ok(r) => r,
         Err(f) => return error_lines(cmd, f, json!({})),

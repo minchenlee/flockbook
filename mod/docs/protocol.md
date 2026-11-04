@@ -60,13 +60,16 @@ owner presses a button, never on a timer. `send` types a message and presses Ent
 
 ### Terminals on another machine (`m/t7`; Rust sidecar only)
 
-The same helper runs on machine `m` (hc `machine.exec` with `argv`, never a shell line: values such
-as `--text` reach it exactly as given) with the same command and `--terminal t7`. First the sidecar
-finds the platform there with `uname -sm` (also `argv`). A machine without a helper target (Windows,
-another CPU) gets `remote_helper_unsupported` and nothing else runs there.
+The same helper runs on machine `m` with the same command and `--terminal t7`. First the sidecar
+finds the platform there with `uname -sm` (`argv`). A machine without a helper target (Windows,
+another CPU) gets `remote_helper_unsupported` and nothing else runs there. On Unix, hc `machine.exec`
+gets `argv` `["sh", "-c", <fixed script>, "sh", <command>, <values>…]`: the fixed script runs
+`"$HOME"/.local/share/flockbook/helper/<version>/flockbook-modfeed` (so the cwd of exec does not
+matter), and the values are only in `"$@"`, so the shell never reads them: `--text` reaches the helper
+exactly as given.
 Its lines come back unchanged, so `header`, `end` and everything between are the helper's there.
-The helper there keeps its own cache (`~/.cache/flockbook/cache.json` there); `--cache` is not
-passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
+The helper there keeps its own cache (`"$HOME"/.cache/flockbook/cache.json` there); this computer's
+`--cache` is not passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
 text names that copy. Only one level: `a/b/t7` is `bad_terminal`. The Swift sidecar does not do
 this: it answers `not-agent` for these terminals.
 

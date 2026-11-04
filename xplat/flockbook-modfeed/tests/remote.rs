@@ -106,10 +106,11 @@ fn a_terminal_on_another_machine_runs_the_helper_there() {
     assert_eq!(exec[0]["argv"], json!(["uname", "-sm"]));
     assert_eq!(exec[1]["on"], "box");
     assert!(exec.iter().all(|e| e.get("line").is_none()), "no shell line carries a value: {exec:?}");
+    let script = format!("c=$1; shift; exec \"$HOME\"/{} \"$c\" --cache \"$HOME\"/.cache/flockbook/cache.json \"$@\"", helper_rel());
     assert_eq!(
         exec[1]["argv"],
-        json!([helper_rel(), "card", "--terminal", "t3", "--cache", ".cache/flockbook/cache.json"]),
-        "the address there is t3; this computer's cache path is not used there"
+        json!(["sh", "-c", script, "sh", "card", "--terminal", "t3"]),
+        "a fixed script finds the helper under $HOME; the address there is t3; this computer's cache path is not used there"
     );
 
     // Approve there: the key goes to t3 on that core, and the claim is kept in that machine's home.
@@ -222,6 +223,20 @@ fn values_reach_the_helper_there_unchanged() {
     let at = argv.iter().position(|a| *a == "--text").unwrap();
     assert_eq!(argv[at + 1], text, "the value is one argument, as typed");
     assert_eq!(w.there.calls("terminal.send")[0]["text"], text, "the agent there gets exactly the text");
+}
+
+#[test]
+fn the_helper_there_is_found_from_any_cwd() {
+    let w = world();
+    w.install_by_hand();
+    w.here.state.lock().unwrap().exec_in_root = true;
+    w.there.set_terminals(vec![claude("t3", "idle", "")]);
+    let text = "a $HOME ~ \"$@\" $1 'x'";
+    let d = w.run(&["send", "--terminal", "box/t3", "--text", text]);
+    assert_eq!(d[1]["result"], "sent", "exec started in / and the helper still ran: {d:?}");
+    assert_eq!(w.there.calls("terminal.send")[0]["text"], text, "the agent there gets exactly the text");
+    let c = w.run(&["card", "--terminal", "box/t3", "--cache", "/here/cache.json"]);
+    assert!(c.iter().all(|l| l["type"] != "error"), "{c:?}");
 }
 
 #[test]
