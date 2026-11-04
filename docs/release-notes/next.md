@@ -4,6 +4,7 @@
 One short line: what this release is about.
 
 ### ✨ New
+- The Herdr app mod has an install script, `install.sh`, for your real herdr-app home: it never overwrites your files, merges keys, and runs `herdr-app check` (`--dry-run` to preview). A missing helper now says where to get it.
 
 ### 🔒 Security
 

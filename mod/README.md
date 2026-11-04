@@ -16,7 +16,8 @@ version comes close or leaves the feature out.
 | `themes/` | Flockbook and Flockbook Mac themes, dark and light. |
 | `test/` | Node tests with fake `gpui-kit`, `gpui-base` and `herdr` modules. |
 | `keys.json` | The Flockbook shortcuts, in a `layout:flockbook` section (while this layout shows). Do not add a `mod:flockbook` section: with one, no key worked. |
-| `install-isolated.sh` | Copies the layout, the mod, the keys and the sidecar into a test herdr-app home. |
+| `install.sh` | Installs the layout, the mod, the themes, the keys and the helper into your herdr-app home, without overwriting yours. |
+| `install-isolated.sh` | Copies the same into a test herdr-app home, for development. |
 
 The chat view reads conversations through a sidecar, `flockbook-modfeed`, built from this repo
 (`swift build -c release --product flockbook-modfeed`). The mod finds it at
@@ -30,20 +31,47 @@ A mod cannot import files from another mod's folder, so all views live in one mo
 
 The sidebar column has the id `sidebar`, so herdr-app's own ⌘B (`layout.toggle:sidebar`) opens and closes it.
 
-## Try it in a test home
+## Install
 
-Never install into your real herdr-app home while this is in development.
+This needs herdr-app and macOS. The mod runs programs: its helper `flockbook-modfeed` (which runs
+`hc` and sends keys and text to an agent's terminal, only when you press or type) and `osascript`
+(the file dialog). It reads the agents' session logs outside its folder (`~/.claude/projects/`,
+`~/.codex/sessions/` and others; see `RECIPE.md`). It makes no network calls.
 
-From a release: download `Flockbook-herdr-mod-<version>.zip` from GitHub Releases. It has this
-folder's layout, mod, themes, keys and install script, and a universal, signed `flockbook-modfeed`
-in `bin/`. Unzip it, then:
+`install.sh` copies the layout, the mod and the themes into your herdr-app home, merges
+`keys.json`, puts the helper in place and runs `herdr-app check`. It never overwrites what you
+have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops
+and writes nothing. A key you already use keeps your command. Add `--dry-run` to see the plan
+first. The home is `--home <folder>`, else `$HERDR_APP_HOME`, else `~/.config/herdr-app`.
+
+From a release: download `Flockbook-herdr-mod-<version>.zip` from
+<https://github.com/minchenlee/flockbook/releases>. It has this folder's layout, mod, themes, keys
+and install scripts, and a universal, signed `flockbook-modfeed` in `bin/`. Unzip it, then:
 
 ```sh
-mkdir -p /tmp/flockbook-test-home
-./install-isolated.sh /tmp/flockbook-test-home bin/flockbook-modfeed
+./install.sh --dry-run --helper bin/flockbook-modfeed
+./install.sh --helper bin/flockbook-modfeed
 ```
 
-From the repo:
+From the repo (in its root):
+
+```sh
+swift build -c release --product flockbook-modfeed
+mod/install.sh --helper .build/release/flockbook-modfeed
+```
+
+From the gallery (herdr.dev/layouts): the agent copies only `layouts/` and `mods/`. Get the
+helper from a release or build it as above, and copy it to
+`<herdr-app home>/flockbook/bin/flockbook-modfeed`. Without it the chat says the helper is
+missing; the other views work.
+
+Then pick the layout in herdr-app with `layout.switch {"name": "flockbook"}`. `ctrl-shift-l`
+switches back to your own layout.
+
+## Try it in a test home
+
+For development, install into a test home instead of your real one. `install-isolated.sh` refuses
+`~/.config/herdr-app` and replaces its own earlier copy without asking:
 
 ```sh
 mkdir -p /tmp/flockbook-test-home

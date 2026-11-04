@@ -27,7 +27,7 @@ lipo -create "${EXES[@]}" -output "$STAGE/bin/flockbook-modfeed"
 lipo -info "$STAGE/bin/flockbook-modfeed"
 # What a person installs; the tests, the docs folder and package.json stay in the repo.
 cp -R mod/layouts mod/mods mod/themes "$STAGE/"
-cp mod/keys.json mod/install-isolated.sh mod/README.md mod/RECIPE.md mod/preview.png "$STAGE/"
+cp mod/keys.json mod/install.sh mod/install-isolated.sh mod/README.md mod/RECIPE.md mod/preview.png "$STAGE/"
 cp LICENSE "$STAGE/"
 
 if [ -n "${SIGN_ID:-}" ]; then
