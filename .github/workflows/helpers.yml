@@ -134,6 +134,10 @@ jobs:
           cat dist/install.sh | FLOCKBOOK_RELEASE_URL="file://$PWD/dist" sh -s -- --home "$RUNNER_TEMP/one-home"
           cmp dist/flockbook-modfeed-universal-apple-darwin "$RUNNER_TEMP/one-home/flockbook/bin/flockbook-modfeed"
           (cd "$RUNNER_TEMP/one-home/flockbook/remote" && shasum -a 256 -c SHA256SUMS)
+          # Windows (Git Bash, MSYS): a clear "not supported yet", nothing downloaded.
+          mkdir -p "$RUNNER_TEMP/win" && printf '#!/bin/sh\n[ "$1" = -s ] && echo MINGW64_NT-10.0 || echo x86_64\n' > "$RUNNER_TEMP/win/uname" && chmod +x "$RUNNER_TEMP/win/uname"
+          if PATH="$RUNNER_TEMP/win:$PATH" sh dist/install.sh 2> win.err; then echo "Windows should stop"; exit 1; fi
+          grep -q "Windows is not supported yet" win.err
       - uses: actions/upload-artifact@v4
         with:
           name: flockbook-herdr-mod

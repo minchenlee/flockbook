@@ -1,5 +1,5 @@
 #!/bin/sh
-# Flockbook for the Herdr app, in one line (published as the release asset install.sh):
+# Flockbook for the Herdr app, in one line on macOS and Linux (published as the release asset install.sh):
 #   curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --dry-run        (arguments go to `flockbook-modfeed install`)
 # It downloads the helpers (flockbook-modfeed) and SHA256SUMS from the same release, stops if a sum
@@ -25,7 +25,8 @@ main() {
         aarch64|arm64) target=aarch64-unknown-linux-musl ;;
         *) die "there is no helper for Linux on $arch yet." ;;
       esac ;;
-    *) die "there is no helper for $os yet. Install from the zip on the release page instead." ;;
+    MINGW* | MSYS* | CYGWIN*) die "Windows is not supported yet. Flockbook for the Herdr app installs on macOS and Linux." ;;
+    *) die "$os is not supported yet. Flockbook for the Herdr app installs on macOS and Linux." ;;
   esac
 
   command -v curl >/dev/null 2>&1 || die "this needs curl."
