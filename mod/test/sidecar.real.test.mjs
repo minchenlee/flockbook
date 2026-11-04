@@ -1,5 +1,5 @@
 // The mod's sidecar calls against a real sidecar binary: set FLOCKBOOK_MODFEED to its path (CI does, for the Rust
-// one in rust/). Without it these tests are skipped. herdr-core is a fake on a Unix socket (no app, no network).
+// one in xplat/flockbook-modfeed). Without it these tests are skipped. herdr-core is a fake on a Unix socket (no app, no network).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

@@ -5,7 +5,7 @@ One short line: what this release is about.
 
 ### ✨ New
 
-- A Rust version of the Herdr app mod's sidecar (`rust/`), so the mod can run on Linux too (preview; Windows to follow).
+- A Rust version of the Herdr app mod's sidecar (`xplat/flockbook-modfeed`, on herdr-core), so the mod can run on Linux too (preview; Windows to follow).
 
 ### 🔒 Security
 
