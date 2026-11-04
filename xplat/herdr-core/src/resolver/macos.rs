@@ -1,4 +1,5 @@
-//! macOS process source: `/bin/ps` and `/usr/sbin/lsof`, read-only, C locale, minimal environment.
+//! macOS (and other non-Linux unix) process source: `/bin/ps` and `/usr/sbin/lsof`, as Swift runs them: read-only,
+//! C locale, minimal environment.
 
 use super::{parse_lsof, parse_ps, Proc, ProcessSource};
 use std::process::{Command, Stdio};

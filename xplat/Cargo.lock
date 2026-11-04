@@ -1402,6 +1402,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "unicode-segmentation",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

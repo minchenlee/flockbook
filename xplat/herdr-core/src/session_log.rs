@@ -57,7 +57,6 @@ pub fn home_dir() -> String {
 }
 
 /// `NSString.lastPathComponent`: the last component, trailing slashes ignored; "/" for "/".
-#[allow(dead_code)] // used by the resolver
 pub(crate) fn last_path_component(p: &str) -> &str {
     let t = p.trim_end_matches('/');
     if t.is_empty() {
@@ -70,7 +69,6 @@ pub(crate) fn last_path_component(p: &str) -> &str {
 }
 
 /// `NSString.deletingLastPathComponent`.
-#[allow(dead_code)] // used by the resolver
 pub(crate) fn deleting_last_path_component(p: &str) -> String {
     let t = p.trim_end_matches('/');
     if t.is_empty() {

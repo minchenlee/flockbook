@@ -1,13 +1,13 @@
-//! Linux process source: plain file reads under a proc root (`/proc` by default). No libc calls, so it compiles
-//! (and is tested against a synthetic tree) on every platform.
+//! Linux process source: plain file reads under a proc root (`/proc` by default): `<pid>/stat`, `cmdline`,
+//! `environ`, `cwd` and `fd/*`. It compiles on every platform (the uid filter and the clock tick rate need libc,
+//! so they are unix only), and checks run it against a synthetic tree.
 
 use super::{Proc, ProcessSource};
+use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 
 pub struct LinuxProcSource {
     root: PathBuf,
-    /// Clock ticks per second (`USER_HZ`). It is 100 on every mainstream Linux build.
-    ticks_per_sec: f64,
 }
 
 impl LinuxProcSource {
@@ -16,12 +16,12 @@ impl LinuxProcSource {
     }
 
     pub fn with_root(root: PathBuf) -> Self {
-        LinuxProcSource { root, ticks_per_sec: 100.0 }
+        LinuxProcSource { root }
     }
 
-    fn boot_time(&self) -> Option<f64> {
+    fn boot_time(&self) -> Option<i64> {
         let s = std::fs::read_to_string(self.root.join("stat")).ok()?;
-        s.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())
+        s.lines().find_map(|l| l.strip_prefix("btime ")).and_then(|v| v.trim().parse().ok())
     }
 }
 
@@ -31,46 +31,96 @@ impl Default for LinuxProcSource {
     }
 }
 
-/// `(ppid, starttime in clock ticks since boot)` from `/proc/<pid>/stat`. The command name sits in parentheses and
-/// may hold spaces and parentheses, so the fields are counted after the last `)`.
-pub fn parse_linux_stat(text: &str) -> Option<(i32, u64)> {
-    let rest = &text[text.rfind(')')? + 1..];
-    let f: Vec<&str> = rest.split_whitespace().collect();
-    // f[0] = state (field 3), f[1] = ppid (field 4), f[19] = starttime (field 22)
-    Some((f.get(1)?.parse().ok()?, f.get(19)?.parse().ok()?))
+/// `(ppid, starttime in clock ticks after boot, comm)` from `/proc/<pid>/stat`. `comm` is in parentheses and may
+/// hold spaces and parentheses itself: the fields follow the last `)`.
+pub(crate) fn parse_stat(stat: &str) -> Option<(i32, u64, String)> {
+    let open = stat.find('(')?;
+    let close = stat.rfind(')')?;
+    let comm = stat.get(open + 1..close)?.to_string();
+    let f: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+    // f[0] is field 3 (state); ppid is field 4, starttime field 22.
+    Some((f.get(1)?.parse().ok()?, f.get(19)?.parse().ok()?, comm))
 }
 
-fn nul_to_space(bytes: &[u8]) -> String {
-    let s = String::from_utf8_lossy(bytes);
-    s.split('\0').filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
+/// `(ppid, starttime in clock ticks since boot)` from `/proc/<pid>/stat`.
+pub fn parse_linux_stat(text: &str) -> Option<(i32, u64)> {
+    parse_stat(text).map(|(ppid, ticks, _)| (ppid, ticks))
+}
+
+fn nul_joined(b: &[u8]) -> String {
+    b.split(|c| *c == 0).filter(|w| !w.is_empty()).map(String::from_utf8_lossy).collect::<Vec<_>>().join(" ")
+}
+
+/// Clock ticks per second (`USER_HZ`); 100 where it cannot be asked.
+fn ticks_per_sec() -> u64 {
+    #[cfg(unix)]
+    {
+        // SAFETY: a plain libc query without arguments that can fail only by returning -1.
+        let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        if hz > 0 {
+            return hz as u64;
+        }
+    }
+    100
+}
+
+/// `ps -x`: this user's processes only. Off unix every entry counts (the tree is synthetic there).
+#[cfg(unix)]
+fn mine(e: &std::fs::DirEntry) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: getuid cannot fail.
+    let uid = unsafe { libc::getuid() };
+    e.metadata().map(|m| m.uid() == uid).unwrap_or(false)
+}
+#[cfg(not(unix))]
+fn mine(_: &std::fs::DirEntry) -> bool {
+    true
 }
 
 impl ProcessSource for LinuxProcSource {
     fn processes(&self) -> Vec<Proc> {
-        let boot = self.boot_time().unwrap_or(0.0);
-        let Ok(rd) = std::fs::read_dir(&self.root) else { return Vec::new() };
-        let mut out = Vec::new();
-        for e in rd.flatten() {
-            let Ok(pid) = e.file_name().to_string_lossy().parse::<i32>() else { continue };
-            let dir = e.path();
-            let Some((ppid, ticks)) = std::fs::read_to_string(dir.join("stat")).ok().and_then(|s| parse_linux_stat(&s)) else { continue };
+        let Some(btime) = self.boot_time() else { return vec![] };
+        let hz = ticks_per_sec();
+        let Ok(rd) = std::fs::read_dir(&self.root) else { return vec![] };
+        let mut out = vec![];
+        for e in rd.filter_map(|e| e.ok()) {
+            let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else { continue };
+            if !mine(&e) {
+                continue;
+            }
+            let base = e.path();
+            let Some((ppid, ticks, comm)) = std::fs::read_to_string(base.join("stat")).ok().and_then(|s| parse_stat(&s)) else {
+                continue;
+            };
+            // Whole seconds, as `ps` prints `lstart`.
+            let Some(start) = DateTime::<Utc>::from_timestamp(btime + (ticks / hz) as i64, 0) else { continue };
+            let mut line = std::fs::read(base.join("cmdline")).map(|b| nul_joined(&b)).unwrap_or_default();
+            if line.is_empty() {
+                line = format!("[{comm}]");
+            }
             // Another user's environ is unreadable: the process is listed but carries no pane env.
-            let cmd = std::fs::read(dir.join("cmdline")).map(|b| nul_to_space(&b)).unwrap_or_default();
-            let env = std::fs::read(dir.join("environ")).map(|b| nul_to_space(&b)).unwrap_or_default();
-            out.push(Proc { pid, ppid, start: boot + ticks as f64 / self.ticks_per_sec, line: format!("{cmd} {env}") });
+            let env = std::fs::read(base.join("environ")).map(|b| nul_joined(&b)).unwrap_or_default();
+            if !env.is_empty() {
+                line = line + " " + &env;
+            }
+            out.push(Proc { pid, ppid, start, line });
         }
         out
     }
 
     fn open_files(&self, pids: &[i32]) -> Vec<String> {
-        let mut out = Vec::new();
+        let mut out = vec![];
         for pid in pids {
-            let Ok(rd) = std::fs::read_dir(self.root.join(pid.to_string()).join("fd")) else { continue };
-            for e in rd.flatten() {
-                if let Ok(target) = std::fs::read_link(e.path()) {
-                    let t = target.to_string_lossy().into_owned();
-                    if t.starts_with('/') {
-                        out.push(t);
+            let base = self.root.join(pid.to_string());
+            let mut links = vec![base.join("cwd")];
+            if let Ok(rd) = std::fs::read_dir(base.join("fd")) {
+                links.extend(rd.filter_map(|e| e.ok()).map(|e| e.path()));
+            }
+            for l in links {
+                if let Ok(t) = std::fs::read_link(&l) {
+                    let s = t.to_string_lossy().into_owned();
+                    if s.starts_with('/') {
+                        out.push(s);
                     }
                 }
             }

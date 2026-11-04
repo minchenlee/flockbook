@@ -21,6 +21,8 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 
-# Windows process table (uncompiled on this host; see src/resolver/windows.rs)
+# Windows: the process table (sysinfo; see src/resolver/windows.rs) and the file index that stands in for the inode
+# (windows-sys; see `file_number` in src/resolver.rs).
 [target.'cfg(windows)'.dependencies]
 sysinfo = { version = "0.32.1", default-features = false, features = ["system"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
