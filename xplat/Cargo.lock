@@ -1399,6 +1399,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "sysinfo",
  "tempfile",
  "unicode-segmentation",
