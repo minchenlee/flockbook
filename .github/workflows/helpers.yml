@@ -1,0 +1,164 @@
+name: helpers
+
+# The Rust flockbook-modfeed (the Herdr app mod's helper) for every platform the release ships, stripped:
+# universal-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl. Each one runs `version` on
+# its own kind of machine, the protocols must match, and the mod zip is packaged (ad-hoc signed) from them.
+# The release calls this; run it by hand (workflow_dispatch) to try a branch. It never publishes anything.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_STRIP: "true"
+
+jobs:
+  linux:
+    name: Helper ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        working-directory: xplat
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          cargo build --release --locked -p flockbook-modfeed --target ${{ matrix.target }}
+      - name: Static, stripped, runs
+        run: |
+          set -eu
+          exe=xplat/target/${{ matrix.target }}/release/flockbook-modfeed
+          file "$exe"
+          file "$exe" | grep -q 'statically linked\|static-pie linked'
+          file "$exe" | grep -q ', stripped'
+          ls -l "$exe"
+          mkdir -p out/${{ matrix.target }}
+          cp "$exe" out/${{ matrix.target }}/flockbook-modfeed
+          "$exe" version | head -1 | tee out/${{ matrix.target }}/version.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helper-${{ matrix.target }}
+          path: out
+          if-no-files-found: error
+
+  macos:
+    name: Helper universal-apple-darwin
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build both and join them
+        run: |
+          set -eu
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            (cd xplat && cargo build --release --locked -p flockbook-modfeed --target "$t")
+          done
+          mkdir -p out/universal-apple-darwin
+          exe=out/universal-apple-darwin/flockbook-modfeed
+          lipo -create xplat/target/{aarch64,x86_64}-apple-darwin/release/flockbook-modfeed -output "$exe"
+          lipo -info "$exe"
+          ls -l "$exe"
+          "$exe" version | head -1 | tee out/universal-apple-darwin/version.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helper-universal-apple-darwin
+          path: out
+          if-no-files-found: error
+
+  # Same protocol everywhere, then the mod zip and the one-line install's assets from these helpers.
+  package:
+    name: Package and try the installs
+    needs: [linux, macos]
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: helper-*
+          merge-multiple: true
+          path: helpers
+      - name: The same protocol on every platform
+        run: |
+          set -eu
+          head -1 helpers/*/version.txt
+          n=$(for f in helpers/*/version.txt; do python3 -c 'import json,sys; h=json.loads(open(sys.argv[1]).readline()); print(h["type"], h["protocol"], h["sidecar"])' "$f"; done | sort -u | wc -l)
+          [ "$(ls helpers/*/version.txt | wc -l)" -eq 3 ] || { echo "want 3 helpers"; exit 1; }
+          [ "$n" -eq 1 ] || { echo "the helpers disagree on the protocol"; exit 1; }
+          rm helpers/*/version.txt
+      - name: Package (ad-hoc signed)
+        run: VERSION=0.0.0-ci HELPERS=helpers scripts/package-mod.sh
+      - name: The zip as a person gets it
+        run: |
+          set -eu
+          mkdir -p try/zip && cd try/zip && unzip -q ../../dist/Flockbook-herdr-mod-0.0.0-ci.zip && cd Flockbook-herdr-mod-0.0.0-ci
+          find . -type f | sort
+          (cd remote && shasum -a 256 -c SHA256SUMS)
+          ./install.sh --home "$RUNNER_TEMP/zip-home" --dry-run
+          HOME="$RUNNER_TEMP/u" ./install.sh --home "$RUNNER_TEMP/zip-home"
+          ls -R "$RUNNER_TEMP/zip-home/flockbook"
+      - name: The one-line install, from these assets
+        run: |
+          set -eu
+          (cd dist && shasum -a 256 flockbook-modfeed-* > SHA256SUMS && cat SHA256SUMS)
+          cat dist/install.sh | FLOCKBOOK_RELEASE_URL="file://$PWD/dist" sh -s -- --home "$RUNNER_TEMP/one-home"
+          cmp dist/flockbook-modfeed-universal-apple-darwin "$RUNNER_TEMP/one-home/flockbook/bin/flockbook-modfeed"
+          (cd "$RUNNER_TEMP/one-home/flockbook/remote" && shasum -a 256 -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flockbook-herdr-mod
+          path: |
+            dist/Flockbook-herdr-mod-*.zip
+            dist/flockbook-modfeed-*
+            dist/install.sh
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  # The musl helpers on real Linux: the zip's install.sh and the one-line install (no herdr-app here, so its
+  # check is skipped), into temp homes.
+  try-linux:
+    name: Try the installs on ${{ matrix.runner }}
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: flockbook-herdr-mod
+          path: dist
+      - name: Install from the zip and in one line
+        run: |
+          set -eu
+          uname -m
+          mkdir zip && (cd zip && unzip -q ../dist/Flockbook-herdr-mod-*.zip)
+          z=$(echo zip/Flockbook-herdr-mod-*)
+          "$z/install.sh" --home "$RUNNER_TEMP/zip-home" --dry-run
+          "$z/install.sh" --home "$RUNNER_TEMP/zip-home"
+          (cd "$RUNNER_TEMP/zip-home/flockbook/remote" && sha256sum -c SHA256SUMS)
+          cat dist/install.sh | FLOCKBOOK_RELEASE_URL="file://$PWD/dist" sh -s -- --home "$RUNNER_TEMP/one-home"
+          "$RUNNER_TEMP/one-home/flockbook/bin/flockbook-modfeed" version | head -1
+          case "$(uname -m)" in x86_64) t=x86_64-unknown-linux-musl ;; *) t=aarch64-unknown-linux-musl ;; esac
+          cmp "dist/flockbook-modfeed-$t" "$RUNNER_TEMP/one-home/flockbook/bin/flockbook-modfeed"

@@ -20,11 +20,12 @@ version comes close or leaves the feature out.
 | `themes/` | Flockbook and Flockbook Mac themes, dark and light. |
 | `test/` | Node tests with fake `gpui-kit`, `gpui-base` and `herdr` modules. |
 | `keys.json` | The Flockbook shortcuts, in a `layout:flockbook` section (while this layout shows). Do not add a `mod:flockbook` section: with one, no key worked. |
-| `install.sh` | Installs the layout, the mod, the themes, the keys and the helper into your herdr-app home, without overwriting yours. |
+| `install.sh` | In the release zip: runs `bin/flockbook-modfeed install`, which installs the layout, the mod, the themes, the keys and the helpers into your herdr-app home, without overwriting yours. |
 | `install-isolated.sh` | Copies the same into a test herdr-app home, for development. |
 
 The chat view reads conversations through a sidecar, `flockbook-modfeed`, built from this repo
-(`swift build -c release --product flockbook-modfeed`). The mod finds it at
+(Rust: `cd xplat && cargo build --release -p flockbook-modfeed`; the Swift one,
+`swift build -c release --product flockbook-modfeed`, speaks the same protocol). The mod finds it at
 `<herdr-app home>/flockbook/bin/flockbook-modfeed`. Its protocol is in `docs/protocol.md`.
 
 The layout and the mod work only together: the layout names the mod's views, and the mod expects
@@ -37,31 +38,42 @@ The sidebar column has the id `sidebar`, so herdr-app's own ⌘B (`layout.toggle
 
 ## Install
 
-This needs herdr-app and macOS. The mod runs programs: its helper `flockbook-modfeed` (which runs
-`hc` and sends keys and text to an agent's terminal, only when you press or type) and `osascript`
-(the file dialog). It reads the agents' session logs outside its folder (`~/.claude/projects/`,
+This needs herdr-app on macOS or Linux. The mod runs programs: its helper `flockbook-modfeed` (which runs
+`hc` and sends keys and text to an agent's terminal, only when you press or type) and, on macOS,
+`osascript` (the file dialog). On Linux the + file dialog is off: drop files on the chat or paste an image. It reads the agents' session logs outside its folder (`~/.claude/projects/`,
 `~/.codex/sessions/` and others; see `RECIPE.md`). It makes no network calls.
 
-`install.sh` copies the layout, the mod and the themes into your herdr-app home, merges
-`keys.json`, puts the helper in place and runs `herdr-app check`. It never overwrites what you
+`flockbook-modfeed install` (the layout, the mod, the themes and the keys are built into the helper)
+copies them into your herdr-app home, merges `keys.json`, puts the helper in `flockbook/bin/` and the
+helpers for other machines in `flockbook/remote/<target>/` (checked against `SHA256SUMS`), and runs
+`herdr-app check`. It needs no python3. It never overwrites what you
 have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops
 and writes nothing. A key you already use keeps your command. Add `--dry-run` to see the plan
 first. The home is `--home <folder>`, else `$HERDR_APP_HOME`, else `~/.config/herdr-app`.
 
-From a release: download `Flockbook-herdr-mod-<version>.zip` from
-<https://github.com/minchenlee/flockbook/releases>. It has this folder's layout, mod, themes, keys
-and install scripts, and a universal, signed `flockbook-modfeed` in `bin/`. Unzip it, then:
+In one line (macOS or Linux): it downloads the helpers and `SHA256SUMS` from the latest release,
+stops if a sum does not match, and runs `flockbook-modfeed install` (add `-s -- --dry-run` after `sh`):
 
 ```sh
-./install.sh --dry-run --helper bin/flockbook-modfeed
-./install.sh --helper bin/flockbook-modfeed
+curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh
+```
+
+From a release zip: download `Flockbook-herdr-mod-<version>.zip` from
+<https://github.com/minchenlee/flockbook/releases>. It has this folder's layout, mod, themes, keys
+and install scripts, a universal, signed `flockbook-modfeed` in `bin/`, and the helper for each
+platform in `remote/<target>/` (`universal-apple-darwin`, `x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-musl`) with `remote/SHA256SUMS`. Unzip it, then:
+
+```sh
+./install.sh --dry-run
+./install.sh
 ```
 
 From the repo (in its root):
 
 ```sh
-swift build -c release --product flockbook-modfeed
-herdr-app/install.sh --helper .build/release/flockbook-modfeed
+(cd xplat && cargo build --release -p flockbook-modfeed)
+xplat/target/release/flockbook-modfeed install --helper xplat/target/release/flockbook-modfeed
 ```
 
 From the gallery (herdr.dev/layouts): the agent copies only `layouts/` and `mods/`. Get the

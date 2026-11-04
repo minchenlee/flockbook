@@ -16,11 +16,16 @@ permissions:
   contents: read
 
 jobs:
+  # The Rust flockbook-modfeed for every platform (the Herdr app mod's helper).
+  helpers:
+    uses: ./.github/workflows/helpers.yml
+
   # Signed + notarized universal Flockbook.app as .zip and .dmg. Signing: import the
   # Developer ID cert into a temporary keychain, sign with hardened runtime, notarize, staple. Without secrets: ad-hoc sign, no notarization,
   # release notes say "unsigned".
   build:
     name: Build macOS app
+    needs: helpers
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -106,9 +111,11 @@ jobs:
           if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh build/Flockbook.app; fi
           scripts/package.sh
           if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh "dist/Flockbook-$VERSION.dmg"; fi
-          # The Herdr app mod (preview): layout, mod and a universal flockbook-modfeed in one zip.
-          NOTARIZE="$NOTARIZED" scripts/package-mod.sh
-          (cd dist && shasum -a 256 Flockbook-* > SHA256SUMS && cat SHA256SUMS)
+          # The Herdr app mod (preview): layout, mod and the Rust flockbook-modfeed for every platform in one zip,
+          # plus the one-line install's assets (install.sh, flockbook-modfeed-<target>).
+          rm -f helpers/*/version.txt
+          NOTARIZE="$NOTARIZED" HELPERS=helpers scripts/package-mod.sh
+          (cd dist && shasum -a 256 Flockbook-* flockbook-modfeed-* install.sh > SHA256SUMS && cat SHA256SUMS)
           {
             if [ "$NOTARIZED" = 1 ]; then
               echo "Signed with a Developer ID and notarized by Apple."
@@ -182,7 +189,7 @@ jobs:
         run: |
           {
             echo 'files<<EOF'
-            ls dist/*.zip dist/*.dmg dist/SHA256SUMS
+            ls dist/*.zip dist/*.dmg dist/SHA256SUMS dist/install.sh dist/flockbook-modfeed-*
             if [ -f dist/appcast.xml ]; then echo dist/appcast.xml; fi
             echo EOF
           } >> "$GITHUB_OUTPUT"

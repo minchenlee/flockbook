@@ -8,6 +8,8 @@ One short line: what this release is about.
 
 - A Rust version of the Herdr app mod's sidecar (`xplat/flockbook-modfeed`, on herdr-core), so the mod can run on Linux too (preview; Windows to follow).
 - The Herdr app mod has an install script, `install.sh`, for your real herdr-app home: it never overwrites your files, merges keys, and runs `herdr-app check` (`--dry-run` to preview). A missing helper now says where to get it.
+- Install the Herdr app mod in one line on macOS or Linux: `curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh`. It checks the helper against the release's SHA256SUMS before it runs anything. The install itself is now `flockbook-modfeed install`, so python3 is no longer needed.
+- The mod's zip carries the helper for macOS (universal) and Linux (x86_64 and arm64, static), and the install keeps them all in `<herdr-app home>/flockbook/remote/` for your other machines. On Linux the + file dialog is off; drop files or paste an image.
 
 ### 🔒 Security
 
