@@ -72,20 +72,20 @@ fn codex_questions() {
 #[test]
 fn screen_question() {
     let single = "❯ Ask me.\n────────────────────\n ☐ Color\nPick a color?\n❯ 1. Red (Recommended)\n     warm\n  2. Blue\n     cool\n  3. Type something.\n────────────────────\n  4. Chat about this\nEnter to select · ↑/↓ to navigate · Esc to cancel";
-    let r = qa::claude_screen(single).expect("single picker");
+    let (r_headers, r) = qa::claude_screen(single).expect("single picker");
     assert!(
-        r.headers == ["Color"] && r.question.text == "Pick a color?"
-            && r.question.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>() == ["Red", "Blue"]
-            && r.question.options.iter().map(|o| o.recommended).collect::<Vec<_>>() == [true, false]
-            && r.question.options.iter().map(|o| o.detail.as_str()).collect::<Vec<_>>() == ["warm", "cool"]
-            && !r.question.multi_select,
+        r_headers == ["Color"] && r.text == "Pick a color?"
+            && r.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>() == ["Red", "Blue"]
+            && r.options.iter().map(|o| o.recommended).collect::<Vec<_>>() == [true, false]
+            && r.options.iter().map(|o| o.detail.as_str()).collect::<Vec<_>>() == ["warm", "cool"]
+            && !r.multi_select,
         "screen question: single"
     );
     let multi = "←  ☐ Size  ☒ Tops  ☐ Pay  ✔ Submit  →\nWhich toppings would you like\non top?\n❯ 1. [✔] Cheese\n     Melted\n  2. [ ] Olive\n  3. [ ] Type something\n     Submit\n────────────────────\n  4. Chat about this";
-    let m = qa::claude_screen(multi).expect("multi picker");
+    let (m_headers, m) = qa::claude_screen(multi).expect("multi picker");
     assert!(
-        m.headers == ["Size", "Tops", "Pay"] && m.question.text == "Which toppings would you like on top?" && m.question.multi_select
-            && m.question.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>() == ["Cheese", "Olive"],
+        m_headers == ["Size", "Tops", "Pay"] && m.text == "Which toppings would you like on top?" && m.multi_select
+            && m.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>() == ["Cheese", "Olive"],
         "screen question: multiSelect, wrapped text, tab bar"
     );
     assert!(
@@ -128,7 +128,7 @@ fn question_answer_keys() {
     cx.questions[1].multi_select = false;
     assert_eq!(
         qa::steps(&cx, &[a(&[0]), a(&[1]), o("一隻魚")]).unwrap(),
-        [t("1"), w("Second?"), t("2"), w("Third?"), k(&["Down", "Down", "Tab"]), t("一隻魚"), k(&["Enter"])],
+        [t("1"), w("Second?"), t("2"), w("Third?"), k(&["Down", "Down"]), k(&["Tab"]), t("一隻魚"), k(&["Enter"])],
         "keys: codex digits, notes on None of the above"
     );
     let mut cxm = multi.clone();

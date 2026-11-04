@@ -10,6 +10,7 @@ description = "Rust port of the Herdr link core: models, snapshot parsing, line-
 serde.workspace = true
 serde_json.workspace = true
 regex = "1.12"
+unicode-segmentation = "1"
 notify = { version = "7.0.0", default-features = false, features = ["macos_fsevent"] }
 base64 = "0.22.1"
 chrono = { version = "0.4.43", default-features = false, features = ["clock", "std"] }

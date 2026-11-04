@@ -71,7 +71,7 @@ fn q_item(q: QuestionRequest) -> Vec<ConversationItem> {
 /// What Claude shows while the picker is open (tab bar, question, options, footer marker).
 fn picker(multi: bool) -> String {
     let mark = if multi { "[ ] " } else { "" };
-    format!("\u{2190}  \u{2610} Pick  \u{2714} Submit  \u{2192}\n\nWhich parts should ship?\n\n 1. {mark}Alpha\n 2. {mark}Beta\n 3. {mark}Gamma\n 4. Type something.\n\u{2500}\u{2500}\u{2500}\u{2500}\n Chat about this\n")
+    format!("\u{2190}  \u{2610} Pick  \u{2714} Submit  \u{2192}\n\nWhich parts should ship?\n\n  1. {mark}Alpha\n  2. {mark}Beta\n  3. {mark}Gamma\n  4. Type something.\n\u{2500}\u{2500}\u{2500}\u{2500}\n Chat about this\n")
 }
 
 fn key_event(key: Key, modifiers: Modifiers) -> Event {
