@@ -43,7 +43,7 @@ It downloads the helper for your machine from the latest release, checks it agai
 To look first: download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper for every platform. (It is also listed in the [Herdr layout gallery](https://herdr.dev/layouts/minchenlee/flockbook--herdr-app/).) Unzip it, then:
 
 ```sh
-bin/flockbook-modfeed install --dry-run   # see what it does (on Linux: remote/<target>/flockbook-modfeed)
+./install.sh --dry-run   # see what it does; nothing is written
 ./install.sh
 ```
 

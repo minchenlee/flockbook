@@ -139,11 +139,12 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Programs**:
   - `flockbook-modfeed`, a helper program at `<herdr-app home>/flockbook/bin/flockbook-modfeed`
     (make it executable). The gallery copies only `layouts/` and `mods/`, so get the helper on its
-    own: the signed universal build is `bin/flockbook-modfeed` in `Flockbook-herdr-mod-<version>.zip`
-    at <https://github.com/minchenlee/flockbook/releases>; or build it from that repo with
-    `swift build -c release --product flockbook-modfeed` (macOS, Swift 6) and copy
-    `.build/release/flockbook-modfeed`. The zip's `install.sh --helper bin/flockbook-modfeed` puts
-    it there. It reads each agent's session log
+    own: the release's one-line install
+    (`curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh`)
+    or the zip's `./install.sh` puts it there. The zip `Flockbook-herdr-mod-<version>.zip` at
+    <https://github.com/minchenlee/flockbook/releases> has it for macOS (`bin/`, signed universal) and
+    Linux (`remote/<target>/`); or build it from that repo with
+    `(cd xplat && cargo build --release -p flockbook-modfeed)`. It reads each agent's session log
     (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`,
     `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to herdr-core (`hc`) to read
     screens and send keys and text. Commands: `feed`, `status`, `card`, `approve`, `answer`,

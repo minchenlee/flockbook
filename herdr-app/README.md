@@ -20,7 +20,7 @@ version comes close or leaves the feature out.
 | `themes/` | Flockbook and Flockbook Mac themes, dark and light. |
 | `test/` | Node tests with fake `gpui-kit`, `gpui-base` and `herdr` modules. |
 | `keys.json` | The Flockbook shortcuts, in a `layout:flockbook` section (while this layout shows). Do not add a `mod:flockbook` section: with one, no key worked. |
-| `install.sh` | In the release zip: runs `bin/flockbook-modfeed install`, which installs the layout, the mod, the themes, the keys and the helpers into your herdr-app home, without overwriting yours. |
+| `install.sh` | In the release zip: runs this machine's helper (`bin/` on macOS, `remote/<target>/` on Linux, checked against `remote/SHA256SUMS`) as `flockbook-modfeed install`, which installs the layout, the mod, the themes, the keys and the helpers into your herdr-app home, without overwriting yours. |
 | `install-isolated.sh` | Copies the same into a test herdr-app home, for development. |
 
 The chat view reads conversations through a sidecar, `flockbook-modfeed`, built from this repo
