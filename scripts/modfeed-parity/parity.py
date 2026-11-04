@@ -149,7 +149,9 @@ class Run:
 
     def cmd(self, *args):
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(self.work, "home"),
-               "HC_SOCKET": self.sock, "TZ": "UTC", "LANG": "en_US.UTF-8"}
+               "HC_SOCKET": self.sock, "TZ": "UTC", "LANG": "en_US.UTF-8",
+               # Swift's NSHomeDirectory() is the account's home, not $HOME: name Claude Code's folder for both.
+               "CLAUDE_CONFIG_DIR": os.path.join(self.work, "home", ".claude")}
         p = subprocess.run([self.binary, *args], env=env, capture_output=True, timeout=60)
         lines = []
         for raw in p.stdout.decode("utf-8", "replace").splitlines():
