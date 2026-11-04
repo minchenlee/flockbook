@@ -20,6 +20,13 @@ pub struct State {
     pub send_delay: f64,
     /// Seconds `terminal.keys` takes before it answers (hc's typing-quiet rule can hold keys this long).
     pub keys_delay: f64,
+    /// Other machines (`machine.exec`, `file.write` with `on`): name -> its home and the socket of its core. A
+    /// command there runs here with `sh -c`, HOME set to that home and HC_SOCKET to that core.
+    pub machines: HashMap<String, (std::path::PathBuf, String)>,
+    /// What `uname -sm` gives there: Some((code, stdout)); None runs the real one.
+    pub uname: Option<(i32, String)>,
+    /// `machine.exec` answers that it ran out of time.
+    pub exec_timed_out: bool,
 }
 
 pub struct FakeHc {
@@ -89,9 +96,37 @@ impl FakeHc {
             .map(|(_, p)| p["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_string()).collect())
             .collect()
     }
+    pub fn add_machine(&self, name: &str, home: &std::path::Path, sock: &str) {
+        self.state.lock().unwrap().machines.insert(name.into(), (home.to_path_buf(), sock.into()));
+    }
     pub fn calls(&self, method: &str) -> Vec<Value> {
         self.state.lock().unwrap().calls.iter().filter(|(m, _)| m == method).map(|(_, p)| p.clone()).collect()
     }
+}
+
+pub fn b64(d: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(d)
+}
+
+fn exec_there(line: &str, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool) -> Value {
+    if timed_out {
+        return json!({"code": null, "signal": 15, "stdout": "", "stderr": "", "truncated": false, "timed_out": true, "ms": 30000});
+    }
+    if let (Some((code, out)), true) = (uname, line.trim() == "uname -sm") {
+        return json!({"code": code, "stdout": b64(out.as_bytes()), "stderr": "", "truncated": false, "timed_out": false, "ms": 1});
+    }
+    let o = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(line)
+        .current_dir(home)
+        .env_clear()
+        .env("HOME", home)
+        .env("HC_SOCKET", sock)
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .output()
+        .unwrap();
+    json!({"code": o.status.code(), "stdout": b64(&o.stdout), "stderr": b64(&o.stderr), "truncated": false, "timed_out": false, "ms": 1})
 }
 
 fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
@@ -111,6 +146,31 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
             g.calls.push((m.clone(), p.clone()));
             match m.as_str() {
                 "terminal.list" => Some(reply(json!({"terminals": g.terminals, "hidden_finished": 0, "machines": []}))),
+                "terminal.put" => {
+                    let name = p["name"].as_str().unwrap_or("");
+                    Some(reply(json!({"path": format!("/remote/tmp/{name}"), "bytes": 1})))
+                }
+                "machine.exec" | "file.write" => {
+                    let on = p["on"].as_str().unwrap_or("").to_string();
+                    let Some((home, sock)) = g.machines.get(&on).cloned() else {
+                        let e = json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": format!("unknown machine \"{on}\""), "data": {"kind": "machine_unknown"}}});
+                        let _ = s.write_all(format!("{e}\n").as_bytes());
+                        continue;
+                    };
+                    if m == "file.write" {
+                        use base64::Engine;
+                        let path = home.join(p["path"].as_str().unwrap_or(""));
+                        let data = base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap_or("")).unwrap();
+                        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                        std::fs::write(&path, &data).unwrap();
+                        Some(reply(json!({"path": path, "bytes": data.len()})))
+                    } else {
+                        let line = p["line"].as_str().unwrap_or("").to_string();
+                        let (uname, timed_out) = (g.uname.clone(), g.exec_timed_out);
+                        drop(g);
+                        Some(reply(exec_there(&line, &home, &sock, uname, timed_out)))
+                    }
+                }
                 "terminal.read" => Some(match g.screens.get(&a) {
                     Some(t) => reply(json!({"text": t, "complete": true, "how": "screen", "why": null})),
                     None => err(format!("no terminal {a}")),

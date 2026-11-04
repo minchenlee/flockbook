@@ -49,12 +49,41 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
+| `helper install` | `--machine <m> --sha256 <hex>` | `installed` |
+| `helper remove` | `--machine <m>` | `removed` |
 
 `card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
 `--cache` is a file the sidecar may read and write; the mod passes `<herdr-app home>/flockbook/cache.json`.
+
+### Terminals on another machine (`m/t7`; Rust sidecar only)
+
+The same helper runs on machine `m` (hc `machine.exec`) with the same command and `--terminal t7`.
+Its lines come back unchanged, so `header`, `end` and everything between are the helper's there.
+The helper there keeps its own cache (`~/.cache/flockbook/cache.json` there); `--cache` is not
+passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
+text names that copy. Only one level: `a/b/t7` is `bad_terminal`. The Swift sidecar does not do
+this: it answers `not-agent` for these terminals.
+
+The helper there must be this same version (`protocol` and `sidecar` both). It is never put on
+another machine without the user's yes:
+
+1. A command for `m/t7` answers `remote_helper_missing` (or `remote_helper_outdated`) with
+   `install`: `{"machine","target","path","bytes","sha256","source"}`, or `null` when this
+   Flockbook carries no helper for that platform.
+2. The mod shows a card with the machine, the path there, the size and the sha256. `source`
+   `"dev"` means the file is from `FLOCKBOOK_REMOTE_HELPERS` (a test or local build), not from the
+   installed Flockbook: the card says so.
+3. Only when the user presses Install: `helper install --machine m --sha256 <the card's sha256>`.
+   The sidecar reads the file again, checks it against `SHA256SUMS` and that sha256, writes it
+   there in parts of at most 6 MiB, checks the sha256 there, then makes it runnable.
+4. `helper remove --machine m` removes `~/.local/share/flockbook/helper` there (every version).
+
+The file comes from `<herdr-app home>/flockbook/remote/<target>/flockbook-modfeed`, with
+`SHA256SUMS` in `remote/` (`<sha256>  <target>/flockbook-modfeed`) or in `remote/<target>/`.
+Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-apple-darwin`.
 
 ## Lines
 
@@ -93,14 +122,27 @@ owner presses a button, never on a timer. `send` types a message and presses Ent
 | `not-agent` | The terminal runs no agent (a plain shell). |
 | `locate` | Finding the session log failed. |
 | `read` | The log could not be read. |
+| `bad_terminal` | Not a terminal address (`a/b/t7`, `/t7`). |
+| `remote_helper_missing` | Machine `m` has no helper yet. `install`: what the install card shows, or `null`. |
+| `remote_helper_outdated` | The helper there is another version. `remote`: its `protocol` and `sidecar`; `install` as above. |
+| `remote_helper_unsupported` | No helper for that machine's platform (Windows, or another CPU). `message` says which. |
+| `remote_failed` | hc could not run it there: unknown machine, no answer in 30 s, or too much output. |
+| `checksum` | `helper install`: the file is not the one the user said yes to, or it arrived changed. Nothing was installed. |
 
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send"],"type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper"],"type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
+
+### `installed` (`helper install`), `removed` (`helper remove`)
+
+```json
+{"bytes":4371392,"machine":"box","parts":1,"path":"~/.local/share/flockbook/helper/0.1.0/flockbook-modfeed","sha256":"7ac5…","source":"release","type":"installed"}
+{"machine":"box","path":"~/.local/share/flockbook/helper","type":"removed"}
+```
 
 ### `log` (`feed`)
 

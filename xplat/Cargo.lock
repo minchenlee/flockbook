@@ -992,10 +992,12 @@ dependencies = [
 name = "flockbook-modfeed"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "herdr-core",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "unicode-segmentation",
 ]
