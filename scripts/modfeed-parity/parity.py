@@ -151,6 +151,14 @@ class Run:
                 t["status"] = {"state": status, "kind": kind}
         return terms
 
+    def age_claims(self, seconds):
+        """Sets the time of every claim file to `seconds` ago (the lock file too: its time means nothing)."""
+        root = os.path.join(os.path.dirname(self.cache), "answered")
+        then = time.time() - seconds
+        for folder in os.listdir(root) if os.path.isdir(root) else []:
+            for name in os.listdir(os.path.join(root, folder)):
+                os.utime(os.path.join(root, folder, name), (then, then))
+
     def sent(self):
         out = []
         for l in open(self.calls):
@@ -268,6 +276,8 @@ def scenario(r):
     req = find(card[1], "card").get("request", "")
     yield step("approve t20 allow, key held", "approve", "--terminal", "t20", "--request", req, "--allow", *C)
     r.write_state(r.set_status("t20", "blocked", "permission"), {"t20": box})
+    # Past HELD_WAIT (60 s) an unheld claim is over, so only the held mark keeps this press from sending a second key.
+    r.age_claims(70)
     yield step("approve t20 again while held", "approve", "--terminal", "t20", "--request", req, "--allow", *C)
     # Files in the composer. Local: the text goes as typed. On another machine: the file is put there first and the
     # text names that copy, quoted.
@@ -291,31 +301,37 @@ def scenario(r):
 
 
 def brief(sent):
-    """What a step sent: (method, keys, text or file name) per call."""
-    return [(c["method"], c["params"].get("keys") or c["params"].get("text") or c["params"].get("name")) for c in sent]
+    """What a step sent: (method, terminal, keys or text or file name) per call."""
+    return [(c["method"], c["params"].get("terminal"),
+             c["params"].get("keys") or c["params"].get("text") or c["params"].get("name")) for c in sent]
 
 
-WALK = [("terminal.keys", ["left"]), ("terminal.keys", ["right"]), ("terminal.keys", ["left"])]
+def keys(terminal, *ks):
+    return [("terminal.keys", terminal, [k]) for k in ks]
+
+
+WALK = keys("t3", "left", "right", "left")
 # Fixed expected results, checked on each side alone (two binaries that do the same wrong thing still fail):
 # step name -> (the "done" result, or None for a card step; exactly what it sent).
 EXPECT = {
     "approve t20 wrong request": ("changed", []),
-    "approve t20 deny": ("sent", [("terminal.keys", ["esc"])]),
+    "approve t20 deny": ("sent", keys("t20", "esc")),
     "approve t20 again (answered)": ("answered", []),
-    "approve t1 allow": ("sent", [("terminal.keys", ["1"])]),
-    "approve t9 allow (Enter on Yes, proceed)": ("sent", [("terminal.keys", ["enter"])]),
-    "approve t10 deny": ("sent", [("terminal.keys", ["esc"])]),
+    "approve t1 allow": ("sent", keys("t1", "1")),
+    "approve t9 allow (Enter on Yes, proceed)": ("sent", keys("t9", "enter")),
+    "approve t10 deny": ("sent", keys("t10", "esc")),
     "answer t5 wrong request": ("changed", []),
-    "answer t5 picks [1]": ("sent", [("terminal.keys", ["2"])]),
+    "answer t5 picks [1]": ("sent", keys("t5", "2")),
     "card t3 --all (walks the picker)": (None, WALK),
-    "answer t3 two questions": ("sent", WALK + [("terminal.keys", [k]) for k in ("2", "1", "3", "tab", "1")]),
-    "approve t20 allow, key held": ("unconfirmed", [("terminal.keys", ["1"])]),
+    "answer t3 two questions": ("sent", WALK + keys("t3", "2", "1", "3", "tab", "1")),
+    "approve t20 allow, key held": ("unconfirmed", keys("t20", "1")),
     "approve t20 again while held": ("answered", []),
     "send t1 another kind": ("changed", []),
     "send t1 another log": ("changed", []),
-    "send t1": ("sent", [("terminal.send", "hello — ✓")]),
-    "send t1 --file (local)": ("sent", [("terminal.send", "look at '{work}/shot one.png'")]),
-    "send box/t40 --file (remote)": ("sent", [("terminal.put", "shot one.png"), ("terminal.send", "look at '/remote/tmp/shot one.png'")]),
+    "send t1": ("sent", [("terminal.send", "t1", "hello — ✓")]),
+    "send t1 --file (local)": ("sent", [("terminal.send", "t1", "look at '{work}/shot one.png'")]),
+    "send box/t40 --file (remote)": ("sent", [("terminal.put", "box/t40", "shot one.png"),
+                                              ("terminal.send", "box/t40", "look at '/remote/tmp/shot one.png'")]),
     "approve t4 (no identity)": ("no-identity", []),
     "send t4 (no identity)": ("no-identity", []),
 }
@@ -329,7 +345,7 @@ def expectation_misses(steps, work):
             continue
         seen.add(name)
         result, want = EXPECT[name]
-        want = [(m, v.replace("{work}", work) if isinstance(v, str) else v) for m, v in want]
+        want = [(m, t, v.replace("{work}", work) if isinstance(v, str) else v) for m, t, v in want]
         got = find(out, "done").get("result")
         if (result is not None and got != result) or brief(sent) != want:
             misses.append("%s: want %s %s, got %s %s" % (name, result, want, got, brief(sent)))
