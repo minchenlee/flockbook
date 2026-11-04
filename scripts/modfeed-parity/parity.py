@@ -7,7 +7,8 @@ Each binary gets the same, freshly made work folder: copies of the synthetic log
 each fake terminal at its log (so no process scan runs), and a fake herdr-core (`fake_hc.py`). The same list of
 commands runs against each (feed, older rows, status, card, approve, answer, send, errors). Their stdout is compared
 line by line after dropping `end.ms`, and the keys and text each one sent to the fake herdr-core are compared too.
-Exit 0 when everything matches, 1 otherwise. Never touches a real herdr-core; nothing here reads real logs.
+Some steps also have a fixed expected result and keys (`EXPECT`), checked on each side alone, and both sides must
+make the same steps. Exit 0 when everything matches and every expectation holds, 1 otherwise. Never touches a real herdr-core; nothing here reads real logs.
 """
 import argparse, json, os, shutil, subprocess, sys, tempfile, time
 
@@ -70,6 +71,16 @@ AGY_BOX = ("  > run the tests\n────────────────�
            "> 1. Yes, run command\n  2. Yes, and always allow\n  3. No, cancel\n\n↑/↓ Navigate · Enter Select")
 
 
+def picker(questions):
+    """Claude Code's picker in the fake herdr-core (fake_hc.py `new_picker`): (header, text, options, multi)."""
+    qs = [{"header": h, "text": t, "options": [list(o) for o in opts], "multi": m} for h, t, opts, m in questions]
+    return {"qs": qs, "at": 0, "focus": 0, "review": False, "done": False, "checks": [[] for _ in qs], "single": {}}
+
+
+TWO_QUESTIONS = [("Color", "Pick a color?", [("Red", "warm"), ("Blue", "cool")], False),
+                 ("Tops", "Which toppings?", [("Cheese", ""), ("Olive", ""), ("Basil", "")], True)]
+
+
 def terminal(addr, argv, pid, status=None, kind=None):
     t = {"address": addr, "labels": {}, "argv": argv, "cwd": "/tmp/proj", "state": "live", "created_ms": 1,
          "title": "", "pid": pid, "parent": None, "foreground": None, "status": None}
@@ -129,8 +140,9 @@ class Run:
                                    stdout=subprocess.PIPE, text=True)
         assert self.hc.stdout.readline().strip() == "ready"
 
-    def write_state(self, terms, screens, after_keys=None):
-        json.dump({"terminals": terms, "screens": screens, "after_keys": after_keys or {}}, open(self.state, "w"))
+    def write_state(self, terms, screens, after_keys=None, pickers=None, delay_keys=None):
+        json.dump({"terminals": terms, "screens": screens, "after_keys": after_keys or {}, "pickers": pickers or {},
+                   "delay_keys": delay_keys or {}}, open(self.state, "w"))
 
     def set_status(self, addr, status, kind):
         terms = [dict(t) for t in self.terms]
@@ -240,6 +252,32 @@ def scenario(r):
     yield step("send t1 another log", "send", "--terminal", "t1", "--text", "hi", "--expect-path", "/elsewhere.jsonl", *C)
     yield step("send t1 empty text", "send", "--terminal", "t1", "--text", "", *C)
     yield step("send t1", "send", "--terminal", "t1", "--text", "hello — ✓", "--expect-kind", "claude", "--expect-path", t1_log, *C)
+    # A Claude picker with two questions (read from the screen): the card shows the first, one unread; --all walks the
+    # picker with left/right (navigation only) and comes back; the answer picks Blue, then toggles Cheese and Basil.
+    r.write_state(r.set_status("t3", "blocked", "question"), {}, pickers={"t3": picker(TWO_QUESTIONS)})
+    card = step("card t3 (two questions)", "card", "--terminal", "t3", *C)
+    yield card
+    yield step("card t3 --all (walks the picker)", "card", "--terminal", "t3", "--all", *C)
+    yield step("answer t3 two questions", "answer", "--terminal", "t3", "--request", find(card[1], "card").get("request", ""),
+               "--answers", '[{"picks":[1]},{"picks":[0,2]}]', *C)
+    # A key that hc holds (no reply within the sidecar's 8 s): unconfirmed, and the claim holds while still blocked.
+    box = CLAUDE_BOX.replace("rm -rf build", "make clean")
+    r.write_state(r.set_status("t20", "blocked", "permission"), {"t20": box}, delay_keys={"t20": 10})
+    card = step("card t20 (make clean)", "card", "--terminal", "t20", *C)
+    yield card
+    req = find(card[1], "card").get("request", "")
+    yield step("approve t20 allow, key held", "approve", "--terminal", "t20", "--request", req, "--allow", *C)
+    r.write_state(r.set_status("t20", "blocked", "permission"), {"t20": box})
+    yield step("approve t20 again while held", "approve", "--terminal", "t20", "--request", req, "--allow", *C)
+    # Files in the composer. Local: the text goes as typed. On another machine: the file is put there first and the
+    # text names that copy, quoted.
+    pic = os.path.join(r.work, "shot one.png")
+    open(pic, "wb").write(b"\x89PNG fake")
+    r.write_state(r.terms, {})
+    yield step("send t1 --file (local)", "send", "--terminal", "t1", "--text", "look at '%s'" % pic, "--file", pic, *C)
+    remote = terminal("box/t40", ["claude"], 7000, "idle")
+    r.write_state(r.terms + [remote], {})
+    yield step("send box/t40 --file (remote)", "send", "--terminal", "box/t40", "--text", "look at '%s'" % pic, "--file", pic, *C)
     # An agent with no identity (no pid): nothing is sent.
     terms = [dict(t) for t in r.terms]
     for t in terms:
@@ -250,6 +288,53 @@ def scenario(r):
     yield card
     yield step("approve t4 (no identity)", "approve", "--terminal", "t4", "--request", find(card[1], "card").get("request", ""), "--allow", *C)
     yield step("send t4 (no identity)", "send", "--terminal", "t4", "--text", "hi", *C)
+
+
+def brief(sent):
+    """What a step sent: (method, keys, text or file name) per call."""
+    return [(c["method"], c["params"].get("keys") or c["params"].get("text") or c["params"].get("name")) for c in sent]
+
+
+WALK = [("terminal.keys", ["left"]), ("terminal.keys", ["right"]), ("terminal.keys", ["left"])]
+# Fixed expected results, checked on each side alone (two binaries that do the same wrong thing still fail):
+# step name -> (the "done" result, or None for a card step; exactly what it sent).
+EXPECT = {
+    "approve t20 wrong request": ("changed", []),
+    "approve t20 deny": ("sent", [("terminal.keys", ["esc"])]),
+    "approve t20 again (answered)": ("answered", []),
+    "approve t1 allow": ("sent", [("terminal.keys", ["1"])]),
+    "approve t9 allow (Enter on Yes, proceed)": ("sent", [("terminal.keys", ["enter"])]),
+    "approve t10 deny": ("sent", [("terminal.keys", ["esc"])]),
+    "answer t5 wrong request": ("changed", []),
+    "answer t5 picks [1]": ("sent", [("terminal.keys", ["2"])]),
+    "card t3 --all (walks the picker)": (None, WALK),
+    "answer t3 two questions": ("sent", WALK + [("terminal.keys", [k]) for k in ("2", "1", "3", "tab", "1")]),
+    "approve t20 allow, key held": ("unconfirmed", [("terminal.keys", ["1"])]),
+    "approve t20 again while held": ("answered", []),
+    "send t1 another kind": ("changed", []),
+    "send t1 another log": ("changed", []),
+    "send t1": ("sent", [("terminal.send", "hello — ✓")]),
+    "send t1 --file (local)": ("sent", [("terminal.send", "look at '{work}/shot one.png'")]),
+    "send box/t40 --file (remote)": ("sent", [("terminal.put", "shot one.png"), ("terminal.send", "look at '/remote/tmp/shot one.png'")]),
+    "approve t4 (no identity)": ("no-identity", []),
+    "send t4 (no identity)": ("no-identity", []),
+}
+
+
+def expectation_misses(steps, work):
+    """The steps whose result or keys are not the fixed expected ones, and the expected steps that did not run."""
+    misses, seen = [], set()
+    for name, out, sent in steps:
+        if name not in EXPECT:
+            continue
+        seen.add(name)
+        result, want = EXPECT[name]
+        want = [(m, v.replace("{work}", work) if isinstance(v, str) else v) for m, v in want]
+        got = find(out, "done").get("result")
+        if (result is not None and got != result) or brief(sent) != want:
+            misses.append("%s: want %s %s, got %s %s" % (name, result, want, got, brief(sent)))
+    misses += ["%s: did not run" % n for n in EXPECT if n not in seen]
+    return misses
 
 
 def main():
@@ -267,6 +352,13 @@ def main():
             results[side] = list(scenario(r))
         finally:
             r.close()
+    problems = []
+    names_a, names_b = [x[0] for x in results["a"]], [x[0] for x in results["b"]]
+    if names_a != names_b:
+        problems.append("the two runs made different steps: A %d, B %d; first difference at %s" % (
+            len(names_a), len(names_b), next((i for i, (x, y) in enumerate(zip(names_a, names_b)) if x != y), min(len(names_a), len(names_b)))))
+    for side in ("a", "b"):
+        problems += ["%s: %s" % (side.upper(), m) for m in expectation_misses(results[side], work)]
     same, diffs, lines = 0, [], 0
     for (name, oa, sa), (_, ob, sb) in zip(results["a"], results["b"]):
         lines += len(oa["lines"])
@@ -275,7 +367,10 @@ def main():
         else:
             diffs.append({"step": name, "a": oa["raw"], "b": ob["raw"], "a_sent": sa, "b_sent": sb})
     total = len(results["a"])
-    print("modfeed parity: %d/%d commands identical (%d output lines from A), %d differ" % (same, total, lines, len(diffs)))
+    print("modfeed parity: %d/%d commands identical (%d output lines from A), %d differ; %d fixed expectations, %d missed" % (
+        same, total, lines, len(diffs), 2 * len(EXPECT), len(problems)))
+    for p in problems:
+        print("!!! " + p)
     for d in diffs:
         print("\n--- differs: %s" % d["step"])
         print("A:\n" + d["a"].rstrip())
@@ -284,9 +379,10 @@ def main():
             print("A sent: %s\nB sent: %s" % (json.dumps(d["a_sent"]), json.dumps(d["b_sent"])))
     if args.report:
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
-        json.dump({"identical": same, "total": total, "diffs": diffs}, open(args.report, "w"), indent=1, ensure_ascii=False)
+        json.dump({"identical": same, "total": total, "diffs": diffs, "expectations": 2 * len(EXPECT), "problems": problems},
+                  open(args.report, "w"), indent=1, ensure_ascii=False)
     shutil.rmtree(work, ignore_errors=True)
-    sys.exit(0 if not diffs and total > 0 else 1)
+    sys.exit(0 if not diffs and not problems and total > 0 else 1)
 
 
 if __name__ == "__main__":
