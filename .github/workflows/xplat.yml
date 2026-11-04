@@ -63,6 +63,17 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      # The helper a Linux machine gets (static musl, as the release zip carries it): its real size must pass
+      # hc's 8 MB file.write in as few parts as it needs, and the remote tests install and run this file.
+      - name: Remote helper (x86_64 musl)
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get install -y musl-tools
+          cargo build --release --locked --target x86_64-unknown-linux-musl -p flockbook-modfeed
+          bin=target/x86_64-unknown-linux-musl/release/flockbook-modfeed
+          echo "musl helper: $(stat -c %s "$bin") bytes"
+          FLOCKBOOK_TEST_HELPER="$PWD/$bin" cargo test --locked -p flockbook-modfeed --test remote -- --nocapture
+
       # The mod's Node tests again, this time against the Rust sidecar too (sidecar.real.test.mjs).
       - uses: actions/setup-node@v4
         with:
