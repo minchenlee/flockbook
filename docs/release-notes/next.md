@@ -7,6 +7,7 @@ One short line: what this release is about.
 - Settings > General > Backend chooses what Flockbook follows: Automatic (default: whichever of the herdr TUI and herdr-core answers, with no warning about the other), herdr-core only, Herdr TUI only, or Both. A new choice applies at once.
 
 - A Rust version of the Herdr app mod's sidecar (`xplat/flockbook-modfeed`, on herdr-core), so the mod can run on Linux too (preview; Windows to follow).
+- Herdr app mod: tabs on another machine (`hc machine`) get the chat too. The Rust helper runs on that machine (Linux x86_64/aarch64 or macOS). Before it puts the helper there, a card shows the machine, the path, the size and the SHA-256, and installs only when you press Install; the tab menu can remove it. The Swift helper still skips these tabs.
 - The Herdr app mod has an install script, `install.sh`, for your real herdr-app home: it never overwrites your files, merges keys, and runs `herdr-app check` (`--dry-run` to preview). A missing helper now says where to get it.
 
 ### 🔒 Security

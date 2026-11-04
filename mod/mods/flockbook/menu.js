@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, run, openOverlay, closeOverlay, agents, shared, setShared } from "herdr";
-import { openTerminal, showScreen, shownScreen, showAgent, openTab, KEY_SCREEN } from "./state.js";
+import { openTerminal, showScreen, shownScreen, showAgent, openTab, KEY_SCREEN, KEY_REMOVE, machineOf } from "./state.js";
 
 const ROW_H = 28, PAD = 6, WIDTH = 220;
 
@@ -28,6 +28,8 @@ export function act(item) {
     case "chat": return showScreen("chat");
     case "open-agent": return showAgent(a.address);
     case "open-tab": return openTab(a.space, { id: a.tab });
+    // The chat shows a card that asks before anything is removed.
+    case "remove-helper": setShared(KEY_REMOVE, a.machine); return showScreen("chat");
     case "copy": return null;   // handled in the view (needs cx)
   }
   return null;
@@ -36,6 +38,7 @@ export function act(item) {
 // The items for a tab pill or an Overview card.
 export function tabItems(tab, { agent = null, spaceId = null, list = [] } = {}) {
   const i = list.findIndex((x) => x.id === tab.id);
+  const machine = machineOf(agent?.address);
   const shown = tab.active && !spaceId;   // the bar's shown tab: the screen and split items apply
   return [
     spaceId && !tab.active ? { label: "Open", act: "open-tab", args: { space: spaceId, tab: tab.id } } : null,
@@ -46,6 +49,7 @@ export function tabItems(tab, { agent = null, spaceId = null, list = [] } = {}) 
     shown && agent ? (shownScreen() === "tab" ? { label: "Show chat", act: "chat" } : { label: "Show panes", act: "panes" }) : null,
     shown ? { label: "Split right", cmd: "pane.split", args: { direction: "right" } } : null,
     shown ? { label: "Split down", cmd: "pane.split", args: { direction: "down" } } : null,
+    machine ? { label: `Remove helper from ${machine}…`, act: "remove-helper", args: { machine }, sep: true } : null,
     { label: "Put away", cmd: "tab.settle", args: { id: tab.id }, sep: true },
     { label: "Close tab", cmd: "tab.close", args: { id: tab.id }, danger: true },
   ];
