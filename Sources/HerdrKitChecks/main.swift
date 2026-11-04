@@ -209,6 +209,8 @@ try await checksHCMirrorRootSafe()
 try checksModFeed()
 try await checksModFeedCards()
 try await checksModFeedReview()
+checksBackendPlan()
+try await checksBackendStore()
 
 print(failures == 0 ? "OK \(total) checks passed" : "\(failures) of \(total) checks FAILED")
 exit(failures == 0 ? 0 : 1)

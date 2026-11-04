@@ -13,6 +13,8 @@ public enum ConnectionProblem: Sendable, Hashable {
     case failed(path: String, reason: String)
     /// herdr session `session` (nil: default) on `host` cannot be reached (`ConnectionCheck.diagnose(remote:)`).
     case remote(RemoteProblem, host: RemoteHost, session: String?)
+    /// Settings > General > Backend is herdr-core only and herdr-core does not answer at `socket`.
+    case hcNotRunning(socket: String)
 }
 
 /// Read-only checks for the first run: the session's socket and the `herdr` program. Sends nothing to herdr.
@@ -118,6 +120,7 @@ extension ConnectionProblem {
         case .notRunning: "herdr is not running"
         case .noPermission: "No access to herdr's socket"
         case .failed: "Cannot connect to herdr"
+        case .hcNotRunning: "herdr-core is not running"
         case .remote(let p, let host, _):
             switch p {
             case .auth: "SSH login to \(host.label) failed"
@@ -137,6 +140,7 @@ extension ConnectionProblem {
         case .notRunning: "herdr Is Not Running"
         case .noPermission: "Cannot Open herdr's Socket"
         case .failed: "Cannot Connect to herdr"
+        case .hcNotRunning: "herdr-core Is Not Running"
         case .remote(let p, _, _):
             switch p {
             case .auth: "SSH Login Failed"
@@ -161,6 +165,8 @@ extension ConnectionProblem {
             "macOS does not let Flockbook open \((path as NSString).abbreviatingWithTildeInPath). Quit herdr, start it again as your own user, then try again."
         case .failed(let path, let reason):
             "Connecting to \((path as NSString).abbreviatingWithTildeInPath) failed: \(reason). Quit herdr, start it again, then try again."
+        case .hcNotRunning(let socket):
+            "Backend is set to herdr-core only (Settings > General), and nothing answers at \((socket as NSString).abbreviatingWithTildeInPath). Start herdr-core with this command, or choose Automatic. Flockbook connects by itself when it starts."
         case .remote(let p, let host, _):
             switch p {
             case .auth:
@@ -185,6 +191,7 @@ extension ConnectionProblem {
     public var command: String? {
         switch self {
         case .notRunning(let c): return c
+        case .hcNotRunning: return "hc server start"
         case .remote(let p, let host, let session):
             // Only an ssh host has a command: `.local` (checks) has no destination.
             guard case .ssh(let d) = host.via else { return nil }
