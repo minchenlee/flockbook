@@ -27,6 +27,10 @@ pub struct State {
     pub uname: Option<(i32, String)>,
     /// `machine.exec` answers that it ran out of time.
     pub exec_timed_out: bool,
+    /// A Windows machine: no `uname` (argv `uname` gives `spawn_failed`).
+    pub windows: bool,
+    /// `file.write` changes the bytes on the way (the sum there must catch it).
+    pub corrupt_writes: bool,
 }
 
 pub struct FakeHc {
@@ -109,24 +113,45 @@ pub fn b64(d: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(d)
 }
 
-fn exec_there(line: &str, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool) -> Value {
+/// What `machine.exec` was given: `argv` (no shell) or `line` (`sh -c`).
+pub enum Run {
+    Argv(Vec<String>),
+    Line(String),
+}
+
+/// Runs it on this computer as that machine would: in its home, with its core. Err: an hc error kind.
+fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool, windows: bool) -> Result<Value, String> {
     if timed_out {
-        return json!({"code": null, "signal": 15, "stdout": "", "stderr": "", "truncated": false, "timed_out": true, "ms": 30000});
+        return Ok(json!({"code": null, "signal": 15, "stdout": "", "stderr": "", "truncated": false, "timed_out": true, "ms": 30000}));
     }
-    if let (Some((code, out)), true) = (uname, line.trim() == "uname -sm") {
-        return json!({"code": code, "stdout": b64(out.as_bytes()), "stderr": "", "truncated": false, "timed_out": false, "ms": 1});
+    let is_uname = match run {
+        Run::Argv(a) => a == &["uname".to_string(), "-sm".to_string()],
+        Run::Line(l) => l.trim() == "uname -sm",
+    };
+    if windows {
+        // cmd.exe would run a line, with POSIX quotes that mean nothing to it. Tests check no line got here.
+        return Err(if matches!(run, Run::Line(_)) { "line_on_windows" } else { "spawn_failed" }.into());
     }
-    let o = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(line)
-        .current_dir(home)
-        .env_clear()
-        .env("HOME", home)
-        .env("HC_SOCKET", sock)
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .output()
-        .unwrap();
-    json!({"code": o.status.code(), "stdout": b64(&o.stdout), "stderr": b64(&o.stderr), "truncated": false, "timed_out": false, "ms": 1})
+    if let (Some((code, out)), true) = (uname, is_uname) {
+        return Ok(json!({"code": code, "stdout": b64(out.as_bytes()), "stderr": "", "truncated": false, "timed_out": false, "ms": 1}));
+    }
+    let mut c = match run {
+        Run::Argv(a) => {
+            let mut c = std::process::Command::new(&a[0]);
+            c.args(&a[1..]);
+            c
+        }
+        Run::Line(l) => {
+            let mut c = std::process::Command::new("sh");
+            c.arg("-c").arg(l);
+            c
+        }
+    };
+    c.current_dir(home).env_clear().env("HOME", home).env("HC_SOCKET", sock).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    match c.output() {
+        Ok(o) => Ok(json!({"code": o.status.code(), "stdout": b64(&o.stdout), "stderr": b64(&o.stderr), "truncated": false, "timed_out": false, "ms": 1})),
+        Err(_) => Err("spawn_failed".into()),
+    }
 }
 
 fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
@@ -160,15 +185,26 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
                     if m == "file.write" {
                         use base64::Engine;
                         let path = home.join(p["path"].as_str().unwrap_or(""));
-                        let data = base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap_or("")).unwrap();
+                        let mut data = base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap_or("")).unwrap();
+                        if g.corrupt_writes {
+                            if let Some(b) = data.first_mut() {
+                                *b ^= 0xff;
+                            }
+                        }
                         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                         std::fs::write(&path, &data).unwrap();
                         Some(reply(json!({"path": path, "bytes": data.len()})))
                     } else {
-                        let line = p["line"].as_str().unwrap_or("").to_string();
-                        let (uname, timed_out) = (g.uname.clone(), g.exec_timed_out);
+                        let run = match p["argv"].as_array() {
+                            Some(a) => Run::Argv(a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()),
+                            None => Run::Line(p["line"].as_str().unwrap_or("").to_string()),
+                        };
+                        let (uname, timed_out, windows) = (g.uname.clone(), g.exec_timed_out, g.windows);
                         drop(g);
-                        Some(reply(exec_there(&line, &home, &sock, uname, timed_out)))
+                        Some(match exec_there(&run, &home, &sock, uname, timed_out, windows) {
+                            Ok(v) => reply(v),
+                            Err(kind) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": kind, "data": {"kind": kind}}}),
+                        })
                     }
                 }
                 "terminal.read" => Some(match g.screens.get(&a) {

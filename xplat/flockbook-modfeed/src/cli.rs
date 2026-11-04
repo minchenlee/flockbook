@@ -78,9 +78,10 @@ pub fn run(argv: &[String]) -> String {
                 return r.fail("no-core", "herdr-core is not running");
             }
             let client = HcClient::new(session, 8, 22);
+            let cache = opt("--cache").map(PathBuf::from);
             let done = match (what.as_str(), opt("--sha256")) {
-                ("install", Some(sha)) => remote::install(&client, &mut r.out, &machine, &sha),
-                ("remove", _) => remote::remove(&client, &mut r.out, &machine),
+                ("install", Some(sha)) => remote::install(&client, &mut r.out, &machine, &sha, cache.as_deref()),
+                ("remove", _) => remote::remove(&client, &mut r.out, &machine, cache.as_deref()),
                 _ => return r.fail("usage", "helper install needs --sha256 <hex> (the one the user said yes to)"),
             };
             match done {
@@ -101,7 +102,7 @@ pub fn run(argv: &[String]) -> String {
             match remote::split(&terminal) {
                 Err(()) => return r.fail("bad_terminal", &format!("not a terminal address: {terminal}")),
                 // On another machine: the helper there answers, and its lines go back as they are.
-                Ok(Some((machine, there))) => return remote::forward(&client, &cmd, &args, &machine, &there),
+                Ok(Some((machine, there))) => return remote::forward(&client, &cmd, &args, &machine, &there, cache_url),
                 Ok(None) => {}
             }
             let ws = match client.snapshot() {

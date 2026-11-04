@@ -10,7 +10,7 @@ Also in the state:
   driven by the keys: digits pick or toggle, left/right move between questions, tab moves on, the review screen's
   `1` submits. Single choice and multiSelect without "Other" only.
 - "delay_keys": {addr: seconds}: `terminal.keys` answers that much later (a key hc held: the sidecar times out).
-- "machines": {name: home}: `machine.exec` with `on` runs its `line` here with `sh -c`, HOME set to that home and
+- "machines": {name: home}: `machine.exec` with `on` runs its `argv` (or its `line` with `sh -c`) here, HOME set to that home and
   HC_SOCKET to this fake (the machine's core is this one: its terminals are the plain addresses).
 - `terminal.put` answers a path on the remote machine: "/remote/tmp/<name>".
 """
@@ -174,7 +174,8 @@ def handle(conn):
                 if home is None:
                     reply = {"error": {"code": -32000, "message": "unknown machine", "data": {"kind": "machine_unknown"}}}
                 else:
-                    run, reply = (params.get("line") or "", home), None
+                    argv = params.get("argv") or ["sh", "-c", params.get("line") or ""]
+                    run, reply = (argv, home), None
             elif method == "machine.list":
                 reply = {"result": {"machines": []}}
             else:
@@ -183,9 +184,15 @@ def handle(conn):
             time.sleep(delay)  # outside the lock: other calls go on
         if run:  # outside the lock: the helper there calls this fake too
             env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": run[1], "HC_SOCKET": sock_path, "TZ": "UTC"}
-            p = subprocess.run(["sh", "-c", run[0]], cwd=run[1], env=env, capture_output=True, timeout=60)
-            reply = {"result": {"code": p.returncode, "stdout": base64.b64encode(p.stdout).decode(),
-                                "stderr": base64.b64encode(p.stderr).decode(), "truncated": False, "timed_out": False, "ms": 1}}
+            try:
+                p = subprocess.run(run[0], cwd=run[1], env=env, capture_output=True, timeout=60)
+            except OSError:
+                p = None
+            if p is None:  # as hc: the program is not there
+                reply = {"error": {"code": -32000, "message": "spawn failed", "data": {"kind": "spawn_failed"}}}
+            else:
+                reply = {"result": {"code": p.returncode, "stdout": base64.b64encode(p.stdout).decode(),
+                                    "stderr": base64.b64encode(p.stderr).decode(), "truncated": False, "timed_out": False, "ms": 1}}
         reply.update({"jsonrpc": "2.0", "id": rid})
         conn.sendall((json.dumps(reply) + "\n").encode())
     finally:

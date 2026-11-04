@@ -21,6 +21,11 @@ fn carried() -> PathBuf {
 }
 const BOX: &str = "Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No";
 
+/// The helper there, from that machine's home (`machine.exec` runs in the home).
+fn helper_rel() -> String {
+    format!("{}/{}/flockbook-modfeed", remote::HELPER_DIR, remote::helper_version())
+}
+
 struct World {
     here: FakeHc,
     there: FakeHc,
@@ -97,11 +102,15 @@ fn a_terminal_on_another_machine_runs_the_helper_there() {
     assert!(w.there.calls("terminal.read").iter().any(|p| p["terminal"] == "t3"), "the helper there read t3 on its core");
     assert!(w.here.calls("terminal.read").is_empty(), "nothing read here");
     let exec = w.here.calls("machine.exec");
-    assert_eq!(exec.len(), 1);
-    assert_eq!(exec[0]["on"], "box");
-    let line = exec[0]["line"].as_str().unwrap();
-    assert!(line.contains("'--terminal' 't3'") && !line.contains("box/t3"), "the address there is t3 ({line})");
-    assert!(!line.contains("/nonexistent-home"), "this computer's cache path is not used there ({line})");
+    assert_eq!(exec.len(), 2, "the platform first, then the command: {exec:?}");
+    assert_eq!(exec[0]["argv"], json!(["uname", "-sm"]));
+    assert_eq!(exec[1]["on"], "box");
+    assert!(exec.iter().all(|e| e.get("line").is_none()), "no shell line carries a value: {exec:?}");
+    assert_eq!(
+        exec[1]["argv"],
+        json!([helper_rel(), "card", "--terminal", "t3", "--cache", ".cache/flockbook/cache.json"]),
+        "the address there is t3; this computer's cache path is not used there"
+    );
 
     // Approve there: the key goes to t3 on that core, and the claim is kept in that machine's home.
     let req = c[1]["request"].as_str().unwrap().to_string();
@@ -196,6 +205,101 @@ fn a_platform_without_a_helper_is_unsupported() {
         assert_eq!(e["code"], "remote_helper_unsupported", "{code} {out}: {e}");
         assert!(e["message"].as_str().unwrap().contains("box"));
     }
+}
+
+#[test]
+fn values_reach_the_helper_there_unchanged() {
+    let w = world();
+    w.install_by_hand();
+    w.there.set_terminals(vec![claude("t3", "idle", "")]);
+    let text = "Tom & Jerry | a; b $(id) `id` %USERPROFILE% %PATH% 'single' \"double\" back\\slash\nnext line *?[x] ~ #";
+    let d = w.run(&["send", "--terminal", "box/t3", "--text", text]);
+    assert_eq!(d[1]["result"], "sent", "{d:?}");
+    let exec = w.here.calls("machine.exec");
+    let fwd = exec.last().unwrap();
+    assert!(fwd.get("line").is_none(), "no shell: {fwd}");
+    let argv: Vec<&str> = fwd["argv"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+    let at = argv.iter().position(|a| *a == "--text").unwrap();
+    assert_eq!(argv[at + 1], text, "the value is one argument, as typed");
+    assert_eq!(w.there.calls("terminal.send")[0]["text"], text, "the agent there gets exactly the text");
+}
+
+#[test]
+fn a_windows_machine_runs_nothing_with_a_value() {
+    let w = world();
+    w.here.state.lock().unwrap().windows = true;
+    let sum = sha256(&carried());
+    for args in [
+        vec!["card", "--terminal", "box/t3"],
+        vec!["send", "--terminal", "box/t3", "--text", "build it & del /q %USERPROFILE%\\notes.txt & rem"],
+        vec!["helper", "install", "--machine", "box", "--sha256", sum.as_str()],
+        vec!["helper", "remove", "--machine", "box"],
+    ] {
+        let e = w.error(&args);
+        assert_eq!(e["code"], "remote_helper_unsupported", "{args:?}: {e}");
+        assert!(e["message"].as_str().unwrap().contains("box"));
+    }
+    let exec = w.here.calls("machine.exec");
+    assert!(exec.iter().all(|e| e["argv"] == json!(["uname", "-sm"])), "only the platform check ran there: {exec:?}");
+    assert!(w.here.calls("file.write").is_empty() && w.here.calls("terminal.put").is_empty());
+}
+
+#[test]
+fn the_sum_there_and_making_it_runnable_are_one_command() {
+    let w = world();
+    let sum = sha256(&carried());
+    let ok = w.run(&["helper", "install", "--machine", "box", "--sha256", &sum]);
+    assert!(ok.iter().any(|l| l["type"] == "installed"), "{ok:?}");
+    let writes = w.here.calls("file.write");
+    let name = writes[0]["path"].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+    let tag = name.strip_prefix("flockbook-modfeed.part.").and_then(|r| r.strip_suffix(".0")).unwrap_or("");
+    assert!(!tag.is_empty() && !tag.contains('.'), "parts carry this run's own tag: {name}");
+    let lines: Vec<String> = w.here.calls("machine.exec").iter().filter_map(|e| e["line"].as_str().map(String::from)).collect();
+    assert_eq!(lines.len(), 1, "one command joins, checks and switches: {lines:?}");
+    assert!(lines[0].contains(&sum) && lines[0].contains("chmod 755") && lines[0].contains(tag), "{}", lines[0]);
+}
+
+#[test]
+fn a_file_changed_on_the_way_is_not_installed() {
+    let w = world();
+    w.here.state.lock().unwrap().corrupt_writes = true;
+    let e = w.error(&["helper", "install", "--machine", "box", "--sha256", &sha256(&carried())]);
+    assert_eq!(e["code"], "checksum", "{e}");
+    assert!(!w.installed().exists());
+    let left: Vec<_> = std::fs::read_dir(w.installed().parent().unwrap()).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert!(left.is_empty(), "no part is left: {left:?}");
+}
+
+#[test]
+fn sha256sums_naming_the_helper_twice_is_refused_and_dot_slash_is_fine() {
+    let w = world();
+    let target = remote::target_for(&uname()).unwrap();
+    let sum = sha256(&carried());
+    std::fs::write(w.helpers.join("SHA256SUMS"), format!("{sum}  ./{target}/flockbook-modfeed\n")).unwrap();
+    assert_eq!(w.error(&["card", "--terminal", "box/t3"])["install"]["sha256"], sum, "./ names the same file");
+    for second in [sum.clone(), "0".repeat(64)] {
+        std::fs::write(w.helpers.join("SHA256SUMS"), format!("{sum}  {target}/flockbook-modfeed\n{second}  ./{target}/flockbook-modfeed\n")).unwrap();
+        let e = w.error(&["card", "--terminal", "box/t3"]);
+        assert_eq!(e["code"], "checksum", "two lines for one file: {e}");
+        assert!(e.get("install").is_none());
+    }
+}
+
+#[test]
+fn the_platform_and_a_missing_helper_are_remembered_for_a_minute() {
+    let w = world();
+    let cache = w._dir.path().join("cache/cache.json");
+    std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    let c = cache.to_string_lossy().to_string();
+    for _ in 0..3 {
+        assert_eq!(w.error(&["feed", "--terminal", "box/t3", "--cache", &c])["code"], "remote_helper_missing");
+    }
+    let exec = w.here.calls("machine.exec");
+    assert_eq!(exec.iter().filter(|e| e["argv"] == json!(["uname", "-sm"])).count(), 1, "uname once: {exec:?}");
+    assert_eq!(exec.len(), 2, "the helper is looked for once; the next polls answer from the cache: {exec:?}");
+    let ok = w.run(&["helper", "install", "--machine", "box", "--sha256", &sha256(&carried()), "--cache", &c]);
+    assert!(ok.iter().any(|l| l["type"] == "installed"), "{ok:?}");
+    assert_eq!(w.run(&["card", "--terminal", "box/t3", "--cache", &c])[1]["type"], "card", "an install forgets the missing helper");
 }
 
 #[test]
