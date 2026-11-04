@@ -1,16 +1,19 @@
 name: xplat
 
-# The cross-platform port (Rust + iced) in xplat/. Runs only when xplat/ or this file changes.
+# The cross-platform port (Rust + iced) in xplat/, and the mod's Node tests on the Rust sidecar. The one place the
+# Rust tests run. Runs only when xplat/, mod/ or this file changes.
 on:
   push:
     branches: [main]
     paths:
       - "xplat/**"
+      - "mod/**"
       - ".github/workflows/xplat.yml"
   pull_request:
     branches: [main]
     paths:
       - "xplat/**"
+      - "mod/**"
       - ".github/workflows/xplat.yml"
   workflow_dispatch:
 
@@ -60,6 +63,16 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      # The mod's Node tests again, this time against the Rust sidecar too (sidecar.real.test.mjs).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: npm test with the Rust sidecar
+        working-directory: mod
+        env:
+          FLOCKBOOK_MODFEED: ${{ github.workspace }}/xplat/target/debug/flockbook-modfeed
+        run: npm test
+
   windows:
     name: Windows compile check
     runs-on: windows-latest
@@ -82,6 +95,10 @@ jobs:
       # window glass, so this compiles the Mica path (window_vibrancy::apply_mica) for Windows.
       - name: Check
         run: cargo check -p herdr-core -p fb-ui -p flockbook --lib --bins --locked --target x86_64-pc-windows-msvc
+
+      # The mod's sidecar runs on Windows: its tests and herdr-core's (the Unix-socket ones are Unix only).
+      - name: Test (herdr-core, flockbook-modfeed)
+        run: cargo test --locked -p herdr-core -p flockbook-modfeed --target x86_64-pc-windows-msvc
 
   macos:
     name: macOS build
