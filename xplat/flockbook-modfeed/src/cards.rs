@@ -4,7 +4,7 @@
 //! read shows the same request the mod showed: the mod passes the card's `request` id back, and a different card on
 //! screen is refused with `changed`, nothing sent.
 
-use crate::answered::FeedAnswered;
+use crate::answered::{Claim, FeedAnswered};
 use crate::rows::{self, FeedQuestion};
 use crate::tail;
 use herdr_core::approval::{self, PaneState};
@@ -92,6 +92,10 @@ pub fn refused(pane: &Pane) -> Done {
 }
 pub fn already_answered() -> Done {
     Done::new("answered", Some("this approval was already answered; waiting for the agent to move on"))
+}
+/// Another press of this prompt (another view, or a double key) was being handled: nothing went out from this one.
+pub fn busy() -> Done {
+    Done::new("busy", Some("Another press was being handled at the same moment, so this one sent nothing. Press again."))
 }
 
 pub enum Current {
@@ -221,8 +225,10 @@ pub fn approve<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Pat
     // land; given back when nothing went out.
     let answered = FeedAnswered::new(cache);
     let blocked = agent.status == AgentStatus::Blocked;
-    if !answered.claim(&pane.id, &id, &tool, &command, blocked, SystemTime::now()) {
-        return already_answered();
+    match answered.claim(&pane.id, &id, &tool, &command, blocked, SystemTime::now()) {
+        Claim::Got => {}
+        Claim::Taken => return already_answered(),
+        Claim::Busy => return busy(),
     }
     // The screen is read again right before the key, and the key goes only while the box is still this id.
     match approval::respond_if_open(screen, &pane.id, &id, allow, &agent.kind, blocked, pending.as_ref(), Some(&gate(pane))) {

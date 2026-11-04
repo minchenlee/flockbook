@@ -87,34 +87,39 @@ impl FeedAnswered {
             return false;
         }
         let Ok(made) = std::fs::metadata(path).and_then(|m| m.modified()) else { return false };
-        now.duration_since(made).map_or(true, |d| d < Self::UNREAD_GRACE)
+        // A time in the future (a clock set back) counts by how far off it is: it never keeps a file for good.
+        match now.duration_since(made) {
+            Ok(d) => d < Self::UNREAD_GRACE,
+            Err(e) => e.duration() < Self::UNREAD_GRACE,
+        }
     }
 
-    /// Made before the key. False: this prompt (its id, or its tool and command) is claimed already.
+    /// Made before the key. `Taken`: this prompt (its id, or its tool and command) is claimed already. `Busy`: another
+    /// run is claiming in this folder right now and did not finish in time; no key goes out, the user can press again.
     ///
-    /// Runs under a lock file in the folder (`ClaimLock`): another run that presses at the same moment gets false.
+    /// Runs under a lock in the folder (`ClaimLock`): two runs that press at the same moment never both claim.
     /// The mark is written to a temp file and then hard-linked to the claim name, so the claim never exists without
     /// its content. A file there that did not parse is removed only when older than `UNREAD_GRACE`.
-    pub fn claim(&self, terminal: &str, id: &str, tool: &str, command: &str, blocked: bool, now: SystemTime) -> bool {
-        let (Some(folder), Some(path)) = (self.folder(terminal), self.file(terminal, id)) else { return true };
+    pub fn claim(&self, terminal: &str, id: &str, tool: &str, command: &str, blocked: bool, now: SystemTime) -> Claim {
+        let (Some(folder), Some(path)) = (self.folder(terminal), self.file(terminal, id)) else { return Claim::Got };
         if self.is_claimed(terminal, id, tool, command, blocked, now) {
-            return false;
+            return Claim::Taken;
         }
         let _ = std::fs::create_dir_all(&folder);
         // One claim at a time in this folder: two runs never both see "not claimed" and both write.
         // A folder that takes no lock file at all (not writable): as without a cache, the same as before.
         let _lock = match ClaimLock::take(&folder) {
             Took::Held(l) => Some(l),
-            Took::Busy => return false,
+            Took::Busy => return Claim::Busy,
             Took::Unavailable => None,
         };
         if self.is_claimed(terminal, id, tool, command, blocked, now) {
-            return false;
+            return Claim::Taken;
         }
         if path.exists() {
             let mark = std::fs::read(&path).ok().and_then(|d| serde_json::from_slice::<Mark>(&d).ok());
             if Self::fresh_unread(&path, &mark, now) {
-                return false;
+                return Claim::Taken;
             }
             let _ = std::fs::remove_file(&path); // not live (is_claimed above): its time is over
         }
@@ -134,14 +139,15 @@ impl FeedAnswered {
         });
         if written.is_err() {
             let _ = std::fs::remove_file(&tmp);
-            return true; // as without a cache
+            return Claim::Got; // as without a cache
         }
         let linked = std::fs::hard_link(&tmp, &path);
         let _ = std::fs::remove_file(&tmp);
         match linked {
-            Ok(()) => true,
+            Ok(()) => Claim::Got,
             // Another run claimed it just now; any other failure: as without a cache.
-            Err(e) => e.kind() != std::io::ErrorKind::AlreadyExists,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Claim::Taken,
+            Err(_) => Claim::Got,
         }
     }
 
@@ -188,46 +194,54 @@ impl FeedAnswered {
     }
 }
 
-/// A lock file (`.lock`, exclusive create) held while one run claims. A lock older than `STALE` is from a run that
-/// died mid-claim: it is removed and taken once more.
-struct ClaimLock(PathBuf);
+/// What `claim` found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Claim {
+    /// This run claimed the prompt: send the key.
+    Got,
+    /// The prompt is claimed already.
+    Taken,
+    /// Another run is claiming in this folder now: nothing is decided, the user can press again.
+    Busy,
+}
+
+/// An OS lock (`flock`) on `.lock`, held while one run claims. The kernel lets it go when its run ends, dead or not,
+/// so no run ever breaks another's lock and its file time means nothing. The file is never removed: a removed file
+/// could let two runs lock two different files.
+struct ClaimLock(#[allow(dead_code)] std::fs::File);
 
 enum Took {
     Held(ClaimLock),
-    /// Another run holds it now.
+    /// Another run holds it, also after `TRIES` waits.
     Busy,
-    /// The lock file cannot be made at all.
+    /// The lock file cannot be opened or locked at all.
     Unavailable,
 }
 
 impl ClaimLock {
-    const STALE: Duration = Duration::from_secs(5);
+    const TRIES: u32 = 10;
+    const WAIT: Duration = Duration::from_millis(20);
 
     fn take(folder: &Path) -> Took {
-        let path = folder.join(".lock");
-        for _ in 0..2 {
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(_) => return Took::Held(ClaimLock(path)),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let old = std::fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|t| SystemTime::now().duration_since(t).ok())
-                        .is_some_and(|d| d >= Self::STALE);
-                    if !old {
-                        return Took::Busy;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let Ok(file) = opts.open(folder.join(".lock")) else { return Took::Unavailable };
+        for i in 0..Self::TRIES {
+            match file.try_lock() {
+                Ok(()) => return Took::Held(ClaimLock(file)),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    if i + 1 < Self::TRIES {
+                        std::thread::sleep(Self::WAIT);
                     }
-                    let _ = std::fs::remove_file(&path);
                 }
-                Err(_) => return Took::Unavailable,
+                Err(std::fs::TryLockError::Error(_)) => return Took::Unavailable,
             }
         }
         Took::Busy
-    }
-}
-
-impl Drop for ClaimLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
     }
 }

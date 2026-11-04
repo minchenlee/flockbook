@@ -155,6 +155,18 @@ fn review1() {
     fake.set_screen("t1", &claude_box("cat notes"));
     let fresh = cards::approve(&pane, &hc, None, &id5, true, c);
     assert!(fresh.result == "sent" && fake.keys().len() == kr + 1, "re-check: after a read with no box, answered again ({fresh:?})");
+    // Re-review 2: another run is claiming in this folder now: "busy", not "answered", and no key; then it works.
+    fake.set_screen("t1", &claude_box("cat busy"));
+    let bid = cards::card(&pane, &hc, None, false, c).request.unwrap();
+    let lock = std::fs::File::options().read(true).write(true).create(true).truncate(false)
+        .open(dir.join("answered").join(modfeedkit::protocol::fnv1a(&pane.id)).join(".lock")).unwrap();
+    lock.lock().unwrap();
+    let kb = fake.keys().len();
+    let busy = cards::approve(&pane, &hc, None, &bid, true, c);
+    assert!(busy.result == "busy" && busy.message.is_some() && fake.keys().len() == kb, "re-review 2: busy, no key ({busy:?})");
+    drop(lock);
+    let after = cards::approve(&pane, &hc, None, &bid, true, c);
+    assert!(after.result == "sent" && fake.keys().len() == kb + 1, "re-review 2: the next press sends ({after:?})");
 
     // 3. A Claude conversation went on in a new log: a cache hit follows continued-in.
     let proj = dir.join("projects/-w-proj");

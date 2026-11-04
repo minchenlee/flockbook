@@ -11,6 +11,7 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 - Two presses of Allow at the same moment (two views, or a double key) could each send a key; now only one does.
+- When two presses of Allow meet, the one that loses now says "Press again" instead of "already answered", and a run that was killed mid-press no longer blocks the next press.
 
 ### ⚙️ Changes
 - The Herdr app mod source moved from `herdr-mod/` to `mod/`. The release zip name does not change.
