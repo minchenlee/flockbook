@@ -13,6 +13,7 @@ regex = "1.12"
 notify = { version = "7.0.0", default-features = false, features = ["macos_fsevent"] }
 base64 = "0.22.1"
 chrono = { version = "0.4.43", default-features = false, features = ["clock", "std"] }
+unicode-segmentation = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

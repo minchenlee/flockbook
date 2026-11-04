@@ -41,4 +41,5 @@ pub mod store;
 pub mod terminal;
 pub mod resolver;
 pub mod session_log;
+pub mod statusline;
 pub use terminal::TerminalFrame;

@@ -1401,6 +1401,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tempfile",
+ "unicode-segmentation",
 ]
 
 [[package]]
