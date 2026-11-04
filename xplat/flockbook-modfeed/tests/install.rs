@@ -203,6 +203,70 @@ fn a_keys_file_that_is_not_json_stops_everything() {
 }
 
 #[test]
+fn a_symlinked_keys_file_is_merged_where_it_points_and_the_link_stays() {
+    let s = sandbox();
+    let dots = s.root.join("dotfiles");
+    fs::create_dir(&dots).unwrap();
+    fs::write(dots.join("keys.json"), r#"{"global":{"cmd-k":"app.palette"}}"#).unwrap();
+    std::os::unix::fs::symlink(dots.join("keys.json"), s.app.join("keys.json")).unwrap();
+    let r = s.run(&["--home", s.app_s()]);
+    assert_eq!(r.status.code(), Some(0), "{}", both(&r));
+    assert!(fs::symlink_metadata(s.app.join("keys.json")).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_link(s.app.join("keys.json")).unwrap(), dots.join("keys.json"));
+    let k: Value = serde_json::from_str(&read(dots.join("keys.json"))).unwrap();
+    assert_eq!(k["global"], json!({"cmd-k": "app.palette"}));
+    assert_eq!(k["layout:flockbook"]["cmd-t"], "tab.new");
+    // The temp file was in the target's folder and is gone; nothing was left beside the link.
+    let left: Vec<_> = fs::read_dir(&dots).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left, vec![std::ffi::OsString::from("keys.json")]);
+    assert!(!s.app.join("keys.json.flockbook-new").exists());
+
+    // A symlinked layout that already matches ours is written through too, and stays a link.
+    let lay = s.app.join("layouts/flockbook.json");
+    fs::copy(&lay, dots.join("flockbook.json")).unwrap();
+    fs::remove_file(&lay).unwrap();
+    std::os::unix::fs::symlink(dots.join("flockbook.json"), &lay).unwrap();
+    let r = s.run(&["--home", s.app_s()]);
+    assert_eq!(r.status.code(), Some(0), "{}", both(&r));
+    assert!(fs::symlink_metadata(&lay).unwrap().file_type().is_symlink());
+
+    // A link to a keys.json that is not there yet: it is created where the link points.
+    let s = sandbox();
+    let dots = s.root.join("dotfiles");
+    fs::create_dir(&dots).unwrap();
+    std::os::unix::fs::symlink(dots.join("keys.json"), s.app.join("keys.json")).unwrap();
+    let r = s.run(&["--home", s.app_s()]);
+    assert_eq!(r.status.code(), Some(0), "{}", both(&r));
+    assert!(fs::symlink_metadata(s.app.join("keys.json")).unwrap().file_type().is_symlink());
+    assert_eq!(keys_of(&s.app)["layout:flockbook"]["cmd-t"], "tab.new");
+}
+
+#[test]
+fn without_home_or_dash_dash_home_it_stops_and_writes_nothing() {
+    let s = sandbox();
+    let r = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed"))
+        .args(["install", "--helper", s.helper.to_str().unwrap()])
+        .env_clear()
+        .env("PATH", s.path_env())
+        .current_dir(&s.root)
+        .output()
+        .unwrap();
+    assert_eq!(r.status.code(), Some(1), "{}", both(&r));
+    assert!(err(&r).contains("--home"), "{}", err(&r));
+    assert!(!s.root.join(".config").exists());
+    assert!(s.calls().is_empty());
+    let e = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed"))
+        .args(["install", "--dry-run"])
+        .env_clear()
+        .env("PATH", s.path_env())
+        .env("HOME", "")
+        .current_dir(&s.root)
+        .output()
+        .unwrap();
+    assert_eq!(e.status.code(), Some(1), "{}", both(&e));
+}
+
+#[test]
 fn installing_again_updates_its_own_files_keeps_edits() {
     let s = sandbox();
     assert_eq!(s.run(&["--home", s.app_s()]).status.code(), Some(0));

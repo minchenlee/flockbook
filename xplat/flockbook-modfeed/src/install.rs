@@ -18,7 +18,8 @@ const RELEASES: &str = "https://github.com/minchenlee/flockbook/releases";
 const HELP: &str = "\
 Installs the Flockbook layout, mod, themes, keys and helper into a herdr-app home.
 Usage: flockbook-modfeed install [--home <herdr-app home>] [--helper <flockbook-modfeed>] [--remote <folder>] [--dry-run]
- - The home is --home, else $HERDR_APP_HOME, else ~/.config/herdr-app.
+ - The home is --home, else $HERDR_APP_HOME, else ~/.config/herdr-app. With no HOME, give --home.
+ - A keys.json, layout or theme that is a symlink stays one; the file it points to is written.
  - It never overwrites what you have: if a layout, mod or theme with the same name is there and
    this did not put it there (or you changed it since), it stops and writes nothing.
  - keys.json is merged: your sections and keys stay; a key you already use keeps your command.
@@ -47,7 +48,20 @@ fn stop(lines: &[String]) -> i32 {
 }
 
 /// Writes through a temp file beside `dest` and a rename, so a reader never sees half a file.
+/// When `dest` is a symlink (a keys.json kept in a dotfiles folder), the file it points to is written,
+/// in that file's own folder, and the link stays.
 fn put(dest: &Path, bytes: &[u8], exe: bool) -> std::io::Result<()> {
+    let real;
+    let dest = if fs::symlink_metadata(dest).is_ok_and(|m| m.file_type().is_symlink()) {
+        // A link to a file that is not there yet: create it where the link points.
+        real = match fs::canonicalize(dest) {
+            Ok(p) => p,
+            Err(_) => dest.parent().unwrap_or(Path::new(".")).join(fs::read_link(dest)?),
+        };
+        real.as_path()
+    } else {
+        dest
+    };
     if let Some(d) = dest.parent() {
         fs::create_dir_all(d)?;
     }
@@ -168,10 +182,14 @@ pub fn run(args: &[String]) -> i32 {
         }
         i += 2;
     }
-    let home = PathBuf::from(home.or_else(|| std::env::var("HERDR_APP_HOME").ok().filter(|h| !h.is_empty())).unwrap_or_else(|| {
-        let h = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
-        format!("{h}/.config/herdr-app")
-    }));
+    let nonempty = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let home = match home.or_else(|| nonempty("HERDR_APP_HOME")) {
+        Some(h) => PathBuf::from(h),
+        None => match nonempty("HOME").or_else(|| nonempty("USERPROFILE")) {
+            Some(h) => Path::new(&h).join(".config").join("herdr-app"),
+            None => return stop(&["STOP: HOME is not set, so there is no ~/.config/herdr-app. Name the folder with --home <herdr-app home>. Nothing was written.".into()]),
+        },
+    };
     if let Some(h) = &helper {
         if !Path::new(h).is_file() {
             return stop(&[format!("STOP: no helper at {h}")]);

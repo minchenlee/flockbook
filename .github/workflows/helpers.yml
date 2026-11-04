@@ -45,12 +45,13 @@ jobs:
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
       - name: Build
         working-directory: xplat
@@ -68,7 +69,7 @@ jobs:
           mkdir -p out/${{ matrix.target }}
           cp "$exe" out/${{ matrix.target }}/flockbook-modfeed
           "$exe" version | head -1 | tee out/${{ matrix.target }}/version.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: helper-${{ matrix.target }}
           path: out
@@ -79,12 +80,13 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build both and join them
         run: |
@@ -98,7 +100,7 @@ jobs:
           lipo -info "$exe"
           ls -l "$exe"
           "$exe" version | head -1 | tee out/universal-apple-darwin/version.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: helper-universal-apple-darwin
           path: out
@@ -111,10 +113,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: helper-*
           merge-multiple: true
@@ -149,7 +151,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/win" && printf '#!/bin/sh\n[ "$1" = -s ] && echo MINGW64_NT-10.0 || echo x86_64\n' > "$RUNNER_TEMP/win/uname" && chmod +x "$RUNNER_TEMP/win/uname"
           if PATH="$RUNNER_TEMP/win:$PATH" sh dist/install.sh 2> win.err; then echo "Windows should stop"; exit 1; fi
           grep -q "Windows is not supported yet" win.err
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flockbook-herdr-mod
           path: |
@@ -171,7 +173,7 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: flockbook-herdr-mod
           path: dist
