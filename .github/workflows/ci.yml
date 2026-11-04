@@ -164,7 +164,7 @@ jobs:
         with:
           node-version: '22'
       - name: npm test
-        working-directory: mod
+        working-directory: herdr-app
         run: npm test
 
   # The offline checks in 3 groups at once (SHARD in scripts/ui-checks.sh); one group when `only` names checks.

@@ -1,19 +1,19 @@
 name: xplat
 
 # The cross-platform port (Rust + iced) in xplat/, and the mod's Node tests on the Rust sidecar. The one place the
-# Rust tests run. Runs only when xplat/, mod/ or this file changes.
+# Rust tests run. Runs only when xplat/, herdr-app/ or this file changes.
 on:
   push:
     branches: [main]
     paths:
       - "xplat/**"
-      - "mod/**"
+      - "herdr-app/**"
       - ".github/workflows/xplat.yml"
   pull_request:
     branches: [main]
     paths:
       - "xplat/**"
-      - "mod/**"
+      - "herdr-app/**"
       - ".github/workflows/xplat.yml"
   workflow_dispatch:
 
@@ -91,7 +91,7 @@ jobs:
         with:
           node-version: '22'
       - name: npm test with the Rust sidecar
-        working-directory: mod
+        working-directory: herdr-app
         env:
           FLOCKBOOK_MODFEED: ${{ github.workspace }}/xplat/target/debug/flockbook-modfeed
         run: npm test

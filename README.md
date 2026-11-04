@@ -4,13 +4,13 @@
 
 Flockbook is a reading view for your [Herdr](https://herdr.dev) coding agents. Read what each agent did, see which one needs you, and reply in one place.
 
-Flockbook is becoming a layout and mod for the Herdr app. The mod is where new work goes. The macOS app below is the current release.
+It comes in two forms: a **layout and mod for the Herdr app**, where new work goes, and a **native macOS app**.
 
 **Built with AI.** AI coding agents write Flockbook: Claude Code writes the code, and a separate AI reviewer (Codex or Claude) checks each change. A human sets the direction, tests the app, and reviews every change. See [How this was built](#how-this-was-built).
 
-## Flockbook for the Herdr app (mod)
+## Flockbook for the Herdr app
 
-<img src="mod/preview.png" alt="Flockbook in the Herdr app" width="800">
+<img src="herdr-app/preview.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
 
 The reading view runs inside the Herdr app window, with no change to the app:
 
@@ -18,182 +18,41 @@ The reading view runs inside the Herdr app window, with no change to the app:
 - **Tab bar**: one capsule per tab, with its status: working, waiting for you, done or idle.
 - **Approval and question cards**: answer a permission prompt or a question above the reply box.
 - **Needs you** lists every agent that waits. **Overview** shows every tab as a card.
+- **Sidebar** with your spaces. ⌘B shows and hides it; hidden, it slides out from the window's left edge.
+- **Terminal**: the agent's real terminal is one key away (⌃`).
 
-<p>
-<img src="mod/preview-needs.png" alt="Needs you: the agents that wait, and the question one of them asks" width="49%">
-<img src="mod/preview-overview.png" alt="Overview: every tab as a card, grouped by workspace" width="49%">
-</p>
+<table>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-approval.png" alt="An approval card above the reply box: the command, Allow once and Deny"><br><sub><b>Approval card</b>: allow or deny a permission prompt above the reply box (1 / 2).</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-needs.png" alt="Needs you: the agents that wait, and the question one of them asks"><br><sub><b>Needs you</b>: every agent that waits, with its question or approval card.</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-overview.png" alt="Overview: every tab as a card, grouped by workspace"><br><sub><b>Overview by workspace</b>: every tab as a card, in its workspace.</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-attach.png" alt="Two attached files above the reply box"><br><sub><b>Reply box</b>: drop files or click + to attach them; ⌘V pastes an image.</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-terminal.png" alt="The agent's real terminal in a floating window over the chat"><br><sub><b>Terminal</b>: ⌃` opens the agent's real terminal over the chat.</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-menu.png" alt="The right-click menu of a tab"><br><sub><b>Tab menu</b>: right-click a tab to rename or move it, open its terminal, put it away or close it.</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="herdr-app/preview-sidebar.png" alt="The floating sidebar over the chat"><br><sub><b>Floating sidebar</b>: hidden, it slides out when the pointer reaches the window's left edge.</sub></td><td width="50%" valign="top"><img src="herdr-app/preview-overview-status.png" alt="Overview grouped by status: the agents that need you first, then the ones done and resting"><br><sub><b>Overview by status</b>: the agents that need you first, then the rest.</sub></td></tr>
+</table>
 
-- **Sidebar** with your spaces. It is hidden and slides out from the window's left edge (⌘B keeps it open).
+A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat. The cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
 
-A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat.
+### Install
 
-The cards follow the same safety rules as the Mac app: each key checks first that the terminal still shows the same agent and the same prompt, one approval goes out once per prompt, and a reply goes only to the conversation the chat showed.
+Download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper. (It is also listed in the [Herdr layout gallery](https://herdr.dev/layouts/minchenlee/flockbook--herdr-app/).) Unzip it, then:
 
-**Status: preview.** Each [release](https://github.com/minchenlee/flockbook/releases/latest) has a `Flockbook-herdr-mod-<version>.zip` with the layout, the mod and the helper. Its `install.sh` puts them into your Herdr app home and never overwrites what you have; run it with `--dry-run` first. See [mod/README.md](mod/README.md). [mod/RECIPE.md](mod/RECIPE.md) describes every part of it.
+```sh
+./install.sh --dry-run --helper bin/flockbook-modfeed   # see what it does
+./install.sh --helper bin/flockbook-modfeed
+```
+
+`install.sh` never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. [herdr-app/README.md](herdr-app/README.md) has the details, and [herdr-app/RECIPE.md](herdr-app/RECIPE.md) describes every part of the mod.
+
+**Status: preview.** Built and tried on macOS. Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi and Antigravity CLI (agy).
 
 ## Flockbook for Mac
 
-A native macOS app that shows your Herdr agents' conversations in a layout that is easier to read than the terminal.
+A native macOS app (macOS 15 or later) with the same reading view, outside the Herdr app. It also has remote access from your phone over Tailscale, phone notifications, queued messages and an embedded terminal.
 
-**[Download for macOS](https://github.com/minchenlee/flockbook/releases/latest)** · [Website](https://flockbook.mclee.dev) · Requires macOS 15 or later.
-
-### Features
-
-The screenshots use a fictional demo session (`scripts/demo-seed.sh`).
-
-#### Sidebar and overview
-
-The sidebar lists your Herdr workspaces. Overview shows every tab and its state: working, waiting for you, done or idle.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/overview-dark.png">
-  <img src="docs/media/overview-light.png" alt="Sidebar and overview" width="800">
-</picture>
-
-#### Conversation view
-
-Each agent's session log is shown as a document: Markdown, code, tables, and tool calls folded into short chips.
+**[Download for macOS](https://github.com/minchenlee/flockbook/releases/latest)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/conversation-dark.png">
-  <img src="docs/media/conversation-light.png" alt="Conversation view" width="800">
+  <img src="docs/media/conversation-light.png" alt="Flockbook for Mac: the conversation view" width="800">
 </picture>
-
-#### Reply
-
-Type under the conversation and press Return to send. You can paste images or attach a file path.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/reply-dark.png">
-  <img src="docs/media/reply-light.png" alt="Reply" width="800">
-</picture>
-
-#### Pictures
-
-Screenshots you paste and pictures the agent reads (for example a simulator screenshot) show in the conversation. Click one to see it at full size.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/pictures-dark.png">
-  <img src="docs/media/pictures-light.png" alt="Pictures in the conversation" width="800">
-</picture>
-
-#### Queued messages
-
-Messages you send while an agent works wait in the agent's queue. Flockbook shows them above the reply field, on the Mac and on the phone, until the agent takes them. For Claude Code, **Pull back to edit** moves the queue into the reply field; Codex's queue is edited in its terminal.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/queued-dark.png">
-  <img src="docs/media/queued-light.png" alt="Two queued messages above the reply field, with Pull back to edit" width="800">
-</picture>
-
-#### Question card
-
-When an agent asks a question with options, pick an answer from a card.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/question-dark.png">
-  <img src="docs/media/question-light.png" alt="Question card" width="800">
-</picture>
-
-#### Approval card
-
-When an agent asks for permission, choose Allow or Deny without opening the terminal.
-The "needs you" notification shows the command and has the same buttons; on macOS they are under **Options** when you hover over the notification.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/approval-dark.png">
-  <img src="docs/media/approval-light.png" alt="Approval card" width="800">
-</picture>
-
-#### Needs you
-
-Agents that wait for you are collected in one list, marked in orange.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/needs-you-dark.png">
-  <img src="docs/media/needs-you-light.png" alt="Needs you" width="800">
-</picture>
-
-#### Split panes
-
-A tab with split panes shows one conversation per pane, stacked.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/split-dark.png">
-  <img src="docs/media/split-light.png" alt="Split panes" width="800">
-</picture>
-
-#### Embedded terminal
-
-Press Control-backtick (⌃`) to see the real terminal of the pane in a sheet.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/terminal-dark.png">
-  <img src="docs/media/terminal-light.png" alt="Embedded terminal" width="800">
-</picture>
-
-#### Remote access (phone)
-
-Read your agents, and Allow or answer, from your phone. Off by default. Tailscale keeps the page private to your own devices.
-
-1. Install [Tailscale](https://tailscale.com/download) on the Mac and on the phone. Sign in with the same account on both.
-2. In the [Tailscale admin console](https://login.tailscale.com/admin/dns), on the DNS page, turn on **MagicDNS** and **HTTPS Certificates**.
-3. In Flockbook, open **Settings > Remote**, turn on **Remote access**. The checklist shows each step with a tick.
-4. Click **Turn On** at "Tailscale Serve". It runs the command it shows (or copy it and run it yourself). It shares only port 7480 with your tailnet, never the internet, and leaves your other Serve settings alone. **Turn Off** removes only that port.
-5. Click **Pair a Device** and scan the QR code with the phone. A paired phone can read; turn on input for it in **Devices**.
-
-A phone with input can also send images: tap **+** in the message box (camera or photos, up to 4, 10 MB each). The Mac re-encodes each image (no location or camera data is kept) and stores it in Flockbook's cache folder.
-
-Codex questions can be answered from the phone. Claude Code questions need one more step: at **Answer Claude questions from the phone**, click **Install…**. The sheet shows the exact entry it adds to `~/.claude/settings.json` (a copy of the file is kept first). The hook only tells Flockbook the question; the phone answers only when the picker on screen matches it exactly, else it says to answer on the Mac. Restart running Claude sessions to include them. **Uninstall…** removes only that entry.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/phone-dark.png">
-  <img src="docs/media/phone-light.png" alt="Flockbook on a phone" width="800">
-</picture>
-
-##### Notifications on the phone
-
-Tap **Notify me** at the top of the agent list. The phone then shows a notification when an agent needs you, also when the page is closed. On iPhone, add Flockbook to the Home Screen first and turn on notifications there. The notification has the agent's title, workspace and tab, never conversation text. It goes through your phone's push service (Apple, Google, Mozilla or Microsoft).
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/push-dark.png">
-  <img src="docs/media/push-light.png" alt="Notifications on the phone" width="800">
-</picture>
-
-**Direct address** (no Tailscale Serve) is under the same setting, marked advanced and less safe: it uses a self-signed certificate that the phone's browser cannot check.
-
-#### Herdr app terminals (herdr-core)
-
-Terminals of the official Herdr app (herdr-core) show beside the herdr server's, grouped by the app's spaces and tabs. They get the same conversation view, approval and question cards, and scrollback.
-
-### Requirements
-
-- macOS 15 or later
-- Herdr, running
-- Agents in Herdr: Claude Code, Codex, Grok Build, Cursor, pi, or Antigravity CLI (agy). Flockbook reads their local session logs to show the conversation.
-
-### Releases
-
-Download the latest `Flockbook-<version>.dmg` or `.zip` from GitHub Releases. Builds are universal (Apple silicon and Intel). Check the download against `SHA256SUMS`.
-
-Release notes say whether a build is signed and notarized. An unsigned build is blocked by macOS on first open; to run it anyway:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Flockbook.app
-```
-
-Signed builds update themselves: once an hour Flockbook checks for a new release, and it installs one only after you agree (Sparkle; turn the check off in Settings, or use Flockbook > Check for Updates…). Versions up to 0.1.2 have no updater: install the next release by hand once.
-
-### Build
-
-```sh
-scripts/bundle.sh    # builds build/Flockbook.app (ad-hoc signed)
-scripts/package.sh   # dist/Flockbook-<version>.zip and .dmg
-scripts/test-update.sh build/update-test   # headless auto-update check with a throwaway key
-swift build -c release --product flockbook-modfeed   # the Herdr app mod's helper
-VERSION=0.7.0 scripts/package-mod.sh   # dist/Flockbook-herdr-mod-<version>.zip
-```
 
 ## Linux and Windows (in progress)
 
@@ -201,7 +60,7 @@ The Rust code in `xplat/` is an early port of Flockbook to Linux and Windows, bu
 
 ## Privacy
 
-Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service.
+Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service. The Herdr app mod and its helper read the same session logs and talk to herdr-core (`hc`) on your Mac; they make no network calls.
 
 ## How this was built
 

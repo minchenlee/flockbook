@@ -6,7 +6,7 @@ Phase A crates are spikes; each one answers one gate.
 | Crate | Gate |
 |---|---|
 | `herdr-core` | Herdr link: the TUI socket client and the herdr-core (`hc`) client, snapshot, the conversation parsers (Claude Code, Codex, pi, Cursor, Grok, agy), the session resolver and log locator, status line records, question pickers, approval rules and the key gate; ported from Swift `Sources/HerdrKit` with its checks |
-| `flockbook-modfeed` | The Herdr app mod's sidecar (`mod/docs/protocol.md`): a drop-in for the Swift `flockbook-modfeed` |
+| `flockbook-modfeed` | The Herdr app mod's sidecar (`herdr-app/docs/protocol.md`): a drop-in for the Swift `flockbook-modfeed` |
 | `spike-select` | Drag-select and copy across rendered markdown blocks |
 | `spike-virt` | Virtual list of 5,000+ messages, memory and frame-time bench |
 | `spike-ime` | Text input with CJK preedit |
