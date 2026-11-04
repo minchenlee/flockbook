@@ -4,6 +4,7 @@
 One short line: what this release is about.
 
 ### ✨ New
+- Settings > General > Backend chooses what Flockbook follows: Automatic (default: whichever of the herdr TUI and herdr-core answers, with no warning about the other), herdr-core only, Herdr TUI only, or Both. A new choice applies at once.
 
 ### 🔒 Security
 

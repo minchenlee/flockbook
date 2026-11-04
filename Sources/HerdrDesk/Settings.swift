@@ -32,6 +32,8 @@ struct SettingsView: View {
     var stepDetails = false
     /// The session the window shows (Machine asks for a relaunch when the choice differs); nil in snapshots.
     var shown: HerdrSession? = nil
+    /// The running store, for Backend (a new choice applies at once); nil in snapshots.
+    var store: HerdrStore? = nil
     /// Widest the rows get, and their distance from the tab list.
     static let column: CGFloat = 760
     static let margin: CGFloat = 40
@@ -81,6 +83,7 @@ struct SettingsView: View {
 
     @ViewBuilder private var general: some View {
         RemoteMachinesSection(shown: shown)
+        BackendSection(store: store)
         SettingsGroup("Appearance", note: reduce ? "Opaque while Reduce Transparency is on in System Settings." : "Glass lets the desktop show through, blurred.") {
             SettingsRow("Window") {
                 Picker("Window", selection: reduce ? .constant(WindowGlass.off.rawValue) : $glass) {
@@ -295,6 +298,7 @@ struct SettingsSplit: View {
     var list = true
     var back: (() -> Void)? = nil
     var shown: HerdrSession? = nil
+    var store: HerdrStore? = nil
     static let listWidth: CGFloat = 196
 
     private var tab: SettingsTab { fixed ?? SettingsTab(stored: stored) }
@@ -310,7 +314,7 @@ struct SettingsSplit: View {
                 Divider()
             }
             SettingsView(tab: tab, reduceTransparency: reduceTransparency, remote: remote, statusLine: statusLine, grokStatusLine: grokStatusLine,
-                         scrolls: scrolls, shown: shown)
+                         scrolls: scrolls, shown: shown, store: store)
                 .frame(maxWidth: scrolls ? .infinity : nil, maxHeight: scrolls ? .infinity : nil, alignment: .top)
                 .probe { SettingsProbe.content = $0 }
                 .id(tab)
@@ -366,7 +370,7 @@ struct SettingsPage: View {
     var body: some View {
         let own = model.sidebarVisibility == .detailOnly
         SettingsSplit(remote: model.remote, statusLine: .live, grokStatusLine: .grokLive, scrolls: true, list: own, back: own ? { model.closeSettings() } : nil,
-                      shown: model.store.session)
+                      shown: model.store.session, store: model.store)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background { Button("Back") { model.closeSettings() }.keyboardShortcut(.cancelAction).hidden() }
             .probe { SettingsProbe.page = $0 }

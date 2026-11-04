@@ -13,8 +13,8 @@ func checksSettingsTabs() async throws {
     check(placed.count == Set(placed).count, "settings tabs: no control is in two tabs (\(placed.map(\.rawValue)))")
     check(Set(placed) == Set(SettingsControl.allCases), "settings tabs: every control is in a tab (missing \(Set(SettingsControl.allCases).subtracting(placed).map(\.rawValue)))")
     check(SettingsTab.allCases.allSatisfy { !$0.controls.isEmpty }, "settings tabs: no empty tab")
-    check(SettingsTab.general.controls == [.machines, .window, .textSize, .readingWidth, .terminalColors, .plusButton],
-          "settings tabs: General holds the machine shown, the window look, reading, the terminal's colours and what + does")
+    check(SettingsTab.general.controls == [.machines, .backend, .window, .textSize, .readingWidth, .terminalColors, .plusButton],
+          "settings tabs: General holds the machine shown, the backend, the window look, reading, the terminal's colours and what + does")
     check(SettingsTab.agents.controls == [.allowInput, .statusLine, .grokStatusLine, .claudeQuestions], "settings tabs: Agents holds input, the Claude and Grok status lines and the question hook")
     check(SettingsTab.remote.controls == [.remoteAccess, .connectWith, .tailscaleSteps, .address, .devices, .pictures, .phoneNotifications, .agentCommand],
           "settings tabs: Remote holds pairing, pictures and notifications")
