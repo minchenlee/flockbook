@@ -1,4 +1,4 @@
-//! Finds and tails an agent's JSONL session log (Claude Code, Codex, Cursor, pi). Port of `SessionLog.swift`.
+//! Finds and tails an agent's JSONL session log (Claude Code, Codex, Cursor, pi, Grok Build). Port of `SessionLog.swift`.
 //!
 //! The tailer runs on its own thread and hands out `Snapshot`s over a channel. A file watcher (the `notify` crate)
 //! wakes it at once when the log directory changes; a timer is the safety net. Dropping the stream stops the thread.
@@ -8,7 +8,7 @@ use crate::model::ConversationItem;
 use notify::{RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -42,76 +42,185 @@ pub struct Snapshot {
 }
 
 // ---------------------------------------------------------------- locating
+//
+// The static parts of Swift's `SessionLog`: where each agent keeps its logs, the lookup by session id, and Claude
+// Code's `continued-in` chain. Paths are built as strings with `/`, as Swift builds them, so they compare equal to
+// the Swift results.
 
-/// Where an agent keeps its logs (the search root for an id). Honors `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-/// `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`. Thin wrapper over [`default_dir_in`] with the real env.
+/// The home folder (Swift: `NSHomeDirectory()`): `HOME` on unix, `USERPROFILE` on Windows. Empty when unset.
+pub fn home_dir() -> String {
+    #[cfg(windows)]
+    let key = "USERPROFILE";
+    #[cfg(not(windows))]
+    let key = "HOME";
+    std::env::var(key).unwrap_or_default()
+}
+
+/// `NSString.lastPathComponent`: the last component, trailing slashes ignored; "/" for "/".
+#[allow(dead_code)] // used by the resolver
+pub(crate) fn last_path_component(p: &str) -> &str {
+    let t = p.trim_end_matches('/');
+    if t.is_empty() {
+        return if p.is_empty() { "" } else { "/" };
+    }
+    match t.rfind('/') {
+        Some(i) => &t[i + 1..],
+        None => t,
+    }
+}
+
+/// `NSString.deletingLastPathComponent`.
+#[allow(dead_code)] // used by the resolver
+pub(crate) fn deleting_last_path_component(p: &str) -> String {
+    let t = p.trim_end_matches('/');
+    if t.is_empty() {
+        return if p.starts_with('/') { "/".into() } else { String::new() };
+    }
+    match t.rfind('/') {
+        Some(i) => {
+            let head = t[..i].trim_end_matches('/');
+            if head.is_empty() {
+                "/".into()
+            } else {
+                head.to_string()
+            }
+        }
+        None => String::new(),
+    }
+}
+
+/// `NSString.standardizingPath`, as far as it is a matter of the string: `~` expanded, `//` and `/./` reduced, `..`
+/// resolved in absolute paths, no trailing slash. On macOS an initial `/private` is dropped when the rest exists
+/// (as Foundation does). Symlinks are not resolved (Foundation resolves them only around a `..`).
+pub fn standardize_path(p: &str) -> String {
+    standardize_path_in(p, &home_dir())
+}
+
+/// [`standardize_path`] with `home` for `~`.
+pub fn standardize_path_in(p: &str, home: &str) -> String {
+    // Windows: both separators name the same path; `/` is kept (drive paths stay `C:/...`).
+    let mut s = if cfg!(windows) { p.replace('\\', "/") } else { p.to_string() };
+    if s == "~" || s.starts_with("~/") {
+        s = home.to_string() + &s[1..];
+    }
+    let abs = is_abs_path(&s);
+    let mut parts: Vec<&str> = vec![];
+    for c in s.split('/') {
+        match c {
+            "" | "." => {}
+            ".." if abs => {
+                parts.pop();
+            }
+            _ => parts.push(c),
+        }
+    }
+    let joined = parts.join("/");
+    let out = if s.starts_with('/') { format!("/{joined}") } else { joined };
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(rest) = out.strip_prefix("/private/") {
+            let cand = format!("/{rest}");
+            if Path::new(&cand).exists() {
+                return cand;
+            }
+        }
+    }
+    if out.is_empty() && !p.is_empty() {
+        return p.to_string();
+    }
+    out
+}
+
+fn file_exists(p: &str) -> bool {
+    Path::new(p).exists()
+}
+
+fn list_dir(p: &str) -> Vec<String> {
+    match std::fs::read_dir(p) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()).collect(),
+        Err(_) => vec![],
+    }
+}
+
+fn id_ok(session_id: &str) -> bool {
+    !session_id.is_empty() && !session_id.contains('/') && !session_id.contains("..")
+}
+
+fn dir_str(dir: &Path) -> String {
+    dir.to_string_lossy().into_owned()
+}
+
+/// Where an agent keeps its logs (the search root for an id), with the process environment and [`home_dir`].
 pub fn default_dir(agent: &str) -> PathBuf {
     let env: HashMap<String, String> = std::env::vars().collect();
-    default_dir_in(agent, &env, &crate::resolver::home_dir())
+    default_dir_in(agent, &env, Path::new(&home_dir()))
 }
 
-/// Pure form of [`default_dir`]: the environment and home are passed in. One rule, shared with the resolver
-/// (`AgentRoots::from_env`).
+/// Where an agent keeps its logs. Grok Build: `$GROK_HOME/sessions`, else `~/.grok/sessions`; Codex
+/// `~/.codex/sessions`; Cursor `~/.cursor/projects`; everything else (pi too) `~/.claude/projects`. As Swift: no
+/// `CODEX_HOME` / `CLAUDE_CONFIG_DIR` here.
 pub fn default_dir_in(agent: &str, env: &HashMap<String, String>, home: &Path) -> PathBuf {
-    crate::resolver::AgentRoots::from_env(env, home).dir_for(agent)
+    let home = dir_str(home);
+    if agent == "grok" {
+        let g = env.get("GROK_HOME").filter(|s| !s.is_empty()).cloned().unwrap_or_else(|| home + "/.grok");
+        return PathBuf::from(g + "/sessions");
+    }
+    // TODO(windows): the agents' folders on Windows are not confirmed; the unix layout under %USERPROFILE% is assumed.
+    PathBuf::from(
+        home + match agent {
+            "codex" => "/.codex/sessions",
+            "cursor" => "/.cursor/projects",
+            _ => "/.claude/projects",
+        },
+    )
 }
 
-/// An id that is safe to join onto a directory: not empty, no separators, no `..`.
-fn plain_id(id: &str) -> bool {
-    !id.is_empty() && !id.contains('/') && !id.contains('\\') && !id.contains("..")
+/// An absolute path: `/...`, or on Windows also `C:\\...` / `C:/...` (Swift only knows the first).
+pub fn is_abs_path(s: &str) -> bool {
+    s.starts_with('/') || Path::new(s).is_absolute()
 }
 
-/// An absolute `.jsonl` path with no `..` part that exists.
-fn existing_jsonl(path: &str) -> Option<PathBuf> {
-    let p = Path::new(path);
-    let ok = p.extension().map_or(false, |e| e == "jsonl")
-        && !p.components().any(|c| c == Component::ParentDir)
-        && p.is_file();
-    ok.then(|| p.to_path_buf())
-}
-
-fn is_abs(id: &str) -> bool {
-    id.starts_with('/') || Path::new(id).is_absolute()
-}
-
-/// The log file for a session: an absolute `.jsonl` path is used as is (any agent); otherwise it is looked up by id.
-pub fn locate(agent: &str, session_id: &str, dir: &Path) -> Option<PathBuf> {
-    if is_abs(session_id) {
-        return existing_jsonl(session_id);
+/// The log file for a session: an absolute `.jsonl` path is used as is (any agent); otherwise it is looked up by id
+/// in `dir` (`default_dir(agent)` normally).
+pub fn locate(agent: &str, session_id: &str, dir: impl AsRef<Path>) -> Option<PathBuf> {
+    // Windows: a drive path is a path too (herdr's `agent_session` paths there are not documented yet).
+    if is_abs_path(session_id) {
+        let ok = session_id.ends_with(".jsonl")
+            && !session_id.contains("/../")
+            && !(cfg!(windows) && session_id.contains("\\..\\"))
+            && file_exists(session_id);
+        return if ok { Some(PathBuf::from(session_id)) } else { None };
     }
     match agent {
         "codex" => locate_codex(session_id, dir),
         "cursor" => locate_cursor(session_id, dir),
+        "grok" => locate_grok(session_id, dir),
         _ => locate_claude(session_id, dir), // Claude Code (and, as before, any other id)
     }
 }
 
-fn sorted_names_desc(p: &Path) -> Vec<String> {
-    let mut v: Vec<String> = std::fs::read_dir(p)
-        .map(|rd| rd.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()).collect())
-        .unwrap_or_default();
-    v.sort_by(|a, b| b.cmp(a));
-    v
-}
-
-/// Codex: `<sessions>/YYYY/MM/DD/rollout-<time>-<id>.jsonl`. Accepts a session id or the file path itself.
-pub fn locate_codex(session_id: &str, sessions_dir: &Path) -> Option<PathBuf> {
-    if is_abs(session_id) {
-        return existing_jsonl_plain(session_id);
+/// Codex: `<sessions>/YYYY/MM/DD/rollout-<time>-<id>.jsonl`, newest day first. Accepts a session id or the file
+/// path itself.
+pub fn locate_codex(session_id: &str, sessions_dir: impl AsRef<Path>) -> Option<PathBuf> {
+    if is_abs_path(session_id) {
+        return if file_exists(session_id) && session_id.ends_with(".jsonl") { Some(PathBuf::from(session_id)) } else { None };
     }
-    if !plain_id(session_id) {
+    if !id_ok(session_id) {
         return None;
     }
-    // Newest day first: a live session is almost always in the last few day folders, so this stops early.
+    fn sub(p: &str) -> Vec<String> {
+        let mut v = list_dir(p);
+        v.sort_by(|a, b| b.cmp(a));
+        v
+    }
+    let sessions_dir = dir_str(sessions_dir.as_ref());
     let suffix = format!("-{session_id}.jsonl");
-    for y in sorted_names_desc(sessions_dir) {
-        let yd = sessions_dir.join(&y);
-        for m in sorted_names_desc(&yd) {
-            let md = yd.join(&m);
-            for d in sorted_names_desc(&md) {
-                let dd = md.join(&d);
-                if let Some(f) = sorted_names_desc(&dd).into_iter().find(|f| f.starts_with("rollout-") && f.ends_with(&suffix)) {
-                    return Some(dd.join(f));
+    for y in sub(&sessions_dir) {
+        for m in sub(&format!("{sessions_dir}/{y}")) {
+            for d in sub(&format!("{sessions_dir}/{y}/{m}")) {
+                let dir = format!("{sessions_dir}/{y}/{m}/{d}");
+                if let Some(f) = sub(&dir).into_iter().find(|f| f.starts_with("rollout-") && f.ends_with(&suffix)) {
+                    return Some(PathBuf::from(format!("{dir}/{f}")));
                 }
             }
         }
@@ -119,41 +228,99 @@ pub fn locate_codex(session_id: &str, sessions_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Like the Swift `locateCodex` path branch: exists and ends in `.jsonl` (no `..` check there).
-fn existing_jsonl_plain(path: &str) -> Option<PathBuf> {
-    let p = Path::new(path);
-    (p.is_file() && path.ends_with(".jsonl")).then(|| p.to_path_buf())
-}
-
 /// Cursor: `<projects>/*/agent-transcripts/<id>/<id>.jsonl`.
-pub fn locate_cursor(session_id: &str, projects_dir: &Path) -> Option<PathBuf> {
-    if !plain_id(session_id) {
+pub fn locate_cursor(session_id: &str, projects_dir: impl AsRef<Path>) -> Option<PathBuf> {
+    if !id_ok(session_id) {
         return None;
     }
-    let rd = std::fs::read_dir(projects_dir).ok()?;
-    for d in rd.filter_map(|e| e.ok()) {
-        let p = d.path().join("agent-transcripts").join(session_id).join(format!("{session_id}.jsonl"));
-        if p.is_file() {
+    let projects_dir = dir_str(projects_dir.as_ref());
+    list_dir(&projects_dir)
+        .into_iter()
+        .map(|d| format!("{projects_dir}/{d}/agent-transcripts/{session_id}/{session_id}.jsonl"))
+        .find(|p| file_exists(p))
+        .map(PathBuf::from)
+}
+
+/// Grok Build: `<sessions>/<url-encoded cwd, or a slug>/<id>/updates.jsonl` (not `chat_history.jsonl`).
+pub fn locate_grok(session_id: &str, sessions_dir: impl AsRef<Path>) -> Option<PathBuf> {
+    if !id_ok(session_id) {
+        return None;
+    }
+    let sessions_dir = dir_str(sessions_dir.as_ref());
+    list_dir(&sessions_dir)
+        .into_iter()
+        .map(|d| format!("{sessions_dir}/{d}/{session_id}/updates.jsonl"))
+        .find(|p| file_exists(p))
+        .map(PathBuf::from)
+}
+
+/// Claude Code: `<projects>/*/<id>.jsonl`, followed to the newest log of its conversation (see [`continued`]).
+pub fn locate_claude(session_id: &str, projects_dir: impl AsRef<Path>) -> Option<PathBuf> {
+    let projects_dir = projects_dir.as_ref();
+    locate_one(session_id, projects_dir, None).map(|p| continued(&p, Some(projects_dir)))
+}
+
+fn locate_one(session_id: &str, projects_dir: &Path, near: Option<&Path>) -> Option<PathBuf> {
+    if !id_ok(session_id) {
+        return None;
+    }
+    if let Some(near) = near {
+        let p = near.parent().unwrap_or(Path::new("/")).join(format!("{session_id}.jsonl"));
+        if p.exists() {
             return Some(p);
+        }
+    }
+    let projects_dir = dir_str(projects_dir);
+    let dirs = std::fs::read_dir(&projects_dir).ok()?;
+    for d in dirs.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()) {
+        let p = format!("{projects_dir}/{d}/{session_id}.jsonl");
+        if file_exists(&p) {
+            return Some(PathBuf::from(p));
         }
     }
     None
 }
 
-/// Claude Code: `<projects>/*/<id>.jsonl`.
-pub fn locate_claude(session_id: &str, projects_dir: &Path) -> Option<PathBuf> {
-    if !plain_id(session_id) {
+/// Claude Code ends a log with a `continued-in` line when the conversation goes on in another session's log, while
+/// herdr keeps the old id. The newest log of the chain; `log` itself when its last line is not one, or the next log
+/// is not there. At most 16 steps; a loop ends. `projects_dir` None: `~/.claude/projects` (as Swift's default).
+pub fn continued(log: &Path, projects_dir: Option<&Path>) -> PathBuf {
+    let default = PathBuf::from(home_dir() + "/.claude/projects");
+    let projects_dir = projects_dir.unwrap_or(&default);
+    let mut at = log.to_path_buf();
+    let mut seen: std::collections::HashSet<PathBuf> = [log.to_path_buf()].into_iter().collect();
+    while seen.len() <= 16 {
+        let Some(id) = continued_in(&at) else { break };
+        let Some(next) = locate_one(&id, projects_dir, Some(&at)) else { break };
+        if !seen.insert(next.clone()) {
+            break;
+        }
+        at = next;
+    }
+    at
+}
+
+/// The `continuedInSessionId` of a log whose last line is a `continued-in` line, else None.
+pub fn continued_in(log: &Path) -> Option<String> {
+    let mut f = std::fs::File::open(log).ok()?;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    if size == 0 {
         return None;
     }
-    let rd = std::fs::read_dir(projects_dir).ok()?;
-    for d in rd.filter_map(|e| e.ok()) {
-        let p = d.path().join(format!("{session_id}.jsonl"));
-        if p.is_file() {
-            return Some(p);
-        }
+    f.seek(SeekFrom::Start(size.saturating_sub(4096))).ok()?;
+    let mut tail = vec![];
+    f.read_to_end(&mut tail).ok()?;
+    let last = tail.split(|b| *b == b'\n').rfind(|s| !s.is_empty())?;
+    let o: serde_json::Value = serde_json::from_slice(last).ok()?;
+    let o = o.as_object()?;
+    if o.get("type")?.as_str()? != "continued-in" {
+        return None;
     }
-    None
+    o.get("continuedInSessionId")?.as_str().map(String::from)
 }
+
+#[cfg(test)]
+mod tests;
 
 // ---------------------------------------------------------------- shared state
 

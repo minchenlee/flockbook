@@ -122,8 +122,11 @@ fn cursor_locate() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// Changed in the merge with rust/herdrkit: the Swift check `ChecksGrok` (default dirs) is the oracle. Swift reads
+/// only `GROK_HOME`; `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and the `PI_CODING_AGENT_*` variables are not read, and pi
+/// (whose sessions are paths) falls through to Claude's folder.
 #[test]
-fn default_dirs_honor_env_overrides() {
+fn default_dirs_follow_swift() {
     use std::collections::HashMap;
     let home = Path::new("/home/u");
     let env = |kv: &[(&str, &str)]| -> HashMap<String, String> { kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
@@ -131,21 +134,15 @@ fn default_dirs_honor_env_overrides() {
     let none = env(&[]);
     assert_eq!(dir("claude", &none), home.join(".claude").join("projects"));
     assert_eq!(dir("codex", &none), home.join(".codex").join("sessions"));
-    assert_eq!(dir("pi", &none), home.join(".pi").join("agent").join("sessions"));
+    assert_eq!(dir("pi", &none), home.join(".claude").join("projects"));
     assert_eq!(dir("cursor", &none), home.join(".cursor").join("projects"));
-    let e = env(&[("CLAUDE_CONFIG_DIR", "/c/claude"), ("CODEX_HOME", "/c/codex"), ("PI_CODING_AGENT_DIR", "/c/pi")]);
-    assert_eq!(dir("claude", &e), Path::new("/c/claude").join("projects"));
-    assert_eq!(dir("codex", &e), Path::new("/c/codex").join("sessions"));
-    assert_eq!(dir("pi", &e), Path::new("/c/pi").join("sessions"));
-    let e = env(&[("PI_CODING_AGENT_DIR", "/c/pi"), ("PI_CODING_AGENT_SESSION_DIR", "/c/pis")]);
-    assert_eq!(dir("pi", &e), Path::new("/c/pis"));
-    // empty values count as unset
-    assert_eq!(dir("pi", &env(&[("PI_CODING_AGENT_DIR", "")])), home.join(".pi").join("agent").join("sessions"));
-    // the resolver and the log tailer agree
-    let roots = herdr_core::resolver::AgentRoots::from_env(&e, home);
-    for a in ["claude", "codex", "cursor", "pi"] {
-        assert_eq!(roots.dir_for(a), dir(a, &e));
-    }
+    assert_eq!(dir("grok", &none), home.join(".grok").join("sessions"));
+    let e = env(&[("CLAUDE_CONFIG_DIR", "/c/claude"), ("CODEX_HOME", "/c/codex"), ("PI_CODING_AGENT_DIR", "/c/pi"), ("GROK_HOME", "/c/grok")]);
+    assert_eq!(dir("claude", &e), home.join(".claude").join("projects"));
+    assert_eq!(dir("codex", &e), home.join(".codex").join("sessions"));
+    assert_eq!(dir("grok", &e), Path::new("/c/grok").join("sessions"));
+    // an empty value counts as unset
+    assert_eq!(dir("grok", &env(&[("GROK_HOME", "")])), home.join(".grok").join("sessions"));
 }
 
 #[test]
