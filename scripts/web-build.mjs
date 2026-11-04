@@ -3,7 +3,7 @@
 //   node scripts/web-build.mjs --check  fail when the Swift file is not what the sources give
 // No packages: Node 24 strips TypeScript types itself; `deno check` does the type check.
 import { stripTypeScriptTypes } from "node:module";
-import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,13 +19,15 @@ const types = {
   ".js": "text/javascript; charset=utf-8",
   ".png": "image/png",
   ".webmanifest": "application/manifest+json",
+  ".json": "application/json",
 };
 
 const sources = readdirSync(join(web, "src")).filter((f) => f.endsWith(".ts")).sort();
 execFileSync("deno", ["check", "--quiet", "--config", join(web, "deno.json"), ...sources.map((f) => join(web, "src", f))], { stdio: "inherit" });
 
 const files = {};
-for (const f of ["index.html", "style.css", "manifest.webmanifest"]) files[f] = readFileSync(join(web, f));
+// hub.json: the Mac hub's answer to the page's first question (pair a device). The Rust helper answers it itself.
+for (const f of ["index.html", "style.css", "manifest.webmanifest", "hub.json"]) files[f] = readFileSync(join(web, f));
 // The icons, made from the Mac app icon by scripts/pwa-icons.swift.
 for (const f of readdirSync(web).filter((f) => f.endsWith(".png")).sort()) files[f] = readFileSync(join(web, f));
 for (const f of sources) {
@@ -44,10 +46,21 @@ for (const n of names) {
 }
 swift += "    ])\n}\n";
 
+// The same files for the Rust helper (`flockbook-modfeed serve` embeds this folder with rust-embed).
+const rustDir = join(root, "xplat/flockbook-modfeed/web");
+const rustSame = () => existsSync(rustDir)
+  && readdirSync(rustDir).sort().join("\n") === names.join("\n")
+  && names.every((n) => readFileSync(join(rustDir, n)).equals(files[n]));
+
 if (check) {
   const same = existsSync(out) && readFileSync(out, "utf8") === swift;
-  console.log(same ? `web-build: up to date (${names.length} files)` : "web-build: HubWebAssets.swift is stale; run node scripts/web-build.mjs");
-  process.exit(same ? 0 : 1);
+  const rust = rustSame();
+  console.log(same && rust ? `web-build: up to date (${names.length} files)`
+    : `web-build: ${same ? "" : "HubWebAssets.swift "}${rust ? "" : "xplat/flockbook-modfeed/web/ "}stale; run node scripts/web-build.mjs`);
+  process.exit(same && rust ? 0 : 1);
 }
 writeFileSync(out, swift);
-console.log(`web-build: wrote ${names.length} files (${names.join(", ")})`);
+rmSync(rustDir, { recursive: true, force: true });
+mkdirSync(rustDir, { recursive: true });
+for (const n of names) writeFileSync(join(rustDir, n), files[n]);
+console.log(`web-build: wrote ${names.length} files (${names.join(", ")}) to the Swift file and xplat/flockbook-modfeed/web/`);

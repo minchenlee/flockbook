@@ -97,23 +97,19 @@ pub fn run(argv: &[String]) -> String {
             if !session.is_available() {
                 return r.fail("no-core", "herdr-core is not running");
             }
-            // exec gives the sidecar 30 s; a send that waits longer reports `unconfirmed`.
-            let client = HcClient::new(session.clone(), 8, 22);
             match remote::split(&terminal) {
                 Err(()) => return r.fail("bad_terminal", &format!("not a terminal address: {terminal}")),
                 // On another machine: the helper there answers, and its lines go back as they are.
-                Ok(Some((machine, there))) => return remote::forward(&client, &cmd, &args, &machine, &there, cache_url),
+                // exec gives the sidecar 30 s; a send that waits longer reports `unconfirmed`.
+                Ok(Some((machine, there))) => {
+                    let client = HcClient::new(session, 8, 22);
+                    return remote::forward(&client, &cmd, &args, &machine, &there, cache_url);
+                }
                 Ok(None) => {}
             }
-            let ws = match client.snapshot() {
-                Ok(ws) => ws,
-                Err(e) => return r.fail("core", &format!("herdr-core: {e}")),
-            };
-            let now_s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-            let found = match locate::find(&terminal, &ws, &mut SessionResolver::new(&session.socket_path), cache_url, now_s) {
-                Ok(f) => f,
-                Err(e @ locate::Failure::NoTerminal(_)) => return r.fail("no-terminal", &e.to_string()),
-                Err(e) => return r.fail("not-agent", &e.to_string()),
+            let (found, client) = match find(&terminal, cache_url) {
+                Ok(x) => x,
+                Err((code, message)) => return r.fail(code, &message),
             };
             let kind = found.pane.agent.as_ref().map(|a| a.kind.clone()).unwrap_or_else(|| "agent".into());
             let url = found.path.as_ref().map(PathBuf::from);
@@ -185,4 +181,46 @@ pub fn run(argv: &[String]) -> String {
         }
         _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send"),
     }
+}
+
+/// herdr-core's client and the agent in `terminal` (with its session log), or the error line's code and message.
+fn find(terminal: &str, cache: Option<&Path>) -> Result<(locate::Found, HcClient), (&'static str, String)> {
+    let session = HcSession::resolve_env();
+    if !session.is_available() {
+        return Err(("no-core", "herdr-core is not running".into()));
+    }
+    // exec gives the sidecar 30 s; a send that waits longer reports `unconfirmed`.
+    let client = HcClient::new(session.clone(), 8, 22);
+    let ws = client.snapshot().map_err(|e| ("core", format!("herdr-core: {e}")))?;
+    let now_s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    match locate::find(terminal, &ws, &mut SessionResolver::new(&session.socket_path), cache, now_s) {
+        Ok(f) => Ok((f, client)),
+        Err(e @ locate::Failure::NoTerminal(_)) => Err(("no-terminal", e.to_string())),
+        Err(e) => Err(("not-agent", e.to_string())),
+    }
+}
+
+/// A key command with its values typed, never parsed from arguments: `serve` passes the page's values here, so a
+/// prompt id, an answer or a text can never be read as an option (`--allow`, `--terminal`).
+pub enum Keys {
+    Approve { request: String, allow: bool },
+    Answer { request: String, answers: Vec<herdr_core::QuestionAnswer> },
+    /// `expect_kind`, `expect_path`: as `send --expect-kind`, `--expect-path`.
+    Send { text: String, expect_kind: Option<String>, expect_path: Option<String> },
+}
+
+/// Runs `keys` on the agent in `terminal`: the `done` line, or the `error` line (as `run` prints them).
+pub fn keys(terminal: &str, cache: Option<&Path>, keys: Keys) -> serde_json::Value {
+    let (found, client) = match find(terminal, cache) {
+        Ok(x) => x,
+        Err((code, message)) => return json!({"type": "error", "code": code, "message": message}),
+    };
+    let log = found.path.as_ref().map(PathBuf::from);
+    let log = log.as_deref();
+    let d = match keys {
+        Keys::Approve { request, allow } => cards::approve(&found.pane, &client, log, &request, allow, cache),
+        Keys::Answer { request, answers } => cards::answer(&found.pane, &client, log, &request, &answers),
+        Keys::Send { text, expect_kind, expect_path } => cards::send(&found.pane, &client, &text, &[], log, expect_kind.as_deref(), expect_path.as_deref()),
+    };
+    serde_json::to_value(&d).unwrap_or_else(|_| json!({"type": "done", "result": "failed"}))
 }

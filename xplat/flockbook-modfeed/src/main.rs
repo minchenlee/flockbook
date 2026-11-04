@@ -6,6 +6,10 @@ fn main() {
     if argv.first().map(String::as_str) == Some("install") {
         std::process::exit(modfeedkit::install::run(&argv[1..]));
     }
+    // `serve` keeps running (the phone page); every other command answers once and exits.
+    if argv.first().map(String::as_str) == Some("serve") {
+        std::process::exit(modfeedkit::serve::main(&argv[1..]));
+    }
     let text = modfeedkit::cli::run(&argv);
     use std::io::Write;
     let mut out = std::io::stdout().lock();

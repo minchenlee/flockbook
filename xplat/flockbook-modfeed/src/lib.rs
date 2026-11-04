@@ -10,5 +10,6 @@ pub mod paste;
 pub mod protocol;
 pub mod remote;
 pub mod rows;
+pub mod serve;
 pub mod status;
 pub mod tail;

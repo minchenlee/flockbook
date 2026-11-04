@@ -23,6 +23,9 @@ unicode-segmentation = "1"
 sha2 = "0.10"
 indexmap = { version = "2", features = ["serde"] }
 base64 = "0.22.1"
+# serve: the phone page in the binary, and its WebSocket (no TLS: Tailscale Serve does that).
+rust-embed = { version = "8", features = ["debug-embed"] }
+tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -144,7 +144,29 @@ function ack(id: string): void {
   void request({ type: "pulledAck", pulled: id });
 }
 
+/** The Rust helper (`flockbook-modfeed serve`, `/hub.json`): Tailscale says who the owner is, so there is no pairing,
+ *  and the requests that send keys go with `POST /api` (same origin) instead of the socket. Null: the Mac hub. */
+let helper: { post: string[] } | null = null;
+
+/** A request over `POST /api`: the answer is the hub messages, the reply to `id` among them. */
+async function post(msg: Record<string, unknown>, id: string): Promise<{ ok: boolean; code?: string; message?: string }> {
+  try {
+    const r = await fetch("/api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ v: 1, id, ...msg }),
+      credentials: "same-origin", cache: "no-store" });
+    if (!r.ok) return { ok: false, code: "failed", message: r.status === 403 ? "The helper refused this request." : `The helper answered ${r.status}.` };
+    let reply: { ok: boolean; code?: string; message?: string } = { ok: false, code: "failed", message: "The helper gave no answer." };
+    for (const m of await r.json() as HubMessage[]) {
+      if (m.type === "reply" && m.re === id) reply = { ok: m.ok, code: m.error?.code, message: m.error?.message };
+      else receive(m);
+    }
+    return reply;
+  } catch {
+    return { ok: false, code: "failed", message: "Not connected." };
+  }
+}
+
 function request(msg: Record<string, unknown>, id = `c${nextId++}`): Promise<{ ok: boolean; code?: string; message?: string }> {
+  if (helper && helper.post.includes(String(msg.type))) return post(msg, id);
   return new Promise((resolve) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) { resolve({ ok: false, code: "failed", message: "Not connected." }); return; }
     waiting.set(id, (ok, code, message) => resolve({ ok, code, message }));
@@ -1506,7 +1528,9 @@ function composer(pane: string, promptOpen: boolean, agent?: string): HTMLElemen
     state.progress = list.some((a) => !a.uploaded) ? 0 : null;
     render();
     const failed = list.length ? await upload(list) : null;
-    const r = failed ? { ok: false, ...failed } : await request({ type: "send", pane, text, ...(list.length ? { attachments: list.map((a) => a.name) } : {}) });
+    const r = failed ? { ok: false, ...failed } : await request({ type: "send", pane, text, ...(list.length ? { attachments: list.map((a) => a.name) } : {}),
+      // The agent and conversation shown: the Rust helper sends nothing when another one is in the pane now.
+      ...(helper ? { agent: find(pane)?.p.agent?.kind, session: view(pane).session } : {}) });
     state.busy = false;
     state.progress = null;
     if (r.ok) {
@@ -1563,5 +1587,16 @@ function fitText(box: HTMLTextAreaElement): void {
 // --- Start.
 if (pushReady()) worker();
 render();
-if (state.token || state.pairSecret) connect();
+/** Asks `/hub.json` how this hub knows the owner: `pair` (the Mac hub) or `tailscale` (the Rust helper: no pairing). */
+async function start(): Promise<void> {
+  if (!state.token && !state.pairSecret) {
+    try {
+      const r = await fetch("/hub.json", { cache: "no-store" });
+      const j = r.ok ? await r.json() as { auth?: string; post?: string[] } : null;
+      if (j?.auth === "tailscale") { helper = { post: j.post ?? [] }; state.token = "tailscale"; render(); }
+    } catch { /* no answer: pair as before */ }
+  }
+  if (state.token || state.pairSecret) connect();
+}
+void start();
 follow();
