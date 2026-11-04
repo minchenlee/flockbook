@@ -281,6 +281,7 @@ def main():
         if d["a_sent"] != d["b_sent"]:
             print("A sent: %s\nB sent: %s" % (json.dumps(d["a_sent"]), json.dumps(d["b_sent"])))
     if args.report:
+        os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
         json.dump({"identical": same, "total": total, "diffs": diffs}, open(args.report, "w"), indent=1, ensure_ascii=False)
     shutil.rmtree(work, ignore_errors=True)
     sys.exit(0 if not diffs and total > 0 else 1)
