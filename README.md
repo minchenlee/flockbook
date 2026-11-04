@@ -40,7 +40,7 @@ curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/inst
 
 It downloads the helper for your machine from the latest release, checks it against the release's `SHA256SUMS`, and runs `flockbook-modfeed install`. Add `-s -- --dry-run` after `sh` to see the plan first.
 
-To look first: download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper for every platform. (It is also listed in the [Herdr layout gallery](https://herdr.dev/layouts/minchenlee/flockbook--herdr-app/).) Unzip it, then:
+To look first: download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper for every platform. (It is also listed in the [Herdr layout gallery](https://herdr.dev/gallery/).) Unzip it, then:
 
 ```sh
 ./install.sh --dry-run   # see what it does; nothing is written
