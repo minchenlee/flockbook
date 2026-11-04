@@ -16,3 +16,8 @@ png = "0.18"
 
 [profile.release]
 debug = "line-tables-only"
+
+# The helper is copied to other machines (hc file.write, 8 MB a call): no symbols or line tables in it.
+[profile.release.package.flockbook-modfeed]
+strip = true
+debug = false
