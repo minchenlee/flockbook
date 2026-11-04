@@ -68,7 +68,8 @@ fn stuck_server_times_out() {
     let client = HerdrClient::new(&session_for(&fake.path)).with_timeout(Duration::from_millis(300));
     let t = Instant::now();
     let r = client.snapshot();
-    assert!(matches!(r, Err(HerdrError::Socket(_))), "timeout surfaces as a socket error: {r:?}");
+    // As Swift's LineSocket (`.timeout` on EAGAIN): the request may still take effect, so it is not a plain failure.
+    assert!(matches!(r, Err(HerdrError::Timeout(_))), "timeout surfaces as a timeout error: {r:?}");
     assert!(t.elapsed() < Duration::from_millis(2000), "gave up near the timeout, not after the stall");
     fake.kill();
 }

@@ -90,7 +90,7 @@ impl ConversationParser {
         match s_of(o, "type") {
             Some("compaction") => {
                 self.flush();
-                self.done.push(ConversationItem { id: id.into(), kind: ItemKind::Status("Context compacted".into()), timestamp: self.line_ts });
+                self.done.push(ConversationItem { id: id.into(), kind: ItemKind::Status("Context compacted".into()), timestamp: self.line_ts, ..Default::default() });
             }
             Some("custom_message") => {
                 // extension notices shown in pi's TUI (e.g. a background subagent finished)
@@ -100,7 +100,7 @@ impl ConversationParser {
                 let text = result_text(o.get("content"));
                 let Some(first) = text.trim().lines().find(|l| !l.is_empty()) else { return };
                 self.flush();
-                self.done.push(ConversationItem { id: id.into(), kind: ItemKind::Status(first.chars().take(160).collect()), timestamp: self.line_ts });
+                self.done.push(ConversationItem { id: id.into(), kind: ItemKind::Status(first.chars().take(160).collect()), timestamp: self.line_ts, ..Default::default() });
             }
             Some("message") => {
                 if let Some(Value::Object(m)) = o.get("message") {
@@ -129,7 +129,7 @@ impl ConversationParser {
                         continue;
                     }
                     self.flush();
-                    self.done.push(ConversationItem { id: format!("{id}-{i}"), kind: ItemKind::UserText(text.into()), timestamp: self.line_ts });
+                    self.done.push(ConversationItem { id: format!("{id}-{i}"), kind: ItemKind::UserText(text.into()), timestamp: self.line_ts, ..Default::default() });
                 }
             }
             Some("assistant") => {
@@ -141,7 +141,7 @@ impl ConversationParser {
                                 continue;
                             }
                             self.flush();
-                            self.done.push(ConversationItem { id: format!("{id}-{i}"), kind: ItemKind::AssistantText(text.into()), timestamp: self.line_ts });
+                            self.done.push(ConversationItem { id: format!("{id}-{i}"), kind: ItemKind::AssistantText(text.into()), timestamp: self.line_ts, ..Default::default() });
                         }
                         Some("toolCall") => {
                             let name = pi_tool(s_of(b, "name").unwrap_or("tool"));
@@ -157,11 +157,11 @@ impl ConversationParser {
                         let msg = s_of(m, "errorMessage").unwrap_or("").lines().find(|l| !l.is_empty()).unwrap_or("");
                         let text = if msg.is_empty() { "Error".to_string() } else { format!("Error: {}", msg.chars().take(160).collect::<String>()) };
                         self.flush();
-                        self.done.push(ConversationItem { id: format!("{id}-err"), kind: ItemKind::Status(text), timestamp: self.line_ts });
+                        self.done.push(ConversationItem { id: format!("{id}-err"), kind: ItemKind::Status(text), timestamp: self.line_ts, ..Default::default() });
                     }
                     Some("aborted") => {
                         self.flush();
-                        self.done.push(ConversationItem { id: format!("{id}-err"), kind: ItemKind::Status("Interrupted".into()), timestamp: self.line_ts });
+                        self.done.push(ConversationItem { id: format!("{id}-err"), kind: ItemKind::Status("Interrupted".into()), timestamp: self.line_ts, ..Default::default() });
                     }
                     _ => {}
                 }
@@ -194,7 +194,7 @@ impl ConversationParser {
         self.open_order.push(id.into());
         self.call_by_id.insert(
             id.into(),
-            ToolCall { id: id.into(), tool_name: name.into(), summary: summary(name, input), input: cut(&pretty_json(input)), output: None, is_error: false },
+            ToolCall { id: id.into(), tool_name: name.into(), summary: summary(name, input), input: cut(&pretty_json(input)), output: None, is_error: false, ..Default::default() },
         );
     }
 }

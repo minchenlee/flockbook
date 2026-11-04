@@ -94,7 +94,7 @@ pub fn parse(data: &[u8]) -> Result<Vec<Workspace>, HerdrError> {
                     kind: kind.clone(),
                     status: AgentStatus::parse(a.agent_status.as_deref()),
                     session_id: sid,
-                    title,
+                    title, ..Default::default()
                 });
             }
         }
@@ -103,7 +103,7 @@ pub fn parse(data: &[u8]) -> Result<Vec<Workspace>, HerdrError> {
             terminal_id: p.terminal_id.clone().unwrap_or_default(),
             cwd: p.cwd.clone().unwrap_or_default(),
             agent,
-            label: p.label.clone().filter(|l| !l.is_empty()),
+            label: p.label.clone().filter(|l| !l.is_empty()), ..Default::default()
         });
     }
 

@@ -115,7 +115,7 @@ impl ConversationParser {
                         detail: self.open_details.get(last).cloned().unwrap_or_default(),
                         open_calls: self.open_order.len(),
                     }),
-                    timestamp: self.call_ts.get(last).copied(),
+                    timestamp: self.call_ts.get(last).copied(), ..Default::default()
                 });
             }
         }
@@ -189,7 +189,7 @@ impl ConversationParser {
                     if ty == Some("user") {
                         if compact_flag || text.starts_with("This session is being continued") {
                             self.flush();
-                            self.done.push(ConversationItem { id: bid, kind: ItemKind::Status("Context compacted".into()), timestamp: self.line_ts });
+                            self.done.push(ConversationItem { id: bid, kind: ItemKind::Status("Context compacted".into()), timestamp: self.line_ts, ..Default::default() });
                             continue;
                         }
                         if meta {
@@ -197,10 +197,10 @@ impl ConversationParser {
                         }
                         let Some(shown) = user_visible(text) else { continue };
                         self.flush();
-                        self.done.push(ConversationItem { id: bid, kind: ItemKind::UserText(shown), timestamp: self.line_ts });
+                        self.done.push(ConversationItem { id: bid, kind: ItemKind::UserText(shown), timestamp: self.line_ts, ..Default::default() });
                     } else {
                         self.flush();
-                        self.done.push(ConversationItem { id: bid, kind: ItemKind::AssistantText(text.to_string()), timestamp: self.line_ts });
+                        self.done.push(ConversationItem { id: bid, kind: ItemKind::AssistantText(text.to_string()), timestamp: self.line_ts, ..Default::default() });
                     }
                 }
                 Some("tool_use") => {
@@ -215,7 +215,7 @@ impl ConversationParser {
                             // a question card, never a permission
                             self.flush();
                             self.question_at.insert(id.clone(), self.done.len());
-                            self.done.push(ConversationItem { id: format!("q-{id}"), kind: ItemKind::Question(q), timestamp: self.line_ts });
+                            self.done.push(ConversationItem { id: format!("q-{id}"), kind: ItemKind::Question(q), timestamp: self.line_ts, ..Default::default() });
                             continue;
                         }
                     }
@@ -233,7 +233,7 @@ impl ConversationParser {
                     self.open_order.push(id.clone());
                     self.call_by_id.insert(
                         id.clone(),
-                        ToolCall { id, tool_name: name.clone(), summary: summary(&name, &input), input: cut(&pretty_json(&input)), output: None, is_error: false },
+                        ToolCall { id, tool_name: name.clone(), summary: summary(&name, &input), input: cut(&pretty_json(&input)), output: None, is_error: false, ..Default::default() },
                     );
                 }
                 Some("tool_result") => {
@@ -303,9 +303,9 @@ impl ConversationParser {
                     }
                     let Some(shown) = user_visible(text) else { return };
                     self.answer_async_questions();
-                    self.done.push(ConversationItem { id: bid, kind: ItemKind::UserText(shown), timestamp: self.line_ts });
+                    self.done.push(ConversationItem { id: bid, kind: ItemKind::UserText(shown), timestamp: self.line_ts, ..Default::default() });
                 } else {
-                    self.done.push(ConversationItem { id: bid, kind: ItemKind::AssistantText(text.to_string()), timestamp: self.line_ts });
+                    self.done.push(ConversationItem { id: bid, kind: ItemKind::AssistantText(text.to_string()), timestamp: self.line_ts, ..Default::default() });
                 }
             }
             Some(pt @ ("custom_tool_call" | "function_call" | "local_shell_call")) => {
@@ -314,7 +314,7 @@ impl ConversationParser {
                 if let Some(q) = question::codex(&name, &id, s_of(payload, "arguments").unwrap_or("")) {
                     self.flush();
                     self.question_at.insert(id.clone(), self.done.len());
-                    self.done.push(ConversationItem { id: format!("q-{id}"), kind: ItemKind::Question(q), timestamp: self.line_ts });
+                    self.done.push(ConversationItem { id: format!("q-{id}"), kind: ItemKind::Question(q), timestamp: self.line_ts, ..Default::default() });
                     return;
                 }
                 if self.run.is_empty() {
@@ -326,7 +326,7 @@ impl ConversationParser {
                 self.open_tool_uses.insert(id.clone(), cmd.clone());
                 self.open_order.push(id.clone());
                 let raw = s_of(payload, "arguments").or_else(|| s_of(payload, "input")).unwrap_or("");
-                self.call_by_id.insert(id.clone(), ToolCall { id, tool_name: name, summary: cmd, input: cut(raw), output: None, is_error: false });
+                self.call_by_id.insert(id.clone(), ToolCall { id, tool_name: name, summary: cmd, input: cut(raw), output: None, is_error: false, ..Default::default() });
             }
             Some("custom_tool_call_output" | "function_call_output" | "local_shell_call_output") => {
                 let Some(id) = s_of(payload, "call_id") else { return };
@@ -404,7 +404,7 @@ impl ConversationParser {
                 ToolChip { id: format!("{key}|{k}"), symbol: l.symbol.into(), text, calls: groups.remove(k).unwrap_or_default() }
             })
             .collect();
-        ConversationItem { id: format!("tools-{key}"), kind: ItemKind::ToolChips(chips), timestamp: at }
+        ConversationItem { id: format!("tools-{key}"), kind: ItemKind::ToolChips(chips), timestamp: at, ..Default::default() }
     }
 }
 

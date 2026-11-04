@@ -53,6 +53,10 @@ impl LineSocket {
                 Ok(0) => return Err(HerdrError::Closed),
                 Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                // Ran past the read timeout: the request may still take effect.
+                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+                    return Err(HerdrError::Timeout("read".into()))
+                }
                 Err(e) => return Err(HerdrError::Socket(format!("read: {e}"))),
             }
         }

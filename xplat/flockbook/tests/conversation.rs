@@ -39,7 +39,7 @@ struct Fake {
 }
 
 fn item(id: String, kind: ItemKind) -> ConversationItem {
-    ConversationItem { id, kind, timestamp: Some(1_700_000_000.0) }
+    ConversationItem { id, kind, timestamp: Some(1_700_000_000.0), ..Default::default() }
 }
 
 fn chat(n: usize) -> Vec<ConversationItem> {

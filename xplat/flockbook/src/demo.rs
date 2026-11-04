@@ -25,7 +25,7 @@ const TREE: &[(&str, &[(&str, &str, AgentStatus)])] = &[
 ];
 
 fn item(id: &str, kind: ItemKind, ts: f64) -> ConversationItem {
-    ConversationItem { id: id.into(), kind, timestamp: Some(ts) }
+    ConversationItem { id: id.into(), kind, timestamp: Some(ts), ..Default::default() }
 }
 
 fn chip(id: &str, symbol: &str, text: &str, tool: &str, summary: &str, output: Option<&str>) -> ToolChip {
@@ -33,7 +33,7 @@ fn chip(id: &str, symbol: &str, text: &str, tool: &str, summary: &str, output: O
         id: id.into(),
         symbol: symbol.into(),
         text: text.into(),
-        calls: vec![ToolCall { id: format!("{id}-c"), tool_name: tool.into(), summary: summary.into(), input: summary.into(), output: output.map(Into::into), is_error: false }],
+        calls: vec![ToolCall { id: format!("{id}-c"), tool_name: tool.into(), summary: summary.into(), input: summary.into(), output: output.map(Into::into), is_error: false, ..Default::default() }],
     }
 }
 
@@ -94,7 +94,7 @@ fn ranking_conversation() -> Vec<ConversationItem> {
             ),
             BASE_TS + 840.0,
         ),
-        item("c3", ToolChips(vec![ToolChip { id: "c3a".into(), symbol: "terminal".into(), text: "Running Bash...".into(), calls: vec![ToolCall { id: "c3a-c".into(), tool_name: "Bash".into(), summary: "python -m ranking.replay logs/last-week.jsonl".into(), input: "python -m ranking.replay logs/last-week.jsonl".into(), output: None, is_error: false }] }]), BASE_TS + 860.0),
+        item("c3", ToolChips(vec![ToolChip { id: "c3a".into(), symbol: "terminal".into(), text: "Running Bash...".into(), calls: vec![ToolCall { id: "c3a-c".into(), tool_name: "Bash".into(), summary: "python -m ranking.replay logs/last-week.jsonl".into(), input: "python -m ranking.replay logs/last-week.jsonl".into(), output: None, is_error: false, ..Default::default() }] }]), BASE_TS + 860.0),
     ]
 }
 
@@ -167,7 +167,7 @@ fn scripted_conversation(agent: &str) -> Vec<ConversationItem> {
         End::Tool(symbol, text) => v.push(item("g-c2", ToolChips(vec![chip("g-c2a", symbol, text, "Bash", "run", Some("ok"))]), BASE_TS + 60.0)),
         End::Running(tool, cmd) => v.push(item(
             "g-c2",
-            ToolChips(vec![ToolChip { id: "g-c2a".into(), symbol: "terminal".into(), text: format!("Running {tool}..."), calls: vec![ToolCall { id: "g-c2a-c".into(), tool_name: tool.into(), summary: cmd.into(), input: cmd.into(), output: None, is_error: false }] }]),
+            ToolChips(vec![ToolChip { id: "g-c2a".into(), symbol: "terminal".into(), text: format!("Running {tool}..."), calls: vec![ToolCall { id: "g-c2a-c".into(), tool_name: tool.into(), summary: cmd.into(), input: cmd.into(), output: None, is_error: false, ..Default::default() }] }]),
             BASE_TS + 60.0,
         )),
         End::AskQuestion => v.push(item("g-q1", ItemKind::Question(demo_question()), BASE_TS + 50.0)),
@@ -195,8 +195,8 @@ impl DemoSource {
                     id: pane_id.clone(),
                     terminal_id: format!("term_{n}"),
                     cwd: format!("~/{}", wname.to_lowercase()),
-                    agent: Some(Agent { name: agent.to_string(), kind: "claude".into(), status: *status, session_id: Some(session), title: label.to_string() }),
-                    label: None,
+                    agent: Some(Agent { name: agent.to_string(), kind: "claude".into(), status: *status, session_id: Some(session), title: label.to_string(), ..Default::default() }),
+                    label: None, ..Default::default()
                 };
                 let conv = if *agent == "quarry-rank-dev" { ranking_conversation() } else { scripted_conversation(agent) };
                 conversations.insert(pane_id, conv);

@@ -21,7 +21,7 @@ impl ConversationParser {
             }
             self.flush();
             let text = if status == Some("error") { "Error" } else { "Interrupted" };
-            self.done.push(ConversationItem { id: bid, kind: ItemKind::Status(text.into()), timestamp: self.line_ts });
+            self.done.push(ConversationItem { id: bid, kind: ItemKind::Status(text.into()), timestamp: self.line_ts, ..Default::default() });
             return;
         }
         let role = s_of(o, "role");
@@ -35,14 +35,14 @@ impl ConversationParser {
                         let Some(text) = cursor_query(raw).filter(|t| !t.is_empty()) else { continue };
                         self.line_ts = cursor_time(raw).or(self.line_ts);
                         self.flush();
-                        self.done.push(ConversationItem { id, kind: ItemKind::UserText(text), timestamp: self.line_ts });
+                        self.done.push(ConversationItem { id, kind: ItemKind::UserText(text), timestamp: self.line_ts, ..Default::default() });
                     } else if role == Some("assistant") {
                         let text = raw.trim();
                         if text.is_empty() {
                             continue;
                         }
                         self.flush();
-                        self.done.push(ConversationItem { id, kind: ItemKind::AssistantText(text.to_string()), timestamp: None });
+                        self.done.push(ConversationItem { id, kind: ItemKind::AssistantText(text.to_string()), timestamp: None, ..Default::default() });
                     }
                 }
                 Some("tool_use") => {
@@ -55,7 +55,7 @@ impl ConversationParser {
                         self.run_key = id.clone();
                     }
                     self.run.push(RunEntry { label: label_for(&name), tool: name.clone(), id: id.clone() });
-                    let call = ToolCall { id: id.clone(), tool_name: name.clone(), summary: summary(&name, &input), input: cut(&pretty_json(&input)), output: None, is_error: false };
+                    let call = ToolCall { id: id.clone(), tool_name: name.clone(), summary: summary(&name, &input), input: cut(&pretty_json(&input)), output: None, is_error: false, ..Default::default() };
                     self.call_by_id.insert(id, call);
                 }
                 _ => {}

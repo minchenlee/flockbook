@@ -65,7 +65,7 @@ fn question(multi: bool) -> QuestionRequest {
 }
 
 fn q_item(q: QuestionRequest) -> Vec<ConversationItem> {
-    vec![ConversationItem { id: "q1".into(), kind: ItemKind::Question(q), timestamp: Some(1.0) }]
+    vec![ConversationItem { id: "q1".into(), kind: ItemKind::Question(q), timestamp: Some(1.0), ..Default::default() }]
 }
 
 /// What Claude shows while the picker is open (tab bar, question, options, footer marker).
@@ -730,7 +730,7 @@ fn clicking_allow_sends_exactly_once() {
 
 fn log_item(command: &str) -> Vec<ConversationItem> {
     let p = PermissionRequest { title: "Run a command".into(), command: command.into(), tool_name: "Bash".into(), tool_use_id: "toolu_long".into(), state: PermState::Pending, detail: String::new(), open_calls: 1 };
-    vec![ConversationItem { id: "p1".into(), kind: ItemKind::PermissionRequest(p), timestamp: Some(1.0) }]
+    vec![ConversationItem { id: "p1".into(), kind: ItemKind::PermissionRequest(p), timestamp: Some(1.0), ..Default::default() }]
 }
 
 fn screen_for(request: &str) -> String {
@@ -888,7 +888,7 @@ fn a_question_card_leaves_no_composer_to_focus_and_a_focus_attempt_changes_nothi
 
 fn logged_call(command: &str, tool: &str, open_calls: usize, detail: &str, screen: &str) -> H {
     let p = PermissionRequest { title: "Run a command".into(), command: command.into(), tool_name: tool.into(), tool_use_id: "toolu_par".into(), state: PermState::Pending, detail: detail.into(), open_calls };
-    let items = vec![ConversationItem { id: "p1".into(), kind: ItemKind::PermissionRequest(p), timestamp: Some(1.0) }];
+    let items = vec![ConversationItem { id: "p1".into(), kind: ItemKind::PermissionRequest(p), timestamp: Some(1.0), ..Default::default() }];
     H::new("getting started", AgentStatus::Blocked, Some(items), Some(RecordingActions::new(screen)))
 }
 

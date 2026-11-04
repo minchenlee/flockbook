@@ -575,10 +575,10 @@ pub mod preview {
     use crate::model::*;
 
     pub fn agent(n: &str, st: AgentStatus) -> Agent {
-        Agent { name: n.into(), kind: "claude".into(), status: st, session_id: None, title: n.into() }
+        Agent { name: n.into(), kind: "claude".into(), status: st, session_id: None, title: n.into(), ..Default::default() }
     }
     pub fn pane(id: &str, a: Option<Agent>) -> Pane {
-        Pane { id: format!("p{id}"), terminal_id: format!("term_{id}"), cwd: "~/Orchard".into(), agent: a, label: None }
+        Pane { id: format!("p{id}"), terminal_id: format!("term_{id}"), cwd: "~/Orchard".into(), agent: a, label: None, ..Default::default() }
     }
     pub fn tab(id: &str, label: &str, n: i64, st: AgentStatus, panes: Vec<Pane>) -> Tab {
         Tab { id: id.into(), label: label.into(), number: n, panes, status: st }

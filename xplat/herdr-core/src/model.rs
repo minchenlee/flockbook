@@ -1,13 +1,24 @@
 //! Public model types (port of Models.swift). Plain data, `Clone + PartialEq`.
 
 /// Agent state. Rollup order: blocked > working > done > idle > unknown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AgentStatus {
     Idle,
     Working,
     Blocked,
     Done,
+    #[default]
     Unknown,
+}
+
+/// Which Herdr runtime an agent lives on (Swift `BackendKind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BackendKind {
+    /// The `herdr` 0.9.x TUI server (`HerdrClient`).
+    #[default]
+    Tui,
+    /// herdr-core (`hc`, `hc::HcClient`).
+    Hc,
 }
 
 impl AgentStatus {
@@ -49,7 +60,7 @@ impl AgentStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Agent {
     pub name: String,
     pub kind: String,
@@ -57,9 +68,24 @@ pub struct Agent {
     /// Session id (Claude) or log path (Codex).
     pub session_id: Option<String>,
     pub title: String,
+    /// Which runtime runs this agent. Routes input and decides which actions exist.
+    pub backend: BackendKind,
+    /// hc only: what a `blocked` agent waits for (`permission`, `question`, `auth`), or `error` for a program that
+    /// reported 7501 `error`. `None` otherwise.
+    pub status_kind: Option<String>,
+    /// hc only: the agent's process in the terminal, `<pid>@<created_ms>` (`hc::mapper::process`). A key gate binds to
+    /// it: hc gives no session id. `None` otherwise (keys then fail closed).
+    pub process: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl Agent {
+    /// An hc agent: `title` is `name`, no session id, no process (keys to it fail closed until one is set).
+    pub fn new(name: &str, kind: &str, status: AgentStatus) -> Agent {
+        Agent { name: name.into(), kind: kind.into(), status, title: name.into(), backend: BackendKind::Hc, ..Default::default() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Pane {
     pub id: String,
     pub terminal_id: String,
@@ -67,9 +93,12 @@ pub struct Pane {
     pub agent: Option<Agent>,
     /// Name set with `pane.rename`; `None` when the pane has none.
     pub label: Option<String>,
+    pub backend: BackendKind,
+    /// hc only: the foreground process, then the terminal's own process (for finding the agent's session log).
+    pub process_ids: Vec<i32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Tab {
     pub id: String,
     pub label: String,
@@ -78,15 +107,37 @@ pub struct Tab {
     pub status: AgentStatus,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Workspace {
     pub id: String,
     pub label: String,
     pub tabs: Vec<Tab>,
 }
 
+/// A picture in a log line (Swift `LogImage.Ref`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImageRef {
+    pub format: ImageFormat,
+    pub width: i64,
+    pub height: i64,
+    /// File offset of the line, when known.
+    pub offset: Option<u64>,
+    /// The picture's place in its line.
+    pub index: usize,
+    /// The first 8 bytes of the SHA-256 of its base64 text.
+    pub digest: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+    Webp,
+    Gif,
+}
+
 /// One tool call behind a chip. `input` and `output` are cut at 4 KB (a trailing "…" marks the cut).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ToolCall {
     pub id: String,
     pub tool_name: String,
@@ -96,9 +147,11 @@ pub struct ToolCall {
     /// `None` until the result arrives.
     pub output: Option<String>,
     pub is_error: bool,
+    /// Pictures in the result, in order.
+    pub images: Vec<ImageRef>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ToolChip {
     /// Stable across `items()` calls (derived from the run key and the label).
     pub id: String,
@@ -108,14 +161,15 @@ pub struct ToolChip {
     pub calls: Vec<ToolCall>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PermState {
     /// The log ends with a tool call that has no result yet. It may wait for approval or just run.
+    #[default]
     Pending,
     Resolved,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PermissionRequest {
     pub title: String,
     pub command: String,
@@ -225,10 +279,18 @@ pub enum ItemKind {
     Status(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl Default for ItemKind {
+    fn default() -> Self {
+        ItemKind::Status(String::new())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ConversationItem {
     pub id: String,
     pub kind: ItemKind,
     /// Seconds since the Unix epoch of the log line (for chips: the first call). `None` when the line has no time.
     pub timestamp: Option<f64>,
+    /// userText: the pictures the owner attached, in order.
+    pub images: Vec<ImageRef>,
 }

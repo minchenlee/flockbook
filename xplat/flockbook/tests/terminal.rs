@@ -787,7 +787,7 @@ fn card_rig(label: &str, items: Option<Vec<herdr_core::ConversationItem>>, scree
 #[test]
 fn question_card_keys_do_nothing_while_the_sheet_is_open() {
     let q = herdr_core::QuestionRequest::new("toolu_t", vec![herdr_core::Question::new("Pick", "Which parts should ship?", vec![herdr_core::QOption::new("Alpha"), herdr_core::QOption::new("Beta"), herdr_core::QOption::new("Gamma")], false)]);
-    let items = vec![herdr_core::ConversationItem { id: "q1".into(), kind: herdr_core::ItemKind::Question(q), timestamp: Some(1.0) }];
+    let items = vec![herdr_core::ConversationItem { id: "q1".into(), kind: herdr_core::ItemKind::Question(q), timestamp: Some(1.0), ..Default::default() }];
     // With the sheet closed the same keys do pick and send (so the test proves the gate, not a dead card).
     let (mut app, _, _) = card_rig("getting started", Some(items.clone()), &picker());
     let _ = app.update(Message::Cards(CardsMsg::Key(CardKey::Digit(2))));

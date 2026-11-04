@@ -359,11 +359,11 @@ mod tests {
     use herdr_core::{ToolCall, ToolChip};
 
     fn item(id: &str, kind: ItemKind, ts: f64) -> ConversationItem {
-        ConversationItem { id: id.into(), kind, timestamp: Some(ts) }
+        ConversationItem { id: id.into(), kind, timestamp: Some(ts), ..Default::default() }
     }
 
     fn chip(id: &str) -> ToolChip {
-        ToolChip { id: id.into(), symbol: "terminal".into(), text: "Ran a command".into(), calls: vec![ToolCall { id: "c".into(), tool_name: "Bash".into(), summary: "ls".into(), input: "ls".into(), output: Some("a\nb".into()), is_error: false }] }
+        ToolChip { id: id.into(), symbol: "terminal".into(), text: "Ran a command".into(), calls: vec![ToolCall { id: "c".into(), tool_name: "Bash".into(), summary: "ls".into(), input: "ls".into(), output: Some("a\nb".into()), is_error: false, ..Default::default() }] }
     }
 
     #[test]
