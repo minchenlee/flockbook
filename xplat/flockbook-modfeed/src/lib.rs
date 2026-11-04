@@ -4,6 +4,7 @@ pub mod answered;
 pub mod cards;
 pub mod cli;
 pub mod feed;
+pub mod install;
 pub mod locate;
 pub mod paste;
 pub mod protocol;

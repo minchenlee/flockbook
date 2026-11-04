@@ -109,6 +109,22 @@ test("the chat shows the composer, and a drop on it attaches files", async () =>
   assert.match(textOf(byId(el, "file-0")), /shot\.png/);
 });
 
+test("the + file dialog (osascript) shows on macOS only; drop still attaches on Linux", async () => {
+  fake.exec = (cmd, args) => args[0] === "feed"
+    ? jl(header("feed"), { type: "log", agent: "claude", path: "/l.jsonl", start: 0, size: 1, cursor: "c" }, { type: "splice", at: 0, count: 1 }, { type: "row", id: "u1", k: "user", text: "hi" }, end)
+    : jl(header(args[0]), end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  assert.ok(byId(v.render(cx), "attach"));
+  const was = fake.window.platform;
+  fake.window.platform = "linux";
+  try {
+    let el = v.render(cx);
+    assert.ok(!byId(el, "attach"));
+    el._h.on_drop({ paths: ["/tmp/shot.png"] }, cx);
+    assert.match(textOf(byId(v.render(cx), "file-0")), /shot\.png/);
+  } finally { fake.window.platform = was; }
+});
+
 test("⌘V with an image and no text on the clipboard attaches the sidecar's PNG; a text paste does not ask", async () => {
   const asked = [];
   fake.exec = (cmd, args) => {

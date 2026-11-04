@@ -32,16 +32,24 @@ A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat
 
 ### Install
 
-Download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper. (It is also listed in the [Herdr layout gallery](https://herdr.dev/layouts/minchenlee/flockbook--herdr-app/).) Unzip it, then:
+On macOS or Linux, in one line:
 
 ```sh
-./install.sh --dry-run --helper bin/flockbook-modfeed   # see what it does
-./install.sh --helper bin/flockbook-modfeed
+curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh
 ```
 
-`install.sh` never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. [herdr-app/README.md](herdr-app/README.md) has the details, and [herdr-app/RECIPE.md](herdr-app/RECIPE.md) describes every part of the mod.
+It downloads the helper for your machine from the latest release, checks it against the release's `SHA256SUMS`, and runs `flockbook-modfeed install`. Add `-s -- --dry-run` after `sh` to see the plan first.
 
-**Status: preview.** Built and tried on macOS. Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi and Antigravity CLI (agy).
+To look first: download `Flockbook-herdr-mod-<version>.zip` from the [latest release](https://github.com/minchenlee/flockbook/releases/latest). It has the layout, the mod and the helper for every platform. (It is also listed in the [Herdr layout gallery](https://herdr.dev/layouts/minchenlee/flockbook--herdr-app/).) Unzip it, then:
+
+```sh
+./install.sh --dry-run   # see what it does; nothing is written
+./install.sh
+```
+
+The install never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. [herdr-app/README.md](herdr-app/README.md) has the details, and [herdr-app/RECIPE.md](herdr-app/RECIPE.md) describes every part of the mod.
+
+**Status: preview.** Built and tried on macOS; the helper also runs on Linux (x86_64 and arm64), where the + file dialog is off (drop files or paste an image instead). Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi and Antigravity CLI (agy).
 
 ## Flockbook for Mac
 

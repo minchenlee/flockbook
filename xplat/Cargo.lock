@@ -994,8 +994,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "herdr-core",
+ "indexmap",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "unicode-segmentation",
 ]
@@ -1719,6 +1721,8 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

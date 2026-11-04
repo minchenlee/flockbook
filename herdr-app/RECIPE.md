@@ -53,7 +53,7 @@ Left to right:
      - "Loading earlier messages" in a small capsule under the bar while older rows load.
    - **Reply box** under the chat, at most 800 px wide: a row of 22 px round tags (model, effort,
      context, cost, folder, branch, agent; a warning tag is orange), then a 16 px rounded `raised`
-     box with a one-line text area ("Reply to the agent"), + to attach files on the left, the
+     box with a one-line text area ("Reply to the agent"), + to attach files on the left (macOS only), the
      branch, and a round 28 px send button (accent when there is text). File chips above the text.
    - **Card** between the chat and the reply box, at most 800 px, 14 px corners, `raised`, 14 px
      padding, an orange 8 px dot before the title.
@@ -88,7 +88,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   A click on a tool chip opens its calls (name, summary, a check, a spinner, or "failed").
   Another agent's chat fades in.
 - **Reply**: Enter sends (the text area's submit). Drop files on the chat or click + (the
-  macOS file dialog) to attach them; ⌘V with an image on the clipboard attaches it as a PNG.
+  macOS file dialog; on Linux and Windows there is no +, since a mod has no file picker) to attach them; ⌘V with an image on the clipboard attaches it as a PNG.
   If the text did not go out, it stays in the box with a red note. "Sent. The agent did not
   confirm it yet." when the core did not answer in time.
 - **Approval card**: 1 allows once, 2 denies (with the card focused). After an answer the buttons
@@ -139,18 +139,19 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Programs**:
   - `flockbook-modfeed`, a helper program at `<herdr-app home>/flockbook/bin/flockbook-modfeed`
     (make it executable). The gallery copies only `layouts/` and `mods/`, so get the helper on its
-    own: the signed universal build is `bin/flockbook-modfeed` in `Flockbook-herdr-mod-<version>.zip`
-    at <https://github.com/minchenlee/flockbook/releases>; or build it from that repo with
-    `swift build -c release --product flockbook-modfeed` (macOS, Swift 6) and copy
-    `.build/release/flockbook-modfeed`. The zip's `install.sh --helper bin/flockbook-modfeed` puts
-    it there. It reads each agent's session log
+    own: the release's one-line install
+    (`curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh`)
+    or the zip's `./install.sh` puts it there. The zip `Flockbook-herdr-mod-<version>.zip` at
+    <https://github.com/minchenlee/flockbook/releases> has it for macOS (`bin/`, signed universal) and
+    Linux (`remote/<target>/`); or build it from that repo with
+    `(cd xplat && cargo build --release -p flockbook-modfeed)`. It reads each agent's session log
     (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`,
     `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to herdr-core (`hc`) to read
     screens and send keys and text. Commands: `feed`, `status`, `card`, `approve`, `answer`,
     `send`, `paste-image`, one per `exec`, JSON Lines back (`herdr-app/docs/protocol.md` in that
     repo). It keeps `<herdr-app home>/flockbook/cache.json`, `answered/` beside it, and pastes in
     `<herdr-app home>/flockbook/paste/`.
-  - `osascript`, for the file dialog.
+  - `osascript`, for the file dialog (macOS only; the + button shows only when `window().platform` is `macos`).
   - It reads `<herdr-app home>/layouts/.state/flockbook.json` once, for whether the sidebar was open.
 - **Themes** `themes/flockbook.json`, `flockbook-light.json`, `flockbook-mac.json`,
   `flockbook-mac-light.json`.

@@ -2,7 +2,7 @@
 // box to reply in. Enter sends through the sidecar's `send`; "+" or a drop attaches files.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
-import { theme, panes, home, exec } from "herdr";
+import { theme, panes, home, exec, window } from "herdr";
 import { agentName, icon, SPIN_MS } from "./state.js";
 import * as sidecar from "./sidecar.js";
 
@@ -35,7 +35,11 @@ export function tagsFor(agent, status) {
   return out.filter((t) => t.text && !seen.has(t.text) && seen.add(t.text));
 }
 
-// The macOS file dialog, through osascript (a mod has no file picker of its own). exec stops after 30 s.
+// The "+" button opens the macOS file dialog through osascript (a mod has no file picker of its own), so it
+// shows on macOS only. Elsewhere, drop files on the chat or paste an image.
+export const canPick = () => (window()?.platform ?? "macos") === "macos";
+
+// The macOS file dialog, through osascript. exec stops after 30 s.
 export async function chooseFiles() {
   const script = ['set l to choose file with prompt "Attach files" with multiple selections allowed',
     'set o to ""', "repeat with f in l", "set o to o & POSIX path of f & linefeed", "end repeat", "return o"];
@@ -186,9 +190,9 @@ export class Composer {
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))
         .child(Textarea.new(b.input).w_full())
         .child(h_flex().gap(8).items_center()
-          .child(div().id("attach").size(28).flex_none().flex().items_center().justify_center().rounded(14).text_color(t.muted)
+          .when(canPick(), (el) => el.child(div().id("attach").size(28).flex_none().flex().items_center().justify_center().rounded(14).text_color(t.muted)
             .hover((s) => s.bg(t.hover).text_color(t.foreground))
-            .on_click((_e, cx) => cx.spawn((cx) => this.pick(cx))).child(svg(icon("plus")).size(15)))
+            .on_click((_e, cx) => cx.spawn((cx) => this.pick(cx))).child(svg(icon("plus")).size(15))))
           .child(div().flex_1())
           .when(Boolean(branch), (el) => el.child(h_flex().gap(4).items_center().text_size(12).text_color(t.muted)
             .child(svg(icon("branch")).size(12)).child(div().max_w(200).truncate().child(branch.text))))
