@@ -140,9 +140,17 @@ class Run:
                                    stdout=subprocess.PIPE, text=True)
         assert self.hc.stdout.readline().strip() == "ready"
 
-    def write_state(self, terms, screens, after_keys=None, pickers=None, delay_keys=None):
+    def write_state(self, terms, screens, after_keys=None, pickers=None, delay_keys=None, machines=None):
         json.dump({"terminals": terms, "screens": screens, "after_keys": after_keys or {}, "pickers": pickers or {},
-                   "delay_keys": delay_keys or {}}, open(self.state, "w"))
+                   "delay_keys": delay_keys or {}, "machines": machines or {}}, open(self.state, "w"))
+
+    def machine_box(self):
+        """Machine `box`: a home with this binary installed as its helper (only the Rust side runs it there)."""
+        home = os.path.join(self.work, "box-home")
+        helper = os.path.join(home, ".local", "share", "flockbook", "helper", "0.1.0", "flockbook-modfeed")
+        os.makedirs(os.path.dirname(helper), exist_ok=True)
+        shutil.copy(self.binary, helper)
+        return {"box": home}
 
     def set_status(self, addr, status, kind):
         terms = [dict(t) for t in self.terms]
@@ -285,8 +293,10 @@ def scenario(r):
     open(pic, "wb").write(b"\x89PNG fake")
     r.write_state(r.terms, {})
     yield step("send t1 --file (local)", "send", "--terminal", "t1", "--text", "look at '%s'" % pic, "--file", pic, *C)
+    # Swift puts the file and sends to box/t40 from here; Rust runs `send` in the helper on box (DIFFER), where the
+    # terminal is t40 on that machine's core (the same fake).
     remote = terminal("box/t40", ["claude"], 7000, "idle")
-    r.write_state(r.terms + [remote], {})
+    r.write_state(r.terms + [remote, terminal("t40", ["claude"], 7001, "idle")], {}, machines=r.machine_box())
     yield step("send box/t40 --file (remote)", "send", "--terminal", "box/t40", "--text", "look at '%s'" % pic, "--file", pic, *C)
     # An agent with no identity (no pid): nothing is sent.
     terms = [dict(t) for t in r.terms]
@@ -330,26 +340,36 @@ EXPECT = {
     "send t1 another log": ("changed", []),
     "send t1": ("sent", [("terminal.send", "t1", "hello — ✓")]),
     "send t1 --file (local)": ("sent", [("terminal.send", "t1", "look at '{work}/shot one.png'")]),
-    "send box/t40 --file (remote)": ("sent", [("terminal.put", "box/t40", "shot one.png"),
-                                              ("terminal.send", "box/t40", "look at '/remote/tmp/shot one.png'")]),
     "approve t4 (no identity)": ("no-identity", []),
     "send t4 (no identity)": ("no-identity", []),
 }
+# Steps where the two sidecars differ on purpose (not compared), with fixed results for each side.
+DIFFER = {
+    "version": "Rust has the `helper` command (helpers on other machines)",
+    "send box/t40 --file (remote)": "Rust runs the command in the helper on box (Swift: from here)",
+}
+EXPECT_SIDE = {
+    "a": {"send box/t40 --file (remote)": ("sent", [("terminal.put", "box/t40", "shot one.png"),
+                                                    ("terminal.send", "box/t40", "look at '/remote/tmp/shot one.png'")])},
+    "b": {"send box/t40 --file (remote)": ("sent", [("terminal.put", "box/t40", "shot one.png"),
+                                                    ("terminal.send", "t40", "look at '/remote/tmp/shot one.png'")])},
+}
 
 
-def expectation_misses(steps, work):
+def expectation_misses(steps, work, side):
     """The steps whose result or keys are not the fixed expected ones, and the expected steps that did not run."""
     misses, seen = [], set()
+    expect = dict(EXPECT, **EXPECT_SIDE[side])
     for name, out, sent in steps:
-        if name not in EXPECT:
+        if name not in expect:
             continue
         seen.add(name)
-        result, want = EXPECT[name]
+        result, want = expect[name]
         want = [(m, t, v.replace("{work}", work) if isinstance(v, str) else v) for m, t, v in want]
         got = find(out, "done").get("result")
         if (result is not None and got != result) or brief(sent) != want:
             misses.append("%s: want %s %s, got %s %s" % (name, result, want, got, brief(sent)))
-    misses += ["%s: did not run" % n for n in EXPECT if n not in seen]
+    misses += ["%s: did not run" % n for n in expect if n not in seen]
     return misses
 
 
@@ -374,17 +394,20 @@ def main():
         problems.append("the two runs made different steps: A %d, B %d; first difference at %s" % (
             len(names_a), len(names_b), next((i for i, (x, y) in enumerate(zip(names_a, names_b)) if x != y), min(len(names_a), len(names_b)))))
     for side in ("a", "b"):
-        problems += ["%s: %s" % (side.upper(), m) for m in expectation_misses(results[side], work)]
+        problems += ["%s: %s" % (side.upper(), m) for m in expectation_misses(results[side], work, side)]
     same, diffs, lines = 0, [], 0
+    expectations = 2 * len(EXPECT) + sum(len(e) for e in EXPECT_SIDE.values())
     for (name, oa, sa), (_, ob, sb) in zip(results["a"], results["b"]):
         lines += len(oa["lines"])
+        if name in DIFFER:
+            continue
         if oa["lines"] == ob["lines"] and oa["exit"] == ob["exit"] and sa == sb:
             same += 1
         else:
             diffs.append({"step": name, "a": oa["raw"], "b": ob["raw"], "a_sent": sa, "b_sent": sb})
-    total = len(results["a"])
-    print("modfeed parity: %d/%d commands identical (%d output lines from A), %d differ; %d fixed expectations, %d missed" % (
-        same, total, lines, len(diffs), 2 * len(EXPECT), len(problems)))
+    total = len(results["a"]) - len(DIFFER)
+    print("modfeed parity: %d/%d commands identical (%d output lines from A), %d differ; %d differ on purpose; "
+          "%d fixed expectations, %d missed" % (same, total, lines, len(diffs), len(DIFFER), expectations, len(problems)))
     for p in problems:
         print("!!! " + p)
     for d in diffs:
@@ -395,7 +418,8 @@ def main():
             print("A sent: %s\nB sent: %s" % (json.dumps(d["a_sent"]), json.dumps(d["b_sent"])))
     if args.report:
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
-        json.dump({"identical": same, "total": total, "diffs": diffs, "expectations": 2 * len(EXPECT), "problems": problems},
+        json.dump({"identical": same, "total": total, "diffs": diffs, "on_purpose": DIFFER, "expectations": expectations,
+                   "problems": problems},
                   open(args.report, "w"), indent=1, ensure_ascii=False)
     shutil.rmtree(work, ignore_errors=True)
     sys.exit(0 if not diffs and not problems and total > 0 else 1)

@@ -182,6 +182,6 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
             }
         }
-        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, paste-image, helper"),
+        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send"),
     }
 }
