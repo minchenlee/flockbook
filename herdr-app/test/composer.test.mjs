@@ -220,6 +220,54 @@ test("Shift+Enter leaves the new line to the box and sends nothing; Enter sends"
   assert.equal(sent[0][sent[0].indexOf("--text") + 1], "first line\nsecond line");
 });
 
+// Enter in the box puts a new line at the cursor (over a selection) before it reports the submit. In the
+// middle of the text that line went out, and came back on a failed send. `type` is what the box does: set the
+// value, then report the change (or not: the order is the box's).
+function enterRig() {
+  const cx = fakeCx(); const c = new Composer(cx);
+  const b = c.box(fake.agents[0]);
+  const type = (v, report = true) => { b.input.set_value(v); if (report) b.input._h.change({}, cx); };
+  const text = () => sent[sent.length - 1][sent[sent.length - 1].indexOf("--text") + 1];
+  return { cx, b, type, text };
+}
+
+test("Enter in the middle of the text sends it without the new line Enter put there", async () => {
+  for (const reported of [true, false]) {
+    const { cx, b, type, text } = enterRig();
+    type("ab"); type("abcd");
+    type("ab\ncd", reported);
+    b.input._h.submit({}, cx); await cx.settle();
+    assert.equal(text(), "abcd", `change reported: ${reported}`);
+  }
+});
+
+test("Enter over a selection sends the text as it was", async () => {
+  const { cx, b, type, text } = enterRig();
+  type("abXcd"); type("ab\ncd");
+  b.input._h.submit({}, cx); await cx.settle();
+  assert.equal(text(), "abXcd");
+});
+
+test("a failed send puts the text back without Enter's new line", async () => {
+  fake.sendResult = "failed"; fake.sendMessage = "Not sent.";
+  const { cx, b, type } = enterRig();
+  type("abcd"); type("ab\ncd");
+  b.input._h.submit({}, cx); await cx.settle();
+  assert.equal(b.input.value(), "abcd");
+});
+
+test("Shift+Enter's new lines stay; Enter at the end adds none", async () => {
+  const { cx, b, type, text } = enterRig();
+  type("ab"); type("ab\n"); b.input._h.submit({ shift: true }, cx);
+  type("ab\ncd"); type("ab\ncd\n");
+  b.input._h.submit({}, cx); await cx.settle();
+  assert.equal(text(), "ab\ncd");
+  // A typed new line in the middle, then Enter at the end.
+  type("x"); type("x\n\ny"); type("x\n\ny\n", false);
+  b.input._h.submit({}, cx); await cx.settle();
+  assert.equal(text(), "x\n\ny");
+});
+
 test("send names the agent and the log the chat showed, so the sidecar can refuse another one", async () => {
   const cx = fakeCx(); const c = new Composer(cx);
   c.seen = (address) => address === "t1" ? { agent: "claude", path: "/logs/a.jsonl" } : null;

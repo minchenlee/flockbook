@@ -13,6 +13,7 @@ One short line: what this release is about.
 ### 🐛 Bug Fixes
 
 - Herdr app mod: ⌘V in the reply box attaches copied files and images. A file copied in Finder is attached instead of its name typed; a screenshot or a browser's Copy Image (also TIFF only) is attached as a PNG. Text still pastes as text, also from Excel, Numbers or Word.
+- Herdr app mod: Enter in the middle of the reply sends it without a line break at the cursor. Before, that line break went out, and came back with the text after a failed send.
 - Herdr app mod: Shift+Enter in the reply box starts a new line at the cursor. Before, it sent the reply. Enter still sends.
 - Herdr app mod: a chat reply in Chinese or Japanese, or with inline code, no longer loses its last line under the time row. Row heights now use the size the text is drawn at (16 px, 26 px lines) and keep whole words and code together.
 

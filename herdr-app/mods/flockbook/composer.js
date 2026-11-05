@@ -90,6 +90,18 @@ export function pastedFiles(lines) {
   return image ? [image] : [];
 }
 
+// Enter in the box puts a new line at the cursor (over a selection) before it reports the submit, so in the
+// middle of the text that line went out. `before` is the text just before the key: when `now` is `before` with
+// one span turned into "\n", the text to send is `before`. Anything else is sent as it is.
+export function withoutEnter(now, before) {
+  if (typeof before !== "string" || now === before) return now;
+  let i = 0;
+  while (i < now.length && i < before.length && now[i] === before[i]) i++;
+  let j = 0;
+  while (j < now.length - i && j < before.length - i && now[now.length - 1 - j] === before[before.length - 1 - j]) j++;
+  return now.slice(i, now.length - j) === "\n" ? before : now;
+}
+
 export class Composer {
   // One input box, made here: herdr-app does not let a view make input state while it draws.
   // Each agent's unsent text and files are kept in `drafts` and swapped in when the agent changes.
@@ -106,7 +118,14 @@ export class Composer {
       cx.spawn((cx) => this.submit(cx));
     });
     this.empty = true;
-    this.input.on("change", (_e, cx) => { const e = !this.input.value().trim(); if (e !== this.empty) { this.empty = e; cx.notify(); } });
+    // The last two texts the box reported, so a submit knows the text before Enter's new line (the box
+    // reports that line's change before or after the submit).
+    this.typed = ["", ""];
+    this.input.on("change", (_e, cx) => {
+      const v = this.input.value();
+      if (v !== this.typed[1]) this.typed = [this.typed[1], v];
+      const e = !v.trim(); if (e !== this.empty) { this.empty = e; cx.notify(); }
+    });
     this.drafts = new Map();   // address → { text, files } of agents not shown
     this.address = null;
     // address → { agent, path } the chat showed last (set by the chat); send is bound to it.
@@ -119,6 +138,9 @@ export class Composer {
     this.statusBusy = false;
   }
 
+  // Sets the box's text from here (no change report counts on it).
+  setText(v) { this.input.set_value(v); this.typed = [v, v]; }
+
   // Shows `agent`'s draft in the box. Safe while drawing: it only sets values.
   box(agent) {
     const a = agent?.address ?? null;
@@ -126,7 +148,7 @@ export class Composer {
       if (this.address) this.drafts.set(this.address, { text: this.input.value(), files: this.files });
       const d = (a && this.drafts.get(a)) || { text: "", files: [] };
       this.drafts.delete(a);
-      this.input.set_value(d.text); this.files = d.files; this.empty = !d.text.trim();
+      this.setText(d.text); this.files = d.files; this.empty = !d.text.trim();
       this.address = a; this.note = null; this.statusAt = 0;
     }
     return a ? this : null;
@@ -161,7 +183,7 @@ export class Composer {
     if (this.address !== a) return;
     const files = r.error ? [] : pastedFiles(r.lines);
     if (files.length) return this.addFiles(files, cx);
-    if (text) { this.input.replace(text); this.empty = !this.input.value().trim(); }
+    if (text) { this.input.replace(text); const v = this.input.value(); this.typed = [v, v]; this.empty = !v.trim(); }
     else if (r.error) this.note = { text: r.error.message, bad: true };
     cx.notify();
   }
@@ -176,11 +198,12 @@ export class Composer {
   async submit(cx) {
     const a = this.address, b = this;
     if (this.sending || !a) return;
-    const text = b.input.value().replace(/\s+$/, "");
-    if (!text.trim() && !b.files.length) { b.input.set_value(""); return; }
+    const now = b.input.value();
+    const text = withoutEnter(now, now === this.typed[1] ? this.typed[0] : this.typed[1]).replace(/\s+$/, "");
+    if (!text.trim() && !b.files.length) { b.setText(""); return; }
     const files = b.files;
     this.sending = true; this.note = null;
-    b.input.set_value(""); b.files = [];
+    b.setText(""); b.files = [];
     cx.notify();
     try {
       const r = await sidecar.send(a, withFiles(text, files), files, this.seen?.(a) ?? null);
@@ -189,7 +212,7 @@ export class Composer {
       // Only "sent" and "unconfirmed" (it may still arrive) mean the text went out; any other result did not send.
       if (r.error || !done || (done.result !== "sent" && done.result !== "unconfirmed")) {
         // Put the text back, unless the box moved to another agent or something new was typed.
-        if (this.address === a && !b.input.value()) { b.input.set_value(text); b.files = files; }
+        if (this.address === a && !b.input.value()) { b.setText(text); b.files = files; }
         else if (this.address !== a) this.drafts.set(a, { text, files });
         this.note = { text: moved ? sidecar.AGENT_CHANGED : (r.error?.message ?? done?.message) || "The message was not sent.", bad: true };
       } else if (done.result === "unconfirmed") {
