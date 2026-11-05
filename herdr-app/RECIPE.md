@@ -42,7 +42,8 @@ Left to right:
    - **Chat**: a reading column at most 760 px wide, 24 px gutters, centered.
      - User message: a right-aligned bubble, at most 78% of the column, 16 px corners, `raised`.
        "1 image" or "N images" under it when it had pictures.
-     - Agent reply: full-width markdown, 14 px text. Code fences are 12 px rounded boxes (`raised`,
+     - Agent reply: full-width markdown, 16 px text, 26 px lines (the `TextView` default; a mod
+       cannot change it). Code fences are 12 px rounded boxes (`raised`,
        1 px border, Menlo 13 px, 19 px lines). Tables are 12 px rounded frames: a `raised` header
        row, 1 px lines between rows, columns sized to their content.
      - Tool calls: a row of 28 px round chips ("Ran 3 commands", an icon per kind: terminal, doc,
@@ -175,8 +176,9 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   state, and select the screen outright.
 - Each screen draws its own top bar, so each copy runs the bar's work. Two copies can get one key
   command: the first acts, and the others skip it within 150 ms (`flockbook.command`).
-- The chat is a `v_virtual_list` with guessed heights (14 px text, 22 px lines, wide letters
-  counted as 14 px, the rest 0.58 × 14), because `list` cannot be scrolled from code and the chat
+- The chat is a `v_virtual_list` with guessed heights (16 px text, 26 px lines, the `TextView`
+  default that a mod cannot change; wide letters counted as 16 px, the rest 0.5 × 16, one
+  letter of width kept free), because `list` cannot be scrolled from code and the chat
   must open at the end. A guess too low cuts a row; guesses lean high.
 - `TextView.markdown` takes no style and draws code and tables square. Split the text into blocks
   and draw fences and tables yourself. A `TextView` in a flexible cell keeps its one-line width
