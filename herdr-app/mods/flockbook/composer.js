@@ -68,10 +68,26 @@ export function withFiles(text, files) {
   return text ? `${text} ${paths}` : paths;
 }
 
-// ⌘V (no other modifier).
-export function pasteKey(e) {
-  const m = e?.modifiers ?? {};
-  return e?.key === "v" && Boolean(m.platform || m.cmd) && !m.shift && !m.alt && !m.control;
+// ⌘V in the box (Ctrl+V on Linux). The box's own paste runs before any key handler and types the clipboard's
+// text, so a file copied in Finder came in as its name. The mod binds the chord under its own key context
+// instead (the keymap is the app's; the context keeps it to this box) and asks the sidecar first.
+export const PASTE_ACTION = "flockbook_paste";
+export const PASTE_CONTEXT = "FlockbookComposer";
+let pasteBound = false;
+function bindPaste(cx) {
+  if (pasteBound || typeof cx?.bind_keys !== "function") return;
+  try {
+    cx.bind_keys([{ keystroke: "secondary-v", action: PASTE_ACTION, context: `${PASTE_CONTEXT} > Input` }]);
+    pasteBound = true;
+  } catch { /* the box's own paste stays, and paste_other still attaches an image */ }
+}
+
+// What `paste-image` found to attach: copied files, else the saved image. Empty: paste the text.
+export function pastedFiles(lines) {
+  const files = lines.find((l) => l.type === "files")?.paths;
+  if (Array.isArray(files) && files.some(Boolean)) return files.filter((p) => typeof p === "string" && p);
+  const image = lines.find((l) => l.type === "image")?.path;
+  return image ? [image] : [];
 }
 
 export class Composer {
@@ -80,6 +96,9 @@ export class Composer {
   constructor(_cx) {
     this.input = TextareaState.new({ placeholder: "Reply to the agent", rows: 1 });
     this.input.set_auto_grow?.(1, 8);
+    bindPaste(_cx);
+    // A paste that found no text, when the binding above is missing: the clipboard's image, if any.
+    this.input.on("paste_other", (_e, cx) => cx.spawn((cx) => this.paste(cx, undefined)));
     // Enter sends. On Shift+Enter the box puts the new line in itself (at the cursor, over a selection);
     // the submit with shift only reports it, so do nothing here. Adding "\n" here gives two new lines.
     this.input.on("submit", (e, cx) => {
@@ -132,13 +151,17 @@ export class Composer {
     this.files = this.files.concat(add); this.note = null; cx.notify();
   }
 
-  // ⌘V with no text on the clipboard: the sidecar saves the clipboard's image as a PNG, attached
-  // like a picked file. Text pastes stay the box's own.
-  async pasteImage(cx) {
+  // ⌘V: copied files (Finder) or an image (a screenshot, a browser image) are attached like picked files,
+  // even when the clipboard also holds text. Only text-only is typed, at the cursor. `text` is the clipboard's
+  // text when the key was pressed. A broken sidecar still lets text paste.
+  async paste(cx, text) {
+    const a = this.address;
     const r = await sidecar.pasteImage();
-    const path = r.error ? null : r.lines.find((l) => l.type === "image")?.path;
-    if (r.error) this.note = { text: r.error.message, bad: true };
-    if (path) this.addFiles([path], cx);
+    if (this.address !== a) return;
+    const files = r.error ? [] : pastedFiles(r.lines);
+    if (files.length) return this.addFiles(files, cx);
+    if (text) { this.input.replace(text); this.empty = !this.input.value().trim(); }
+    else if (r.error) this.note = { text: r.error.message, bad: true };
     cx.notify();
   }
 
@@ -190,7 +213,8 @@ export class Composer {
       .child(div().id(`file-x-${i}`).size(16).flex().items_center().justify_center().rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => { this.files = this.files.filter((f) => f !== p); cx.notify(); }).child("×"));
     return v_flex().id("composer").w_full().px(16).pb(14).pt(6).gap(6).items_center()
-      .on_key_down((e, cx) => { if (pasteKey(e) && cx.read_from_clipboard?.() === undefined) cx.spawn((cx) => this.pasteImage(cx)); })
+      .key_context(PASTE_CONTEXT)
+      .on_action(PASTE_ACTION, (_e, cx) => { const text = cx.read_from_clipboard?.(); cx.spawn((cx) => this.paste(cx, text)); })
       .when(setting("status_row") !== "hide", (el) => el.child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag))))
       .child(v_flex().id("box").w_full().max_w(800).rounded(16).bg(t.raised).border(1).border_color(t.border).shadow_sm().px(12).pt(10).pb(8).gap(6)
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))

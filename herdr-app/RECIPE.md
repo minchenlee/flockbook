@@ -102,7 +102,8 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   A click on a tool chip opens its calls (name, summary, a check, a spinner, or "failed").
   Another agent's chat fades in.
 - **Reply**: Enter sends (the text area's submit). Drop files on the chat or click + (the
-  macOS file dialog; on Linux and Windows there is no +, since a mod has no file picker) to attach them; ⌘V with an image on the clipboard attaches it as a PNG.
+  macOS file dialog; on Linux and Windows there is no +, since a mod has no file picker) to attach them. ⌘V (Ctrl+V on Linux) attaches what was copied: files copied in Finder or a file
+  manager, else an image (a screenshot, a browser image) as a PNG. Only a clipboard with text alone types the text.
   If the text did not go out, it stays in the box with a red note. "Sent. The agent did not
   confirm it yet." when the core did not answer in time.
 - **Approval card**: 1 allows once, 2 denies (with the card focused). After an answer the buttons
@@ -212,6 +213,10 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   `<herdr-app home>/flockbook/config.json`. Off, it asks nothing. A helper built from source has no
   release version and never asks. Nothing else goes on the network.
 - Do not add a `mod:flockbook` section to `keys.json`: with one, no key worked.
+- ⌘V in the reply box: the text box's own paste runs before any `on_key_down`, so a key handler never
+  sees it, and a Finder copy (file names as text) came in as names. The mod binds `secondary-v` with
+  `cx.bind_keys` under its own key context (`FlockbookComposer > Input`), asks `paste-image` first,
+  and types the text itself only when nothing was attached.
 - `layout()` is the file, not the live tree. Keep the shown screen and the sidebar state in shared
   state, and select the screen outright.
 - A mouse move carries no button state and arrives only over the element under the pointer, so
@@ -246,6 +251,8 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - A reply with a code fence and a table shows a rounded code box and a rounded table whose text
   stays inside its cells.
 - Typing in the reply box and pressing Enter puts the text into the agent's terminal.
+- ⌘V in the reply box after copying a file in Finder attaches the file (no name typed); after a
+  screenshot to the clipboard it attaches a PNG; after copying text it types the text at the cursor.
 - A Claude permission prompt shows the approval card with the same command; 1 allows it once, and
   the buttons turn off until the prompt leaves.
 - A question picker shows the question card; picking and Send answer answers it in the terminal.

@@ -125,23 +125,84 @@ test("the + file dialog (osascript) shows on macOS only; drop still attaches on 
   } finally { fake.window.platform = was; }
 });
 
-test("⌘V with an image and no text on the clipboard attaches the sidecar's PNG; a text paste does not ask", async () => {
+// ⌘V in the box: the box's own paste runs before any key handler, so the mod binds the chord under its own
+// key context and asks the sidecar first. Files and images become attachments; only text is pasted as text.
+const PASTE_DIR = "/home/test/.config/herdr-app/flockbook/paste";
+function pasteRig(answer) {
   const asked = [];
   fake.exec = (cmd, args) => {
-    if (args[0] === "paste-image") { asked.push(args); return jl(header("paste-image"), { type: "image", path: "/home/test/.config/herdr-app/flockbook/paste/paste-1.png" }, end); }
+    if (args[0] === "paste-image") { asked.push(args); return answer ? jl(header("paste-image"), ...answer, end) : { code: 1, stdout: "", stderr: "boom" }; }
     return jl(header(args[0]), end);
   };
-  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
-  const key = { key: "v", modifiers: { platform: true } };
-  cx.read_from_clipboard = () => "some text";
-  byId(v.render(cx), "composer")._h.on_key_down(key, cx); await cx.settle();
-  assert.equal(asked.length, 0);
-  cx.read_from_clipboard = () => undefined;
-  byId(v.render(cx), "composer")._h.on_key_down({ key: "v", modifiers: { platform: true, shift: true } }, cx); await cx.settle();
-  assert.equal(asked.length, 0, "⇧⌘V is not a paste");
-  byId(v.render(cx), "composer")._h.on_key_down(key, cx); await cx.settle();
-  assert.deepEqual(asked[0].slice(0, 3), ["paste-image", "--dir", "/home/test/.config/herdr-app/flockbook/paste"]);
-  assert.match(textOf(byId(v.render(cx), "file-0")), /paste-1\.png/);
+  const cx = fakeCx(); const v = new ChatView(cx);
+  const typed = [];
+  v.composer.input.replace = (x) => typed.push(x);
+  const press = async (clip) => {
+    cx.read_from_clipboard = () => clip;
+    const el = byId(v.render(cx), "composer");
+    el._h.on_action(null, cx); await cx.settle();
+    // An element stub answers every property, `then` too, so it goes back wrapped (or `await` never ends).
+    return { el: byId(v.render(cx), "composer") };
+  };
+  return { asked, cx, v, typed, press };
+}
+const chips = (el) => [0, 1, 2].map((i) => byId(el, `file-${i}`)).filter(Boolean).map((c) => textOf(c).replace(/\s*×$/, ""));
+
+test("paste: the mod binds ⌘V (Ctrl+V on Linux) for its own box only, once", async () => {
+  const cx = fakeCx(); const bound = [];
+  cx.bind_keys = (b) => { bound.push(...b); return b.length; };
+  const v = new ChatView(cx); await cx.settle(); new ChatView(cx);
+  assert.deepEqual(bound, [{ keystroke: "secondary-v", action: "flockbook_paste", context: "FlockbookComposer > Input" }]);
+  const el = byId(v.render(cx), "composer");
+  assert.equal(el._a.key_context, "FlockbookComposer");
+  assert.equal(typeof el._h.on_action, "function");
+});
+
+test("paste: a screenshot (image, no text) is attached, nothing typed", async () => {
+  const r = pasteRig([{ type: "image", path: `${PASTE_DIR}/paste-1.png` }]);
+  const { el } = await r.press(undefined);
+  assert.deepEqual(r.asked[0].slice(0, 3), ["paste-image", "--dir", PASTE_DIR]);
+  assert.deepEqual(chips(el), ["paste-1.png"]);
+  assert.deepEqual(r.typed, []);
+});
+
+test("paste: Finder files are attached, not their names typed", async () => {
+  const r = pasteRig([{ type: "files", paths: ["/home/you/Shot 1.png", "/home/you/notes.txt"] }, { type: "image", path: null }]);
+  const { el } = await r.press("Shot 1.png\rnotes.txt");
+  assert.deepEqual(chips(el), ["Shot 1.png", "notes.txt"]);
+  assert.deepEqual(r.typed, []);
+});
+
+test("paste: a browser image (image and text) is attached; the text is not typed", async () => {
+  const r = pasteRig([{ type: "image", path: `${PASTE_DIR}/paste-2.png` }]);
+  const { el } = await r.press("<img src=x>");
+  assert.equal(chips(el).length, 1);
+  assert.deepEqual(r.typed, []);
+});
+
+test("paste: text only is typed at the cursor; a missing sidecar still pastes text", async () => {
+  const r = pasteRig([{ type: "image", path: null }]);
+  let { el } = await r.press("hello");
+  assert.deepEqual(r.typed, ["hello"]);
+  assert.equal(chips(el).length, 0);
+  const broken = pasteRig(null);
+  ({ el } = await broken.press("still text"));
+  assert.deepEqual(broken.typed, ["still text"]);
+  assert.ok(!byId(el, "send-note"), "no error for a text paste");
+});
+
+test("paste: nothing to paste and a broken sidecar says why", async () => {
+  const r = pasteRig(null);
+  const { el } = await r.press(undefined);
+  assert.match(textOf(byId(el, "send-note")), /sidecar/);
+  assert.deepEqual(r.typed, []);
+});
+
+test("paste: when the box's own paste finds no text (no binding), the image is still attached", async () => {
+  const r = pasteRig([{ type: "image", path: `${PASTE_DIR}/paste-3.png` }]);
+  r.v.render(r.cx);
+  r.v.composer.input._h.paste_other({}, r.cx); await r.cx.settle();
+  assert.equal(chips(byId(r.v.render(r.cx), "composer")).length, 1);
 });
 
 test("Shift+Enter leaves the new line to the box and sends nothing; Enter sends", async () => {
