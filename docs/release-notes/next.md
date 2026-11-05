@@ -26,3 +26,5 @@ One short line: what this release is about.
 - Herdr app mod: text in a code block can be selected and copied with ⌘C, also across lines, like the rest of a reply. Right-click a code block for Copy code, which copies the whole block.
 
 ### ⚙️ Changes
+
+- Herdr app mod: Flockbook settings are laid out as Herdr's own Settings: General, Phone page and Updates in a sidebar on the left, each setting with its line on the left and its switch on the right.

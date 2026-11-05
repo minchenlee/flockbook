@@ -86,18 +86,24 @@ Left to right:
      (`openOverlay` `kind: "dialog"`, 760 px × 0.8 of the window, Herdr's frame: rounded corners,
      shadow, the window dimmed behind it). Esc, a click beside it, or its close button (28 px, top
      right) closes it; opening it again replaces it. The sidebar's Flockbook row, ⌘⇧, and the tab
-     menu's "choose Ask in Flockbook settings first…" open it. "Flockbook" (18 px), "Saved in <file>.
-     Changes apply at once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
+     menu's "choose Ask in Flockbook settings first…" open it. Laid out as Herdr's Settings: a 196 px
+     sidebar on the left (a `border` line on its right) with "Flockbook" (18 px semibold), one 34 px row a
+     section with its icon (the chosen one `selected`), and "Saved in <file>. Changes apply at once." (11 px
+     `dim`) at the bottom; on the right the close button and the section, which scrolls by itself: UPPERCASE
+     11.5 px `muted` headings, then one row per setting (the name in 13.5 px, a line on what it does in
      12 px muted, and on the right a two-choice switch: 26 px choices in a `chrome` frame, the chosen
-     one `selected` and semibold): **Check for updates** On | Off, **Status row** Show | Hide,
-     **Helper on other machines** Ask | Never, **Phone page** Off | On. A box with a `blocked` border when config.json is not
-     JSON. The update line with the command written out (Menlo 11.5 px) when one is out.
+     one `selected` and semibold), a `border` line under each row. **General**: CHAT, **Status row**
+     Show | Hide; OTHER MACHINES, **Helper on other machines** Ask | Never. **Phone page**: PHONE PAGE,
+     **Phone page** Off | On. **Updates**: UPDATES, **Check for updates** On | Off, and the update line with
+     the command written out (Menlo 11.5 px) when one is out. It opens on General. A box with a `blocked`
+     border above any section when config.json is not JSON.
      Under Phone page: a status dot and line (Running in `done`, a problem in `blocked`). While on
      and Serve not set, right under it: "One step left: run this once in a terminal.", the one
      `tailscale serve` command with Copy (`--https=8443` when 443 is another service's, with a
      `muted` line that says so), and the status is asked every 3 s until Serve is set. Without
-     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** field (empty:
-     the login found, which the line under it names), **Read-only** Off | On, and once Serve is set
+     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** row (its line names
+     the login in use; on the right a 260 × 30 px field in a `background` frame with a `border` line, 12 px
+     text, placeholder "Default: this machine's Tailscale login"; empty: the login found), **Read-only** Off | On, and once Serve is set
      the address with Copy and a 140 px QR code on a white 8 px box. Linux adds a line on
      `loginctl enable-linger`.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
@@ -167,7 +173,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   ⌘⇧[ / ⌘⇧] or ⌃Tab / ⌃⇧Tab the tab before or after, ⌘⌥↑ / ⌘⌥↓ the space before or after,
   ⌘⌃⇧← / ⌘⌃⇧→ move the tab, ⌘⇧I Needs you, ⌘⇧\ Overview, ⌘B sidebar, ⌃` terminal,
   ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘⇧, Flockbook settings, ⌘/ help. In the Flockbook settings,
-  Tab moves through the choices and Enter or Space picks one.
+  Tab moves through the sections, then the choices, and Enter or Space picks one.
 
 ## Built from
 
