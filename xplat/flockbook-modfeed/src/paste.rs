@@ -1,6 +1,7 @@
 //! Swift: `Paste.swift`. `paste-image`: what ⌘V in the reply box attaches instead of typing text (herdr-app's mod
-//! API reads only clipboard text). Copied files win (Finder puts their names as text too), then an image as a PNG
-//! file (a screenshot, a browser image; TIFF and other image types become PNG on macOS). Text alone is nothing here.
+//! API reads only clipboard text). Copied files win (Finder puts their names as text too). Then plain text is the
+//! box's own paste, also with an image beside it (Excel, Numbers and Word put a picture of the cells). Then an image,
+//! as a PNG file: a screenshot, a browser's Copy Image (image and HTML); TIFF and other types become PNG on macOS.
 
 use chrono::{DateTime, Local};
 use std::path::Path;
@@ -19,7 +20,7 @@ pub enum Clip {
     Files(Vec<String>),
     /// An image, as PNG data.
     Image(Vec<u8>),
-    /// Text only, or empty: the box's own paste.
+    /// Plain text (with or without an image), or empty: the box's own paste.
     Nothing,
 }
 
@@ -46,8 +47,9 @@ pub fn clipboard() -> Clip {
     Clip::Nothing
 }
 
-/// JXA: files (`NSURL`, file URLs only) first, then an image: the PNG as it is, or any image AppKit reads (TIFF,
-/// JPEG, HEIC, PDF...) drawn into PNG. Prints {"files":[...]}, {"png":"<base64>"} or {}.
+/// JXA: files (`NSURL`, file URLs only) first; plain text next (nothing to attach); then an image: the PNG as it is,
+/// or any image AppKit reads (TIFF, JPEG, HEIC, PDF...) drawn into PNG. Prints {"files":[...]}, {"png":"<base64>"}
+/// or {}.
 #[cfg(target_os = "macos")]
 const MAC_SCRIPT: &str = r#"ObjC.import("AppKit");
 function run(argv) {
@@ -56,6 +58,7 @@ function run(argv) {
   const files = [];
   if (urls && !urls.isNil()) for (let i = 0; i < urls.count; i++) files.push(urls.objectAtIndex(i).path.js);
   if (files.length) return JSON.stringify({ files });
+  if (pb.availableTypeFromArray($(["public.utf8-plain-text", "public.plain-text"])).js) return "{}";
   let png = pb.dataForType("public.png");
   if (png.isNil()) {
     if (!$.NSImage.canInitWithPasteboard(pb)) return "{}";
@@ -88,7 +91,8 @@ pub fn mac_clip(pasteboard: Option<&str>) -> Clip {
 }
 
 /// Linux: `read(None)` lists the clipboard's types, one per line; `read(Some(type))` gives that type's data.
-/// Files: `text/uri-list`, or GNOME's `x-special/gnome-copied-files`. Image: `image/png`.
+/// Files: `text/uri-list`, or GNOME's `x-special/gnome-copied-files`. Then plain text (`text/plain...`,
+/// `UTF8_STRING`, `STRING`, `TEXT`): nothing. Then the image: `image/png`.
 pub fn linux_clip(read: impl Fn(Option<&str>) -> Option<Vec<u8>>) -> Clip {
     let types = read(None).map(|b| String::from_utf8_lossy(&b).lines().map(|l| l.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
     let has = |t: &str| types.iter().any(|x| x == t);
@@ -99,6 +103,9 @@ pub fn linux_clip(read: impl Fn(Option<&str>) -> Option<Vec<u8>>) -> Clip {
                 return Clip::Files(files);
             }
         }
+    }
+    if types.iter().any(|t| t.starts_with("text/plain") || matches!(t.as_str(), "UTF8_STRING" | "STRING" | "TEXT")) {
+        return Clip::Nothing;
     }
     match has("image/png").then(|| read(Some("image/png"))).flatten() {
         Some(png) if png.starts_with(PNG_MAGIC) => Clip::Image(png),

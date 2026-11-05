@@ -186,9 +186,10 @@ asked), `no-home`, or `error` (no answer yet, for example offline). Only `newer`
 ```
 
 What ⌘V in the reply box attaches. `files`: files copied in Finder or a file manager (file URLs), in order;
-an `image` line with `path: null` follows it. Otherwise `image`: the clipboard's image saved as a new PNG in
-the folder (PNG as it is; on macOS TIFF and other image types are turned into PNG), or `path: null` when the
-clipboard holds only text or nothing. Pastes older than a day in that folder are removed; other files never.
+an `image` line with `path: null` follows it. Otherwise `image`: `path: null` when the clipboard holds plain text
+(also beside an image, as Excel, Numbers and Word put it) or nothing, so the box types the text; else the
+clipboard's image saved as a new PNG in the folder (PNG as it is; on macOS TIFF and other image types are turned
+into PNG). Pastes older than a day in that folder are removed; other files never.
 
 ### `log` (`feed`)
 

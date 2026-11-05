@@ -1,5 +1,5 @@
-//! paste-image: what a ⌘V in the reply box attaches. Copied files win, then an image (PNG, or any image type
-//! turned into PNG); text alone is the box's own paste. macOS tests use a private named pasteboard, never the
+//! paste-image: what a ⌘V in the reply box attaches. Copied files win; then plain text is the box's own paste
+//! (Excel, Numbers and Word also put a picture of the cells); then an image (PNG, or any image type turned into PNG). macOS tests use a private named pasteboard, never the
 //! clipboard of the person running them. Linux tests give the reader the clipboard's types and data.
 
 use modfeedkit::paste::{self, Clip};
@@ -39,12 +39,16 @@ fn linux_files_win_over_image_and_text() {
 }
 
 #[test]
-fn linux_image_wins_over_text() {
+fn linux_text_wins_over_image() {
     // A screenshot tool: PNG only.
     assert_eq!(linux(&[("image/png", PNG)]), Clip::Image(PNG.to_vec()));
-    // A browser image: PNG, HTML and text.
-    let c = linux(&[("text/html", b"<img src=x>"), ("UTF8_STRING", b"x"), ("image/png", PNG)]);
+    // A browser's Copy Image: PNG and HTML, no plain text.
+    let c = linux(&[("text/html", b"<img src=x>"), ("image/png", PNG)]);
     assert_eq!(c, Clip::Image(PNG.to_vec()));
+    // An image with plain text (a spreadsheet's cells): the text.
+    assert_eq!(linux(&[("image/png", PNG), ("UTF8_STRING", b"1\t2")]), Clip::Nothing);
+    assert_eq!(linux(&[("image/png", PNG), ("text/plain;charset=utf-8", b"1\t2")]), Clip::Nothing);
+    assert_eq!(linux(&[("text/plain", b"x"), ("image/png", PNG)]), Clip::Nothing);
     // Text only, and data that is not PNG: nothing to attach.
     assert_eq!(linux(&[("UTF8_STRING", b"hello"), ("text/plain", b"hello")]), Clip::Nothing);
     assert_eq!(linux(&[("image/png", b"not a png")]), Clip::Nothing);
@@ -128,16 +132,29 @@ function run(argv) {{
     }
 
     #[test]
-    fn browser_image_wins_over_its_text() {
-        // A browser's "Copy Image": TIFF, HTML and the address as text.
+    fn browser_image_with_html_only() {
+        // A browser's "Copy Image": TIFF and HTML, no plain text.
         let b = Board::new(
             "browser",
-            r#"pb.declareTypesOwner($(["public.html", "public.utf8-plain-text", "public.tiff"]), null);
+            r#"pb.declareTypesOwner($(["public.html", "public.tiff"]), null);
   pb.setStringForType("<img src=\"https://example.com/a.png\">", "public.html");
-  pb.setStringForType("https://example.com/a.png", "public.utf8-plain-text");
   pb.setDataForType(tiff, "public.tiff");"#,
         );
         assert!(png_of(b.clip()).starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
+
+    #[test]
+    fn image_with_plain_text_is_text() {
+        // Excel, Numbers, Word: the cells as text, and a picture of them.
+        let b = Board::new(
+            "cells",
+            r#"pb.declareTypesOwner($(["public.utf8-plain-text", "public.html", "public.png", "public.tiff"]), null);
+  pb.setStringForType("1\t2", "public.utf8-plain-text");
+  pb.setStringForType("<table></table>", "public.html");
+  pb.setDataForType(png, "public.png");
+  pb.setDataForType(tiff, "public.tiff");"#,
+        );
+        assert_eq!(b.clip(), Clip::Nothing);
     }
 
     #[test]

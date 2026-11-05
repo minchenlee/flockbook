@@ -151,9 +151,10 @@ export class Composer {
     this.files = this.files.concat(add); this.note = null; cx.notify();
   }
 
-  // ⌘V: copied files (Finder) or an image (a screenshot, a browser image) are attached like picked files,
-  // even when the clipboard also holds text. Only text-only is typed, at the cursor. `text` is the clipboard's
-  // text when the key was pressed. A broken sidecar still lets text paste.
+  // ⌘V: copied files (Finder) are attached like picked files; plain text is typed at the cursor, also with a
+  // picture beside it (spreadsheet cells); an image alone (a screenshot, a browser's Copy Image) is attached.
+  // The sidecar decides (paste-image). `text` is the clipboard's text when the key was pressed. A broken
+  // sidecar still lets text paste.
   async paste(cx, text) {
     const a = this.address;
     const r = await sidecar.pasteImage();

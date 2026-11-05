@@ -126,7 +126,7 @@ test("the + file dialog (osascript) shows on macOS only; drop still attaches on 
 });
 
 // ⌘V in the box: the box's own paste runs before any key handler, so the mod binds the chord under its own
-// key context and asks the sidecar first. Files and images become attachments; only text is pasted as text.
+// key context and asks the sidecar first: files, else plain text (the box types it), else an image.
 const PASTE_DIR = "/home/test/.config/herdr-app/flockbook/paste";
 function pasteRig(answer) {
   const asked = [];
@@ -173,14 +173,14 @@ test("paste: Finder files are attached, not their names typed", async () => {
   assert.deepEqual(r.typed, []);
 });
 
-test("paste: a browser image (image and text) is attached; the text is not typed", async () => {
+test("paste: a browser's Copy Image (image and HTML, no plain text) is attached", async () => {
   const r = pasteRig([{ type: "image", path: `${PASTE_DIR}/paste-2.png` }]);
-  const { el } = await r.press("<img src=x>");
+  const { el } = await r.press(undefined);
   assert.equal(chips(el).length, 1);
   assert.deepEqual(r.typed, []);
 });
 
-test("paste: text only is typed at the cursor; a missing sidecar still pastes text", async () => {
+test("paste: plain text (alone, or with a picture of spreadsheet cells) is typed at the cursor; a missing sidecar still pastes text", async () => {
   const r = pasteRig([{ type: "image", path: null }]);
   let { el } = await r.press("hello");
   assert.deepEqual(r.typed, ["hello"]);
