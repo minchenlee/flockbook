@@ -90,7 +90,8 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
 - Images waiting for a send are known in memory only: after `serve` restarts, add them again.
 - Pull back takes what is queued in the pane now. If the pane runs another Claude Code session than the page shows,
   that session's text is pulled (the Mac hub does the same; the protocol says only the pane).
-- With two pages open, both get a pulled text that no page took yet, so it can land in two composers.
+- A pulled text goes to one page at a time. When that page closes before it has the text in its composer, another
+  page gets it at its next connect after 30 seconds, not sooner.
 - A long pull (a queued text of many lines) keeps the request open for a while: about half a second per line.
 - Notifications: the helper does not know one phone from another (no pairing). The bell shows on when it keeps any
   subscription, so a phone it removed (gone at the push service) can still show the bell on while another phone has

@@ -40,7 +40,8 @@ const PICTURE_WINDOW_S: u64 = 600;
 const REMOTE_QUEUE_S: u64 = 5;
 
 /// A text pulled back from an agent's queue that no composer has confirmed yet (`pulledAck`). Kept in this process
-/// (POST and the socket are separate sessions), for every page of this owner: the next hello sends it again.
+/// (POST and the socket are separate sessions), for every page of this owner: a later hello sends it again, to one page
+/// at a time (`hand_out`).
 #[derive(Clone, Debug, PartialEq)]
 struct Pulled {
     id: String,
@@ -48,6 +49,23 @@ struct Pulled {
     text: String,
     note: Option<String>,
     interrupted: bool,
+    /// When a page last got it (the pull's reply, or a hello). None: no page yet.
+    handed: Option<std::time::Instant>,
+}
+
+/// A text a page got is not sent to another page for this long: the page that has it acks it first. Without an ack
+/// (the page closed, the reply was lost), the next hello after this gets it, so it is never lost.
+const HANDED: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The kept texts for a page that says hello now: the ones no page got in the last `HANDED`. They count as handed.
+fn hand_out(all: &mut [Pulled], now: std::time::Instant) -> Vec<Value> {
+    all.iter_mut()
+        .filter(|p| p.handed.is_none_or(|t| now.duration_since(t) >= HANDED))
+        .map(|p| {
+            p.handed = Some(now);
+            pulled_line(p)
+        })
+        .collect()
 }
 
 static PULLED: std::sync::Mutex<Vec<Pulled>> = std::sync::Mutex::new(Vec::new());
@@ -78,7 +96,7 @@ fn keep_pulled(pane: &str, text: &str) -> Option<String> {
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let id = format!("p{t:x}-{}", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-    all.push(Pulled { id: id.clone(), pane: pane.into(), text: text.into(), note: Some(UNFINISHED.into()), interrupted: false });
+    all.push(Pulled { id: id.clone(), pane: pane.into(), text: text.into(), note: Some(UNFINISHED.into()), interrupted: false, handed: None });
     Some(id)
 }
 
@@ -464,7 +482,7 @@ impl Session {
             }
             // Pulled texts no composer confirmed yet (the connection dropped before), with their warning.
             let mut out = vec![w, json!({"type": "snapshot", "workspaces": snap})];
-            out.extend(pulled_store().iter().map(pulled_line));
+            out.extend(hand_out(&mut pulled_store(), std::time::Instant::now()));
             out.push(ok(&id));
             return out;
         }
@@ -865,12 +883,12 @@ fn pull_queued(re: &str, pane: &str, terminal: &str, cache: Option<&std::path::P
     };
     if let Some(id) = &kept {
         if let Some(p) = pulled_store().iter_mut().find(|p| &p.id == id) {
-            (p.note, p.interrupted) = (note.clone(), interrupted);
+            (p.note, p.interrupted, p.handed) = (note.clone(), interrupted, Some(std::time::Instant::now()));
         }
     }
     match r {
         Outcome::Pulled(text) | Outcome::Interrupted(text) | Outcome::Partial(text, _) => {
-            let mut l = pulled_line(&Pulled { id: String::new(), pane: pane.into(), text, note, interrupted });
+            let mut l = pulled_line(&Pulled { id: String::new(), pane: pane.into(), text, note, interrupted, handed: None });
             match kept {
                 Some(id) => l["id"] = json!(id),
                 None => _ = l.as_object_mut().map(|o| o.remove("id")),
@@ -1052,6 +1070,19 @@ mod tests {
         assert_eq!(s.receive(&json!({"v": 1, "id": "p4", "type": "pushUnsubscribe", "endpoint": fcm}).to_string()), vec![ok("p4")]);
         assert_eq!(welcome(&mut s)["pushOn"], false);
         *super::super::push::center() = None;
+    }
+
+
+    #[test]
+    fn a_kept_text_goes_to_one_page_at_a_time() {
+        let t0 = std::time::Instant::now();
+        let p = |id: &str, at: Option<std::time::Instant>| Pulled { id: id.into(), pane: "hc:t1".into(), text: "x".into(), note: None, interrupted: false, handed: at };
+        // a: just handed to the page that pulled it; b: never handed (the pull is still running or its reply was lost).
+        let mut all = vec![p("a", Some(t0)), p("b", None)];
+        let ids = |v: Vec<Value>| v.iter().map(|l| l["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(hand_out(&mut all, t0 + std::time::Duration::from_secs(1))), ["b"]);
+        assert!(hand_out(&mut all, t0 + std::time::Duration::from_secs(2)).is_empty(), "a second page now gets neither");
+        assert_eq!(ids(hand_out(&mut all, t0 + HANDED + std::time::Duration::from_secs(2))), ["a", "b"], "no ack: again later");
     }
 
 }

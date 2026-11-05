@@ -539,12 +539,12 @@ fn the_agents_queue_and_pull_back() {
     let id = r[0]["id"].as_str().unwrap().to_string();
     assert_eq!(fake.keys(), vec![vec!["up".to_string()], vec!["ctrl+u".to_string()]]);
 
-    // A page that did not confirm it gets it again at hello; after pulledAck, no more.
+    // Another page that says hello now does not get it too: the page that pulled it has it (it would come again
+    // after 30 s without an ack: hub's unit test). After pulledAck, no page gets it.
     let mut ws2 = socket(srv.port);
     say(&mut ws2, json!({"v": 1, "id": "h2", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
     let got = read_until(&mut ws2, |v| v["type"] == "reply" && v["re"] == "h2");
-    let again = got.iter().find(|m| m["type"] == "pulled").unwrap();
-    assert_eq!((again["id"].as_str(), again["text"].as_str()), (Some(id.as_str()), Some("QC reply GAMMA")));
+    assert!(!got.iter().any(|m| m["type"] == "pulled"), "one page at a time: {got:?}");
     say(&mut ws2, json!({"v": 1, "id": "a", "type": "pulledAck", "pulled": id}));
     read_until(&mut ws2, |v| v["type"] == "reply" && v["re"] == "a");
     let mut ws3 = socket(srv.port);
