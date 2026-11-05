@@ -6,7 +6,7 @@ import { theme, layout, window, settings, openOverlay, run, setAgentOrder, nextC
 import { openMenu, tabItems } from "./menu.js";
 import { spaceAgents, spaceTabs, activeTab, currentAgent, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
   SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
-import { loadConfig, pollUpdate } from "./config.js";
+import { loadConfig, pollUpdate, updateDot } from "./config.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -132,7 +132,9 @@ export function topBar(t, over = false) {
   // round backing when drawn over content, like the capsules.
   return watchEdge(h_flex().id("top-root").w_full().h(BAR_H).min_w(0)).pl(left).pr(left + (side ? 0 : 36)).gap(8).items_center()
     .when(!over, (el) => el.bg(t.background))
+    // A newer Flockbook while the sidebar is hidden: a small dot on its button, until it opens or Not now.
     .when(!side, (el) => el.child(button("sidebar", svg(icon("sidebar")).size(16), () => toggleSidebar(), 28, "Sidebar (⌘B)")
+      .relative().when(updateDot(), (b) => b.child(div().id("update-dot").absolute().top(4).right(4).size(7).rounded(4).bg(t.accent)))
       .when(over, (b) => b.bg(t.chrome).border(1).border_color(t.border))))
     .child(h_flex().flex_1().min_w(0).justify_center().gap(10).child(strip).child(tools));
 }

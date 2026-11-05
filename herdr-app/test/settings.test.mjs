@@ -10,7 +10,9 @@ import { SettingsView } from "../mods/flockbook/settings.js";
 import { SideView } from "../mods/flockbook/side.js";
 import { Composer } from "../mods/flockbook/composer.js";
 import { ChatView } from "../mods/flockbook/chat.js";
-import { command } from "../mods/flockbook/top.js";
+import { command, TopView } from "../mods/flockbook/top.js";
+import { toggleSidebar, peekAtEdge } from "../mods/flockbook/state.js";
+import { SETTINGS } from "../mods/flockbook/settings.js";
 import { tabItems } from "../mods/flockbook/menu.js";
 import * as sidecar from "../mods/flockbook/sidecar.js";
 
@@ -240,4 +242,43 @@ test("helper on other machines, Never: the tab menu has no Remove helper", async
   assert.ok(tabItems(tab, { agent: fake.agents[0], list: [tab] }).some((i) => i?.act === "remove-helper"));
   await setSetting("remote_helper", "never");
   assert.ok(!tabItems(tab, { agent: fake.agents[0], list: [tab] }).some((i) => i?.act === "remove-helper"));
+});
+
+test("sidebar hidden: a small dot on the top bar's sidebar button, until the sidebar opens or Not now", async () => {
+  const dot = () => byId(byId(new TopView(fakeCx()).render(fakeCx()), "sidebar"), "update-dot");
+  await loadConfig();
+  fake.shared["flockbook.sidebar"] = false;
+  assert.equal(dot(), null, "nothing out yet");
+  await pollUpdate();
+  assert.ok(dot(), "a newer release, sidebar hidden");
+  toggleSidebar(); toggleSidebar();   // opened, then hidden again: seen
+  assert.equal(dot(), null);
+  // A newer one again: the dot is back; the floating sidebar counts as opening it too.
+  fake.shared["flockbook.update"] = update("newer", "0.10.0");
+  assert.ok(dot());
+  peekAtEdge({ position: { x: 1, y: 300 } });
+  assert.equal(dot(), null);
+  // Not now hides it as well.
+  fake.shared["flockbook.update"] = update("newer", "0.11.0");
+  fake.shared["flockbook.sidebar.peek"] = null;
+  assert.ok(dot());
+  const el = new SideView(fakeCx()).render(fakeCx());
+  byId(el, "update-dismiss")._h.on_click({}, fakeCx());
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(dot(), null);
+});
+
+test("the words: Status row names cost; Never says how to remove a helper", () => {
+  const about = Object.fromEntries(SETTINGS.map((s) => [s.key, s.about]));
+  assert.match(about.status_row, /model, context, cost, folder and branch/);
+  assert.match(about.remote_helper, /To remove a helper that is already there, choose Ask first\./);
+});
+
+test("a release that comes out while the sidebar is open gets no dot when it is hidden later", async () => {
+  await loadConfig();
+  fake.shared["flockbook.sidebar"] = true;
+  await pollUpdate();
+  new SideView(fakeCx()).render(fakeCx());
+  fake.shared["flockbook.sidebar"] = false;
+  assert.equal(byId(byId(new TopView(fakeCx()).render(fakeCx()), "sidebar"), "update-dot"), null);
 });

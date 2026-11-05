@@ -9,6 +9,7 @@ import * as sidecar from "./sidecar.js";
 export const KEY_CONFIG = "flockbook.config";    // { file, bad, text }: the parsed file, and the text it was read from
 export const KEY_UPDATE = "flockbook.update";    // the helper's last `update` line
 const KEY_UPDATE_AT = "flockbook.update.at";     // when the mod last asked (ms)
+const KEY_UPDATE_SEEN = "flockbook.update.seen"; // the version whose line was seen in the open sidebar
 export const DEFAULTS = { check_updates: true, status_row: "show", remote_helper: "ask" };
 export const CHOICES = { check_updates: [true, false], status_row: ["show", "hide"], remote_helper: ["ask", "never"] };
 export const configPath = () => `${appHome()}/flockbook/config.json`;
@@ -78,6 +79,11 @@ export function updateShown() {
   const u = shared(KEY_UPDATE);
   return u?.state === "newer" && u.latest && setting("check_updates") ? u : null;
 }
+
+// The dot on the top bar's sidebar button: a line to show that the sidebar has not shown yet.
+export const updateDot = () => { const u = updateShown(); return Boolean(u) && shared(KEY_UPDATE_SEEN) !== u.latest; };
+// The sidebar opened (docked or floating): its line is seen, so the dot goes.
+export function updateSeen() { const u = updateShown(); if (u && shared(KEY_UPDATE_SEEN) !== u.latest) setShared(KEY_UPDATE_SEEN, u.latest); }
 
 // Not now: hidden at once; the helper keeps it hidden for that version until a newer one.
 export async function dismissUpdate() {

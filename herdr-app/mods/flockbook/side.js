@@ -4,9 +4,10 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, run, openOverlay, closeOverlay, props } from "herdr";
 import { openMenu, spaceItems } from "./menu.js";
-import { needing, showNeeds, showOverview, showSettings, shownScreen, icon, showSpace, toggleSidebar, peekClosed, PEEK_W, PEEK_GAP, SPRING } from "./state.js";
+import { needing, showNeeds, showOverview, showSettings, shownScreen, icon, showSpace, toggleSidebar, sidebarShown, peekClosed, PEEK_W, PEEK_GAP, SPRING } from "./state.js";
 import { statusMark, lightsRoom, BAR_H } from "./top.js";
 import { updateLine } from "./settings.js";
+import { updateSeen } from "./config.js";
 
 // Status marks for a space's tabs: all of them up to 5, else the first 3 and "+N".
 export function tabMarks(tabs) {
@@ -53,6 +54,8 @@ export class SideView {
       .when(Boolean(extra), (el) => el.child(extra));
 
     const update = updateLine(t, this);
+    // Drawn in the open sidebar (docked or floating): seen, so the top bar's dot goes (once per version).
+    if (update && (this.floating || sidebarShown())) updateSeen();
     const waiting = needing().length;
     const badge = waiting ? div().px(6).h(18).rounded(9).flex().items_center().text_size(11).font_semibold()
       .bg(t.blocked).text_color(t.background).child(String(waiting)) : null;

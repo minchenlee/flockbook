@@ -32,6 +32,8 @@ Left to right:
    - At the bottom: the update line when a newer Flockbook is out (a `raised` 8 px box: "Flockbook
      X.Y.Z is out", then **Copy install command** and **Not now**), a **Flockbook** row (the
      Flockbook screen), and **Settings**.
+   While the sidebar is hidden and a newer Flockbook is out, the top bar's sidebar button has a 7 px
+   `accent` dot, until the sidebar opens (docked or floating) or **Not now**.
 2. **Work area**: a stack of five screens. The bar floats over the first four.
    - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
      round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
@@ -116,11 +118,12 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
     helper asks GitHub at most once a day. A newer release shows the update line; **Copy install
     command** puts the one-line install on the clipboard; **Not now** hides it until a newer one.
     Nothing shows when it is current, offline, or on any error. Off: nothing is asked.
-  - **Status row** Hide: no tags above the reply box (the branch beside the send button stays).
+  - **Status row** Hide: no tags (model, context, cost, folder, branch) above the reply box (the branch beside the send button stays).
   - **Helper on other machines** Never: for a tab on another machine the chat says, in one line,
     "Flockbook does not run its helper on other machines. To change it: Flockbook settings, Helper
     on other machines: Ask." No install card, no Remove helper in the tab menu, and the helper
-    itself refuses every command for a terminal there and `helper install` / `remove` (`remote-off`).
+    itself refuses every command for a terminal there and `helper install` / `remove` (`remote-off`). To remove a helper that is
+    already there, choose Ask first.
 - **Sidebar**: ⌘B or the sidebar button shows and hides it. With it hidden, the pointer at the
   window's left 4 px slides it out as a floating panel (260 px wide, 8 px from the edges, 14 px
   corners, a large shadow), which closes when the pointer leaves it, on Esc or a click beside it.
