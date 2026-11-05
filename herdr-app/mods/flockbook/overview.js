@@ -31,7 +31,8 @@ export function allTabs() {
 const STATUS_GROUPS = [
   ["Needs you", (st) => st === "blocked"],
   ["Working", (st) => st === "working"],
-  ["Done and resting", (st) => st !== "blocked" && st !== "working"],
+  ["Done", (st) => st === "done"],
+  ["Resting", (st) => st !== "blocked" && st !== "working" && st !== "done"],
 ];
 
 // The sections to show: [{ title, items }], empty ones left out.
