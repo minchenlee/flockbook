@@ -13,6 +13,7 @@ One short line: what this release is about.
 - Phone page on the Rust helper: spaces and tabs as the Herdr app shows them, also tabs on other machines. Before, every terminal was in one tab. Reading, approving and sending on another machine go through the helper there.
 - Phone page on the Rust helper: messages you typed while the agent works show at the end of the conversation, and Claude Code's can be pulled back to edit, as on the Mac hub.
 - Phone page on the Rust helper: images you add in the composer go out with your message. PNG, JPEG and WebP up to 10 MB, without their metadata (a photo's location is removed); HEIC is refused with a plain message.
+- Phone page on the Rust helper: notifications when an agent needs you or is done, with the page closed too. They hold no conversation text and are encrypted for your phone.
 - Phone page on the Rust helper: pictures in the conversation show, on this machine's terminals. PNG, JPEG and WebP up to 10 MB are sent as they are in the log.
 
 ### 🔒 Security

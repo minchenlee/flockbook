@@ -52,6 +52,18 @@ Images you add in the composer (+) go to the helper with POST, part by part, the
 paths, as on the Mac. The helper keeps them in `<herdr-app home>/flockbook/uploads` (folder mode 700, files mode 600)
 under names it makes, and removes only its own files: after 7 days, or the oldest past 200 files or 512 MB.
 
+Notifications (the bell on the page) come from the helper itself, with the page open or closed: when an agent needs
+you (a prompt to approve or answer), and when it is done after working. A message holds only the agent's title, its
+name, the space and the tab, never conversation text. It is encrypted for your phone (Web Push, RFC 8291 and 8292), so
+the push service sees only its size and time. The helper sends to the push services of Chrome and Android (FCM),
+Safari and iOS (Apple), Firefox (Mozilla) and Edge (Windows) only, over HTTPS, and follows no redirect. A phone the
+push service says is gone (404, 410) is removed. Like the Mac hub, one agent sends one kind at most every 2 minutes,
+and at most 6 go out a minute; "needs you" always goes, and the rest are told of in one "N more agent updates".
+The key and the phones' subscriptions are in `<herdr-app home>/flockbook/serve` (`vapid.key`, `subscriptions.json`,
+mode 600, folder mode 700). When either file is there but cannot be read, the helper does not replace it: it says
+`notifications off` in its log and the bell stays hidden. Delete the file to start again (every phone then turns
+notifications on again).
+
 A connection whose peer stops reading is closed after 5 s without progress on a message.
 
 ## Limits
@@ -80,8 +92,11 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
   that session's text is pulled (the Mac hub does the same; the protocol says only the pane).
 - With two pages open, both get a pulled text that no page took yet, so it can land in two composers.
 - A long pull (a queued text of many lines) keeps the request open for a while: about half a second per line.
-- Not in this version: notifications.
-  The helper answers those requests with "Not offered by this helper."
+- Notifications: the helper does not know one phone from another (no pairing). The bell shows on when it keeps any
+  subscription, so a phone it removed (gone at the push service) can still show the bell on while another phone has
+  one. Turn it off and on again on that phone. The Mac hub knows each device.
+- Notifications are checked every 3 seconds: a prompt answered within that time may not be notified.
+- Notifications are sent with `curl`. Without `curl` on the PATH none go out.
 
 ## Start it
 

@@ -9,6 +9,7 @@ pub mod gate;
 pub mod hub;
 pub mod layout;
 pub mod net;
+pub mod push;
 pub mod strip;
 pub mod upload;
 
@@ -172,6 +173,14 @@ pub fn main(args: &[String]) -> i32 {
     };
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(o.port);
     eprintln!("serve: listening on http://127.0.0.1:{port} for {} (Tailscale Serve only; Funnel is refused)", o.user);
+    // Notifications from serve's own loop, page open or not (`push`). Off, with the reason, when the files are not right.
+    if let Some(h) = o.home.clone() {
+        let read = h.clone();
+        match push::start(std::path::Path::new(&h), std::time::Duration::from_secs(3), Box::new(push::curl_post), move || hub::workspaces(Some(&read))) {
+            Ok(()) => eprintln!("serve: notifications ready"),
+            Err(e) => eprintln!("serve: notifications off: {e}"),
+        }
+    }
     let settings = net::Settings {
         user: o.user.clone(),
         origin: o.origin.clone(),

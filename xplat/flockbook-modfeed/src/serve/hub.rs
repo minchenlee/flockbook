@@ -390,6 +390,21 @@ pub struct Session {
     workspaces: Vec<Workspace>,
 }
 
+/// herdr-core's workspaces now: spaces and tabs as the Mac app shows them, other machines' too (`layout`). Empty
+/// when it does not answer. `home`: the herdr-app home whose settings say whether other machines are read.
+pub fn workspaces(home: Option<&str>) -> Vec<herdr_core::Workspace> {
+    let session = HcSession::resolve_env();
+    if !session.is_available() {
+        return vec![];
+    }
+    let never = crate::config::load(crate::config::dir(home).as_deref()).remote_never;
+    super::layout::snapshot(&HcClient::new(session, 8, 22), never).unwrap_or_default()
+}
+
+fn now_s() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
 impl Session {
     pub fn new(cfg: Config) -> Session {
         Session { cfg, welcomed: false, watched: vec![], feeds: HashMap::new(), last_snapshot: None, workspaces: vec![] }
@@ -418,12 +433,7 @@ impl Session {
 
     /// herdr-core's workspaces now; empty when it does not answer.
     fn load(&mut self) -> Value {
-        let session = HcSession::resolve_env();
-        // Spaces and tabs as the Mac app shows them, other machines' too (`layout`).
-        self.workspaces = if session.is_available() { {
-            let never = crate::config::load(crate::config::dir(self.cfg.home.as_deref()).as_deref()).remote_never;
-            super::layout::snapshot(&HcClient::new(session, 8, 22), never).unwrap_or_default()
-        } } else { vec![] };
+        self.workspaces = workspaces(self.cfg.home.as_deref());
         snapshot(&self.workspaces)
     }
 
@@ -446,6 +456,11 @@ impl Session {
             let mut w = json!({"type": "welcome", "hub": self.cfg.hub, "hubVersion": crate::protocol::SIDECAR_VERSION, "level": self.level()});
             if let Some(s) = session {
                 w["session"] = json!(s);
+            }
+            // One owner, no device ids: on when the helper keeps any subscription (the page also checks the key).
+            if let Some(c) = super::push::center().as_ref() {
+                w["pushKey"] = json!(c.public_key());
+                w["pushOn"] = json!(!c.store.all.is_empty());
             }
             // Pulled texts no composer confirmed yet (the connection dropped before), with their warning.
             let mut out = vec![w, json!({"type": "snapshot", "workspaces": snap})];
@@ -497,7 +512,25 @@ impl Session {
                 };
                 self.picture(&id, pane, item, index as usize, m["full"] == true)
             }
-            "pushUnsubscribe" => vec![ok(&id)],
+            // Any level, --read-only too: a notification carries no conversation text.
+            "pushSubscribe" => {
+                let str_of = |k: &str| m[k].as_str().unwrap_or("").to_string();
+                let sub = super::push::Sub { endpoint: str_of("endpoint"), p256dh: str_of("p256dh"), auth: str_of("auth"), added: now_s() };
+                if !sub.valid() {
+                    return vec![fail(&id, "badRequest", "Not a push service this hub sends to.")];
+                }
+                if super::push::center().as_mut().is_some_and(|c| c.store.add(sub)) {
+                    vec![ok(&id)]
+                } else {
+                    vec![fail(&id, "failed", "Notifications are off on this hub.")]
+                }
+            }
+            "pushUnsubscribe" => {
+                if let (Some(c), Some(e)) = (super::push::center().as_mut(), m["endpoint"].as_str()) {
+                    c.store.remove(e);
+                }
+                vec![ok(&id)]
+            }
             _ => vec![fail(&id, "failed", "Not offered by this helper.")],
         }
     }
@@ -990,4 +1023,35 @@ mod tests {
         assert_eq!(ro.post(r#"{"v":1,"id":"c3","type":"send","pane":"hc:t1","text":"x"}"#)[0]["error"]["code"], "readOnly");
         assert_eq!(ro.post(r#"{"v":1,"id":"c4","type":"watch","pane":"hc:t1"}"#)[0]["error"]["code"], "badRequest");
     }
+
+    #[test]
+    fn phones_subscribe_for_notifications() {
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        std::env::set_var("HC_SOCKET", "/nonexistent/flockbook-test/hc.sock");
+        std::env::remove_var("HERDR_DESK_HC_SOCKET");
+        let dir = tempfile::tempdir().unwrap();
+        let ua = p256::SecretKey::random(&mut rand_core::OsRng);
+        let p256dh = super::super::push::b64url(ua.public_key().to_encoded_point(false).as_bytes());
+        let auth = super::super::push::b64url(&[7; 16]);
+        let fcm = "https://fcm.googleapis.com/fcm/send/x";
+        let sub = |id: &str, e: &str| json!({"v": 1, "id": id, "type": "pushSubscribe", "endpoint": e, "p256dh": p256dh, "auth": auth}).to_string();
+        let welcome = |s: &mut Session| s.receive(r#"{"v":1,"id":"h","type":"hello"}"#)[0].clone();
+        let mut s = Session::new(Config { cache: None, read_only: true, hub: "test".into(), home: None });
+        assert_eq!(s.receive(&sub("p0", fcm))[0]["error"]["code"], "unauthorized");
+        welcome(&mut s);
+        assert_eq!(s.receive(&sub("p1", fcm))[0]["error"]["code"], "failed", "push off: nothing kept");
+        let key = p256::ecdsa::SigningKey::random(&mut rand_core::OsRng);
+        let store = super::super::push::Store::open(dir.path()).unwrap();
+        *super::super::push::center() = Some(super::super::push::Center::new(key, store, Box::new(|_, _, _| 201)));
+        let w = welcome(&mut s);
+        assert_eq!(w["pushOn"], false);
+        assert_eq!(w["pushKey"].as_str().map(|k| super::super::push::unb64url(k).unwrap().len()), Some(65));
+        assert_eq!(s.receive(&sub("p2", "https://evil.example/x"))[0]["error"]["code"], "badRequest");
+        assert_eq!(s.receive(&sub("p3", fcm)), vec![ok("p3")], "read-only may subscribe");
+        assert_eq!(welcome(&mut s)["pushOn"], true);
+        assert_eq!(s.receive(&json!({"v": 1, "id": "p4", "type": "pushUnsubscribe", "endpoint": fcm}).to_string()), vec![ok("p4")]);
+        assert_eq!(welcome(&mut s)["pushOn"], false);
+        *super::super::push::center() = None;
+    }
+
 }
