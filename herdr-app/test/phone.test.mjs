@@ -52,7 +52,7 @@ beforeEach(() => {
 async function screen() {
   await loadConfig();
   await pollPhone();
-  const v = new SettingsView(fakeCx());
+  const v = new SettingsView(fakeCx()); v.section = "phone";
   return { v, el: () => v.render(fakeCx()) };
 }
 const click = (el, id) => byId(el, id)._h.on_click({}, fakeCx());
@@ -127,7 +127,7 @@ test("while On waits for Serve, the status is asked every 3 s; the address and Q
   await loadConfig();
   await pollPhone();
   const cx = fakeCx();
-  const v = new SettingsView(cx);
+  const v = new SettingsView(cx); v.section = "phone";
   await cx.settle();
   const tick = cx.timers.find((x) => !x.once && x.ms <= 3000);
   assert.ok(tick, "a timer of 3 s or less");

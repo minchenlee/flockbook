@@ -101,26 +101,83 @@ test("a change keeps the other keys and every view sees it at once", async () =>
 
 test("the screen: three settings, each with its two choices, reachable with the keyboard", async () => {
   await loadConfig();
-  const el = new SettingsView(fakeCx()).render(fakeCx());
-  const text = textOf(el);
-  for (const s of ["Check for updates", "Status row", "Helper on other machines"]) assert.match(text, new RegExp(s));
+  const v = new SettingsView(fakeCx());
   const stops = [];
-  for (const [k, a, b] of [["check_updates", "on", "off"], ["status_row", "show", "hide"], ["remote_helper", "ask", "never"]]) {
+  for (const [sec, k, a, b] of [["updates", "check_updates", "on", "off"], ["general", "status_row", "show", "hide"], ["general", "remote_helper", "ask", "never"]]) {
+    v.section = sec;
+    const el = v.render(fakeCx());
+    assert.match(textOf(el), new RegExp(SETTINGS.find((s) => s.key === k).title));
     for (const x of [a, b]) {
       const o = opt(el, k, x);
       assert.ok(o, `${k} ${x}`);
       assert.equal(typeof o._a.tab_index, "number", "a tab stop");
       assert.ok(o._h.on_key_down, "Enter or Space picks it");
-      stops.push(o._a.tab_index);
+      if (sec === "general") stops.push(o._a.tab_index);
     }
   }
   assert.deepEqual([...stops].sort((x, y) => x - y), stops, "Tab goes top to bottom");
   // Space on Off.
-  const o = opt(el, "check_updates", "off");
+  v.section = "updates";
+  const o = opt(v.render(fakeCx()), "check_updates", "off");
   const cx = fakeCx();
   o._h.on_key_down({ key: "space", modifiers: {} }, cx);
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(JSON.parse(file).check_updates, false);
+});
+
+// Laid out as Herdr's own Settings: sections in a sidebar on the left, the chosen one filled; on the right
+// UPPERCASE headings, and rows with the title and one line about it on the left, the control on the right.
+const NAV = [["general", "General"], ["phone", "Phone page"], ["updates", "Updates"]];
+const nodes = (el) => { const all = []; (function walk(n) { if (!n || typeof n !== "object") return; all.push(n); (n.kids ?? []).forEach(walk); })(el); return all; };
+
+test("settings layout: a sidebar with General, Phone page and Updates; General is chosen first", async () => {
+  await loadConfig();
+  const el = new SettingsView(fakeCx()).render(fakeCx());
+  const side = byId(el, "set-nav");
+  assert.ok(side, "a sidebar");
+  assert.match(textOf(side), /^Flockbook/);
+  const stops = [];
+  for (const [id, label] of NAV) {
+    const r = byId(side, `set-nav-${id}`);
+    assert.ok(r, id);
+    assert.match(textOf(r), new RegExp(label));
+    assert.ok(nodes(r).some((n) => n.tag === "svg"), `${id} has an icon`);
+    assert.equal(r._a.bg, id === "general" ? "#selected" : undefined, `${id}: only the chosen row is filled`);
+    assert.equal(typeof r._a.tab_index, "number"); stops.push(r._a.tab_index);
+  }
+  assert.deepEqual(stops, [1, 2, 3], "the sidebar comes first with Tab");
+  const pane = byId(el, "settings-root");
+  assert.ok(byId(pane, "set-status_row") && byId(pane, "set-remote_helper"));
+  assert.equal(byId(pane, "set-phone"), null);
+  assert.equal(byId(pane, "set-check_updates"), null);
+  for (const h of ["CHAT", "OTHER MACHINES"]) assert.ok(nodes(pane).some((n) => n.kids?.[0] === h), `heading ${h}`);
+});
+
+test("settings layout: a click, Enter or Space on a section shows it; every setting is in one section", async () => {
+  await loadConfig();
+  const v = new SettingsView(fakeCx());
+  const where = {};
+  for (const [id] of NAV) {
+    const cx = fakeCx();
+    if (id === "updates") byId(v.render(cx), `set-nav-${id}`)._h.on_key_down({ key: "enter", modifiers: {} }, cx);
+    else byId(v.render(cx), `set-nav-${id}`)._h.on_click({}, cx);
+    assert.equal(v.section, id);
+    const el = v.render(fakeCx());
+    assert.equal(byId(el, `set-nav-${id}`)._a.bg, "#selected");
+    for (const key of [...SETTINGS.map((s) => s.key), "phone"]) if (byId(byId(el, "settings-root"), `set-${key}`)) (where[key] ??= []).push(id);
+  }
+  assert.deepEqual(where, { status_row: ["general"], remote_helper: ["general"], phone: ["phone"], check_updates: ["updates"] });
+});
+
+test("settings layout: a row is the title and its line on the left, the control on the right", async () => {
+  await loadConfig();
+  const v = new SettingsView(fakeCx()); v.section = "updates";
+  const row = byId(v.render(fakeCx()), "set-check_updates");
+  assert.equal(row.tag, "h");
+  const [text, control] = row.kids;
+  assert.match(textOf(text), /^Check for updates .*api\.github\.com/);
+  assert.ok(byId(control, "set-check_updates-on") && byId(control, "set-check_updates-off"));
+  assert.ok(nodes(byId(v.render(fakeCx()), "settings-root")).some((n) => n.kids?.[0] === "UPDATES"));
 });
 
 // The Flockbook settings: a dialog over the window, as Herdr's own Settings (dimmed behind it; Esc or a
@@ -186,7 +243,8 @@ test("update line: a newer release shows one line in the sidebar, Copy puts the 
   byId(line, "update-copy")._h.on_click({}, cx);
   assert.equal(copied, ONE_LINE);
   // The settings dialog shows the command itself too.
-  assert.match(textOf(new SettingsView(fakeCx()).render(fakeCx())), /install\.sh \| sh/);
+  const sv = new SettingsView(fakeCx()); sv.section = "updates";
+  assert.match(textOf(sv.render(fakeCx())), /install\.sh \| sh/);
 });
 
 test("update line: Not now hides it for that version (the helper remembers)", async () => {
