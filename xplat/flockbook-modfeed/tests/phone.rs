@@ -322,6 +322,32 @@ fn serve_set_by_us_on_8443_gives_the_address_with_the_port() {
 }
 
 #[test]
+fn a_new_address_gets_a_new_qr_file_and_the_old_ones_go() {
+    let t = t();
+    signed_in(&t);
+    let dir = t.home.join("flockbook");
+    fs::create_dir_all(&dir).unwrap();
+    // An old fixed-name file, an old hashed one, and files that are not ours.
+    for f in ["phone-qr.svg", "phone-qr-0badc0de.svg", "phone-qr-notes.txt", "config.json", "phone-qr-12345678.png"] {
+        fs::write(dir.join(f), "x").unwrap();
+    }
+    serve_json(&t, json!({"Web": {"box.tail1.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8787"}}}}}));
+    let first = PathBuf::from(t.phone("launchd", &["status"])["qr"].as_str().unwrap());
+    // The same address again: the same file.
+    let again = PathBuf::from(t.phone("launchd", &["status"])["qr"].as_str().unwrap());
+    assert_eq!(first, again);
+    // Now on 8443: another name, so a cached picture of the old one is not shown.
+    serve_json(&t, json!({"Web": {"box.tail1.ts.net:8443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8787"}}}}}));
+    let second = PathBuf::from(t.phone("launchd", &["status"])["qr"].as_str().unwrap());
+    assert_ne!(first, second);
+    let mut left: Vec<String> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    left.sort();
+    let mut want = vec!["config.json".to_string(), "phone-qr-12345678.png".into(), "phone-qr-notes.txt".into(), second.file_name().unwrap().to_string_lossy().into_owned()];
+    want.sort();
+    assert_eq!(left, want, "only the helper's older phone-qr*.svg files are removed");
+}
+
+#[test]
 fn once_serve_is_set_the_address_and_a_qr_code() {
     let t = t();
     signed_in(&t);
@@ -334,7 +360,10 @@ fn once_serve_is_set_the_address_and_a_qr_code() {
     assert_eq!(p["serve"]["set"], true, "{p}");
     assert_eq!(p["serve"]["url"], "https://box.tail1.ts.net/");
     let qr = PathBuf::from(p["qr"].as_str().expect("a qr path"));
-    assert_eq!(qr, t.home.join("flockbook/phone-qr.svg"));
+    let name = qr.file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(qr.parent(), Some(t.home.join("flockbook").as_path()));
+    let hex = name.strip_prefix("phone-qr-").and_then(|n| n.strip_suffix(".svg")).unwrap_or_else(|| panic!("{name}"));
+    assert!(hex.len() == 8 && hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()), "8 hex of the content: {name}");
     let svg = read(&qr);
     assert!(svg.starts_with("<svg") && svg.contains("<path"), "{svg}");
     // Serve for another port is not this page.

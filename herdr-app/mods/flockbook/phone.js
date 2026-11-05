@@ -4,7 +4,7 @@
 // itself; the login and Read-only are in config.json (phone_user, phone_read_only; phone_port is not on screen).
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { shared, setShared } from "herdr";
+import { shared, setShared, appHome } from "herdr";
 import { setSetting, configBad, KEY_CONFIG } from "./config.js";
 import * as sidecar from "./sidecar.js";
 
@@ -42,6 +42,14 @@ export async function setPhoneOption(key, value) {
   if (!(await setSetting(key, value))) return false;
   await ask(phoneOn() ? "on" : "status");
   return true;
+}
+
+// svg() reads a path under the app root, which is the app home (the icons are "mods/flockbook/…"), not an
+// absolute one. The helper writes the QR in <app home>/flockbook (the mod passes --home): the path from there.
+// Null when it is not under the app home.
+export function appRel(path) {
+  const root = appHome().replace(/\/+$/, "") + "/";
+  return typeof path === "string" && path.startsWith(root) && path.length > root.length ? path.slice(root.length) : null;
 }
 
 // What the status line says, and whether it is a problem.
@@ -118,7 +126,7 @@ export function phoneBody(t, owner, { seg, small }) {
     if (l.serve?.set) {
       body.child(note("Open on your phone (signed in to the same Tailscale account):"))
         .child(h_flex().gap(6).items_center().child(mono("phone-url", l.serve.url)).child(copy("phone-url-copy", l.serve.url)))
-        .when(Boolean(l.qr), (el) => el.child(div().id("phone-qr").size(156).p(8).rounded(8).bg("#ffffff").child(svg(l.qr).size(140).text_color("#000000"))));
+        .when(Boolean(appRel(l.qr)), (el) => el.child(div().id("phone-qr").size(156).p(8).rounded(8).bg("#ffffff").child(svg(appRel(l.qr)).size(140).text_color("#000000"))));
     }
     if (l.service?.kind === "systemd") body.child(note("Linux: it stops when you log out, unless lingering is on (loginctl enable-linger)."));
   }
