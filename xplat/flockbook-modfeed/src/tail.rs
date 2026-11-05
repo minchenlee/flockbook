@@ -74,7 +74,9 @@ pub fn read_before_max(path: &Path, before: u64, bytes: u64, max_line: u64) -> s
     let data = read_span(path, start, end)?;
     let mut body: &[u8] = &data;
     if start > 0 {
-        let Some(nl) = body.iter().position(|&b| b == b'\n') else {
+        // The last byte is the newline that ends the line before `before`: a newline that starts a whole line
+        // must come before it.
+        let Some(nl) = body[..body.len().saturating_sub(1)].iter().position(|&b| b == b'\n') else {
             // One line longer than `bytes` (a tool result with a screenshot): the range still moves back, to its
             // start (staying at `before` would stop older rows there for good). Read whole up to `max_line`.
             let from = line_start(path, start)?;
