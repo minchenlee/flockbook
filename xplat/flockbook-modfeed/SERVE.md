@@ -82,8 +82,9 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
   Others show an empty box. At most 300 pictures (or 256 MB) go out in 10 minutes, on all connections together.
 - Pictures show for this machine's terminals only, not for terminals on another machine.
 - Images you add are not re-encoded (the Mac app re-encodes them): PNG, JPEG and WebP up to 10 MB.
-  Their metadata goes: EXIF and XMP (where a photo was taken, the camera), and PNG text chunks.
-  A JPEG keeps only its Orientation, so an upright photo still shows upright. A file that cannot be read is refused.
+  Their metadata goes: EXIF and XMP (where a photo was taken, the camera), IPTC and comments, and PNG text chunks.
+  A JPEG keeps only JFIF, its colour profile and its Orientation, so an upright photo still shows upright. What a phone
+  puts after the image (a Motion Photo's video, a depth map or gain map) goes too. A file that cannot be read is refused.
   HEIC (an iPhone's own type) is refused: "This picture type cannot be sent; pick JPEG or PNG."
   At most 20 images (or 100 MB) in 10 minutes, and 8 waiting for a send.
 - Images go to this machine's terminals only. A send with images to another machine is refused; nothing goes.

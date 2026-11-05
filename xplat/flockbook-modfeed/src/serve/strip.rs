@@ -62,6 +62,11 @@ pub fn orientation_app1(v: u16) -> Vec<u8> {
     s
 }
 
+/// A JPEG without its metadata, cut at its first EOI. Kept: JFIF (APP0), the colour profile (APP2 `ICC_PROFILE`) and
+/// Adobe's colour marker (APP14) before the first scan, the tables and frame segments, and the scans as they are.
+/// Gone: EXIF and XMP (APP1), every other APPn (IPTC in APP13, MPF, Ducky), comments, anything between scans but tables,
+/// and everything after EOI (a Motion Photo's video, a gain map or depth map with its own EXIF). An EXIF Orientation
+/// other than 1 comes back as a minimal APP1 (`orientation_app1`) after JFIF. The image data is not decoded.
 pub fn jpeg(b: &[u8]) -> Result<Vec<u8>, &'static str> {
     if b.get(0..2) != Some(&[0xff, 0xd8]) {
         return Err(BROKEN);
@@ -71,6 +76,7 @@ pub fn jpeg(b: &[u8]) -> Result<Vec<u8>, &'static str> {
     let mut put_at = 2;
     let mut turn: Option<u16> = None;
     let mut first = true;
+    let mut scanned = false;
     let mut i = 2;
     loop {
         if b.get(i) != Some(&0xff) {
@@ -82,11 +88,11 @@ pub fn jpeg(b: &[u8]) -> Result<Vec<u8>, &'static str> {
             continue;
         }
         if m == 0xd9 {
-            out.extend(&b[i..i + 2]);
-            break;
+            out.extend([0xff, 0xd9]);
+            break; // the rest of the file goes
         }
         if (0xd0..=0xd7).contains(&m) || m == 0x01 {
-            out.extend(&b[i..i + 2]);
+            out.extend([0xff, m]);
             i += 2;
             continue;
         }
@@ -95,23 +101,49 @@ pub fn jpeg(b: &[u8]) -> Result<Vec<u8>, &'static str> {
             return Err(BROKEN);
         }
         let seg = &b[i..i + 2 + len];
+        let body = &seg[4..];
+        i += 2 + len;
         if m == 0xda {
-            // Start of scan: the rest is image data (and any later segments, which carry no metadata we know of).
-            out.extend(&b[i..]);
-            break;
-        }
-        if m == 0xe1 {
-            if turn.is_none() {
-                turn = orientation(&seg[4..]).filter(|v| *v != 1);
+            // Start of scan, then its entropy-coded data up to the next marker (0xFF then not 0x00 or RSTn).
+            out.extend(seg);
+            let mut j = i;
+            loop {
+                match (b.get(j), b.get(j + 1)) {
+                    (None, _) => return Err(BROKEN),
+                    (Some(0xff), Some(0x00 | 0xd0..=0xd7)) => j += 2,
+                    (Some(0xff), Some(_)) => break,
+                    (Some(0xff), None) => return Err(BROKEN),
+                    _ => j += 1,
+                }
             }
-        } else {
+            out.extend(&b[i..j]);
+            i = j;
+            scanned = true;
+            first = false;
+            continue;
+        }
+        let keep = match m {
+            0xe1 => {
+                if turn.is_none() && !scanned {
+                    turn = orientation(body).filter(|v| *v != 1);
+                }
+                false
+            }
+            0xe0 => !scanned,
+            0xe2 => !scanned && body.starts_with(b"ICC_PROFILE\0"),
+            0xee => !scanned && body.starts_with(b"Adobe"),
+            0xe3..=0xef | 0xfe => false,
+            // Between scans only tables (DHT, DQT, DRI, DAC); before the first one, every frame segment too.
+            0xc4 | 0xdb | 0xdd | 0xcc => true,
+            _ => !scanned,
+        };
+        if keep {
             out.extend(seg);
             if first && m == 0xe0 {
                 put_at = out.len();
             }
         }
         first = false;
-        i += 2 + len;
     }
     if let Some(v) = turn {
         out.splice(put_at..put_at, orientation_app1(v));
@@ -260,6 +292,51 @@ mod tests {
         assert_eq!(jpeg(&cut), Err(BROKEN));
     }
 
+    #[test]
+    fn jpeg_nothing_after_the_end() {
+        // A Motion Photo or a gain map: a second image (with its own EXIF and GPS) after EOI.
+        let (b, scan) = photo(&[]);
+        let (second, _) = photo(&[exif(6)]);
+        let out = jpeg(&[b.as_slice(), &second, b"ftypmp4 GPS"].concat()).unwrap();
+        assert_eq!(out, b, "cut at the first EOI");
+        assert!(out.ends_with(&scan));
+    }
+
+    #[test]
+    fn jpeg_nothing_between_scans() {
+        // Progressive: a scan, then an APP1 with GPS and a comment before the next scan's tables.
+        let (b, scan) = photo(&[]);
+        let first = &b[..b.len() - 2];
+        let dht = seg(0xc4, &[0x00, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7]);
+        let scan2 = [seg(0xda, &[1, 1, 0, 0, 0x3f, 0]), vec![0x9a, 0xff, 0xd0, 0xbc, 0xff, 0x00]].concat();
+        let file = [first, &seg(0xe1, &exif(6)), &seg(0xfe, b"GPS here"), &dht, &scan2, &[0xff, 0xd9]].concat();
+        let out = jpeg(&file).unwrap();
+        assert!(!out.windows(3).any(|w| w == b"GPS"), "no GPS left");
+        assert_eq!(out, [first, &dht, &scan2, &[0xff, 0xd9]].concat(), "both scans and the tables stay");
+        assert!(out.starts_with(&b[..b.len() - scan.len()]));
+    }
+
+    #[test]
+    fn jpeg_keeps_only_known_segments() {
+        let icc = [b"ICC_PROFILE\0\x01\x01".as_slice(), &[9; 20]].concat();
+        let adobe = b"Adobe\0\x64\0\0\0\0\x01".to_vec();
+        let mut b = vec![0xff, 0xd8];
+        b.extend(seg(0xe0, b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0"));
+        b.extend(seg(0xe2, &icc));
+        b.extend(seg(0xe2, b"MPF\0GPS"));
+        b.extend(seg(0xed, b"Photoshop 3.0\08BIM GPS Amsterdam"));
+        b.extend(seg(0xec, b"Ducky GPS"));
+        b.extend(seg(0xfe, b"GPS comment"));
+        b.extend(seg(0xee, &adobe));
+        let (p, _) = photo(&[]);
+        let tail = &p[2 + seg(0xe0, b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0").len()..];
+        b.extend(tail);
+        let out = jpeg(&b).unwrap();
+        assert!(!out.windows(3).any(|w| w == b"GPS"), "APP13, APP12, MPF and COM go");
+        let want = [&p[..2 + 18], &seg(0xe2, &icc), &seg(0xee, &adobe), tail].concat();
+        assert_eq!(out, want, "JFIF, the colour profile and Adobe stay");
+    }
+
     fn chunk(ty: &[u8], d: &[u8]) -> Vec<u8> {
         [&(d.len() as u32).to_be_bytes()[..], ty, d, &[0, 0, 0, 0]].concat()
     }
@@ -272,6 +349,8 @@ mod tests {
         let sig = b"\x89PNG\r\n\x1a\n".to_vec();
         let b = [sig.clone(), ihdr.clone(), chunk(b"tEXt", b"GPS\0here"), chunk(b"eXIf", &exif(6)[6..]), chunk(b"iTXt", b"x"), chunk(b"zTXt", b"y"), idat.clone(), iend.clone()].concat();
         assert_eq!(png(&b).unwrap(), [sig.clone(), ihdr.clone(), idat.clone(), iend.clone()].concat());
+        let after = [b.clone(), chunk(b"tEXt", b"GPS"), b"trailer GPS".to_vec()].concat();
+        assert_eq!(png(&after).unwrap(), [sig.clone(), ihdr.clone(), idat.clone(), iend.clone()].concat(), "nothing after IEND");
         let mut bad = [sig, ihdr].concat();
         bad.extend([0xff, 0, 0, 0]);
         bad.extend(b"IDAT");
