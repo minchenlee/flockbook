@@ -16,21 +16,21 @@ const header = (cmd) => ({ type: "header", protocol: 1, sidecar: "0.1.0", cmd })
 const end = (ok = true) => ({ type: "end", ok });
 
 // The fake helper: Tailscale signed in unless `ts` is null; the service as `state`; Serve set when `url`.
-let file, ts, state, url, fail, reason;
+let file, ts, state, url, fail, reason, qrAt;
 const line = () => ({
   type: "phone",
   tailscale: ts, tailscale_error: ts ? null : "Tailscale is not installed.",
   user: JSON.parse(file ?? "{}").phone_user || ts?.login || null,
   port: 8787, read_only: JSON.parse(file ?? "{}").phone_read_only === true,
   serve: { set: Boolean(url), url, command: reason ? "tailscale serve --bg --https=8443 8787" : "tailscale serve --bg 8787", reason: reason ?? null },
-  qr: url ? `${HOME}/flockbook/phone-qr.svg` : null,
+  qr: url ? (qrAt ?? `${HOME}/flockbook/phone-qr-1a2b3c4d.svg`) : null,
   service: { kind: "systemd", state, file: "/home/test/.config/systemd/user/flockbook-serve.service",
     message: state === "error" ? "It failed. Its log: journalctl --user -u flockbook-serve" : state === "by-hand" ? "Set up by hand (see SERVE.md)." : null },
 });
 const phoneCalls = () => log.exec.filter(([, a]) => a[0] === "phone").map(([, a]) => a.slice(0, a.indexOf("--home")).join(" "));
 
 beforeEach(() => {
-  reset(); file = null; ts = { login: "me@example.com", dns: "box.tail1.ts.net" }; state = "off"; url = null; fail = null; reason = null;
+  reset(); file = null; ts = { login: "me@example.com", dns: "box.tail1.ts.net" }; state = "off"; url = null; fail = null; reason = null; qrAt = null;
   fake.readText = (p) => (p === CONFIG ? file : null);
   fake.writeText = (p, text, expected) => { if (p !== CONFIG) return null; if (expected !== file) throw new Error("stale"); file = text; return null; };
   fake.exec = (_c, args) => {
@@ -156,7 +156,16 @@ test("once Serve is set: the address to open, Copy, and a QR code", async () => 
   const cx = { ...fakeCx(), write_to_clipboard: (x) => { cx.copied = x; } };
   byId(s, "phone-url-copy")._h.on_click({}, cx);
   assert.equal(cx.copied, "https://box.tail1.ts.net/");
-  assert.equal(byId(s, "phone-qr").kids[0]._a.path, `${HOME}/flockbook/phone-qr.svg`);
+  // svg() reads a path under the app root (the app home), not an absolute one.
+  assert.equal(byId(s, "phone-qr").kids[0]._a.path, "flockbook/phone-qr-1a2b3c4d.svg");
+});
+
+test("a QR file outside the app home is not drawn (svg() could not find it)", async () => {
+  state = "running"; url = "https://box.tail1.ts.net/"; qrAt = "/elsewhere/flockbook/phone-qr-1a2b3c4d.svg";
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  assert.equal(textOf(byId(s, "phone-url")), "https://box.tail1.ts.net/", "the address still shows");
+  assert.equal(byId(s, "phone-qr"), null);
 });
 
 test("Off stops it; an error says what failed and where to look", async () => {

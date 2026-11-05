@@ -181,7 +181,7 @@ asked), `no-home`, or `error` (no answer yet, for example offline). Only `newer`
 ### `phone` (`phone status`, `on`, `off`)
 
 ```json
-{"port":8787,"qr":"<home>/flockbook/phone-qr.svg","read_only":false,"serve":{"command":"tailscale serve --bg 8787","reason":null,"set":true,"url":"https://box.tail1.ts.net/"},"service":{"file":"/home/me/.config/systemd/user/flockbook-serve.service","kind":"systemd","message":null,"state":"running"},"tailscale":{"dns":"box.tail1.ts.net","login":"me@example.com"},"tailscale_error":null,"type":"phone","user":"me@example.com"}
+{"port":8787,"qr":"<home>/flockbook/phone-qr-1a2b3c4d.svg","read_only":false,"serve":{"command":"tailscale serve --bg 8787","reason":null,"set":true,"url":"https://box.tail1.ts.net/"},"service":{"file":"/home/me/.config/systemd/user/flockbook-serve.service","kind":"systemd","message":null,"state":"running"},"tailscale":{"dns":"box.tail1.ts.net","login":"me@example.com"},"tailscale_error":null,"type":"phone","user":"me@example.com"}
 ```
 
 The phone page (`serve`, SERVE.md) as a user service. Every answer has this line, also after an `error`.
@@ -197,7 +197,9 @@ settings and restarts it. `off` stops it and removes that file, only when it has
   address, and the one command to set it. When 443 `/` already goes to another local service, the plain
   command would replace it: `command` is `tailscale serve --bg --https=8443 <port>` (the first free of 8443,
   10443, …) and `reason` says why (else null). The address keeps a port other than 443
-  (`https://box.tail1.ts.net:8443/`). `qr`: an SVG QR code of the address, once it is set.
+  (`https://box.tail1.ts.net:8443/`). `qr`: an SVG QR code of the address, once it is set:
+  `<home>/flockbook/phone-qr-<8 hex of its sha256>.svg`, a new name for a new address; the helper removes its older
+  `phone-qr*.svg` files there. The mod draws it from the path under the app home (`svg()` reads from the app root).
 - `service.state`: `off` (no file), `running`, `stopped`, `error` (`message` says where its log is), or
   `by-hand` (a file without the marker; never changed).
 

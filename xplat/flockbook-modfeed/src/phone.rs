@@ -261,6 +261,31 @@ pub fn service_state(env: &Env) -> Value {
     json!({"kind": match env.kind { Kind::Launchd => "launchd", Kind::Systemd => "systemd" }, "state": state, "file": file, "message": message})
 }
 
+/// Writes the QR code as `phone-qr-<8 hex of its sha256>.svg` and removes the helper's other QR files there
+/// (`phone-qr.svg` and `phone-qr-<8 hex>.svg`). The app may keep a drawn svg by its path, so a new address
+/// needs a new name to be drawn again.
+fn write_qr(dir: &Path, svg: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(svg.as_bytes());
+    let name = format!("phone-qr-{}.svg", hash.iter().take(4).map(|b| format!("{b:02x}")).collect::<String>());
+    let p = dir.join(&name);
+    if std::fs::read_to_string(&p).ok().as_deref() != Some(svg) {
+        let _ = std::fs::create_dir_all(dir);
+        std::fs::write(&p, svg).ok()?;
+    }
+    let old_qr = |n: &str| {
+        n == "phone-qr.svg"
+            || n.strip_prefix("phone-qr-").and_then(|r| r.strip_suffix(".svg")).is_some_and(|h| h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n != name && old_qr(&n) && e.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    Some(p)
+}
+
 /// The whole picture, as the mod shows it. Writes the QR code when Serve is set.
 pub fn status(env: &Env, cfg: &Config, dir: Option<&Path>) -> Value {
     let ts = tailscale(env);
@@ -268,14 +293,7 @@ pub fn status(env: &Env, cfg: &Config, dir: Option<&Path>) -> Value {
     let step = ts.as_ref().ok().map(|_| serve_step(env, cfg.phone_port));
     let url = step.as_ref().and_then(|s| s.url.clone());
     let qr = match (&url, dir) {
-        (Some(u), Some(d)) => qr_svg(u).and_then(|svg| {
-            let p = d.join("phone-qr.svg");
-            if std::fs::read_to_string(&p).ok().as_deref() != Some(svg.as_str()) {
-                let _ = std::fs::create_dir_all(d);
-                std::fs::write(&p, svg).ok()?;
-            }
-            Some(p)
-        }),
+        (Some(u), Some(d)) => qr_svg(u).and_then(|svg| write_qr(d, &svg)),
         _ => None,
     };
     json!({
