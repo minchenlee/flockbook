@@ -418,8 +418,33 @@ fn read_machine_docs(client: &HcClient, previous: &[(String, Value)]) -> Vec<(St
 /// The other machines' documents now: read in the background when older than the TTL (a slow machine never holds up a
 /// snapshot); a quick read shows in this snapshot, a slow one in a later one.
 fn machine_docs() -> Vec<(String, Value)> {
-    let start = {
+    machine_docs_with(|previous| {
+        let client = HcClient::new(herdr_core::hc::HcSession::resolve_env(), 8, 22);
+        read_machine_docs(&client, previous)
+    })
+}
+
+/// Ends a background read: `running` goes back to false even when the read panics, and then the next snapshot
+/// starts a new read at once (`at` cleared), so the layout never stops refreshing.
+struct ReadDone {
+    docs: Option<Vec<(String, Value)>>,
+}
+
+impl Drop for ReadDone {
+    fn drop(&mut self) {
         let mut g = MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner());
+        match self.docs.take() {
+            Some(d) => g.docs = d,
+            None => g.at = None,
+        }
+        g.running = false;
+    }
+}
+
+fn machine_docs_with(read: impl FnOnce(&[(String, Value)]) -> Vec<(String, Value)> + Send + 'static) -> Vec<(String, Value)> {
+    let lock = || MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner());
+    let start = {
+        let mut g = lock();
         let stale = g.at.is_none_or(|a| a.elapsed() > MACHINE_DOCS_TTL);
         if stale && !g.running {
             g.running = true;
@@ -431,18 +456,15 @@ fn machine_docs() -> Vec<(String, Value)> {
     };
     if let Some(previous) = start {
         std::thread::spawn(move || {
-            let client = HcClient::new(herdr_core::hc::HcSession::resolve_env(), 8, 22);
-            let docs = read_machine_docs(&client, &previous);
-            let mut g = MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner());
-            g.docs = docs;
-            g.running = false;
+            let mut done = ReadDone { docs: None };
+            done.docs = Some(read(&previous));
         });
         let until = Instant::now() + MACHINE_DOCS_WAIT;
-        while Instant::now() < until && MACHINE_DOCS.lock().map(|g| g.running).unwrap_or(false) {
+        while Instant::now() < until && lock().running {
             std::thread::sleep(Duration::from_millis(25));
         }
     }
-    MACHINE_DOCS.lock().map(|g| g.docs.clone()).unwrap_or_default()
+    lock().docs.clone()
 }
 
 /// `terminal.list` and the documents, grouped. Err: `terminal.list` failed.
@@ -546,5 +568,19 @@ mod tests {
         assert!(n.spaces.get("tb1").is_none());
         assert_eq!((n.spaces.get("both").map(String::as_str), n.tabs.get("both").map(String::as_str)), (Some("B"), Some("B")));
         assert!(fresh_id(&format!("sp{}", "a".repeat(32))) && !fresh_id("sp1"));
+    }
+
+    #[test]
+    fn a_read_that_panics_is_retried() {
+        let running = || MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner()).running;
+        let _ = machine_docs_with(|_| panic!("a reader that fails"));
+        let until = Instant::now() + Duration::from_secs(5);
+        while running() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!running(), "running goes back to false after a panic");
+        // The next snapshot reads again at once (no TTL wait), and its docs show.
+        let got = machine_docs_with(|_| vec![("box".into(), json!({"ok": 1}))]);
+        assert_eq!(got, vec![("box".to_string(), json!({"ok": 1}))]);
     }
 }
