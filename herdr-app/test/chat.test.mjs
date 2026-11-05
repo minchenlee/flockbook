@@ -238,3 +238,28 @@ test("reaching the top asks for older rows once and keeps the same row in view",
   assert.equal(asks.length, 1);
   assert.equal(olderFrom(v.feed()), null);
 });
+
+test("no element above a chat reply's text stops the press (Herdr 0.1.13: that makes the text unselectable)", async () => {
+  fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 2 }, user("u1", "hi"), asst("a1", "Some **text** to select."), end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  const root = v.render(cx);
+  const stops = [];
+  const walk = (el, above) => {
+    if (!el || typeof el !== "object") return;
+    if (el.tag === "md") {
+      for (const a of above) {
+        const down = a._h?.on_mouse_down;
+        if (!down) continue;
+        let stopped = false;
+        down({ button: "left", position: { x: 0, y: 0 } }, { stop_propagation: () => { stopped = true; }, notify() {} });
+        if (stopped) stops.push(a.tag + (a._a?.id ? `#${a._a.id}` : ""));
+      }
+      return;
+    }
+    const kids = el.tag === "vl" ? el._args.render({ start: 0, end: el._args.n }) : (el.kids || []);
+    for (const k of kids) walk(k, [...above, el]);
+  };
+  walk(root, []);
+  assert.ok(lastList, "the chat drew its list");
+  assert.deepEqual(stops, [], "an element above the reply text stops the left press");
+});

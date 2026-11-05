@@ -296,8 +296,10 @@ export class ChatView {
       // The chat input keeps ⌘⌥↑/↓ from the app's keys, so the chat switches spaces itself.
       .on_key_down((e, cx) => { const go = spaceKey(e); if (go) { cx.stop_propagation?.(); run(go); } })
       // Another agent's chat fades in; a new card fades in and rises into place.
-      // Presses on the content don't drag the window (the block has window_drag for the bar).
-      .child(v_flex().flex_1().min_h(0).on_mouse_down("left", stop)
+      // No press stop on the content: under Herdr 0.1.13 an ancestor's stop_propagation on the left press
+      // makes TextView text unselectable. Put the stop back (so content presses don't drag the window; the
+      // block has window_drag for the bar) once Herdr fixes that. The reply box and the cards keep theirs.
+      .child(v_flex().flex_1().min_h(0)
         .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
       .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
         .on_mouse_down("left", stop).child(this.helper.removeCard(t, this.refresh))))

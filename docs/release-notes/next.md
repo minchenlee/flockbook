@@ -15,5 +15,6 @@ One short line: what this release is about.
 
 - Herdr app mod: Shift+Enter in the reply box starts a new line at the cursor. Before, it sent the reply. Enter still sends.
 - Herdr app mod: a chat reply in Chinese or Japanese, or with inline code, no longer loses its last line under the time row. Row heights now use the size the text is drawn at (16 px, 26 px lines) and keep whole words and code together.
+- Herdr app mod: on Herdr 0.1.13 you can select and copy text in the chat again. Before, a drag in a reply selected nothing.
 
 ### ⚙️ Changes
