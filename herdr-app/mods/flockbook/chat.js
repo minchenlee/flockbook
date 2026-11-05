@@ -35,6 +35,15 @@ export function spaceKey(e) {
   return e.key === "up" ? "space.prev" : e.key === "down" ? "space.next" : null;
 }
 
+// A tool's input or a label in one line: its first line with text, and " …" when more lines follow.
+// A one-line row draws every line of a multi-line text (a heredoc) over the rows around it.
+export function oneLine(text) {
+  const lines = String(text ?? "").split(/\r\n|\r|\n/).map((l) => l.replace(/\t/g, " ").trim());
+  const i = lines.findIndex(Boolean);
+  if (i < 0) return "";
+  return lines.slice(i + 1).some(Boolean) ? `${lines[i]} …` : lines[i];
+}
+
 export class ChatView {
   constructor(cx) {
     this.scroll = VirtualListScrollHandle.new();
@@ -156,7 +165,7 @@ export class ChatView {
         return h_flex().w_full().h(34).items_center().justify_center().text_size(12).text_color(t.muted).child(row.text || "");
       case "perm": {
         // A call without a result yet. Whether it waits for an approval is the card's job (cards.js).
-        const what = row.text || row.perm?.title || row.perm?.tool || "a tool";
+        const what = oneLine(row.text || row.perm?.title || row.perm?.tool) || "a tool";
         const pending = row.perm?.state === "pending";
         return h_flex().w_full().h(44).items_center().child(h_flex().h(28).px(10).gap(6).items_center().rounded(14)
           .bg(t.chrome).border(1).border_color(t.border).text_size(12.5).text_color(t.muted)
@@ -172,7 +181,7 @@ export class ChatView {
 
   note(t, text) {
     return h_flex().w_full().h(44).items_center().child(div().px(12).py(6).rounded(10).border(1).border_color(t.border)
-      .text_size(12.5).text_color(t.muted).truncate().child(text));
+      .text_size(12.5).text_color(t.muted).truncate().child(oneLine(text)));
   }
 
   tools(row, t) {
@@ -184,14 +193,15 @@ export class ChatView {
         h_flex().h(28).px(10).gap(6).items_center().rounded(14).bg(t.chrome).border(1).border_color(t.border)
           .text_size(12.5).text_color(t.muted)
           .child(svg(chipIcon(c.symbol)).size(13).flex_none())
-          .child(c.text || "")
+          .child(oneLine(c.text))
           .when(running, (el) => el.child(svg(icon("spinner")).size(11).text_color(t.working).spin(SPIN_MS)))
           .child(div().text_color(t.dim).child(open ? "▴" : "▾")))));
     if (!open) return box;
     const calls = chips.flatMap((c) => c.calls || []);
-    return box.child(v_flex().pl(12).gap(0).children(calls.map((k) => h_flex().h(26).gap(8).items_center().text_size(12)
-      .child(div().flex_none().text_color(t.foreground).child(k.name || "tool"))
-      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(k.summary || ""))
+    // One line a call: a row is 26 px tall (estimate.js counts it so), and clips whatever does not fit.
+    return box.child(v_flex().pl(12).gap(0).children(calls.map((k) => h_flex().h(26).overflow_hidden().gap(8).items_center().text_size(12)
+      .child(div().flex_none().text_color(t.foreground).child(oneLine(k.name) || "tool"))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(oneLine(k.summary)))
       .child(k.error ? div().flex_none().text_color(t.blocked).child("failed")
         : k.done ? svg(icon("check")).size(12).flex_none().text_color(t.done)
         : svg(icon("spinner")).size(11).flex_none().text_color(t.working).spin(SPIN_MS)))));
