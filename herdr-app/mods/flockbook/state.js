@@ -13,7 +13,8 @@ export function machineOf(address) {
   const p = String(address ?? "").replace(/^hc:/, "").split("/");
   return p.length === 2 && p[0] && p[1] ? p[0] : null;
 }
-export const shownScreen = () => shared(KEY_SCREEN) ?? "chat";
+// "settings" was a screen before the settings became a dialog; a saved one shows the chat.
+export const shownScreen = () => { const s = shared(KEY_SCREEN); return s && s !== "settings" ? s : "chat"; };
 export function showScreen(child) {
   setShared(KEY_SCREEN, child);
   run("layout.select", { stack: "screen", child });
@@ -147,8 +148,21 @@ export function showAgent(address) {
 
 export function showNeeds() { showScreen("needs"); }
 export function showOverview() { showScreen("overview"); }
-// The Flockbook screen; the file is read again, in case someone edited it.
-export function showSettings() { loadConfig(); showScreen("settings"); }
+// The Flockbook settings: a dialog over the window, as Herdr's own Settings (dimmed behind it; Esc or a
+// click beside it closes it). The file is read again, in case someone edited it. Opening it again
+// replaces the open one, so there is never a second (closing an id that is gone does nothing).
+export const KEY_SETTINGS = "flockbook.settings";   // the open settings dialog's overlay id
+export const SETTINGS_W = 760, SETTINGS_H = 0.8;
+export function showSettings() {
+  loadConfig();
+  const open = shared(KEY_SETTINGS);
+  if (open) closeOverlay(open);
+  setShared(KEY_SETTINGS, openOverlay({ mod: "flockbook", props: { view: "settings" }, kind: "dialog", width: SETTINGS_W, height: SETTINGS_H }));
+}
+// The dialog went (Esc, a click beside it, its close button).
+export function settingsClosed(id) {
+  if (id && shared(KEY_SETTINGS) === id) setShared(KEY_SETTINGS, null);
+}
 
 // Opens a tab of any space: that space, that tab, and its screen.
 export function openTab(spaceId, tab) {

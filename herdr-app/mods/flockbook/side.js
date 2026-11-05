@@ -135,7 +135,7 @@ export class SideView {
         })
         .children(list.map(space)))
       .when(Boolean(update), (el) => el.child(div().pb(4).child(update)))
-      .child(row("side-flockbook", "sliders", "Flockbook", () => showSettings(), null, screen === "settings"))
+      .child(row("side-flockbook", "sliders", "Flockbook", () => showSettings(), null, false))
       .child(row("side-settings", "gear", "Settings", () => run("app.settings")));
   }
 }

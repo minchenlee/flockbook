@@ -1,4 +1,4 @@
-// Flockbook settings: <appHome>/flockbook/config.json, set on the Flockbook screen.
+// Flockbook settings: <appHome>/flockbook/config.json, set in the Flockbook settings dialog.
 // {"check_updates": true, "status_row": "show", "remote_helper": "ask"}. A missing file or key is the default;
 // the install never creates the file. A file that is not JSON is the defaults too, and is left alone
 // (the screen says so). The helper reads the same file (the mod passes --home) for check_updates and

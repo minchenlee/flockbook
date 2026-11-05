@@ -1,12 +1,12 @@
-// The "settings" view: the Flockbook screen (sidebar row "Flockbook", or ⌘⇧,). Three settings, each two
+// The "settings" view: the Flockbook settings dialog (sidebar row "Flockbook", ⌘⇧, or the tab menu),
+// over the window as Herdr's own Settings; Esc, a click beside it or its close button closes it. Three settings, each two
 // choices, saved in <appHome>/flockbook/config.json (config.js). Tab moves through the choices; Enter or
 // Space picks one. Also the update line, which the sidebar shows too.
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme } from "herdr";
+import { theme, props, closeOverlay } from "herdr";
 import { setting, setSetting, loadConfig, configBad, configPath, updateShown, dismissUpdate } from "./config.js";
-import { watchEdge, noteWindowHeight } from "./state.js";
-import { overBar, startTop, BAR_H } from "./top.js";
+import { icon, settingsClosed } from "./state.js";
 
 export const SETTINGS = [
   { key: "check_updates", title: "Check for updates", choices: [[true, "On", "on"], [false, "Off", "off"]],
@@ -20,7 +20,7 @@ export const SETTINGS = [
 const picks = (e) => e?.key === "enter" || e?.key === "space" || e?.key === " ";
 
 // "Flockbook X is out" with Copy (the one-line install) and Not now. Null when there is nothing to say.
-// `full`: the command is written out too (the Flockbook screen; the sidebar is narrow).
+// `full`: the command is written out too (the settings dialog; the sidebar is narrow).
 export function updateLine(t, owner, full = false) {
   const u = updateShown();
   if (!u) return null;
@@ -39,18 +39,25 @@ export function updateLine(t, owner, full = false) {
 export class SettingsView {
   constructor(cx) {
     this.copied = null;
-    this.top = {}; startTop(cx, this.top);
+    this.overlay = props()?.overlay ?? null;
     cx?.spawn?.(async (cx) => { await loadConfig(); cx.notify(); });
   }
+
+  close(_cx) { settingsClosed(this.overlay); }
 
   choose(key, value, cx) { cx.spawn(async (cx) => { await setSetting(key, value); cx.notify(); }); }
 
   render(cx) {
     const t = theme();
-    const stop = (_e, cx) => cx.stop_propagation();
-    return v_flex().id("settings-screen").relative().size_full().bg(t.background).on_size_change((size) => noteWindowHeight(size))
-      .child(div().size_full().pt(BAR_H).on_mouse_down("left", stop).child(this.content(t, cx)))
-      .child(overBar(t));
+    const close = div().id("settings-close").size(28).flex().items_center().justify_center().rounded(6)
+      .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_click(() => { settingsClosed(this.overlay); if (this.overlay) closeOverlay(this.overlay); })
+      .child(svg(icon("close")).size(14));
+    return v_flex().id("settings-screen").size_full()
+      .child(h_flex().w_full().flex_none().px(24).pt(18).pb(4).items_center()
+        .child(div().flex_1().text_size(18).font_semibold().text_color(t.foreground).child("Flockbook"))
+        .child(close))
+      .child(div().flex_1().min_h(0).w_full().child(this.content(t, cx)));
   }
 
   content(t, _cx) {
@@ -73,9 +80,8 @@ export class SettingsView {
         .child(div().text_size(13.5).text_color(t.foreground).child(s.title))
         .child(div().text_size(12).text_color(t.muted).child(s.about)))
       .child(segment(s));
-    return watchEdge(v_flex().id("settings-root").size_full().items_center().overflow_y_scrollbar().px(32).py(24))
-      .child(v_flex().w_full().max_w(640).gap(4)
-        .child(div().text_size(18).font_semibold().text_color(t.foreground).child("Flockbook"))
+    return v_flex().id("settings-root").size_full().overflow_y_scrollbar().px(24).pb(24)
+      .child(v_flex().w_full().gap(4)
         .child(div().pb(8).text_size(12).text_color(t.muted).child(`Saved in ${configPath()}. Changes apply at once.`))
         .when(bad, (el) => el.child(div().id("set-bad").p(10).rounded(8).bg(t.raised).border(1).border_color(t.blocked)
           .text_size(12.5).text_color(t.foreground)

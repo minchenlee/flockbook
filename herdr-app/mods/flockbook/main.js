@@ -1,5 +1,5 @@
 // Flockbook for herdr-app: one mod, four views. The layout picks the view with props.view
-// ("top", "side", "chat", "needs", "overview", "settings"). One folder, because a mod cannot import another mod's files.
+// ("top", "side", "chat", "needs", "overview"; "settings" is the settings dialog). One folder, because a mod cannot import another mod's files.
 import { View, div } from "gpui-kit";
 import { theme, props } from "herdr";
 import { TopView } from "./top.js";

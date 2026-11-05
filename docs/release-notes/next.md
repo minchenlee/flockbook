@@ -7,7 +7,7 @@ One short line: what this release is about.
 
 - Herdr app: drag a tab in the top bar to change the tab order. A line shows where it goes; dragging out of the bar cancels.
 - Herdr app: drag a workspace in the sidebar up or down to change the workspace order. A line shows where it goes; dragging out of the list cancels.
-- Herdr app mod: a Flockbook settings screen (check for updates, status row, helper on other machines), a quiet line when a newer Flockbook is out, and the install upgrades an older, unchanged Flockbook (a gallery copy) in place. *(preview)*
+- Herdr app mod: Flockbook settings in a dialog over the window, like Herdr's own Settings (check for updates, status row, helper on other machines), a quiet line when a newer Flockbook is out, and the install upgrades an older, unchanged Flockbook (a gallery copy) in place. *(preview)*
 
 ### 🔒 Security
 

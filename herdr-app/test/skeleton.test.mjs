@@ -12,7 +12,7 @@ function blocks(n, out = []) { if (n.type === "block") out.push(n); (n.children 
 test("every layout block shows the flockbook mod with a known view, or the shown tab", () => {
   const mods = blocks(layout).filter((b) => b.content.mod);
   const views = mods.map((b) => { assert.equal(b.content.mod, "flockbook"); return b.content.props.view; });
-  assert.deepEqual(views.sort(), ["chat", "needs", "overview", "settings", "side", "top"]);
+  assert.deepEqual(views.sort(), ["chat", "needs", "overview", "side", "top"], "settings is a dialog, not a block");
   assert.deepEqual(blocks(layout).filter((b) => !b.content.mod).map((b) => [b.id, b.content.tab]), [["tab-panes", "active"]]);
 });
 
