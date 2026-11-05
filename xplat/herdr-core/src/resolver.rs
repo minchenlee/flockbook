@@ -703,6 +703,16 @@ fn parse_lstart(words: &[&str]) -> Option<NaiveDateTime> {
     NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(h, m, s)
 }
 
+/// A pid file's `procStart`: `ps lstart` text on macOS; on Linux Claude Code writes `/proc/<pid>/stat` starttime
+/// (clock ticks after boot) instead.
+fn proc_start(ps: &str) -> Option<Date> {
+    if !ps.is_empty() && ps.bytes().all(|b| b.is_ascii_digit()) {
+        return linux::ticks_to_date(ps.parse().ok()?);
+    }
+    let words: Vec<&str> = ps.split(' ').filter(|w| !w.is_empty()).collect();
+    parse_lstart(&words).and_then(|n| local_to_utc(&Utc, &n))
+}
+
 fn local_to_utc<Tz: TimeZone>(tz: &Tz, n: &NaiveDateTime) -> Option<Date> {
     tz.from_local_datetime(n).earliest().map(|d| d.with_timezone(&Utc))
 }
@@ -864,8 +874,7 @@ pub fn claude_session_source_with(
             continue;
         }
         let Some(ps) = o.get("procStart").and_then(|v| v.as_str()) else { continue };
-        let words: Vec<&str> = ps.split(' ').filter(|w| !w.is_empty()).collect();
-        let Some(ps) = parse_lstart(&words).and_then(|n| local_to_utc(&Utc, &n)) else { continue };
+        let Some(ps) = proc_start(ps) else { continue };
         if (ps - proc_.start).num_milliseconds().abs() > 2000 {
             continue;
         }
