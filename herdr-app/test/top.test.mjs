@@ -155,3 +155,111 @@ test("a shell tab: no Terminal button", () => {
   fake.spaces[0].tabs.forEach((x) => { x.active = x.id === "tb-sh"; });
   assert.equal(byId(new TopView(fakeCx()).render(fakeCx()), "terminal"), null);
 });
+
+// Tab drag. Each pill is 80 px wide, 10 px apart, from x = 100: tb-t1, tb-t2, tb-t3, tb-sh.
+const X = { "tb-t1": 100, "tb-t2": 190, "tb-t3": 280, "tb-sh": 370 };
+const at = (id, dx) => ({ button: "left", click_count: 1, modifiers: {}, position: { x: X[id] + dx, y: 20 },
+  local_position: { x: dx, y: 10 }, bounds: { x: X[id], y: 10, width: 80, height: 30 } });
+const pill = (el, id) => byId(el, `tab-${id}`);
+function press(el, id, dx = 20) { pill(el, id)._h.on_mouse_down(at(id, dx), fakeCx()); }
+function move(el, id, dx) { pill(el, id)._h.on_mouse_move(at(id, dx), fakeCx()); }
+function release(el, id, dx) { byId(el, "tabs")._h.on_mouse_up(at(id, dx), fakeCx()); }
+const render = () => new TopView(fakeCx()).render(fakeCx());
+
+test("drag a tab right: the line shows after the tab under the pointer, release moves it there once", () => {
+  let el = render();
+  press(el, "tb-t1"); move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  el = render();
+  const line = byId(pill(el, "tb-t3"), "drop-line");
+  assert.ok(line, "the insertion line is on tb-t3");
+  assert.ok(line._a.right !== undefined && line._a.left === undefined, "on its right side");
+  assert.equal(byId(el, "drop-line") === line, true, "one line only");
+  assert.ok(pill(el, "tb-t1")._a.opacity < 1, "the dragged tab is dimmed");
+  release(el, "tb-t3", 60);
+  assert.deepEqual(log.run, [["tab.move", { id: "tb-t1", index: 3 }]]);
+  assert.equal(byId(render(), "drop-line"), null, "the line goes after the drop");
+});
+
+test("drag a tab left: before the tab under the pointer", () => {
+  let el = render();
+  press(el, "tb-sh"); move(el, "tb-sh", 10); move(el, "tb-t2", 15);
+  el = render();
+  assert.ok(byId(pill(el, "tb-t2"), "drop-line")._a.left !== undefined, "on tb-t2's left side");
+  release(el, "tb-t2", 15);
+  assert.deepEqual(log.run, [["tab.move", { id: "tb-sh", index: 2 }]]);
+});
+
+test("the place is counted from the pointer on the pill, so a scrolled bar gives the same place", () => {
+  let el = render();
+  const shift = (e) => ({ ...e, position: { x: e.position.x - 250, y: 20 }, bounds: { ...e.bounds, x: e.bounds.x - 250 } });
+  pill(el, "tb-t1")._h.on_mouse_down(shift(at("tb-t1", 20)), fakeCx());
+  pill(el, "tb-t1")._h.on_mouse_move(shift(at("tb-t1", 30)), fakeCx());
+  pill(el, "tb-t2")._h.on_mouse_move(shift(at("tb-t2", 70)), fakeCx());
+  byId(el, "tabs")._h.on_mouse_up(shift(at("tb-t2", 70)), fakeCx());
+  assert.deepEqual(log.run, [["tab.move", { id: "tb-t1", index: 2 }]]);
+});
+
+test("a press that moves less than 4 px is a click: the tab is shown, nothing moves", () => {
+  const el = render();
+  press(el, "tb-t2"); move(el, "tb-t2", 23);
+  assert.equal(byId(render(), "drop-line"), null);
+  pill(el, "tb-t2")._h.on_click({}, fakeCx());
+  release(el, "tb-t2", 23);
+  assert.deepEqual(log.run.map((r) => r[0]), ["tab.select", "layout.select"]);
+});
+
+test("a drag back to its own place moves nothing and does not select the tab", () => {
+  const el = render();
+  press(el, "tb-t2"); move(el, "tb-t2", 70); move(el, "tb-t1", 70);
+  assert.equal(byId(render(), "drop-line"), null, "right after tb-t1 is where tb-t2 already is");
+  pill(el, "tb-t2")._h.on_click({}, fakeCx());
+  release(el, "tb-t1", 70);
+  assert.deepEqual(log.run, []);
+});
+
+test("leaving the tab bar cancels: no line, the tab is not dimmed, the release moves nothing", () => {
+  let el = render();
+  press(el, "tb-t1"); move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  byId(el, "tabs")._h.on_hover(false, fakeCx());
+  el = render();
+  assert.equal(byId(el, "drop-line"), null);
+  assert.equal(pill(el, "tb-t1")._a.opacity, undefined);
+  release(el, "tb-t3", 60);
+  move(el, "tb-t3", 60);
+  assert.equal(byId(render(), "drop-line"), null, "moving over it again with no press starts nothing");
+  assert.deepEqual(log.run, []);
+});
+
+test("another mouse button, or a press outside the bar, cancels the drag", () => {
+  let el = render();
+  press(el, "tb-t1"); move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  pill(el, "tb-t3")._h.on_mouse_down_right(at("tb-t3", 60), { ...fakeCx(), stop_propagation() {} });
+  assert.equal(log.overlays.length, 0, "the right press only cancels; no menu during a drag");
+  release(el, "tb-t3", 60);
+  assert.deepEqual(log.run, []);
+  el = render();
+  press(el, "tb-t1"); move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  byId(el, "tabs")._h.on_mouse_down_out(at("tb-t3", 60), fakeCx());
+  release(el, "tb-t3", 60);
+  assert.deepEqual(log.run, []);
+});
+
+test("a release on the bar's edge, outside the pills, ends the press: a later move starts nothing", () => {
+  let el = render();
+  press(el, "tb-t1");
+  byId(el, "tabs")._h.on_mouse_up(at("tb-t1", -6), fakeCx());
+  move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  el = render();
+  assert.equal(byId(el, "drop-line"), null, "no drag without a press");
+  assert.equal(pill(el, "tb-t1")._a.opacity, undefined);
+  pill(el, "tb-t1")._h.on_click({}, fakeCx());
+  assert.deepEqual(log.run.map((r) => r[0]), ["tab.select", "layout.select"], "the next click is a click");
+});
+
+test("a drag released on the bar's edge drops at the last place shown", () => {
+  const el = render();
+  press(el, "tb-t1"); move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  byId(el, "tabs")._h.on_mouse_up(at("tb-sh", 85), fakeCx());
+  assert.deepEqual(log.run, [["tab.move", { id: "tb-t1", index: 3 }]]);
+  assert.equal(byId(render(), "drop-line"), null);
+});

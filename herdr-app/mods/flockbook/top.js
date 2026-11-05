@@ -32,6 +32,30 @@ export function lightsRoom() {
 }
 
 export const BAR_H = 56;
+
+// The tab being dragged: { id, x, moved, target: { id, after } }. One drag at a time, so it is
+// kept here and every copy of the bar draws from it. A press starts it; it counts as a drag once
+// the pointer has moved DRAG_PX, and until then the release is a plain click.
+// Herdr's mouse moves carry no button state and arrive only over the bar, so a release outside
+// the bar is never seen: leaving the bar, another button, or a press elsewhere cancels instead.
+let drag = null;
+const DRAG_PX = 4;
+
+// Where a drop puts the dragged tab: its position in `tabs` after the move, or -1 when it would
+// stay where it is.
+export function dropPlace(tabs, d) {
+  const from = tabs.findIndex((x) => x.id === d?.id), on = tabs.findIndex((x) => x.id === d?.target?.id);
+  if (from < 0 || on < 0) return -1;
+  const slot = on + (d.target.after ? 1 : 0);
+  const to = slot > from ? slot - 1 : slot;
+  return to === from ? -1 : to;
+}
+
+function cancelDrag(cx) {
+  const shown = drag?.moved;
+  drag = null;
+  if (shown) cx?.notify?.();
+}
 const KEY_CMD = "flockbook.command";   // the last key command and when, so two copies don't both act
 
 // Keys bound to "flockbook.<command>" in keys.json.
@@ -96,16 +120,38 @@ export function topBar(t, over = false) {
   const capsule = (id) => h_flex().id(id).h(38).px(4).gap(2).items_center().flex_none().rounded(19)
     .bg(t.chrome).border(1).border_color(t.border).shadow_sm();
 
+  const dragging = drag?.moved ? drag : null;
+  const lineOn = dragging && dropPlace(tabs, dragging) >= 0 ? dragging.target : null;
+
   const pill = (tab) => {
     const on = tab.active;
+    const line = lineOn?.id === tab.id ? lineOn : null;
     return h_flex().id(`tab-${tab.id}`).relative().h(30).pl(13).pr(on ? 6 : 14).gap(8).items_center().flex_none().rounded(15).text_size(13)
       .text_color(on ? t.foreground : t.muted)
       // The selected fill fades in and out instead of jumping between tabs.
       .child(div().id(`fill-${tab.id}`).absolute().inset_0().rounded(15).bg(t.selected).opacity(on ? 1 : 0).transition("opacity", FADE))
       .when(on, (el) => el.font_weight(600))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
-      .on_mouse_down("left", stop).on_click(() => showTab(tab))
-      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openMenu(tabItems(tab, { agent: tabAgents(tab.id)[0] ?? null, list: tabs })); })
+      .when(dragging?.id === tab.id, (el) => el.opacity(0.45))
+      .on_mouse_down("left", (e, cx) => { cx.stop_propagation?.(); drag = { id: tab.id, x: e.position.x, moved: false, target: null }; })
+      .on_mouse_move((e, cx) => {
+        if (!drag || (!drag.moved && Math.abs(e.position.x - drag.x) < DRAG_PX)) return;
+        // The half of this pill under the pointer: its painted box, so a scrolled bar counts too.
+        const after = (e.local_position?.x ?? 0) >= (e.bounds?.width ?? 0) / 2;
+        const was = drag.moved ? drag.target : null;
+        drag.moved = true;
+        drag.target = { id: tab.id, after };
+        if (was?.id !== tab.id || was?.after !== after) cx.notify?.();
+      })
+      // The release after a drag is not a click.
+      .on_click(() => { if (!drag?.moved) showTab(tab); })
+      .on_mouse_down("right", (_e, cx) => {
+        cx.stop_propagation?.();
+        if (drag?.moved) return cancelDrag(cx);
+        drag = null;
+        openMenu(tabItems(tab, { agent: tabAgents(tab.id)[0] ?? null, list: tabs })); })
+      .when(Boolean(line), (el) => el.child(div().id("drop-line").absolute().top(2).bottom(2).w(3).rounded(2).bg(t.accent)
+        .when(line.after, (l) => l.right(-3.5)).when(!line.after, (l) => l.left(-3.5))))
       .child(statusMark(tab.status, t))
       .child(div().max_w(170).truncate().child(tabLabel(tab)))
       .when(on, (el) => el.child(div().id(`close-${tab.id}`).size(18).flex_none().flex().items_center().justify_center().rounded(9)
@@ -115,7 +161,20 @@ export function topBar(t, over = false) {
   };
 
   const strip = capsule("tabs").min_w(0).flex_shrink(1)
-    .child(tabs.length ? h_flex().id("tab-scroll").min_w(0).gap(4).items_center().overflow_x_scrollbar().children(tabs.map(pill))
+    .on_hover((inside, cx) => { if (!inside) cancelDrag(cx); })
+    .on_mouse_down_out((_e, cx) => cancelDrag(cx))
+    // On the whole capsule, not the pills' row: a release on its padding ends the press too.
+    .on_mouse_up("left", (_e, cx) => {
+      const d = drag;
+      drag = null;
+      if (!d?.moved) return;
+      cx.notify?.();
+      const to = dropPlace(tabs, d);
+      if (to >= 0) run("tab.move", { id: d.id, index: tabs[to].index });
+    })
+    .child(tabs.length ? h_flex().id("tab-scroll").min_w(0).gap(4).items_center().overflow_x_scrollbar()
+      .when(Boolean(dragging), (el) => el.cursor_grabbing())
+      .children(tabs.map(pill))
       : div().px(12).text_size(12.5).text_color(t.muted).child("No tabs in this space"));
   const tools = capsule("tools").px(5).gap(4)
     .child(button("new", svg(icon("plus")).size(15), () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 }), 30, "New tab (⌘T)"))
