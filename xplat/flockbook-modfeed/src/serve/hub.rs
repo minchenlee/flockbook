@@ -80,6 +80,8 @@ pub struct Config {
     pub read_only: bool,
     /// The name the page shows.
     pub hub: String,
+    /// The herdr-app home whose Flockbook settings apply (`remote_helper: never`); passed to every command.
+    pub home: Option<String>,
 }
 
 /// One command of the sidecar, run in this process: its lines after `header`, without `end`.
@@ -352,6 +354,10 @@ impl Session {
             a.push("--cache".into());
             a.push(c.clone());
         }
+        // Last, as the mod passes it: the last --home counts.
+        if let Some(h) = &self.cfg.home {
+            a.extend(["--home".into(), h.clone()]);
+        }
         a
     }
 
@@ -494,7 +500,7 @@ impl Session {
                 cli::Keys::Send { text: text.into(), expect_kind: Some(kind.into()), expect_path: path }
             }
         };
-        let line = cli::keys(&p.terminal_id, cache, keys);
+        let line = cli::keys(&p.terminal_id, cache, self.cfg.home.as_deref(), keys);
         vec![done_reply(&id, std::slice::from_ref(&line))]
     }
 
@@ -764,7 +770,7 @@ mod tests {
 
     #[test]
     fn socket_refuses_keys() {
-        let mut s = Session::new(Config { cache: None, read_only: false, hub: "test".into() });
+        let mut s = Session::new(Config { cache: None, read_only: false, hub: "test".into(), home: None });
         s.welcomed = true;
         for t in KEYS {
             let r = s.receive(&json!({"v": 1, "id": "c1", "type": t, "pane": "hc:t1", "prompt": "x", "allow": true, "text": "x"}).to_string());
@@ -774,7 +780,7 @@ mod tests {
         // Missing fields are null, never a panic.
         assert_eq!(s.receive(r#"{"v":1,"id":"c5","type":"unwatch"}"#), vec![ok("c5")]);
         assert_eq!(s.post(r#"{"v":1,"id":"c6","type":"send"}"#)[0]["re"], "c6");
-        let mut ro = Session::new(Config { cache: None, read_only: true, hub: "test".into() });
+        let mut ro = Session::new(Config { cache: None, read_only: true, hub: "test".into(), home: None });
         assert_eq!(ro.post(r#"{"v":1,"id":"c3","type":"send","pane":"hc:t1","text":"x"}"#)[0]["error"]["code"], "readOnly");
         assert_eq!(ro.post(r#"{"v":1,"id":"c4","type":"watch","pane":"hc:t1"}"#)[0]["error"]["code"], "badRequest");
     }

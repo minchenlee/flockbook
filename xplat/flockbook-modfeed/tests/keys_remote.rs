@@ -37,7 +37,7 @@ fn keys_to_another_machine_go_to_the_helper_there() {
     let card = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed")).args(["card", "--terminal", "box/t3"]).env("HC_SOCKET", &here.path).output().unwrap();
     let card: serde_json::Value = String::from_utf8(card.stdout).unwrap().lines().nth(1).map(|l| serde_json::from_str(l).unwrap()).unwrap();
     let req = card["request"].as_str().unwrap().to_string();
-    let d = cli::keys("box/t3", Some(&cache), Keys::Approve { request: req.clone(), allow: true });
+    let d = cli::keys("box/t3", Some(&cache), None, Keys::Approve { request: req.clone(), allow: true });
     assert_eq!(d, json!({"type": "done", "result": "sent"}), "approve there");
     assert_eq!(there.keys(), vec![vec!["1".to_string()]]);
     assert!(here.keys().is_empty(), "no key here");
@@ -45,30 +45,30 @@ fn keys_to_another_machine_go_to_the_helper_there() {
     // Send: the text reaches the agent there unchanged, even text that looks like an option.
     there.set_terminals(vec![claude("t3", "idle", "")]);
     let text = "--allow --terminal t9 --home /x --file /etc/passwd --text";
-    let d = cli::keys("box/t3", Some(&cache), Keys::Send { text: text.into(), expect_kind: Some("claude".into()), expect_path: None });
+    let d = cli::keys("box/t3", Some(&cache), None, Keys::Send { text: text.into(), expect_kind: Some("claude".into()), expect_path: None });
     assert_eq!(d["result"], "sent", "{d}");
     assert_eq!(there.calls("terminal.send").last().unwrap()["text"], text);
     assert_eq!(there.calls("terminal.send").last().unwrap()["terminal"], "t3");
     assert!(here.calls("terminal.send").is_empty());
 
     // Another agent kind there: nothing is sent.
-    let d = cli::keys("box/t3", Some(&cache), Keys::Send { text: "hi".into(), expect_kind: Some("codex".into()), expect_path: None });
+    let d = cli::keys("box/t3", Some(&cache), None, Keys::Send { text: "hi".into(), expect_kind: Some("codex".into()), expect_path: None });
     assert_ne!(d["result"], "sent", "{d}");
 
     // Answer: the answers reach the helper there as it reads them (there is no question, so it says so).
     let a = vec![herdr_core::QuestionAnswer { picks: vec![0], other: Some("--deny".into()) }];
-    let d = cli::keys("box/t3", Some(&cache), Keys::Answer { request: "screen-1".into(), answers: a });
+    let d = cli::keys("box/t3", Some(&cache), None, Keys::Answer { request: "screen-1".into(), answers: a });
     assert_eq!(d["type"], "done", "a done line from there, not a usage error: {d}");
     assert_ne!(d["result"], "sent");
 
     // A value that would be read as an option there is refused here; nothing runs there.
     let runs = here.calls("machine.exec").len();
-    let d = cli::keys("box/t3", Some(&cache), Keys::Approve { request: "--deny".into(), allow: true });
+    let d = cli::keys("box/t3", Some(&cache), None, Keys::Approve { request: "--deny".into(), allow: true });
     assert_eq!(d["type"], "error", "{d}");
-    let d = cli::keys("box/t3", Some(&cache), Keys::Send { text: "hi".into(), expect_kind: Some("claude".into()), expect_path: Some("--home".into()) });
+    let d = cli::keys("box/t3", Some(&cache), None, Keys::Send { text: "hi".into(), expect_kind: Some("claude".into()), expect_path: Some("--home".into()) });
     assert_eq!(d["type"], "error", "{d}");
     assert_eq!(here.calls("machine.exec").len(), runs, "nothing ran there");
 
     // A bad address: an error, not a lookup here.
-    assert_eq!(cli::keys("a/b/c", Some(&cache), Keys::Approve { request: "r".into(), allow: true })["code"], "bad_terminal");
+    assert_eq!(cli::keys("a/b/c", Some(&cache), None, Keys::Approve { request: "r".into(), allow: true })["code"], "bad_terminal");
 }

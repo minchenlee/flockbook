@@ -83,6 +83,7 @@ Options:
 | `--cache <file>` | The sidecar's cache and its `answered/` claims (`~/.flockbook/serve/cache.json`). |
 | `--origin https://<host>` | An extra page origin to accept. Use it when a proxy changes `Host`. By default the `Origin` must name `Host` or `X-Forwarded-Host`. |
 | `--read-only` | The page only reads. Approve, answer and send are refused. |
+| `--home <folder>` | The herdr-app home whose Flockbook settings apply (`Never` for other machines). Default: `$HERDR_APP_HOME`, else the home this helper is installed in, else `~/.config/herdr-app`. |
 
 ## Run it at login (not installed for you)
 

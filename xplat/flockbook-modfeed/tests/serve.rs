@@ -594,3 +594,28 @@ fn older_rows_have_a_bound() {
     }
     assert_eq!(total, 20 + modfeedkit::serve::hub::MAX_OLDER, "the 20 tail rows before new20, then the bound");
 }
+
+#[test]
+fn never_comes_from_the_herdr_app_home() {
+    // Flockbook settings in $HERDR_APP_HOME say Never: nothing runs on box, keys to it get remote-off.
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app-home");
+    std::fs::create_dir_all(app.join("flockbook")).unwrap();
+    std::fs::write(app.join("flockbook/config.json"), r#"{"remote_helper": "never"}"#).unwrap();
+    let here = FakeHc::start();
+    let there = FakeHc::start();
+    here.set_terminals(vec![claude("box/t3", "idle", "")]);
+    there.set_terminals(vec![claude("t3", "idle", "")]);
+    here.add_machine("box", &dir.path().join("box-home"), &there.path);
+    let srv = start_env(&here.path, &[], &[("HERDR_APP_HOME", app.to_str().unwrap())]);
+    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p1", "type": "send", "pane": "hc:box/t3", "text": "hello", "agent": "claude"}));
+    let r: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(r[0]["ok"], false, "{r}");
+    assert!(r[0]["error"]["message"].as_str().unwrap_or("").contains("does not run its helper"), "{r}");
+    let mut ws = socket(srv.port);
+    say(&mut ws, json!({"v": 1, "id": "h", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "h");
+    say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": "hc:box/t3"}));
+    read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
+    assert!(here.calls("machine.exec").is_empty(), "nothing ran on box");
+}
