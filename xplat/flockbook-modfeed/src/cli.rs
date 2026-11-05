@@ -217,7 +217,8 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
             }
         }
-        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, queue"),
+        // The Swift sidecar's text (parity): `queue` is serve's own, not offered to the mod.
+        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send"),
     }
 }
 
