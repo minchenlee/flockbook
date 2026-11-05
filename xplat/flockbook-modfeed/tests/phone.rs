@@ -270,6 +270,57 @@ fn a_failed_service_is_an_error_with_where_to_look() {
     assert!(s["message"].as_str().unwrap().contains("flockbook-modfeed-serve.log"), "{s}");
 }
 
+fn serve_json(t: &T, v: Value) {
+    fs::write(t.bin.join("ts-serve.json"), v.to_string()).unwrap();
+}
+
+#[test]
+fn serve_443_used_by_another_service_gives_an_8443_command_and_why() {
+    let t = t();
+    signed_in(&t);
+    // 443 "/" is another local service: the plain command would replace it.
+    serve_json(&t, json!({"TCP": {"443": {"HTTPS": true}}, "Web": {"box.tail1.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:3000"}}}}}));
+    let p = t.phone("launchd", &["status"]);
+    assert_eq!(p["serve"]["set"], false, "{p}");
+    assert_eq!(p["serve"]["command"], "tailscale serve --bg --https=8443 8787");
+    assert!(p["serve"]["reason"].as_str().unwrap().contains("443 is used by another service"), "{p}");
+    // 8443 is taken as well: the next one.
+    serve_json(&t, json!({"TCP": {"443": {"HTTPS": true}, "8443": {"HTTPS": true}}, "Web": {
+        "box.tail1.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:3000"}}},
+        "box.tail1.ts.net:8443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:4000"}}}}}));
+    let p = t.phone("launchd", &["status"]);
+    assert_eq!(p["serve"]["command"], "tailscale serve --bg --https=10443 8787");
+    // Another path on 443 is not in the way: the plain command keeps it.
+    serve_json(&t, json!({"TCP": {"443": {"HTTPS": true}}, "Web": {"box.tail1.ts.net:443": {"Handlers": {"/grafana": {"Proxy": "http://127.0.0.1:3000"}}}}}));
+    let p = t.phone("launchd", &["status"]);
+    assert_eq!(p["serve"]["command"], "tailscale serve --bg 8787");
+    assert_eq!(p["serve"]["reason"], Value::Null);
+    assert!(!t.log().contains("tailscale serve --"), "status changes nothing: {}", t.log());
+}
+
+#[test]
+fn serve_443_free_gives_the_plain_command_and_no_reason() {
+    let t = t();
+    signed_in(&t);
+    serve_json(&t, json!({}));
+    let p = t.phone("launchd", &["status"]);
+    assert_eq!(p["serve"]["command"], "tailscale serve --bg 8787");
+    assert_eq!(p["serve"]["reason"], Value::Null);
+}
+
+#[test]
+fn serve_set_by_us_on_8443_gives_the_address_with_the_port() {
+    let t = t();
+    signed_in(&t);
+    serve_json(&t, json!({"TCP": {"443": {"HTTPS": true}, "8443": {"HTTPS": true}}, "Web": {
+        "box.tail1.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:3000"}}},
+        "box.tail1.ts.net:8443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8787"}}}}}));
+    let p = t.phone("launchd", &["status"]);
+    assert_eq!(p["serve"]["set"], true, "{p}");
+    assert_eq!(p["serve"]["url"], "https://box.tail1.ts.net:8443/");
+    assert_eq!(p["serve"]["reason"], Value::Null);
+}
+
 #[test]
 fn once_serve_is_set_the_address_and_a_qr_code() {
     let t = t();

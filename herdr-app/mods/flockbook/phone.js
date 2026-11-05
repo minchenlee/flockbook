@@ -30,6 +30,11 @@ export async function pollPhone(force = true) {
   return ask("status");
 }
 
+// On and Serve not set yet: the settings ask every 3 s, so the address shows once the command has run.
+export const phoneWaitsForServe = () => phoneOn() && !phone()?.line?.serve?.set && Boolean(phone()?.line?.tailscale);
+export const PHONE_TICK_MS = 3_000;
+export const phoneTick = () => pollPhone(phoneWaitsForServe());
+
 export const setPhone = (on) => ask(on ? "on" : "off");
 
 // A login or Read-only change: saved, and while on the service is written again with it.
@@ -86,6 +91,14 @@ export function phoneBody(t, owner, { seg, small }) {
     .child(h_flex().id("phone-state").gap(8).items_center().text_size(12.5)
       .child(div().size(7).rounded(4).flex_none().bg(said === "Running" ? t.done : bad ? t.blocked : t.dim))
       .child(div().text_color(bad ? t.foreground : t.muted).child(said)));
+  // On, Serve not set: the one step left, right under the state, where it is seen.
+  if (on && ts && !l.serve?.set) {
+    const command = l.serve?.command ?? "tailscale serve --bg 8787";
+    body.child(div().id("phone-serve-step").text_size(12.5).text_color(t.foreground).child("One step left: run this once in a terminal."))
+      .child(h_flex().gap(6).items_center().child(mono("phone-serve-command", command)).child(copy("phone-serve-copy", command)))
+      .when(Boolean(l.serve?.reason), (el) => el.child(div().id("phone-serve-reason").text_size(12).text_color(t.muted).child(l.serve?.reason ?? "")))
+      .child(note("Tailscale Serve puts the page on your tailnet with HTTPS (not tailscale funnel). Flockbook never changes your Tailscale settings. The address shows here once it is set."));
+  }
   if (!ts) {
     body.child(note(`${l?.tailscale_error ?? "Tailscale is not available."} The phone page is reached only through Tailscale. Guide: SERVE.md`))
       .child(h_flex().gap(6).items_center().child(mono("phone-guide", GUIDE)).child(copy("phone-guide-copy", GUIDE, "Copy link")));
@@ -106,9 +119,6 @@ export function phoneBody(t, owner, { seg, small }) {
       body.child(note("Open on your phone (signed in to the same Tailscale account):"))
         .child(h_flex().gap(6).items_center().child(mono("phone-url", l.serve.url)).child(copy("phone-url-copy", l.serve.url)))
         .when(Boolean(l.qr), (el) => el.child(div().id("phone-qr").size(156).p(8).rounded(8).bg("#ffffff").child(svg(l.qr).size(140).text_color("#000000"))));
-    } else {
-      body.child(note("Then, once, in a terminal: Tailscale Serve puts the page on your tailnet with HTTPS. Flockbook never changes your Tailscale settings. Not tailscale funnel."))
-        .child(h_flex().gap(6).items_center().child(mono("phone-serve-command", l.serve?.command ?? "tailscale serve --bg 8787")).child(copy("phone-serve-copy", l.serve?.command ?? "tailscale serve --bg 8787")));
     }
     if (l.service?.kind === "systemd") body.child(note("Linux: it stops when you log out, unless lingering is on (loginctl enable-linger)."));
   }
