@@ -607,6 +607,8 @@ fn never_comes_from_the_herdr_app_home() {
     here.set_terminals(vec![claude("box/t3", "idle", "")]);
     there.set_terminals(vec![claude("t3", "idle", "")]);
     here.add_machine("box", &dir.path().join("box-home"), &there.path);
+    here.set_machine_list(vec![json!({"name": "box", "state": "connected"})]);
+    here.set_doc("box/herdr-app", one_space("Remote", "build", &[("t3", "agent")]));
     let srv = start_env(&here.path, &[], &[("HERDR_APP_HOME", app.to_str().unwrap())]);
     let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p1", "type": "send", "pane": "hc:box/t3", "text": "hello", "agent": "claude"}));
     let r: Value = serde_json::from_str(&body).unwrap();
@@ -618,4 +620,10 @@ fn never_comes_from_the_herdr_app_home() {
     say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": "hc:box/t3"}));
     read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
     assert!(here.calls("machine.exec").is_empty(), "nothing ran on box");
+    // Not even a look: its layout is not read (its tab shows under the labels).
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    say(&mut ws, json!({"v": 1, "id": "p", "type": "ping"}));
+    read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "p");
+    assert!(here.calls("machine.list").is_empty(), "no machine list");
+    assert!(here.calls("doc.get").iter().all(|p| p.get("on").is_none()), "no document of box: {:?}", here.calls("doc.get"));
 }

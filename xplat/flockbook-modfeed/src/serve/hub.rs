@@ -365,7 +365,10 @@ impl Session {
     fn load(&mut self) -> Value {
         let session = HcSession::resolve_env();
         // Spaces and tabs as the Mac app shows them, other machines' too (`layout`).
-        self.workspaces = if session.is_available() { super::layout::snapshot(&HcClient::new(session, 8, 22)).unwrap_or_default() } else { vec![] };
+        self.workspaces = if session.is_available() { {
+            let never = crate::config::load(crate::config::dir(self.cfg.home.as_deref()).as_deref()).remote_never;
+            super::layout::snapshot(&HcClient::new(session, 8, 22), never).unwrap_or_default()
+        } } else { vec![] };
         snapshot(&self.workspaces)
     }
 

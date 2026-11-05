@@ -467,13 +467,14 @@ fn machine_docs_with(read: impl FnOnce(&[(String, Value)]) -> Vec<(String, Value
     lock().docs.clone()
 }
 
-/// `terminal.list` and the documents, grouped. Err: `terminal.list` failed.
-pub fn snapshot(client: &HcClient) -> Result<Vec<Workspace>, herdr_core::HerdrError> {
+/// `terminal.list` and the documents, grouped. Err: `terminal.list` failed. `remote_never` (the person chose Never for
+/// the helper on other machines): their documents are not read either, and their tabs group by labels.
+pub fn snapshot(client: &HcClient, remote_never: bool) -> Result<Vec<Workspace>, herdr_core::HerdrError> {
     let list = client.call("terminal.list", json!({}), None)?;
     let terms = list["terminals"].as_array().cloned().unwrap_or_default();
     // A document that cannot be read: names fall back to labels and folders.
     let app = client.call("doc.get", json!({"name": APP_DOC}), None).map(|r| r["value"].clone()).unwrap_or(Value::Null);
-    Ok(workspaces(&terms, &app, &machine_docs()))
+    Ok(workspaces(&terms, &app, &if remote_never { vec![] } else { machine_docs() }))
 }
 
 #[cfg(test)]

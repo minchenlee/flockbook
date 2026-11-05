@@ -37,7 +37,8 @@ in that pane now, nothing is sent (the same check as the mod's `send --expect-ki
 Terminals on other machines (`hc machine add`) show in their own spaces, named and ordered by that machine's
 Herdr layout, as in the Mac app. Their conversation, prompts and keys go through the helper on that machine,
 which makes the same checks there. `serve` never installs that helper: install it from the mod's card.
-A machine whose helper is off in Flockbook settings (`Never`) shows its tabs, but nothing is read or sent there.
+A machine whose helper is off in Flockbook settings (`Never`) shows its tabs, grouped by their labels, but
+nothing is read or sent there, not even its layout.
 
 Messages you typed while the agent works (its own queue: Claude Code, Codex, Grok Build) show faded at the end
 of the conversation. Claude Code's can be pulled back to the composer, as on the Mac: Up, then Ctrl-U, never
