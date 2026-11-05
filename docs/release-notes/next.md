@@ -11,4 +11,6 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 
+- Herdr app mod: a chat reply that mixes Chinese with English words or numbers (often in a list) no longer loses its last line under the next row.
+
 ### ⚙️ Changes

@@ -107,3 +107,26 @@ test("a long pasted message with a list is guessed within one line of its drawn 
   assert.ok(guess >= drawn, `${guess} < ${drawn}`);
   assert.ok(guess - drawn < LINE, `${guess} is a line or more over ${drawn}`);
 });
+
+// Latin words drawn on macOS (2× screenshot of a 760 px column, Herdr app 0.1.13): "Ran a command" is
+// about 112 px, "Herdr" with its two spaces about 44 px; a full-width character 16 px.
+test("a list item whose Latin words push the last full-width mark past the edge is guessed two lines", () => {
+  // Drawn: 「 + "Ran a command" + 」 + 36 full-width characters = 16 + 112 + 16 + 576 = 720 px, then 。
+  // (16 px) does not fit the item's 737 px (760 less the 22 px indent) and goes to a line of its own.
+  const text = "1. 「Ran a command」" + "測".repeat(36) + "。";
+  const guess = markdownHeight(text, 760);
+  assert.ok(guess >= 2 * LINE, `${guess} < ${2 * LINE}`);
+});
+
+test("digits and an en dash in a CJK list item are not counted narrower than drawn", () => {
+  // " 17–23" (space, digits, en dash) is drawn about 48 px wide; counted at 0.5 em it was 44.8 px. Drawn:
+  // 32 full-width characters + 5 × 48 = 752 px, wider than the item's 737 px: two lines.
+  const text = "- " + "測".repeat(32) + " 17–23".repeat(5);
+  assert.ok(markdownHeight(text, 760) >= 2 * LINE, `${markdownHeight(text, 760)}`);
+});
+
+test("bold markers are not counted as drawn text", () => {
+  // "**" is markup: a line of 46 full-width characters (736 px) in bold fits a 748 px column.
+  const text = "**" + "粗".repeat(46) + "**";
+  assert.ok(markdownHeight(text, W) < 2 * LINE, `${markdownHeight(text, W)}`);
+});
