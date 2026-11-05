@@ -82,7 +82,10 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 
 - **Tabs**: click a pill to show that tab. A tab with one agent shows the chat; a split tab or a
   shell shows its panes. Right-click a pill: Rename…, Move left, Move right, Open terminal,
-  Show chat or Show panes, Split right, Split down, Put away, Close tab.
+  Show chat or Show panes, Split right, Split down, Put away, Close tab. Drag a pill to move its
+  tab: a line shows where it goes, and the release moves it there. Dragging out of the bar
+  cancels (the tab stays), and so does another mouse button. Esc does not cancel: the bar does
+  not take the keyboard from the chat or the terminal.
 - **Chat**: opens at the newest message and follows new ones. Scrolling up stops following; the ↓
   button goes back to the end. Older messages load only when you scroll up past the first row.
   A click on a tool chip opens its calls (name, summary, a check, a spinner, or "failed").
@@ -173,6 +176,8 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - Do not add a `mod:flockbook` section to `keys.json`: with one, no key worked.
 - `layout()` is the file, not the live tree. Keep the shown screen and the sidebar state in shared
   state, and select the screen outright.
+- A mouse move carries no button state and arrives only over the element under the pointer, so
+  a release outside the bar is never seen. The tab drag ends when the pointer leaves the bar.
 - Each screen draws its own top bar, so each copy runs the bar's work. Two copies can get one key
   command: the first acts, and the others skip it within 150 ms (`flockbook.command`).
 - The chat is a `v_virtual_list` with guessed heights (14 px text, 22 px lines, wide letters
@@ -209,3 +214,5 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - With the sidebar hidden, moving the pointer to the window's left edge slides out the floating
   sidebar, and it closes when the pointer leaves it.
 - ⌃` opens the agent's terminal window; ⌃` again closes it.
+- Dragging a pill onto another pill moves that tab there, also with the bar scrolled; dragging it
+  out of the bar and releasing moves nothing.

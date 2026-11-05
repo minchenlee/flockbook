@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Herdr app: drag a tab in the top bar to change the tab order. A line shows where it goes; dragging out of the bar cancels.
+
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
