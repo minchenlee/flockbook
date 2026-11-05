@@ -1,6 +1,6 @@
 //! Pictures the page uploads (`attach`, POST /api only) for its next `send` (the Mac hub's `HubSession.attach`).
-//! Unlike the Mac hub, nothing is re-encoded: PNG, JPEG and WebP are kept as they are, by their first bytes, never
-//! by a name or MIME type. HEIC (an iPhone's own type) cannot be read here: the page is told to pick JPEG or PNG.
+//! Unlike the Mac hub, nothing is re-encoded: PNG, JPEG and WebP are kept, by their first bytes, never by a name or
+//! MIME type, without their metadata (`strip`: a JPEG keeps only its Orientation). HEIC (an iPhone's own type) cannot be read here: the page is told to pick JPEG or PNG.
 //!
 //! The files go to `<herdr-app home>/flockbook/uploads` (mode 700), each mode 600 with a name made here
 //! (`phone-YYYYMMDD-HHMMSS-xxxxxx.<ext>`). `send` takes only names this helper holds and types their paths. Only
@@ -88,6 +88,17 @@ pub fn kind(b: &[u8]) -> Result<(&'static str, i64, i64), &'static str> {
         return Err("The image is too large (at most 12000 px a side, 50 megapixels, 10 MB).");
     }
     Ok((ext, w, h))
+}
+
+/// `b` without its metadata (`strip`), by its type; HEIC and other types as they are (`kind` refuses them).
+pub fn clean(b: &[u8]) -> Result<Vec<u8>, &'static str> {
+    use herdr_core::log_image::Format;
+    match herdr_core::log_image::header(b) {
+        Some((Format::Jpeg, ..)) => super::strip::jpeg(b),
+        Some((Format::Png, ..)) => super::strip::png(b),
+        Some((Format::Webp, ..)) => super::strip::webp(b),
+        _ => Ok(b.to_vec()),
+    }
 }
 
 /// A name `write` makes: "phone-YYYYMMDD-HHMMSS-xxxxxx.<png|jpg|webp>". Only these are ever removed.
@@ -226,6 +237,8 @@ pub fn attach(dir: &Path, name: &str, part: usize, parts: usize, data: &str, now
         st.open = Some(Open { name: name.into(), parts, next: part + 1, data: all });
         return Ok(None);
     }
+    // Metadata out (EXIF and XMP, text chunks; a JPEG keeps its Orientation), then the checks on what is kept.
+    let all = clean(&all).map_err(bad)?;
     let (ext, width, height) = kind(&all).map_err(bad)?;
     let path = write(dir, &all, ext, wall).map_err(|_| ("failed", "The helper could not store the image.".to_string()))?;
     if st.held.len() >= MAX_HELD {

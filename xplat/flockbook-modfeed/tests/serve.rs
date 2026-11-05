@@ -739,9 +739,14 @@ fn pictures_go_up_with_post_and_out_with_send() {
     let hub: Value = serde_json::from_str(&hub).unwrap();
     assert!(hub["post"].as_array().unwrap().contains(&json!("attach")), "{hub}");
 
-    // A PNG of 700 KB in two parts: kept as it is, in the helper's own folder, mode 600.
-    let pic = png(30, 40, 700_000);
-    let (a, b) = pic.split_at(640 << 10);
+    // A PNG of 700 KB in two parts, with a text chunk: kept without it, in the helper's own folder, mode 600.
+    let chunk = |ty: &[u8], d: &[u8]| [&(d.len() as u32).to_be_bytes()[..], ty, d, &[0, 0, 0, 0]].concat();
+    let sig = b"\x89PNG\r\n\x1a\n".to_vec();
+    let ihdr = chunk(b"IHDR", &[0, 0, 0, 30, 0, 0, 0, 40, 8, 6, 0, 0, 0]);
+    let (idat, iend) = (chunk(b"IDAT", &vec![7u8; 700_000]), chunk(b"IEND", &[]));
+    let sent_up = [sig.clone(), ihdr.clone(), chunk(b"tEXt", b"Comment\0at home"), idat.clone(), iend.clone()].concat();
+    let pic = [sig, ihdr, idat, iend].concat();
+    let (a, b) = sent_up.split_at(640 << 10);
     assert_eq!(up("a0", "img-1", 0, 2, &b64(a)), json!([{"type": "reply", "re": "a0", "ok": true}]));
     let r = up("a1", "img-1", 1, 2, &b64(b));
     assert_eq!(r[0], json!({"type": "attached", "upload": "img-1", "width": 30, "height": 40, "bytes": pic.len()}), "{r}");
