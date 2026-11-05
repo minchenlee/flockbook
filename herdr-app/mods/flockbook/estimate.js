@@ -2,9 +2,9 @@
 // Body text as TextView draws it (measured in the app): 16 px (1rem), 26 px per line (gpui's line
 // height, about 1.618 × the size). Over-guessing leaves a gap; under-guessing cuts the row, so the
 // guesses lean high: prose wraps by unit (a Latin word or an inline code span does not break, closing
-// full-width punctuation stays with the character before it), letters are counted wide, and 8% goes on
-// top of the prose. Code boxes and tables get their drawn height, with no 8%: on a long answer full of
-// code the 8% left a big gap.
+// full-width punctuation stays with the character before it, opening punctuation with the one after),
+// letters are counted per character a little wide, and END_PAD px go on the end.
+// No percentage on top: on a long pasted message 8% of the height was many lines of empty space.
 export const READ_W = 760;  // the reading column's width at most
 export const GUTTER = 24;   // each side of the column
 
@@ -13,26 +13,50 @@ const isWide = (c) => c >= 0x1100 && (c <= 0x115f || (c >= 0x2e80 && c <= 0xa4cf
 
 // Body text size and line height, in px.
 export const FS = 16, LH = 26;
-// Latin letters in prose, in em: measured about 0.47 em (spaces included); a little more.
-const LATIN_EM = 0.5;
+// Kept under the prose, for what the count misses (a bold word, an emoji). Small: the guess is meant to
+// be within a line of the drawn height.
+const END_PAD = 6;
+// Latin letters in prose: Helvetica's widths (1/1000 em, ASCII 33-126), 6% wider. The Mac's system font draws
+// a hyphenated lowercase word 6% wider than Helvetica and digits 0.6 em (measured, Herdr app 0.1.13); a flat 0.5 em was
+// narrower than drawn on digits and capitals, and a line that just fit in the guess wrapped on screen.
+const HELV = [278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015,
+  667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611,
+  278, 278, 278, 469, 556, 333,
+  556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500,
+  334, 260, 334, 584];
+const LATIN_SCALE = 1.06;  // more puts the long VM-measured message (Linux font) a line over
+// Other narrow characters (an en dash, an accented letter): 0.6 em.
+const latinWidth = (u, fs) => {
+  let w = 0;
+  for (const ch of u) { const c = ch.codePointAt(0); w += c >= 33 && c <= 126 ? HELV[c - 33] : 600; }
+  return w * LATIN_SCALE * fs / 1000;
+};
 // Inline code: Menlo at 14 px, 0.6 em a character, 4 px padding each side.
 const CODE_CH = 14 * 0.6, CODE_PAD = 8;
 // Full-width punctuation that may not start a line: it goes down with the character before it.
 const NO_START = new Set("，。、；：？！）」』】〉》〕｝％…—～·");
+// Full-width punctuation that may not end a line: it goes down with the character after it.
+const NO_END = new Set("（「『【〈《〔｛");
 
-// Lines of prose drawn `width` px wide at `fs` px. Each line keeps one character of slack: line
-// breaking (no-start punctuation, a word moved down) can end a line a character early.
-export function proseLines(text, full, fs = FS) {
-  const width = Math.max(fs, full - fs);
-  const units = String(text).match(/`[^`]+`|[A-Za-z0-9_\-+./:@#%&=?!'"$<>~^*]+|\s+|./gsu) ?? [];
+// Lines of prose drawn `width` px wide at `fs` px. gpui fills a line to its full width and lets
+// punctuation start a line (measured in the VM: 35 full-width characters fit 564 px, 36 wrap), so no
+// slack is kept: a character of slack per line counted a line too many on 5 of 54 measured paragraphs
+// and none too few without it. Latin letters, counted wide, keep their own margin.
+export function proseLines(text, width, fs = FS) {
+  width = Math.max(fs, width);
+  // A word: letters, digits, brackets and the marks gpui keeps inside one. A slash starts a new word:
+  // gpui breaks "HC_SESSION/HC_SOCKET" before the slash (measured in the VM).
+  const units = String(text).match(/`[^`]+`|\/?[A-Za-z0-9_\-+.:@#%&=?!'"$<>~^*()[\]{}]+|\s+|./gsu) ?? [];
   const wide = (u) => isWide(u.codePointAt(0));
   const size = (u) => u[0] === "`" && u.length > 1 ? (u.length - 2) * CODE_CH + CODE_PAD
     : /^\s+$/.test(u) ? fs * 0.3 * u.length
-      : wide(u) ? fs : u.length * fs * LATIN_EM;
+      : wide(u) ? fs : latinWidth(u, fs);
   let n = 1, w = 0;
   for (let i = 0; i < units.length; i++) {
     let u = units[i], uw = size(u);
-    // Keep a run of no-start punctuation with the unit before it.
+    // Keep opening punctuation with the unit after it, and a run of no-start punctuation with the unit before it.
+    while (NO_END.has(u) && i + 1 < units.length && !/^\s+$/.test(units[i + 1])) { u = units[++i]; uw += size(u); }
     while (i + 1 < units.length && NO_START.has(units[i + 1])) { uw += fs; i++; }
     if (w > 0 && w + uw > width) {
       if (/^\s+$/.test(u)) { n++; w = 0; continue; }  // a space at the break is not drawn
@@ -60,17 +84,24 @@ export function markdownHeight(text, width) {
   // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
   let gap = 0;
   const box = () => { h -= gap; gap = 0; };
+  // The open paragraph, list item or quote. Markdown joins a line that starts no new block to it (a soft
+  // break draws as a space), so its lines are counted once, joined: counted one by one, a long pasted
+  // message with short source lines came out many lines too tall.
+  let para = null, lastLevel = null;  // lastLevel: the last list item's nesting, while in a list
+  // "**" (bold) is markup, not drawn.
+  const close = () => { if (para) p += proseLines(para.text.replace(/\*\*/g, ""), para.width, para.fs) * para.lh + para.extra; para = null; };
   const lines = String(text).split("\n");
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li].replace(/\t/g, "    ");
     // A code box as mdblocks.js draws it: 6 px margin, 10 px padding and a 1 px border, each side.
-    if (/^\s*```/.test(line)) { if (!inCode) { box(); h += 34; } else prevBlank = true; inCode = !inCode; continue; }
+    if (/^\s*```/.test(line)) { close(); lastLevel = null; if (!inCode) { box(); h += 34; } else prevBlank = true; inCode = !inCode; continue; }
     if (inCode) { h += CODE_LH * Math.max(1, wrapLines(line, width - 30, 13)); continue; }
-    if (!line.trim()) { if (!prevBlank) { h += 10; gap = 10; } prevBlank = true; continue; }
+    if (!line.trim()) { close(); if (!prevBlank) { h += 10; gap = 10; } prevBlank = true; continue; }
     prevBlank = false; gap = 0;
     let m;
-    if ((m = /^(#{1,6})\s/.exec(line))) { const size = [30, 25, 22, 20, 17, 16][m[1].length - 1]; p += proseLines(line, width, size) * size * 1.62 + 12; continue; }
+    if ((m = /^(#{1,6})\s/.exec(line))) { close(); lastLevel = null; const size = [30, 25, 22, 20, 17, 16][m[1].length - 1]; p += proseLines(line, width, size) * size * 1.62 + 12; continue; }
     if (/^\s*\|/.test(line) && li + 1 < lines.length && TABLE_SEP.test(lines[li + 1])) {
+      close(); lastLevel = null;
       // A table as mdblocks.js draws it: 6 px above and below, a 1 px frame; each row 8 px padding top
       // and bottom plus a 1 px line, as tall as its tallest cell at the colWidths widths.
       const rows = [tableCells(line)];
@@ -83,11 +114,28 @@ export function markdownHeight(text, width) {
       li = j - 1; prevBlank = true;
       continue;
     }
-    if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) { p += proseLines(line.slice(m[0].length), width - 24 - m[1].length * 8) * LH + 6; continue; }
-    if (/^>\s?/.test(line)) { p += proseLines(line.replace(/^>\s?/, ""), width - 24) * LH; continue; }
-    p += proseLines(line, width) * LH;
+    if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) {
+      // Text is 22 px in per level (measured). A list right under a paragraph (no blank line) still gets
+      // the paragraph gap above it.
+      // Items are 4 px apart; the first item of a list, nested ones too, has no gap above it (measured).
+      const level = m[1].length ? Math.ceil(m[1].length / 4) : 0;
+      if (para && !para.item) p += 10;
+      else if (lastLevel !== null && level <= lastLevel) p += 4;
+      lastLevel = level;
+      close(); para = { text: line.slice(m[0].length), width: width - 22 * (1 + level), fs: FS, lh: LH, extra: 0, item: true };
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      close(); lastLevel = null; para = { text: line.replace(/^>\s?/, ""), width: width - 24, fs: FS, lh: LH, extra: 0 };
+      continue;
+    }
+    // A line under a rule-like or setext marker is left as its own line (rare in chat; counted high).
+    if (/^\s*([-*_=])(\s*\1){2,}\s*$/.test(line)) { close(); lastLevel = null; p += LH; continue; }
+    if (para) { para.text += " " + line.trim(); continue; }
+    lastLevel = null; para = { text: line, width, fs: FS, lh: LH, extra: 0 };
   }
-  return Math.ceil(h + p * 1.08);
+  close();
+  return Math.ceil(h + p + (p > 0 ? END_PAD : 0));
 }
 
 const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;

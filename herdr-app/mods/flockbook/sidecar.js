@@ -52,6 +52,8 @@ export const installHelper = (machine, sha256) => call("helper", ["install", "--
 export const removeHelper = (machine) => call("helper", ["remove", "--machine", machine, "--cache", cachePath()]);
 // A newer Flockbook? `dismiss`: hide that version's line (docs/protocol.md, update).
 export const updateCheck = (dismiss = null) => call("update-check", dismiss ? ["--dismiss", dismiss] : []);
+// The phone page as a user service: status, on, off (docs/protocol.md, phone).
+export const phone = (what) => call("phone", [what]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 // `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
 export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,

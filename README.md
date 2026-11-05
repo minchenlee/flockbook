@@ -55,7 +55,7 @@ The install never overwrites what you have: if a layout, mod or theme called flo
 
 A native macOS app (macOS 15 or later) with the same reading view, outside the Herdr app. It also has remote access from your phone over Tailscale, phone notifications, queued messages and an embedded terminal.
 
-**[Download for macOS](https://github.com/minchenlee/flockbook/releases/latest)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
+**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.8.0)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/conversation-dark.png">
@@ -68,7 +68,7 @@ The Rust code in `xplat/` is an early port of Flockbook to Linux and Windows, bu
 
 ## Privacy
 
-Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service. The Herdr app mod and its helper read the same session logs and talk to herdr-core (`hc`) on your Mac; they go on the network only to check api.github.com once a day for a newer release (turn it off on the mod's Flockbook screen).
+Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service. The Herdr app mod and its helper read the same session logs and talk to herdr-core (`hc`) on your Mac; they go on the network only to check api.github.com once a day for a newer release (turn it off in the mod's Flockbook settings).
 
 ## How this was built
 

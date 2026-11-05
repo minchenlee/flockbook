@@ -14,9 +14,10 @@ a card. The sidebar is hidden and slides out from the window's left edge.
 The window has no title bar. The macOS window buttons sit at 18, 22. The theme is black and white
 (`flockbook` dark, `flockbook-light` light); the Mac themes (`flockbook-mac`, `flockbook-mac-light`)
 use blue `#007aff` for working, green `#34c759` for done and orange `#ff9500` for blocked.
-Dark colors: the window shows `#0b0b0b` behind the chat and the sidebar alike (the theme names
-canvas `#000000` and chrome `#0b0b0b`; the window paints both `#0b0b0b`), raised `#161616`, hover
-`#1c1c1c`, selected `#262626`, border `#363636`, muted `#9a9a9a`, dim `#5f5f5f`, accent and
+Dark colors: the base colors are the same as `flockbook-mac`. The window shows `#202020` behind the
+chat and the sidebar alike (the theme names canvas `#202020` and chrome `#1c1c1c`; the window paints
+both `#202020`), raised `#262626`, hover `#2e2e2e`, selected `#383838`, text selection `#3a3a3a`,
+border `#363636`, muted `#9a9a9a`, dim `#707070` (3.3:1 on the canvas, as before), accent and
 foreground `#ededed`.
 
 Left to right:
@@ -35,10 +36,10 @@ Left to right:
      floating sidebar. The tab drag in the top bar and this one share `drag.js`.
    - At the bottom: the update line when a newer Flockbook is out (a `raised` 8 px box: "Flockbook
      X.Y.Z is out", then **Copy install command** and **Not now**), a **Flockbook** row (the
-     Flockbook screen), and **Settings**.
+     Flockbook settings dialog), and **Settings**.
    While the sidebar is hidden and a newer Flockbook is out, the top bar's sidebar button has a 7 px
    `accent` dot, until the sidebar opens (docked or floating) or **Not now**.
-2. **Work area**: a stack of five screens. The bar floats over the first four.
+2. **Work area**: a stack of four screens. The bar floats over the first three.
    - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
      round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
      Centered: a tab capsule and a tools capsule, both 38 px tall, fully round, `chrome` with a 1 px
@@ -81,12 +82,21 @@ Left to right:
      N need you", and a "Group by Status | Workspace" switch. Then groups of 64 px cards (1 to 3
      columns, at least 300 px each, 12 px gaps): a status mark, the tab label (14 px semibold), how
      long ago it changed ("13m"), and the space and agent in 12 px muted.
-   - **Flockbook**: at most 640 px wide. "Flockbook" (18 px), "Saved in <file>. Changes apply at
-     once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
+   - **Flockbook settings**: not a screen but a dialog over the window, as Herdr's own Settings
+     (`openOverlay` `kind: "dialog"`, 760 px × 0.8 of the window, Herdr's frame: rounded corners,
+     shadow, the window dimmed behind it). Esc, a click beside it, or its close button (28 px, top
+     right) closes it; opening it again replaces it. The sidebar's Flockbook row, ⌘⇧, and the tab
+     menu's "choose Ask in Flockbook settings first…" open it. "Flockbook" (18 px), "Saved in <file>.
+     Changes apply at once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
      12 px muted, and on the right a two-choice switch: 26 px choices in a `chrome` frame, the chosen
      one `selected` and semibold): **Check for updates** On | Off, **Status row** Show | Hide,
-     **Helper on other machines** Ask | Never. A box with a `blocked` border when config.json is not
+     **Helper on other machines** Ask | Never, **Phone page** Off | On. A box with a `blocked` border when config.json is not
      JSON. The update line with the command written out (Menlo 11.5 px) when one is out.
+     Under Phone page: a status dot and line (Running in `done`, a problem in `blocked`); without
+     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** field (empty:
+     the login found, which the line under it names), **Read-only** Off | On, and while on either
+     the one `tailscale serve --bg 8787` command with Copy or, once Serve is set, the address with
+     Copy and a 140 px QR code on a white 8 px box. Linux adds a line on `loginctl enable-linger`.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
      above them, 8 px padding, 6 px gaps, 8 px corners, 1 px border, `muted` border on focus).
 
@@ -120,10 +130,10 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Flockbook settings** (the Flockbook row, or ⌘⇧,): saved in `<herdr-app home>/flockbook/config.json`
   as `{"check_updates": true, "status_row": "show", "remote_helper": "ask"}`. The install never
   creates the file; a missing file or key is the default, and so is a value that is not one of the
-  choices. A file that is not JSON is the defaults too: the screen says so, and its switches do
+  choices. A file that is not JSON is the defaults too: the dialog says so, and its switches do
   nothing until the file is fixed or removed (it is never overwritten). A change keeps the other keys,
   is written against the text just read (someone else's change is read again, not lost), and every
-  view shows it at once. The file is read again each minute and when the screen opens.
+  view shows it at once. The file is read again each minute and when the dialog opens.
   - **Check for updates** On: the mod asks the helper (`update-check`) at most once an hour; the
     helper asks GitHub at most once a day. A newer release shows the update line; **Copy install
     command** puts the one-line install on the clipboard; **Not now** hides it until a newer one.
@@ -135,6 +145,14 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
     settings first…" (it opens them) in place of Remove helper; and the helper
     itself refuses every command for a terminal there and `helper install` / `remove` (`remote-off`). To remove a helper that is
     already there, choose Ask first.
+  - **Phone page** On: the helper (`phone on`) writes the phone page's user service (a launchd agent
+    on macOS, a systemd user unit on Linux, from `serve --print`, marked as Flockbook's) and loads
+    it, so it keeps running after Herdr app quits and starts at login. Off stops it and removes that
+    one file. A service set up by hand (SERVE.md) has no marker: the section says so and leaves it.
+    No Tailscale: On cannot be picked. The login and Read-only apply at once (the service is written
+    again). The port is config.json `phone_port` (8787), not in the dialog: for a port already taken.
+    Flockbook never changes Tailscale settings; it shows the Serve command. An install that replaces
+    the helper restarts this service. While the dialog is open it asks the helper again every 10 s.
 - **Sidebar**: ⌘B or the sidebar button shows and hides it. With it hidden, the pointer at the
   window's left 4 px slides it out as a floating panel (260 px wide, 8 px from the edges, 14 px
   corners, a large shadow), which closes when the pointer leaves it, on Esc or a click beside it.
@@ -145,7 +163,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Keys** (while this layout shows): ⌘T new tab, ⌘W close tab, ⌘⇧N new space, ⌘1-⌘9 a tab,
   ⌘⇧[ / ⌘⇧] or ⌃Tab / ⌃⇧Tab the tab before or after, ⌘⌥↑ / ⌘⌥↓ the space before or after,
   ⌘⌃⇧← / ⌘⌃⇧→ move the tab, ⌘⇧I Needs you, ⌘⇧\ Overview, ⌘B sidebar, ⌃` terminal,
-  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘⇧, Flockbook settings, ⌘/ help. On the Flockbook screen,
+  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘⇧, Flockbook settings, ⌘/ help. In the Flockbook settings,
   Tab moves through the choices and Enter or Space picks one.
 
 ## Built from
@@ -155,16 +173,17 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   - `sidebar`: a `column`, 250 px (min 220, max 320), `hidden`, `chrome`, a 1 px divider, holding
     one block `side`.
   - `work`: a `column` holding the `stack` `screen` (active `chat`) with the blocks `chat`,
-    `needs`, `overview`, `settings` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
+    `needs`, `overview` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
     `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
     padding 8).
   - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
 - **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked
-  by `props.view`: `side`, `chat`, `needs`, `overview`, `settings`, `top`; overlays use `termbar` (the terminal
-  window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
+  by `props.view`: `side`, `chat`, `needs`, `overview`, `top`; overlays use `settings` (the Flockbook
+  settings dialog), `termbar` (the terminal window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
   All views are in one folder because a mod cannot import another mod's files.
 - **Shared state** (`shared` / `setShared`): `flockbook.agent` (the agent shown),
-  `flockbook.screen` (the shown screen), `flockbook.sidebar`, `flockbook.sidebar.peek`,
+  `flockbook.screen` (the shown screen; an old `settings` shows the chat), `flockbook.settings` (the
+  open settings dialog), `flockbook.sidebar`, `flockbook.sidebar.peek`,
   `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
   `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
   last update line, and when the mod asked).

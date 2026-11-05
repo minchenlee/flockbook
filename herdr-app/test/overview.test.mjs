@@ -21,8 +21,8 @@ test("every tab of every space, except settled ones", () => {
   assert.deepEqual(allTabs().map((it) => it.tab.id), ["tb-t1", "tb-t2", "tb-t3", "tb-sh"]);
 });
 
-test("grouped by status: needs you, working, then done and resting; or by space", () => {
-  assert.deepEqual(groups(allTabs(), "status").map((g) => [g.title, g.items.length]), [["Needs you", 1], ["Working", 1], ["Done and resting", 2]]);
+test("grouped by status: needs you, working, done, then resting; or by space", () => {
+  assert.deepEqual(groups(allTabs(), "status").map((g) => [g.title, g.items.length]), [["Needs you", 1], ["Working", 1], ["Done", 1], ["Resting", 1]]);
   assert.deepEqual(groups(allTabs(), "space").map((g) => [g.title, g.items.length]), [["app", 2], ["docs", 2]]);
 });
 

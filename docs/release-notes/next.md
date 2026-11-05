@@ -5,9 +5,7 @@ One short line: what this release is about.
 
 ### ✨ New
 
-- Herdr app: drag a tab in the top bar to change the tab order. A line shows where it goes; dragging out of the bar cancels.
-- Herdr app: drag a workspace in the sidebar up or down to change the workspace order. A line shows where it goes; dragging out of the list cancels.
-- Herdr app mod: a Flockbook settings screen (check for updates, status row, helper on other machines), a quiet line when a newer Flockbook is out, and the install upgrades an older, unchanged Flockbook (a gallery copy) in place. *(preview)*
+- Herdr app mod: Flockbook settings have a Phone page switch. On runs the phone page in the background as a user service (it keeps running after Herdr app quits), names your Tailscale login, and shows the one `tailscale serve` command, then the address and a QR code. Flockbook never changes Tailscale settings. *(preview)*
 
 - Phone page on the Rust helper (`flockbook-modfeed serve`): scroll up for older messages, as on the Mac hub. New rows still come while you read them.
 - Phone page on the Rust helper: spaces and tabs as the Herdr app shows them, also tabs on other machines. Before, every terminal was in one tab. Reading, approving and sending on another machine go through the helper there.
@@ -20,10 +18,6 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 
-- Herdr app mod: ⌘V in the reply box attaches copied files and images. A file copied in Finder is attached instead of its name typed; a screenshot or a browser's Copy Image (also TIFF only) is attached as a PNG. Text still pastes as text, also from Excel, Numbers or Word.
-- Herdr app mod: Enter in the middle of the reply sends it without a line break at the cursor. Before, that line break went out, and came back with the text after a failed send.
-- Herdr app mod: Shift+Enter in the reply box starts a new line at the cursor. Before, it sent the reply. Enter still sends.
-- Herdr app mod: a chat reply in Chinese or Japanese, or with inline code, no longer loses its last line under the time row. Row heights now use the size the text is drawn at (16 px, 26 px lines) and keep whole words and code together.
-- Herdr app mod: on Herdr 0.1.13 you can select and copy text in the chat again. Before, a drag in a reply selected nothing.
+- Herdr app mod: a chat reply that mixes Chinese with English words or numbers (often in a list) no longer loses its last line under the next row.
 
 ### ⚙️ Changes

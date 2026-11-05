@@ -4,12 +4,16 @@ name: Release
 #  1. helpers (helpers.yml): the Rust flockbook-modfeed, stripped, for universal-apple-darwin,
 #     x86_64-unknown-linux-musl and aarch64-unknown-linux-musl. Each runs `version`; the protocols must match;
 #     the mod zip is packaged and both installs are tried on macOS, Linux x86_64 and Linux arm64.
-#  2. build (macOS): the app (signed, notarized when the secrets are there), then scripts/package-mod.sh with
+#  2. build (macOS): the app (signed, notarized when the secrets are there; only with the Mac app on, see
+#     below), then scripts/package-mod.sh with
 #     those helpers: Flockbook-herdr-mod-<version>.zip (bin/ = the macOS helper, signed; remote/<target>/ = all
 #     three, remote/SHA256SUMS), and the one-line install's assets dist/install.sh and
 #     dist/flockbook-modfeed-<target>. dist/SHA256SUMS covers the app, the zip, the helpers and install.sh.
-#  3. publish: one GitHub release with Flockbook-<version>.zip/.dmg, Flockbook-herdr-mod-<version>.zip,
-#     install.sh, flockbook-modfeed-<target> (x3), SHA256SUMS and appcast.xml (notarized builds only).
+#  3. publish: one GitHub release with Flockbook-herdr-mod-<version>.zip, install.sh, flockbook-modfeed-<target>
+#     (x3), SHA256SUMS and, with the Mac app on, Flockbook-<version>.zip/.dmg and appcast.xml (notarized only).
+# The Mac app is off by default: releases ship the Herdr app mod only. Turn it on for every release with the
+# repository variable RELEASE_MAC_APP=true, or for one run with workflow_dispatch mac_app=true. When it is on
+# again, point site/static/_redirects (appcast) and the download links back to releases/latest.
 # The one-line install then works from releases/latest/download/install.sh. workflow_dispatch rebuilds an
 # existing tag. To try the helpers without a release: push a ci/ branch (helpers.yml runs on its own).
 
@@ -23,6 +27,11 @@ on:
         description: 'Existing release tag (e.g. v0.1.0)'
         required: true
         type: string
+      mac_app:
+        description: 'Also build, notarize and publish the Mac app (Flockbook.app, dmg, appcast)'
+        required: false
+        type: boolean
+        default: false
 
 # The build job only reads the repo; only the publish job writes the release.
 permissions:
@@ -40,11 +49,13 @@ jobs:
   # Developer ID cert into a temporary keychain, sign with hardened runtime, notarize, staple. Without secrets: ad-hoc sign, no notarization,
   # release notes say "unsigned".
   build:
-    name: Build macOS app
+    name: Build and package
     needs: helpers
     runs-on: macos-26
     timeout-minutes: 60
     env:
+      # 'true' or 'false': build the Mac app too (see the top of this file).
+      MAC_APP: ${{ (github.event_name == 'workflow_dispatch' && inputs.mac_app) || vars.RELEASE_MAC_APP == 'true' }}
       # Pin the toolchain: Xcode 26.1.1 ships Swift 6.2.1, the same compiler the app is developed with.
       DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
       ARCHS: arm64 x86_64
@@ -73,16 +84,19 @@ jobs:
           echo "BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Toolchain
+        if: env.MAC_APP == 'true'
         run: |
           xcodebuild -version
           swift --version
 
       - name: Build (arm64 + x86_64)
+        if: env.MAC_APP == 'true'
         run: |
           for a in $ARCHS; do swift build -c release --product HerdrDesk --arch "$a"; done
 
       # Headless checks only: they use a fake herdr socket and fixtures, no herdr server, no window.
       - name: HerdrKitChecks
+        if: env.MAC_APP == 'true'
         run: swift run HerdrKitChecks
 
       - name: Import signing certificate
@@ -107,6 +121,7 @@ jobs:
 
       # SPARKLE_PUBLIC_KEY (a repository variable, not secret) turns on auto-update in the app.
       - name: Bundle and sign
+        if: env.MAC_APP == 'true'
         env:
           SIGN_ID: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
@@ -114,6 +129,7 @@ jobs:
 
       # scripts/package.sh builds the dmg window with dmgbuild (hash-pinned in scripts/dmg/requirements.txt, own venv).
       - name: Python for dmgbuild
+        if: env.MAC_APP == 'true'
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
@@ -132,23 +148,32 @@ jobs:
             echo "Signing or notarization secrets missing; publishing an unsigned build."
           fi
           echo "NOTARIZED=$NOTARIZED" >> "$GITHUB_ENV"
-          if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh build/Flockbook.app; fi
-          scripts/package.sh
-          if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh "dist/Flockbook-$VERSION.dmg"; fi
+          if [ "$MAC_APP" = true ]; then
+            if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh build/Flockbook.app; fi
+            scripts/package.sh
+            if [ "$NOTARIZED" = 1 ]; then scripts/notarize.sh "dist/Flockbook-$VERSION.dmg"; fi
+          else
+            echo "Mac app off: the release has the Herdr app mod only."
+            mkdir -p dist
+          fi
           # The Herdr app mod (preview): layout, mod and the Rust flockbook-modfeed for every platform in one zip,
           # plus the one-line install's assets (install.sh, flockbook-modfeed-<target>).
           rm -f helpers/*/version.txt
           NOTARIZE="$NOTARIZED" HELPERS=helpers scripts/package-mod.sh
           (cd dist && shasum -a 256 Flockbook-* flockbook-modfeed-* install.sh > SHA256SUMS && cat SHA256SUMS)
           {
-            if [ "$NOTARIZED" = 1 ]; then
+            if [ "$MAC_APP" != true ]; then
+              echo "Flockbook for the Herdr app (preview). No new Flockbook for Mac build in this release."
+            elif [ "$NOTARIZED" = 1 ]; then
               echo "Signed with a Developer ID and notarized by Apple."
             else
               echo "**Unsigned build.** It is not signed with a Developer ID and not notarized."
               echo "macOS blocks it on first open. To run it anyway: \`xattr -dr com.apple.quarantine /Applications/Flockbook.app\`."
             fi
             echo
-            echo "Requires macOS 15 or later and a running Herdr. Universal (Apple silicon + Intel)."
+            if [ "$MAC_APP" = true ]; then
+              echo "Requires macOS 15 or later and a running Herdr. Universal (Apple silicon + Intel)."
+            fi
             echo "Unofficial: not affiliated with, endorsed by, or supported by Herdr, Inc."
           } > dist/NOTES.md
 
@@ -159,6 +184,7 @@ jobs:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
         run: |
+          if [ "$MAC_APP" != true ]; then echo "Mac app off: no appcast."; exit 0; fi
           if [ -z "${SPARKLE_PUBLIC_KEY:-}" ] && [ -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]; then
             echo "No Sparkle keys: no appcast, this build does not auto-update."; exit 0
           fi
@@ -176,7 +202,8 @@ jobs:
         id: notes
         run: |
           code=0
-          APPCAST=$([ -f dist/appcast.xml ] && echo 1 || true) scripts/release-notes.sh "$TAG" > dist/NOTES.custom.md || code=$?
+          APPCAST=$([ -f dist/appcast.xml ] && echo 1 || true) MAC_APP=$([ "$MAC_APP" = true ] && echo 1 || true) \
+            scripts/release-notes.sh "$TAG" > dist/NOTES.custom.md || code=$?
           if [ "$code" = 0 ]; then
             mv dist/NOTES.custom.md dist/NOTES.md
             echo "file=1" >> "$GITHUB_OUTPUT"
@@ -207,14 +234,17 @@ jobs:
           name: flockbook-macos
           path: dist
 
-      # appcast.xml exists only for builds that auto-update (see the Appcast step).
+      # The .dmg and the app's .zip exist only with the Mac app on; appcast.xml only for builds that auto-update
+      # (see the Appcast step). The mod zip, install.sh, the helpers and SHA256SUMS are always there.
       - name: List assets
         id: assets
         run: |
           {
             echo 'files<<EOF'
-            ls dist/*.zip dist/*.dmg dist/SHA256SUMS dist/install.sh dist/flockbook-modfeed-*
-            if [ -f dist/appcast.xml ]; then echo dist/appcast.xml; fi
+            ls dist/Flockbook-herdr-mod-*.zip dist/SHA256SUMS dist/install.sh dist/flockbook-modfeed-*
+            for f in dist/*.zip dist/*.dmg dist/appcast.xml; do
+              case "$f" in dist/Flockbook-herdr-mod-*) ;; *) if [ -f "$f" ]; then echo "$f"; fi ;; esac
+            done
             echo EOF
           } >> "$GITHUB_OUTPUT"
 

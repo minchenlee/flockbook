@@ -1,4 +1,4 @@
-// Flockbook settings (<appHome>/flockbook/config.json), the Flockbook screen, and the update line.
+// Flockbook settings (<appHome>/flockbook/config.json), the Flockbook settings dialog, and the update line.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { fake, log, reset } from "./stub/herdr.mjs";
@@ -11,7 +11,7 @@ import { SideView } from "../mods/flockbook/side.js";
 import { Composer } from "../mods/flockbook/composer.js";
 import { ChatView } from "../mods/flockbook/chat.js";
 import { command, TopView } from "../mods/flockbook/top.js";
-import { toggleSidebar, peekAtEdge, KEY_SCREEN } from "../mods/flockbook/state.js";
+import { toggleSidebar, peekAtEdge, KEY_SCREEN, shownScreen } from "../mods/flockbook/state.js";
 import { SETTINGS } from "../mods/flockbook/settings.js";
 import { tabItems, act } from "../mods/flockbook/menu.js";
 import { shared } from "herdr";
@@ -54,7 +54,7 @@ const press = (el) => el._h.on_click({}, fakeCx());
 
 test("no config.json: every setting is its default, and nothing is written", async () => {
   await loadConfig();
-  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask" });
+  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false });
   for (const [k, v] of Object.entries(DEFAULTS)) assert.equal(setting(k), v, k);
   assert.equal(configBad(), false);
   assert.equal(log.writes.length, 0, "opening Flockbook never creates the file");
@@ -123,15 +123,53 @@ test("the screen: three settings, each with its two choices, reachable with the 
   assert.equal(JSON.parse(file).check_updates, false);
 });
 
-test("the sidebar has a Flockbook row above Settings, and a key command opens the screen", () => {
+// The Flockbook settings: a dialog over the window, as Herdr's own Settings (dimmed behind it; Esc or a
+// click beside it closes it). Not a screen of the stack.
+const settingsDialogs = () => log.overlays.filter((o) => o.props?.view === "settings");
+function assertDialog(o) {
+  assert.equal(o.mod, "flockbook");
+  assert.equal(o.kind, "dialog", "centered, dims the window, Esc and a click beside it close it");
+  assert.equal(o.frame, undefined, "Herdr's frame: rounded corners, shadow, background");
+  assert.ok(!o.modal, "a click beside it closes it");
+}
+
+test("the sidebar has a Flockbook row above Settings; it and the key command open the settings dialog", () => {
   const el = new SideView(fakeCx()).render(fakeCx());
   const ids = el.kids.map((k) => k?._a?.id);
   const at = ids.indexOf("side-flockbook");
   assert.ok(at > 0 && at < ids.indexOf("side-settings"), ids.join(","));
   press(byId(el, "side-flockbook"));
-  assert.deepEqual(log.run.at(-1), ["layout.select", { stack: "screen", child: "settings" }]);
+  assert.equal(settingsDialogs().length, 1);
+  assertDialog(settingsDialogs()[0]);
+  assert.ok(!log.run.some(([n, a]) => n === "layout.select" && a?.child === "settings"), "the screen behind stays");
+  // Open: the key command replaces it, so there is never a second one.
   command("settings");
-  assert.deepEqual(log.run.at(-1), ["layout.select", { stack: "screen", child: "settings" }]);
+  assert.equal(settingsDialogs().length, 2);
+  assert.deepEqual(log.closed, ["o1"]);
+});
+
+test("the settings dialog: a close button; once closed (Esc, a click beside it, the button) it opens again", () => {
+  press(byId(new SideView(fakeCx()).render(fakeCx()), "side-flockbook"));
+  fake.props = { view: "settings", overlay: "o1" };
+  const v = new SettingsView(fakeCx());
+  const el = v.render(fakeCx());
+  assert.equal(byId(el, "over-bar"), null, "no top bar in the dialog");
+  press(byId(el, "settings-close"));
+  assert.deepEqual(log.closed, ["o1"]);
+  v.close(fakeCx());
+  command("settings");
+  assert.equal(settingsDialogs().length, 2);
+  assert.deepEqual(log.closed, ["o1"], "nothing open to replace");
+  // Esc or a click beside it: Herdr closes it and the view's close runs; the next opens fresh.
+  new SettingsView(fakeCx()).close(fakeCx());
+  press(byId(new SideView(fakeCx()).render(fakeCx()), "side-flockbook"));
+  assert.equal(settingsDialogs().length, 3);
+  assert.deepEqual(log.closed, ["o1"]);
+});
+
+test("a screen saved as the old settings screen shows the chat", () => {
+  fake.shared[KEY_SCREEN] = "settings";
+  assert.equal(shownScreen(), "chat");
 });
 
 test("update line: a newer release shows one line in the sidebar, Copy puts the one-line install on the clipboard", async () => {
@@ -147,7 +185,7 @@ test("update line: a newer release shows one line in the sidebar, Copy puts the 
   const cx = { ...fakeCx(), write_to_clipboard: (s) => { copied = s; } };
   byId(line, "update-copy")._h.on_click({}, cx);
   assert.equal(copied, ONE_LINE);
-  // The Flockbook screen shows the command itself too.
+  // The settings dialog shows the command itself too.
   assert.match(textOf(new SettingsView(fakeCx()).render(fakeCx())), /install\.sh \| sh/);
 });
 
@@ -248,7 +286,8 @@ test("helper on other machines, Never: the tab menu has no Remove helper", async
   const hint = items.find((i) => i?.act === "settings");
   assert.match(hint.label, /choose Ask in Flockbook settings first/);
   act(hint);
-  assert.equal(shared(KEY_SCREEN), "settings");
+  assert.equal(log.overlays.at(-1)?.props?.view, "settings", "the settings dialog");
+  assertDialog(log.overlays.at(-1));
 });
 
 test("sidebar hidden: a small dot on the top bar's sidebar button, until the sidebar opens or Not now", async () => {

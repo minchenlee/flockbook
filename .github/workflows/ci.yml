@@ -66,8 +66,9 @@ jobs:
           M15: ${{ inputs.macos15_only }}
         run: |
           sidecar=1
-          # Whether the macOS app jobs run: not when every changed file is the Herdr app mod or docs (the Swift
-          # targets read nothing under herdr-app/; the mod job still runs). A manual run always runs them.
+          # Whether the macOS app jobs run: only when a file the Mac app is built or tested from changed (Swift
+          # sources and tests, the web page it serves, its scripts, this workflow). The Herdr app mod, the Rust
+          # helpers (xplat.yml and helpers.yml test them), docs and the site skip them. A manual run always runs them.
           app=1
           if [ "$EVENT" = workflow_dispatch ]; then
             if [ -n "$ONLY" ] || [ "$M15" = true ]; then sidecar=0; fi
@@ -80,9 +81,11 @@ jobs:
                 '^(xplat/(flockbook-modfeed|herdr-core)/|xplat/Cargo\.(toml|lock)$|Sources/(HerdrKit|ModFeedKit|flockbook-modfeed)/|scripts/modfeed-parity/|Tests/HerdrKitTests/Fixtures/|Package\.(swift|resolved)$|\.github/workflows/ci\.yml$)'; then
                 sidecar=0
               fi
-              if [ "$n" -gt 0 ] && [ "$n" -lt 300 ] && [ -z "$(printf '%s\n' "$files" | grep -Ev '^(herdr-app/|docs/|[^/]+\.md$)')" ]; then
+              app_files=$(printf '%s\n' "$files" | grep -E '^(Sources/|Tests/|web/|Package\.(swift|resolved)$|scripts/|\.github/workflows/ci\.yml$)' \
+                | grep -Ev '^scripts/(helper-release\.mjs|known-files\.mjs|package-mod\.sh|install-from-release\.sh)$' || true)
+              if [ "$n" -gt 0 ] && [ "$n" -lt 300 ] && [ -z "$app_files" ]; then
                 app=0
-                echo "::notice title=macOS app jobs skipped::only the Herdr app mod or docs changed"
+                echo "::notice title=macOS app jobs skipped::no Mac app file changed"
               fi
             fi
           fi

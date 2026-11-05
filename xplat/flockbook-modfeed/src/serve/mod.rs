@@ -71,6 +71,13 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     if o.user.is_empty() {
         return Err("--user <tailscale login> is needed: the one account allowed (the login `tailscale whois` shows)".into());
     }
+    // These go into a service file (--print, Flockbook settings): a line break there starts another directive.
+    if o.user.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("--user is one Tailscale login: no spaces or control characters".into());
+    }
+    if o.cache.iter().chain(&o.origin).chain(&o.home).any(|v| v.chars().any(char::is_control)) {
+        return Err("--cache, --origin and --home cannot have control characters".into());
+    }
     Ok(o)
 }
 
@@ -111,9 +118,9 @@ fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-/// A systemd argument: quoted, with `\`, `"` and `%` escaped.
+/// A systemd argument: quoted, with `\`, `"`, `%` and `$` escaped (ExecStart= expands `$VAR`, also in quotes).
 fn unit_arg(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%"))
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%").replace('$', "$$"))
 }
 
 /// A service file for `program` with these options. Printed only; the owner installs it (SERVE.md).
@@ -238,5 +245,19 @@ mod tests {
         assert_eq!(app_home(None, None, None, Some("")), None);
         assert_eq!(parse(&a(&["--user", "me@x", "--home", "/h"])).unwrap().home.as_deref(), Some("/h"));
         assert!(args_of(&parse(&a(&["--user", "me@x", "--home", "/h"])).unwrap()).ends_with(&a(&["--home", "/h"])));
+    }
+
+    #[test]
+    fn a_line_break_or_a_space_cannot_get_into_a_service_file() {
+        for bad in ["me@x.com\nExecStartPre=/bin/sh", "me @x.com", "me\r@x.com", "me\u{0}@x.com"] {
+            assert!(parse(&a(&["--user", bad])).is_err(), "--user {bad:?}");
+        }
+        assert!(parse(&a(&["--user", "me@x.com", "--cache", "/h/c\n.json"])).is_err(), "--cache with a line break");
+        assert!(parse(&a(&["--user", "me@x.com", "--home", "/h\nExecStartPre=/bin/sh"])).is_err(), "--home with a line break");
+        assert!(parse(&a(&["--user", "me@x.com", "--cache", "/h/my cache.json"])).is_ok(), "a space in a path is fine");
+        // systemd expands $VAR in ExecStart=, also inside quotes: $$ is a $.
+        let o = parse(&a(&["--user", "me$HOME@x.com", "--cache", "/h/$c.json"])).unwrap();
+        let s = service("systemd", "/opt/fb/fm", "/home/me", &o);
+        assert!(s.contains("\"me$$HOME@x.com\"") && s.contains("\"/h/$$c.json\""), "{s}");
     }
 }

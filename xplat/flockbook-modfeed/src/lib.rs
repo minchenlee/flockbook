@@ -15,4 +15,5 @@ pub mod rows;
 pub mod serve;
 pub mod status;
 pub mod tail;
+pub mod phone;
 pub mod update;

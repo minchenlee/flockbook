@@ -125,7 +125,23 @@ Options:
 | `--read-only` | The page only reads. Approve, answer and send are refused. |
 | `--home <folder>` | The herdr-app home whose Flockbook settings apply (`Never` for other machines). Default: `$HERDR_APP_HOME`, else the home this helper is installed in, else `~/.config/herdr-app`. |
 
-## Run it at login (not installed for you)
+## From the Herdr app mod (Flockbook settings)
+
+The Flockbook screen in Herdr app has **Phone page** Off | On. On runs `flockbook-modfeed phone on`, which:
+
+- reads your login and machine name from `tailscale status --json` (you can type another login),
+- writes the same service file as `--print` below, with a first line that marks it as made by Flockbook
+  settings, and the app's `HC_SESSION` / `HC_SOCKET`, and loads it (`launchctl bootstrap`, or
+  `systemctl --user enable` and `restart`).
+
+Off stops it and removes that one file, only when it has the marker. A file you installed by hand from
+`--print` has no marker; the settings show it and leave it alone. The settings never run `tailscale serve`:
+they show the command to copy, and once Serve is set, the address and a QR code. The port is config.json
+`phone_port` (8787); Read-only is on the screen.
+
+On Linux, a user service stops when you log out unless lingering is on: `loginctl enable-linger`.
+
+## Run it at login by hand (not installed for you)
 
 `--print` writes a service file for the options you give. Read the file before you install it.
 

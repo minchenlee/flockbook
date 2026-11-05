@@ -31,6 +31,8 @@ p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa"
 hkdf = "0.12"
 aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# phone: the QR code of the page's address (drawn as our own SVG; no image or renderer features).
+qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

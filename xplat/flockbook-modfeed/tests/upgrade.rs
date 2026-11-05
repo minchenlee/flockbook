@@ -100,9 +100,22 @@ fn a_v0_8_0_home_without_install_json_is_upgraded() {
     let dry = h.install(&["--dry-run"]);
     assert_eq!(dry.status.code(), Some(0), "{}", both(&dry));
     let plan = String::from_utf8_lossy(&dry.stdout).into_owned();
-    // Each file is named by the first release that had it: chat.js changed in v0.8.0, the layout did not.
+    // Each file is named by the first release that had it: chat.js changed in v0.8.0; a file v0.8.0 kept
+    // from v0.7.0 is v0.7.0's. One that is already this version's (the layout, now) is not replaced.
     assert!(plan.contains("mods/flockbook/chat.js: older Flockbook (v0.8.0), replaced"), "{plan}");
-    assert!(plan.contains("layouts/flockbook.json: older Flockbook (v0.7.0), replaced"), "{plan}");
+    let v7 = release("v0.7.0", "herdr-mod", true);
+    let mut from_v7 = 0;
+    for (rel, bytes) in &old {
+        let now = fs::read(repo().join("herdr-app").join(rel)).ok();
+        let line = format!("{rel}: older Flockbook");
+        if now.as_ref() == Some(bytes) {
+            assert!(!plan.contains(&line), "{rel} is already this version's: {plan}");
+        } else if now.is_some() && v7.iter().any(|(r, b)| r == rel && b == bytes) {
+            assert!(plan.contains(&format!("{line} (v0.7.0), replaced")), "{rel}: {plan}");
+            from_v7 += 1;
+        }
+    }
+    assert!(from_v7 > 0, "some file v0.8.0 kept from v0.7.0 is replaced: {plan}");
     let r = h.install(&[]);
     assert_eq!(r.status.code(), Some(0), "{}", both(&r));
     for (rel, _) in &old {
