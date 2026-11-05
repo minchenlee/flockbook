@@ -80,7 +80,7 @@ jobs:
                 '^(xplat/(flockbook-modfeed|herdr-core)/|xplat/Cargo\.(toml|lock)$|Sources/(HerdrKit|ModFeedKit|flockbook-modfeed)/|scripts/modfeed-parity/|Tests/HerdrKitTests/Fixtures/|Package\.(swift|resolved)$|\.github/workflows/ci\.yml$)'; then
                 sidecar=0
               fi
-              if [ "$n" -gt 0 ] && [ "$n" -lt 300 ] && ! printf '%s\n' "$files" | grep -Evq '^(herdr-app/|docs/|[^/]+\.md$)'; then
+              if [ "$n" -gt 0 ] && [ "$n" -lt 300 ] && ! printf '%s\n' "$files" | grep -Ev '^(herdr-app/|docs/|[^/]+\.md$)' >/dev/null; then
                 app=0
                 echo "::notice title=macOS app jobs skipped::only the Herdr app mod or docs changed"
               fi
