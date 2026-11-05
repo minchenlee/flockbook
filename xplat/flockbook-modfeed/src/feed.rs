@@ -45,12 +45,15 @@ fn parse(c: Option<&str>) -> Option<Cursor> {
 }
 
 /// Prints the `log` line and the rows (or `unchanged`) for `path`, and returns the state to keep.
-/// `previous`: the state kept for this terminal. It counts only when `cursor` names it.
+/// `previous`: the state kept for this terminal. It counts only when `cursor` names it. `pictures`: rows say where
+/// their pictures are in the log (`items_at`).
+#[allow(clippy::too_many_arguments)]
 pub fn run<Tz: chrono::TimeZone>(
     path: Option<&Path>,
     agent: &str,
     cursor: Option<&str>,
     previous: Option<&State>,
+    pictures: bool,
     out: &mut JsonLines,
     now: &Date,
     tz: &Tz,
@@ -78,7 +81,7 @@ pub fn run<Tz: chrono::TimeZone>(
     // Keep the old range start while the log only grew and the range is not too big.
     let keep = prev.and_then(|p| (p.path == path_s && size >= p.size && size - p.start <= MAX_SPAN).then_some(p.start));
     let range = tail::read(url, keep, tail::BYTES)?;
-    let rs = rows::rows(&tail::items(&range.lines), now, tz);
+    let rs = rows::rows(&parsed(&range, pictures), now, tz);
     let mut enc = JsonLines::new();
     for r in &rs {
         enc.emit(r);
@@ -104,12 +107,20 @@ pub fn run<Tz: chrono::TimeZone>(
 }
 
 /// `feed --before <start>`: the rows of the 2 MB before `start`. Keeps no state.
-pub fn older<Tz: chrono::TimeZone>(path: &Path, before: u64, out: &mut JsonLines, now: &Date, tz: &Tz) -> std::io::Result<()> {
+pub fn older<Tz: chrono::TimeZone>(path: &Path, before: u64, pictures: bool, out: &mut JsonLines, now: &Date, tz: &Tz) -> std::io::Result<()> {
     let range = tail::read_before(path, before, tail::BYTES)?;
-    let rs = rows::rows(&tail::items(&range.lines), now, tz);
+    let rs = rows::rows(&parsed(&range, pictures), now, tz);
     out.emit_value(json!({"type": "older", "path": path.to_string_lossy(), "start": range.start, "count": rs.len()}));
     for r in &rs {
         out.emit(r);
     }
     Ok(())
+}
+
+fn parsed(range: &tail::Range, pictures: bool) -> Vec<herdr_core::ConversationItem> {
+    if pictures {
+        tail::items_at(range)
+    } else {
+        tail::items(&range.lines)
+    }
 }

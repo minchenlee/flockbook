@@ -22,7 +22,7 @@ fn run(sock: &str, args: &[&str]) -> Vec<Value> {
 fn protocol_lines() {
     let v = run("/nonexistent.sock", &["version"]);
     assert_eq!(v[0], serde_json::json!({"type":"header","protocol":1,"sidecar":"0.1.0","cmd":"version"}));
-    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "phone"]));
+    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone"]));
     assert_eq!(v.last().unwrap()["type"], "end");
     assert_eq!(v.last().unwrap()["ok"], true);
 
