@@ -1,6 +1,7 @@
 // What every view agrees on: the agent shown in the chat, and the screen in the stack.
 // Kept in shared() so the copies of this mod (one per layout block) see the same value.
 import { agents, focused, shared, setShared, run, spaces, openOverlay, closeOverlay, appHome, readTextFile } from "herdr";
+import { loadConfig, updateSeen } from "./config.js";
 
 export const KEY_AGENT = "flockbook.agent";
 // The screen in the stack, as this mod last selected it (layout() is the file, not the live tree).
@@ -34,6 +35,7 @@ export const sidebarShown = () => shared(KEY_SIDEBAR) === true;
 export function toggleSidebar() {
   const show = !sidebarShown();
   endPeek();
+  if (show) updateSeen();
   setShared(KEY_SIDEBAR, show);
   run(show ? "layout.show" : "layout.hide", { id: "sidebar" });
 }
@@ -56,6 +58,7 @@ export function peekAtEdge(e) {
   const id = openOverlay({ mod: "flockbook", props: { view: "side", peek: true }, kind: "window", frame: "none",
     at: { x: PEEK_GAP, y: PEEK_GAP }, width: PEEK_W, height: (shared(KEY_WIN_H) ?? 800) - PEEK_GAP * 2 });
   setShared(KEY_PEEK, id);
+  updateSeen();
 }
 export function endPeek() {
   const id = shared(KEY_PEEK);
@@ -144,6 +147,8 @@ export function showAgent(address) {
 
 export function showNeeds() { showScreen("needs"); }
 export function showOverview() { showScreen("overview"); }
+// The Flockbook screen; the file is read again, in case someone edited it.
+export function showSettings() { loadConfig(); showScreen("settings"); }
 
 // Opens a tab of any space: that space, that tab, and its screen.
 export function openTab(spaceId, tab) {

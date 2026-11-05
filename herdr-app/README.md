@@ -41,14 +41,18 @@ The sidebar column has the id `sidebar`, so herdr-app's own ⌘B (`layout.toggle
 This needs herdr-app on macOS or Linux. The mod runs programs: its helper `flockbook-modfeed` (which runs
 `hc` and sends keys and text to an agent's terminal, only when you press or type) and, on macOS,
 `osascript` (the file dialog). On Linux the + file dialog is off: drop files on the chat or paste an image. It reads the agents' session logs outside its folder (`~/.claude/projects/`,
-`~/.codex/sessions/` and others; see `RECIPE.md`). It makes no network calls.
+`~/.codex/sessions/` and others; see `RECIPE.md`). It goes on the network only to check once a day for
+a newer Flockbook (api.github.com); turn it off on the Flockbook screen (sidebar, **Flockbook**), which
+also has the status row and the helper on other machines. They are kept in `flockbook/config.json`.
 
 `flockbook-modfeed install` (the layout, the mod, the themes and the keys are built into the helper)
 copies them into your herdr-app home, merges `keys.json`, puts the helper in `flockbook/bin/` and the
 helpers for other machines in `flockbook/remote/<target>/` (checked against `SHA256SUMS`), and runs
 `herdr-app check`. It needs no python3. It never overwrites what you
 have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops
-and writes nothing. A key you already use keeps your command. Add `--dry-run` to see the plan
+and writes nothing. The one exception is an older Flockbook nobody changed (a gallery copy, an older
+zip): each file whose checksum is one of an earlier version's is replaced, and the plan names the
+version. A key you already use keeps your command. Add `--dry-run` to see the plan
 first. The home is `--home <folder>`, else `$HERDR_APP_HOME`, else `~/.config/herdr-app`.
 
 In one line (macOS or Linux): it downloads the helpers and `SHA256SUMS` from the latest release,

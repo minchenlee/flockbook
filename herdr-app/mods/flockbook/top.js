@@ -5,7 +5,8 @@ import { h_flex } from "gpui-base";
 import { theme, layout, window, settings, openOverlay, run, setAgentOrder, nextCommand, shared, setShared } from "herdr";
 import { openMenu, tabItems } from "./menu.js";
 import { spaceAgents, spaceTabs, activeTab, currentAgent, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
-  SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, watchEdge } from "./state.js";
+  SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
+import { loadConfig, pollUpdate, updateDot } from "./config.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -65,6 +66,7 @@ export function command(c) {
   if (c === "needs") return showNeeds();
   if (c === "sidebar") return toggleSidebar();
   if (c === "overview") return showOverview();
+  if (c === "settings") return showSettings();
   if ((c === "move-left" || c === "move-right") && i >= 0) {
     const to = i + (c === "move-left" ? -1 : 1);
     if (to >= 0 && to < tabs.length) run("tab.move", { id: tab.id, index: tabs[to].index });
@@ -87,6 +89,11 @@ export function startTop(cx, owner) {
     }
   });
   cx?.spawn?.(async (cx) => { await loadSidebar(); cx.notify(); });
+  // The settings file, read again each minute (someone may edit it), and the update check (pollUpdate
+  // asks the helper at most once an hour).
+  const settings = async (cx) => { await loadConfig(); await pollUpdate(); cx.notify(); };
+  cx?.spawn?.(settings);
+  cx?.timer?.every(60_000, (cx) => cx.spawn(settings));
 }
 
 // Keeps the screen right for the shown tab: the chat for an agent, the tab's terminals for a
@@ -184,7 +191,9 @@ export function topBar(t, over = false) {
   // round backing when drawn over content, like the capsules.
   return watchEdge(h_flex().id("top-root").w_full().h(BAR_H).min_w(0)).pl(left).pr(left + (side ? 0 : 36)).gap(8).items_center()
     .when(!over, (el) => el.bg(t.background))
+    // A newer Flockbook while the sidebar is hidden: a small dot on its button, until it opens or Not now.
     .when(!side, (el) => el.child(button("sidebar", svg(icon("sidebar")).size(16), () => toggleSidebar(), 28, "Sidebar (⌘B)")
+      .relative().when(updateDot(), (b) => b.child(div().id("update-dot").absolute().top(4).right(4).size(7).rounded(4).bg(t.accent)))
       .when(over, (b) => b.bg(t.chrome).border(1).border_color(t.border))))
     .child(h_flex().flex_1().min_w(0).justify_center().gap(10).child(strip).child(tools));
 }

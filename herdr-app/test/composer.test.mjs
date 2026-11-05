@@ -65,7 +65,7 @@ test("Enter sends the text and files through the sidecar, then empties the box",
   const b = c.box(fake.agents[0]);
   b.input.set_value("Fix it\n"); c.addFiles(["/tmp/a.png", "/tmp/a.png", "/tmp/b.txt"], cx);
   b.input._h.submit({}, cx); await cx.settle();
-  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Fix it /tmp/a.png /tmp/b.txt", "--file", "/tmp/a.png", "--file", "/tmp/b.txt"]);
+  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Fix it /tmp/a.png /tmp/b.txt", "--file", "/tmp/a.png", "--file", "/tmp/b.txt", "--home", "/home/test/.config/herdr-app"]);
   assert.equal(b.input.value(), ""); assert.deepEqual(b.files, []);
 });
 
@@ -164,7 +164,7 @@ test("send names the agent and the log the chat showed, so the sidecar can refus
   c.seen = (address) => address === "t1" ? { agent: "claude", path: "/logs/a.jsonl" } : null;
   const b = c.box(fake.agents[0]);
   b.input.set_value("Go on"); b.input._h.submit({}, cx); await cx.settle();
-  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Go on", "--expect-kind", "claude", "--expect-path", "/logs/a.jsonl"]);
+  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Go on", "--expect-kind", "claude", "--expect-path", "/logs/a.jsonl", "--home", "/home/test/.config/herdr-app"]);
 });
 
 test("the chat gives the composer what its feed showed", async () => {

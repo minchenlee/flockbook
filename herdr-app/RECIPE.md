@@ -29,8 +29,12 @@ Left to right:
    - A "Workspaces" heading (11.5 px, semibold, muted) with a small + on the right.
    - One 34 px row per space: a 22 px monogram square (two letters, 10.5 px), the name, and the
      status marks of its tabs on the right (all up to 5, else the first 3 and "+N").
-   - **Settings** at the bottom.
-2. **Work area**: a stack of four screens. The bar floats over the first three.
+   - At the bottom: the update line when a newer Flockbook is out (a `raised` 8 px box: "Flockbook
+     X.Y.Z is out", then **Copy install command** and **Not now**), a **Flockbook** row (the
+     Flockbook screen), and **Settings**.
+   While the sidebar is hidden and a newer Flockbook is out, the top bar's sidebar button has a 7 px
+   `accent` dot, until the sidebar opens (docked or floating) or **Not now**.
+2. **Work area**: a stack of five screens. The bar floats over the first four.
    - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
      round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
      Centered: a tab capsule and a tools capsule, both 38 px tall, fully round, `chrome` with a 1 px
@@ -73,6 +77,12 @@ Left to right:
      N need you", and a "Group by Status | Workspace" switch. Then groups of 64 px cards (1 to 3
      columns, at least 300 px each, 12 px gaps): a status mark, the tab label (14 px semibold), how
      long ago it changed ("13m"), and the space and agent in 12 px muted.
+   - **Flockbook**: at most 640 px wide. "Flockbook" (18 px), "Saved in <file>. Changes apply at
+     once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
+     12 px muted, and on the right a two-choice switch: 26 px choices in a `chrome` frame, the chosen
+     one `selected` and semibold): **Check for updates** On | Off, **Status row** Show | Hide,
+     **Helper on other machines** Ask | Never. A box with a `blocked` border when config.json is not
+     JSON. The update line with the command written out (Menlo 11.5 px) when one is out.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
      above them, 8 px padding, 6 px gaps, 8 px corners, 1 px border, `muted` border on focus).
 
@@ -101,6 +111,24 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Question card**: 1-9 picks an option (a one-choice pick moves on); the number after the
   options moves the keyboard into the own-answer box; Enter goes on or sends. With more questions
   behind the first: **Show all N questions** reads them all from the agent's picker.
+- **Flockbook settings** (the Flockbook row, or ⌘⇧,): saved in `<herdr-app home>/flockbook/config.json`
+  as `{"check_updates": true, "status_row": "show", "remote_helper": "ask"}`. The install never
+  creates the file; a missing file or key is the default, and so is a value that is not one of the
+  choices. A file that is not JSON is the defaults too: the screen says so, and its switches do
+  nothing until the file is fixed or removed (it is never overwritten). A change keeps the other keys,
+  is written against the text just read (someone else's change is read again, not lost), and every
+  view shows it at once. The file is read again each minute and when the screen opens.
+  - **Check for updates** On: the mod asks the helper (`update-check`) at most once an hour; the
+    helper asks GitHub at most once a day. A newer release shows the update line; **Copy install
+    command** puts the one-line install on the clipboard; **Not now** hides it until a newer one.
+    Nothing shows when it is current, offline, or on any error. Off: nothing is asked.
+  - **Status row** Hide: no tags (model, context, cost, folder, branch) above the reply box (the branch beside the send button stays).
+  - **Helper on other machines** Never: for a tab on another machine the chat says, in one line,
+    "Flockbook does not run its helper on other machines. To change it: Flockbook settings, Helper
+    on other machines: Ask." No install card; the tab menu has "Remove helper: choose Ask in Flockbook
+    settings first…" (it opens them) in place of Remove helper; and the helper
+    itself refuses every command for a terminal there and `helper install` / `remove` (`remote-off`). To remove a helper that is
+    already there, choose Ask first.
 - **Sidebar**: ⌘B or the sidebar button shows and hides it. With it hidden, the pointer at the
   window's left 4 px slides it out as a floating panel (260 px wide, 8 px from the edges, 14 px
   corners, a large shadow), which closes when the pointer leaves it, on Esc or a click beside it.
@@ -111,7 +139,8 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Keys** (while this layout shows): ⌘T new tab, ⌘W close tab, ⌘⇧N new space, ⌘1-⌘9 a tab,
   ⌘⇧[ / ⌘⇧] or ⌃Tab / ⌃⇧Tab the tab before or after, ⌘⌥↑ / ⌘⌥↓ the space before or after,
   ⌘⌃⇧← / ⌘⌃⇧→ move the tab, ⌘⇧I Needs you, ⌘⇧\ Overview, ⌘B sidebar, ⌃` terminal,
-  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘/ help.
+  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘⇧, Flockbook settings, ⌘/ help. On the Flockbook screen,
+  Tab moves through the choices and Enter or Space picks one.
 
 ## Built from
 
@@ -120,25 +149,28 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   - `sidebar`: a `column`, 250 px (min 220, max 320), `hidden`, `chrome`, a 1 px divider, holding
     one block `side`.
   - `work`: a `column` holding the `stack` `screen` (active `chat`) with the blocks `chat`,
-    `needs`, `overview` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
+    `needs`, `overview`, `settings` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
     `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
     padding 8).
   - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
 - **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked
-  by `props.view`: `side`, `chat`, `needs`, `overview`, `top`; overlays use `termbar` (the terminal
+  by `props.view`: `side`, `chat`, `needs`, `overview`, `settings`, `top`; overlays use `termbar` (the terminal
   window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
   All views are in one folder because a mod cannot import another mod's files.
 - **Shared state** (`shared` / `setShared`): `flockbook.agent` (the agent shown),
   `flockbook.screen` (the shown screen), `flockbook.sidebar`, `flockbook.sidebar.peek`,
-  `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`.
+  `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
+  `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
+  last update line, and when the mod asked).
 - **herdr functions**: `spaces`, `agents`, `panes`, `focused`, `theme`, `layout`, `window`,
   `settings`, `props`, `run`, `nextCommand`, `setAgentOrder`, `openOverlay`, `closeOverlay`,
-  `exec`, `appHome`, `home`, `readTextFile`.
+  `exec`, `appHome`, `home`, `readTextFile`, `writeTextFile` (config.json only).
 - **Commands it runs**: `layout.select {stack: "screen", child}`, `layout.show` / `layout.hide
   {id: "sidebar"}`, `tab.select`, `tab.close`, `tab.move`, `tab.rename`, `tab.settle`, `tab.new`,
   `pane.split`, `space.select`, `space.new`, `space.rename`, `space.close`, `agent.focus`,
   `app.settings`. Its own key commands: `flockbook.terminal`, `flockbook.needs`,
-  `flockbook.sidebar`, `flockbook.overview`, `flockbook.move-left`, `flockbook.move-right`.
+  `flockbook.sidebar`, `flockbook.overview`, `flockbook.settings`, `flockbook.move-left`,
+  `flockbook.move-right`.
 - **Shipped mods**: `new-menu` (the + popup, 250 × 512).
 - **Programs**:
   - `flockbook-modfeed`, a helper program at `<herdr-app home>/flockbook/bin/flockbook-modfeed`
@@ -152,8 +184,9 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
     (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`,
     `~/.pi/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to herdr-core (`hc`) to read
     screens and send keys and text. Commands: `feed`, `status`, `card`, `approve`, `answer`,
-    `send`, `paste-image`, one per `exec`, JSON Lines back (`herdr-app/docs/protocol.md` in that
-    repo). It keeps `<herdr-app home>/flockbook/cache.json`, `answered/` beside it, and pastes in
+    `send`, `paste-image`, `helper`, `update-check`, one per `exec`, JSON Lines back
+    (`herdr-app/docs/protocol.md` in that repo). Every call ends with `--home <herdr-app home>`, so
+    the helper follows the same config.json. It keeps `<herdr-app home>/flockbook/cache.json`, `answered/` beside it, and pastes in
     `<herdr-app home>/flockbook/paste/`.
   - `osascript`, for the file dialog (macOS only; the + button shows only when `window().platform` is `macos`).
   - It reads `<herdr-app home>/layouts/.state/flockbook.json` once, for whether the sidebar was open.
@@ -161,7 +194,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   `flockbook-mac-light.json`.
 - **Keys** `keys.json`: one `layout:flockbook` section.
 - **Art** `mods/flockbook/icons/`: arrow-down, bell, branch, check, close, doc, folder, gear, grid,
-  plus, search, send, sidebar, spinner, split, terminal, tool (16 × 16 SVG, 1.8 px round strokes, `currentColor`).
+  plus, search, send, sidebar, sliders, spinner, split, terminal, tool (16 × 16 SVG, 1.8 px round strokes, `currentColor`).
 
 ## Watch out
 
@@ -172,8 +205,12 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - Tell the person before adding it: the mod runs programs (`exec` of the helper and `osascript`;
   the helper runs `hc` and sends keys and text to agents' terminals, only on a press or a key), and
   reads files outside its folder: the agents' session logs (`~/.claude/projects/`,
-  `~/.codex/sessions/` and the others under Programs) and `<herdr-app home>/layouts/.state/`. It
-  does not reach the network.
+  `~/.codex/sessions/` and the others under Programs) and `<herdr-app home>/layouts/.state/`.
+- It reaches the network once a day: the helper asks `api.github.com` for the latest Flockbook
+  release (curl, 5 s at most) and keeps the answer in `<herdr-app home>/flockbook/update-check.json`.
+  To turn it off: Flockbook settings, Check for updates: Off, or `{"check_updates": false}` in
+  `<herdr-app home>/flockbook/config.json`. Off, it asks nothing. A helper built from source has no
+  release version and never asks. Nothing else goes on the network.
 - Do not add a `mod:flockbook` section to `keys.json`: with one, no key worked.
 - `layout()` is the file, not the live tree. Keep the shown screen and the sidebar state in shared
   state, and select the screen outright.

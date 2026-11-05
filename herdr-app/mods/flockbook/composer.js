@@ -5,6 +5,7 @@ import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
 import { theme, panes, home, exec, window } from "herdr";
 import { agentName, icon, SPIN_MS } from "./state.js";
 import * as sidecar from "./sidecar.js";
+import { setting } from "./config.js";
 
 export const STATUS_MS = 5000;
 
@@ -190,7 +191,7 @@ export class Composer {
         .on_click((_e, cx) => { this.files = this.files.filter((f) => f !== p); cx.notify(); }).child("×"));
     return v_flex().id("composer").w_full().px(16).pb(14).pt(6).gap(6).items_center()
       .on_key_down((e, cx) => { if (pasteKey(e) && cx.read_from_clipboard?.() === undefined) cx.spawn((cx) => this.pasteImage(cx)); })
-      .child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag)))
+      .when(setting("status_row") !== "hide", (el) => el.child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag))))
       .child(v_flex().id("box").w_full().max_w(800).rounded(16).bg(t.raised).border(1).border_color(t.border).shadow_sm().px(12).pt(10).pb(8).gap(6)
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))
         .child(Textarea.new(b.input).w_full())

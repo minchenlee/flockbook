@@ -6,6 +6,7 @@ One short line: what this release is about.
 ### ✨ New
 
 - Herdr app: drag a tab in the top bar to change the tab order. A line shows where it goes; dragging out of the bar cancels.
+- Herdr app mod: a Flockbook settings screen (check for updates, status row, helper on other machines), a quiet line when a newer Flockbook is out, and the install upgrades an older, unchanged Flockbook (a gallery copy) in place. *(preview)*
 
 ### 🔒 Security
 

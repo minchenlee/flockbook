@@ -79,6 +79,17 @@
               "window_drag": true
             },
             {
+              "id": "settings",
+              "type": "block",
+              "content": {
+                "mod": "flockbook",
+                "props": {
+                  "view": "settings"
+                }
+              },
+              "window_drag": true
+            },
+            {
               "id": "tab",
               "type": "column",
               "children": [

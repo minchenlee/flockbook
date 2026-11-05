@@ -215,6 +215,8 @@ export class ChatView {
   // A failed `feed` in words people can act on; the sidecar's own message small below.
   problem(t, err) {
     if (isRemoteProblem(err)) return this.helper.problem(t, err, machineOf(this.address), this.refresh);
+    // Helper on other machines: Never. One plain line: it is off, and where to turn it on.
+    if (err.code === "remote-off") return this.center(t, err.message || "Flockbook does not run its helper on other machines. To change it: Flockbook settings.");
     const say = {
       "not-agent": "This terminal runs no agent.",
       "no-terminal": "This agent's terminal is gone.",
