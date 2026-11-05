@@ -33,6 +33,10 @@ pub struct State {
     pub corrupt_writes: bool,
     /// `machine.exec` starts in `/`, not in the home there (hc does not promise the cwd).
     pub exec_in_root: bool,
+    /// `doc.get` values by name ("herdr-app"), or by "<machine>/<name>" with `on`.
+    pub docs: HashMap<String, Value>,
+    /// What `machine.list` gives (`machines`).
+    pub machine_list: Vec<Value>,
 }
 
 pub struct FakeHc {
@@ -101,6 +105,12 @@ impl FakeHc {
             .filter(|(m, _)| m == "terminal.keys")
             .map(|(_, p)| p["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_string()).collect())
             .collect()
+    }
+    pub fn set_doc(&self, key: &str, v: Value) {
+        self.state.lock().unwrap().docs.insert(key.into(), v);
+    }
+    pub fn set_machine_list(&self, m: Vec<Value>) {
+        self.state.lock().unwrap().machine_list = m;
     }
     pub fn add_machine(&self, name: &str, home: &std::path::Path, sock: &str) {
         self.state.lock().unwrap().machines.insert(name.into(), (home.to_path_buf(), sock.into()));
@@ -173,6 +183,12 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
             g.calls.push((m.clone(), p.clone()));
             match m.as_str() {
                 "terminal.list" => Some(reply(json!({"terminals": g.terminals, "hidden_finished": 0, "machines": []}))),
+                "doc.get" => {
+                    let name = p["name"].as_str().unwrap_or("");
+                    let key = p["on"].as_str().map_or(name.to_string(), |m| format!("{m}/{name}"));
+                    Some(reply(json!({"name": name, "value": g.docs.get(&key).cloned().unwrap_or(Value::Null), "version": 1})))
+                }
+                "machine.list" => Some(reply(json!({"machines": g.machine_list}))),
                 "terminal.put" => {
                     let name = p["name"].as_str().unwrap_or("");
                     Some(reply(json!({"path": format!("/remote/tmp/{name}"), "bytes": 1})))

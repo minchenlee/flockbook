@@ -85,7 +85,7 @@ fn tail_older_paste() {
     let first = tail::read_before(&f, cut.start, tail::BYTES).unwrap();
     assert!(first.start == 0 && first.lines == t[..t.len() - 1].to_vec(), "modfeed older: reaches the file's start");
     let mut oo = JsonLines::new();
-    feed::older(&f, cut.start, &mut oo, &now(), &Utc).unwrap();
+    feed::older(&f, cut.start, false, &mut oo, &now(), &Utc).unwrap();
     assert!(oo.lines[0].contains(r#""type":"older""#) && oo.lines[0].contains(r#""start":0"#), "modfeed older: {}", oo.lines[0]);
     assert!(oo.lines.len() > 1 && oo.lines[1..].iter().all(|l| l.contains(r#""type":"row""#)), "modfeed older: then rows");
 }
@@ -97,27 +97,27 @@ fn feed_splices() {
     let f = dir.path().join("s.jsonl");
     std::fs::write(&f, t[..5].join("\n") + "\n").unwrap();
     let mut o1 = JsonLines::new();
-    let s1 = feed::run(Some(&f), "claude", None, None, &mut o1, &now(), &Utc).unwrap();
+    let s1 = feed::run(Some(&f), "claude", None, None, false, &mut o1, &now(), &Utc).unwrap();
     assert!(o1.lines.iter().any(|l| l.contains(r#""at":0"#) && l.contains(r#""type":"splice""#)), "first answer splices at 0");
     assert_eq!(o1.lines.iter().filter(|l| l.contains(r#""type":"row""#)).count(), 2, "user + tools row");
     let c1 = s1.as_ref().unwrap().cursor();
     let mut o2 = JsonLines::new();
-    let s2 = feed::run(Some(&f), "claude", Some(&c1), s1.as_ref(), &mut o2, &now(), &Utc).unwrap();
+    let s2 = feed::run(Some(&f), "claude", Some(&c1), s1.as_ref(), false, &mut o2, &now(), &Utc).unwrap();
     assert!(o2.lines.contains(&r#"{"type":"unchanged"}"#.to_string()) && s2 == s1, "same size, unchanged");
     let mut h = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
     h.write_all((t[5..].join("\n") + "\n").as_bytes()).unwrap();
     drop(h);
     let mut o3 = JsonLines::new();
-    let s3 = feed::run(Some(&f), "claude", Some(&c1), s1.as_ref(), &mut o3, &now(), &Utc).unwrap();
+    let s3 = feed::run(Some(&f), "claude", Some(&c1), s1.as_ref(), false, &mut o3, &now(), &Utc).unwrap();
     let splice3 = o3.lines.iter().find(|l| l.contains(r#""type":"splice""#)).unwrap();
     assert!(splice3.contains(r#""at":1"#) && splice3.contains(r#""count":4"#), "growth splices at the changed tools row ({splice3})");
     assert_eq!(o3.lines.iter().filter(|l| l.contains(r#""type":"row""#)).count(), 3, "prints rows from the splice on");
     assert_eq!(s3.as_ref().unwrap().start, s1.as_ref().unwrap().start, "keeps the range start while the log grows");
     let mut o4 = JsonLines::new();
-    feed::run(Some(&f), "claude", Some("1.bad.0.0.x"), s3.as_ref(), &mut o4, &now(), &Utc).unwrap();
+    feed::run(Some(&f), "claude", Some("1.bad.0.0.x"), s3.as_ref(), false, &mut o4, &now(), &Utc).unwrap();
     assert!(o4.lines.iter().any(|l| l.contains(r#""at":0"#) && l.contains(r#""type":"splice""#)), "an unknown cursor gets everything again");
     let mut o5 = JsonLines::new();
-    feed::run(None, "codex", None, None, &mut o5, &now(), &Utc).unwrap();
+    feed::run(None, "codex", None, None, false, &mut o5, &now(), &Utc).unwrap();
     assert!(o5.lines[0].contains(r#""path":null"#), "no log, path null");
 
     // Locate: cache round trip (with the feed state).
@@ -187,4 +187,22 @@ fn cache_times_read_back_exactly() {
     let cf = dir.path().join("cache.json");
     locate::write_cache(&cache, Some(&cf));
     assert_eq!(locate::read_cache(Some(&cf)), cache);
+}
+
+#[test]
+fn pictures_only_when_asked() {
+    // A pasted PNG: the mod's rows count it; rows read with line offsets (serve) also say where it is.
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAMAAAAECAYAAABLLYUGAAAA";
+    let pre = r#"{"type":"file-history-snapshot"}"#;
+    let line = format!(r#"{{"type":"user","uuid":"u1","timestamp":"2026-11-03T01:40:00.000Z","message":{{"role":"user","content":[{{"type":"text","text":"see"}},{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{png}"}}}}]}}}}"#);
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("s.jsonl");
+    std::fs::write(&f, format!("{pre}\n\n{line}\n")).unwrap();
+    let range = tail::read(&f, None, tail::BYTES).unwrap();
+    let plain = rows::rows(&tail::items(&range.lines), &now(), &Utc);
+    assert_eq!((plain[0].images, plain[0].pics.as_ref()), (Some(1), None));
+    let at = rows::rows(&tail::items_at(&range), &now(), &Utc);
+    let p = &at[0].pics.as_ref().unwrap()[0];
+    assert_eq!((p.format, p.width, p.height, p.offset, p.index), ("png", 3, 4, pre.len() as u64 + 2, 0), "the line after an empty one");
+    assert_eq!(p.digest.len(), 16);
 }

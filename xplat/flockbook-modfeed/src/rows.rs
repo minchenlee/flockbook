@@ -23,6 +23,10 @@ pub struct FeedRow {
     pub ts: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub images: Option<usize>,
+    /// Where the item's pictures are in the log (`Hub.pictures(of:)` order). Only for items read with line offsets
+    /// (`feed --pictures`, what `serve` asks for); the mod's rows never have it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pics: Option<Vec<FeedPic>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chips: Option<Vec<FeedChip>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,8 +37,44 @@ pub struct FeedRow {
 
 impl FeedRow {
     pub fn new(k: &str, id: &str, text: Option<String>, ts: Option<i64>) -> FeedRow {
-        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, ts, images: None, chips: None, perm: None, question: None }
+        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, ts, images: None, pics: None, chips: None, perm: None, question: None }
     }
+}
+
+/// A picture's place in the log: its line's offset, its place in the line, and its fingerprint (16 hex digits).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct FeedPic {
+    pub format: &'static str,
+    pub width: i64,
+    pub height: i64,
+    pub offset: u64,
+    pub index: usize,
+    pub digest: String,
+}
+
+/// The item's pictures, as `Hub.pictures(of:)` counts them: the owner's for a user item, every call's result pictures
+/// in call order for a tool group. None when there are none, or when a ref has no line offset.
+pub fn pics(it: &ConversationItem) -> Option<Vec<FeedPic>> {
+    let refs: Vec<&ImageRef> = match &it.kind {
+        ItemKind::UserText(_) => it.images.iter().collect(),
+        ItemKind::ToolChips(chips) => chips.iter().flat_map(|c| &c.calls).flat_map(|x| &x.images).collect(),
+        _ => vec![],
+    };
+    if refs.is_empty() {
+        return None;
+    }
+    refs.iter()
+        .map(|r| {
+            Some(FeedPic {
+                format: herdr_core::log_image::format_raw(r.format),
+                width: r.width,
+                height: r.height,
+                offset: r.offset?,
+                index: r.index,
+                digest: format!("{:016x}", r.digest),
+            })
+        })
+        .collect()
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -181,6 +221,7 @@ pub fn question(q: &QuestionRequest) -> FeedQuestion {
 
 pub fn row(it: &ConversationItem) -> FeedRow {
     let mut r = FeedRow::new("status", &it.id, None, ms(it.timestamp));
+    r.pics = pics(it);
     match &it.kind {
         ItemKind::UserText(s) => {
             r.k = "user".into();

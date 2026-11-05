@@ -2,12 +2,16 @@
 //! it installs nothing (`--print launchd|systemd` prints a service file to install by hand). Guide: SERVE.md.
 //!
 //!   flockbook-modfeed serve --user <tailscale login> [--port 8787] [--cache <file>] [--origin https://<name>.ts.net]
-//!                           [--read-only]
+//!                           [--read-only] [--home <herdr-app home>]
 //!   flockbook-modfeed serve --print launchd|systemd --user <login> [the same options]
 
 pub mod gate;
 pub mod hub;
+pub mod layout;
 pub mod net;
+pub mod push;
+pub mod strip;
+pub mod upload;
 
 pub const DEFAULT_PORT: u16 = 8787;
 
@@ -20,13 +24,15 @@ pub struct Options {
     pub origin: Option<String>,
     pub read_only: bool,
     pub print: Option<String>,
+    /// `--home`: the herdr-app home whose Flockbook settings (`flockbook/config.json`) serve follows. None: `app_home`.
+    pub home: Option<String>,
 }
 
-pub const USAGE: &str = "usage: flockbook-modfeed serve --user <tailscale login> [--port 8787] [--cache <file>] [--origin https://<name>.ts.net] [--read-only] [--print launchd|systemd]";
+pub const USAGE: &str = "usage: flockbook-modfeed serve --user <tailscale login> [--port 8787] [--cache <file>] [--origin https://<name>.ts.net] [--read-only] [--home <herdr-app home>] [--print launchd|systemd]";
 
 /// The options, or why not. There is deliberately no option for the address: it is always 127.0.0.1.
 pub fn parse(args: &[String]) -> Result<Options, String> {
-    let mut o = Options { user: String::new(), port: DEFAULT_PORT, cache: None, origin: None, read_only: false, print: None };
+    let mut o = Options { user: String::new(), port: DEFAULT_PORT, cache: None, origin: None, read_only: false, print: None, home: None };
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
@@ -47,6 +53,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 }
             }
             "--read-only" => o.read_only = true,
+            "--home" => o.home = Some(val()?).filter(|h| !h.is_empty()),
             "--print" => {
                 let v = val()?;
                 if v != "launchd" && v != "systemd" {
@@ -68,8 +75,8 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     if o.user.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err("--user is one Tailscale login: no spaces or control characters".into());
     }
-    if o.cache.iter().chain(&o.origin).any(|v| v.chars().any(char::is_control)) {
-        return Err("--cache and --origin cannot have control characters".into());
+    if o.cache.iter().chain(&o.origin).chain(&o.home).any(|v| v.chars().any(char::is_control)) {
+        return Err("--cache, --origin and --home cannot have control characters".into());
     }
     Ok(o)
 }
@@ -78,6 +85,16 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
 fn default_cache() -> Option<String> {
     let home = herdr_core::hc::session::home_dir(&herdr_core::hc::session::process_env());
     (!home.is_empty()).then(|| format!("{home}/.flockbook/serve/cache.json"))
+}
+
+/// The herdr-app home whose settings serve follows: `--home`, else `$HERDR_APP_HOME`, else the home this helper is
+/// installed in (`<home>/flockbook/bin`), else `~/.config/herdr-app` (as the install picks it). None: no home known.
+pub fn app_home(flag: Option<&str>, env: Option<&str>, installed: Option<&std::path::Path>, user_home: Option<&str>) -> Option<String> {
+    let given = |v: Option<&str>| v.filter(|h| !h.is_empty()).map(String::from);
+    given(flag)
+        .or_else(|| given(env))
+        .or_else(|| installed.and_then(|fb| fb.parent()).map(|h| h.to_string_lossy().into_owned()))
+        .or_else(|| given(user_home).map(|h| format!("{h}/.config/herdr-app")))
 }
 
 fn args_of(o: &Options) -> Vec<String> {
@@ -90,6 +107,9 @@ fn args_of(o: &Options) -> Vec<String> {
     }
     if o.read_only {
         a.push("--read-only".into());
+    }
+    if let Some(h) = &o.home {
+        a.extend(["--home".into(), h.clone()]);
     }
     a
 }
@@ -143,6 +163,8 @@ pub fn main(args: &[String]) -> i32 {
         print!("{}", service(&kind, &program, &home, &o));
         return 0;
     }
+    let user_home = herdr_core::hc::session::home_dir(&herdr_core::hc::session::process_env());
+    o.home = app_home(o.home.as_deref(), std::env::var("HERDR_APP_HOME").ok().as_deref(), crate::config::dir(None).as_deref(), Some(&user_home));
     if o.cache.is_none() {
         o.cache = default_cache();
     }
@@ -158,10 +180,19 @@ pub fn main(args: &[String]) -> i32 {
     };
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(o.port);
     eprintln!("serve: listening on http://127.0.0.1:{port} for {} (Tailscale Serve only; Funnel is refused)", o.user);
+    // Notifications from serve's own loop, page open or not (`push`). Off, with the reason, when the files are not right.
+    if let Some(h) = o.home.clone() {
+        let (read, dir) = (h.clone(), push::folder(std::path::Path::new(&h)));
+        let post = move |e: &str, hs: &[String], b: &[u8]| push::curl_post(&dir, e, hs, b);
+        match push::start(std::path::Path::new(&h), std::time::Duration::from_secs(3), Box::new(post), move || hub::workspaces(Some(&read))) {
+            Ok(()) => eprintln!("serve: notifications ready"),
+            Err(e) => eprintln!("serve: notifications off: {e}"),
+        }
+    }
     let settings = net::Settings {
         user: o.user.clone(),
         origin: o.origin.clone(),
-        hub: hub::Config { cache: o.cache.clone(), read_only: o.read_only, hub: "Flockbook".into() },
+        hub: hub::Config { cache: o.cache.clone(), read_only: o.read_only, hub: "Flockbook".into(), home: o.home.clone() },
     };
     net::serve(listener, settings);
     0
@@ -205,11 +236,24 @@ mod tests {
     }
 
     #[test]
+    fn the_herdr_app_home() {
+        let fb = std::path::Path::new("/opt/h/flockbook");
+        assert_eq!(app_home(Some("/given"), Some("/env"), Some(fb), Some("/home/you")).as_deref(), Some("/given"));
+        assert_eq!(app_home(None, Some("/env"), Some(fb), Some("/home/you")).as_deref(), Some("/env"));
+        assert_eq!(app_home(Some(""), Some(""), Some(fb), Some("/home/you")).as_deref(), Some("/opt/h"), "the home the helper is installed in");
+        assert_eq!(app_home(None, None, None, Some("/home/you")).as_deref(), Some("/home/you/.config/herdr-app"));
+        assert_eq!(app_home(None, None, None, Some("")), None);
+        assert_eq!(parse(&a(&["--user", "me@x", "--home", "/h"])).unwrap().home.as_deref(), Some("/h"));
+        assert!(args_of(&parse(&a(&["--user", "me@x", "--home", "/h"])).unwrap()).ends_with(&a(&["--home", "/h"])));
+    }
+
+    #[test]
     fn a_line_break_or_a_space_cannot_get_into_a_service_file() {
         for bad in ["me@x.com\nExecStartPre=/bin/sh", "me @x.com", "me\r@x.com", "me\u{0}@x.com"] {
             assert!(parse(&a(&["--user", bad])).is_err(), "--user {bad:?}");
         }
         assert!(parse(&a(&["--user", "me@x.com", "--cache", "/h/c\n.json"])).is_err(), "--cache with a line break");
+        assert!(parse(&a(&["--user", "me@x.com", "--home", "/h\nExecStartPre=/bin/sh"])).is_err(), "--home with a line break");
         assert!(parse(&a(&["--user", "me@x.com", "--cache", "/h/my cache.json"])).is_ok(), "a space in a path is fine");
         // systemd expands $VAR in ExecStart=, also inside quotes: $$ is a $.
         let o = parse(&a(&["--user", "me$HOME@x.com", "--cache", "/h/$c.json"])).unwrap();
