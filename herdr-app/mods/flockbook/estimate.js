@@ -79,7 +79,7 @@ export function wrapLines(text, width, fs = 14) {
 }
 
 export function markdownHeight(text, width) {
-  const CODE_LH = 19;
+  const CODE_LH = 21;  // TextView at 13 px (Menlo): its own line height, as table text (13.5 px) draws 21
   let h = 0, p = 0, inCode = false, prevBlank = true;  // h: drawn exactly; p: prose, wraps
   // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
   let gap = 0;

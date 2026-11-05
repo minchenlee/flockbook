@@ -53,7 +53,7 @@ Left to right:
        "1 image" or "N images" under it when it had pictures.
      - Agent reply: full-width markdown, 16 px text, 26 px lines (the `TextView` default; a mod
        cannot change it). Code fences are 12 px rounded boxes (`raised`,
-       1 px border, Menlo 13 px, 19 px lines). Tables are 12 px rounded frames: a `raised` header
+       1 px border, Menlo 13 px, 21 px lines: one selectable `TextView` paragraph, so a drag selects across lines). Tables are 12 px rounded frames: a `raised` header
        row, 1 px lines between rows, columns sized to their content.
      - Tool calls: a row of 28 px round chips ("Ran 3 commands", an icon per kind: terminal, doc,
        search, tool), each with ▾. A spinner while a call runs.
