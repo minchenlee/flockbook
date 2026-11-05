@@ -43,7 +43,7 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
   - For your own programs, that is the trust they already have: they can run `hc` and send keys themselves.
   - Other users of the machine are not kept out. Do not run `serve` on a machine you share with users you do
     not trust.
-- Not in this version: pictures, older rows, the agent's queue, image upload, and notifications.
+- Not in this version: pictures, the agent's queue, image upload, and notifications.
   The helper answers those requests with "Not offered by this helper."
 
 ## Start it

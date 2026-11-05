@@ -1,6 +1,6 @@
 //! The phone page's protocol (remote protocol v1, `web/src/protocol.ts`; the Mac app's `HubSession.swift`) on the
-//! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt), ping. Approve, answer and send
-//! come only over `POST /api` (`post`); on the socket they are refused. Pictures, older rows, the queue, uploads and
+//! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt), loadEarlier, ping. Approve, answer
+//! and send come only over `POST /api` (`post`); on the socket they are refused. Pictures, the queue, uploads and
 //! notifications are not offered: those requests get a `failed` reply.
 //!
 //! Every read and every key goes through `cli::run`, the same code the mod's sidecar runs, so the claims, the
@@ -212,13 +212,57 @@ fn done_reply(re: &str, lines: &[Value]) -> Value {
     }
 }
 
-/// What one pane's conversation looks like on this connection.
+/// What one pane's conversation looks like on this connection (the mod's `feedstate.js`): the older rows read for
+/// `loadEarlier`, then the tail `feed` keeps current.
 #[derive(Default)]
 struct Feed {
     cursor: Option<String>,
     rows: Vec<Value>,
+    older: Vec<Value>,
+    /// The log and where its tail starts (bytes); where the older rows start; the log's first row is shown.
+    path: Option<String>,
+    start: Option<u64>,
+    older_start: Option<u64>,
+    first: bool,
+    /// The conversation's `session` sent to the page: the log, or the pane when there is none.
+    session: String,
+    /// The oldest item the page has after a `loadEarlier`; None: the newest WINDOW.
+    from: Option<Value>,
     sent: Option<Vec<Value>>,
     prompt: Option<Value>,
+}
+
+impl Feed {
+    fn drop_older(&mut self) {
+        self.from = None;
+        self.older.clear();
+        self.older_start = None;
+        self.first = false;
+    }
+    /// Where the next `feed --before` reads up to; None when the log's first row is already here.
+    fn older_from(&self) -> Option<u64> {
+        if self.first || self.path.is_none() || self.start.unwrap_or(0) == 0 {
+            return None;
+        }
+        self.older_start.or(self.start)
+    }
+    fn items(&self) -> Vec<Value> {
+        self.older.iter().chain(&self.rows).filter_map(item).collect()
+    }
+}
+
+/// What to send for a conversation the page has as `sent`: `append` with the new and changed items when `sent` is
+/// the start of `now` (the page merges them by id), else `replace`. None: nothing changed.
+fn update(sent: Option<&Vec<Value>>, now: &[Value]) -> Option<(&'static str, Vec<Value>)> {
+    let Some(sent) = sent else { return Some(("replace", now.to_vec())) };
+    if sent.as_slice() == now {
+        return None;
+    }
+    if sent.len() <= now.len() && sent.iter().zip(now).all(|(a, b)| a["id"] == b["id"]) {
+        let changed = now.iter().enumerate().filter(|(i, n)| sent.get(*i) != Some(n)).map(|(_, n)| n.clone()).collect();
+        return Some(("append", changed));
+    }
+    Some(("replace", now.to_vec()))
 }
 
 /// One page connection (or one POST): its watched panes and what it was sent last.
@@ -309,6 +353,12 @@ impl Session {
             }
             t if KEYS.contains(&t) => vec![fail(&id, "badRequest", "Keys go with POST /api on this helper.")],
             "pair" => vec![fail(&id, "badRequest", "This helper needs no pairing: Tailscale says who you are.")],
+            "loadEarlier" => {
+                let (Some(session), Some(before)) = (m["session"].as_str(), m["before"].as_str()) else {
+                    return vec![fail(&id, "badRequest", "loadEarlier needs session and before.")];
+                };
+                self.load_earlier(session, before, &id)
+            }
             "pulledAck" | "pushUnsubscribe" => vec![ok(&id)],
             _ => vec![fail(&id, "failed", "Not offered by this helper.")],
         }
@@ -405,14 +455,21 @@ impl Session {
         }
         let lines = run(&argv);
         let feed = self.feeds.entry(pane.to_string()).or_default();
-        let mut session = pane.to_string();
         for l in &lines {
             match l["type"].as_str() {
                 Some("log") => {
                     feed.cursor = l["cursor"].as_str().map(String::from);
-                    if let Some(path) = l["path"].as_str() {
-                        session = path.to_string();
+                    let path = l["path"].as_str().map(String::from);
+                    let start = l["start"].as_u64();
+                    // Another log, or its tail starts elsewhere: the older rows no longer join it.
+                    if path != feed.path || start != feed.start {
+                        if path != feed.path {
+                            feed.rows.clear();
+                        }
+                        feed.drop_older();
                     }
+                    feed.session = path.clone().unwrap_or_else(|| pane.to_string());
+                    (feed.path, feed.start) = (path, start);
                 }
                 Some("splice") => {
                     let at = l["at"].as_u64().unwrap_or(0) as usize;
@@ -422,11 +479,16 @@ impl Session {
                 _ => {}
             }
         }
-        let items: Vec<Value> = feed.rows.iter().filter_map(item).collect();
-        let tail: Vec<Value> = items[items.len().saturating_sub(WINDOW)..].to_vec();
-        if feed.sent.as_ref() != Some(&tail) {
-            out.push(json!({"type": "conversation", "pane": pane, "session": session, "mode": "replace", "items": tail, "hasEarlier": false}));
-            feed.sent = Some(tail);
+        if feed.session.is_empty() {
+            feed.session = pane.to_string();
+        }
+        let items = feed.items();
+        let lo = feed.from.as_ref().and_then(|f| items.iter().position(|i| &i["id"] == f)).unwrap_or(items.len().saturating_sub(WINDOW));
+        let tail = &items[lo..];
+        if let Some((mode, send)) = update(feed.sent.as_ref(), tail) {
+            let earlier = lo > 0 || feed.older_from().is_some();
+            out.push(json!({"type": "conversation", "pane": pane, "session": feed.session, "mode": mode, "items": send, "hasEarlier": earlier}));
+            feed.sent = Some(tail.to_vec());
         }
         // The screen is read only when there may be a prompt: the agent is blocked, or the log ends with a question.
         let blocked = p.agent.as_ref().is_some_and(|a| a.status == AgentStatus::Blocked);
@@ -439,6 +501,50 @@ impl Session {
             out.push(pr);
         }
         out
+    }
+}
+
+impl Session {
+    /// `loadEarlier`: up to WINDOW items before `before` in the watched pane that shows `session` (the Mac hub's
+    /// `loadEarlier`). The log is read further back only when fewer than WINDOW are here. Only this connection's own
+    /// log path and offset go to `feed --before`; the page's values are only compared.
+    fn load_earlier(&mut self, session: &str, before: &str, id: &str) -> Vec<Value> {
+        let Some(pane) = self.watched.iter().find(|p| self.feeds.get(*p).is_some_and(|f| f.session == session)).cloned() else {
+            return vec![fail(id, "notFound", &format!("No watched pane shows session {session}."))];
+        };
+        let Some(terminal) = self.pane(&pane).map(|p| p.terminal_id.clone()) else { return vec![fail(id, "notFound", &format!("No pane {pane}."))] };
+        let feed = &self.feeds[&pane];
+        let at = |items: &[Value]| items.iter().position(|i| i["id"] == before);
+        let Some(idx) = at(&feed.items()) else { return vec![fail(id, "notFound", &format!("No item {before}."))] };
+        if idx < WINDOW {
+            if let (Some(from), Some(path)) = (feed.older_from(), feed.path.clone()) {
+                let mut argv = self.base("feed", &terminal);
+                argv.extend(["--before".into(), from.to_string(), "--path".into(), path.clone()]);
+                let lines = run(&argv);
+                let head = lines.iter().find(|l| l["type"] == "older");
+                let Some(head) = head.filter(|h| h["path"].as_str() == Some(path.as_str())) else {
+                    return vec![fail(id, "failed", "Could not load earlier messages. Try again.")];
+                };
+                let start = head["start"].as_u64();
+                let feed = self.feeds.get_mut(&pane).expect("watched");
+                let have: std::collections::HashSet<Value> = feed.older.iter().chain(&feed.rows).map(|r| r["id"].clone()).collect();
+                let add: Vec<Value> = lines.iter().filter(|l| l["type"] == "row" && !have.contains(&l["id"])).cloned().collect();
+                feed.older.splice(0..0, add);
+                feed.older_start = start;
+                feed.first = start == Some(0);
+            }
+        }
+        let feed = self.feeds.get_mut(&pane).expect("watched");
+        let items = feed.items();
+        let idx = at(&items).unwrap_or(idx.min(items.len()));
+        let lo = idx.saturating_sub(WINDOW);
+        let older = items[lo..idx].to_vec();
+        if let Some(sent) = feed.sent.as_mut().filter(|s| s.first().is_some_and(|f| f["id"] == before)) {
+            sent.splice(0..0, older.iter().cloned());
+            feed.from = sent.first().map(|i| i["id"].clone());
+        }
+        let earlier = lo > 0 || feed.older_from().is_some();
+        vec![json!({"type": "conversation", "pane": pane, "session": session, "mode": "prepend", "items": older, "hasEarlier": earlier}), ok(id)]
     }
 }
 
@@ -489,6 +595,18 @@ mod tests {
         assert_eq!(pq["question"]["id"], "screen-1");
         assert_eq!(pq["question"]["headers"], json!(["Color"]));
         assert_eq!(pq["question"]["questions"][0]["options"], json!([{"label": "Red", "detail": "warm", "recommended": true}, {"label": "Blue"}]));
+    }
+
+    #[test]
+    fn updates() {
+        let a = |id: &str, t: &str| json!({"id": id, "text": t});
+        assert_eq!(update(None, &[a("1", "x")]), Some(("replace", vec![a("1", "x")])));
+        assert_eq!(update(Some(&vec![a("1", "x")]), &[a("1", "x")]), None);
+        // A new item and a changed last one: only those.
+        assert_eq!(update(Some(&vec![a("1", "x"), a("2", "y")]), &[a("1", "x"), a("2", "y2"), a("3", "z")]), Some(("append", vec![a("2", "y2"), a("3", "z")])));
+        // An item gone or another first item: replace.
+        assert_eq!(update(Some(&vec![a("1", "x"), a("2", "y")]), &[a("1", "x")]).unwrap().0, "replace");
+        assert_eq!(update(Some(&vec![a("1", "x")]), &[a("0", "w"), a("1", "x")]).unwrap().0, "replace");
     }
 
     #[test]

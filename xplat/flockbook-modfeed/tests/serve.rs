@@ -349,3 +349,77 @@ fn a_peer_that_does_not_read_is_let_go() {
     };
     assert!(ended, "the hub let the connection go");
 }
+
+fn user_line(id: &str, text: &str) -> String {
+    format!(r#"{{"type":"user","uuid":"{id}","timestamp":"2026-11-03T01:40:00.000Z","message":{{"role":"user","content":"{text}"}}}}"#)
+}
+
+/// An idle agent whose log `log` is known (the cache's entry for t1, as `feed` keeps it).
+fn with_log(dir: &std::path::Path, log: &std::path::Path) -> (FakeHc, String) {
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "")]);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let cache = dir.join("cache.json");
+    let c = json!({"entries": {"t1": {"kind": "claude", "cwd": "/tmp/proj", "pids": [4242], "path": log, "checked": now}}, "feeds": {}});
+    std::fs::write(&cache, c.to_string()).unwrap();
+    (fake, cache.to_string_lossy().to_string())
+}
+
+#[test]
+fn load_earlier_reads_back_in_the_log() {
+    // 50 old rows, then 2.1 MB with no rows (beyond the tail `feed` reads), then 120 new rows.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("sess-1.jsonl");
+    let mut lines: Vec<String> = (0..50).map(|i| user_line(&format!("old{i}"), &format!("old {i}"))).collect();
+    let pad = "x".repeat(1000);
+    lines.extend((0..2200).map(|_| format!(r#"{{"type":"file-history-snapshot","pad":"{pad}"}}"#)));
+    lines.extend((0..120).map(|i| user_line(&format!("new{i}"), &format!("new {i}"))));
+    std::fs::write(&log, lines.join("\n") + "\n").unwrap();
+    let (fake, cache) = with_log(dir.path(), &log);
+    let srv = start(&fake.path, &["--cache", &cache]);
+    let mut ws = socket(srv.port);
+    say(&mut ws, json!({"v": 1, "id": "h", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "h");
+    let pane = got.iter().find(|m| m["type"] == "snapshot").unwrap()["workspaces"][0]["tabs"][0]["panes"][0]["id"].as_str().unwrap().to_string();
+    let session = log.to_string_lossy().to_string();
+
+    // Asked before watching: no pane shows it here yet.
+    say(&mut ws, json!({"v": 1, "id": "e0", "type": "loadEarlier", "session": session, "before": "new20-0"}));
+    let r = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "e0");
+    assert_eq!(r.last().unwrap()["error"]["code"], "notFound");
+
+    say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": pane}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
+    let c = got.iter().find(|m| m["type"] == "conversation").unwrap();
+    assert_eq!(c["session"], session.as_str());
+    let items = c["items"].as_array().unwrap();
+    assert_eq!(items.len(), 100, "the newest 100");
+    assert_eq!(items[0]["id"], "new20-0");
+    assert_eq!(c["hasEarlier"], true);
+
+    // Unknown session or item: notFound, nothing read.
+    for (i, (s, b)) in [("/etc/passwd", "new20-0"), (session.as_str(), "nope")].into_iter().enumerate() {
+        say(&mut ws, json!({"v": 1, "id": format!("x{i}"), "type": "loadEarlier", "session": s, "before": b}));
+        let r = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == format!("x{i}"));
+        assert_eq!(r.last().unwrap()["error"]["code"], "notFound", "{r:?}");
+    }
+
+    // Before new20: the 20 rows here and the 50 the log has before the tail. The first row of the log is shown now.
+    say(&mut ws, json!({"v": 1, "id": "e1", "type": "loadEarlier", "session": session, "before": "new20-0"}));
+    let r = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "e1");
+    assert_eq!(r.last().unwrap()["ok"], true, "{r:?}");
+    let p = r.iter().find(|m| m["type"] == "conversation").unwrap();
+    assert_eq!(p["mode"], "prepend");
+    let ids: Vec<&str> = p["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), 70, "{ids:?}");
+    assert_eq!((ids[0], ids[49], ids[50], ids[69]), ("old0-0", "old49-0", "new0-0", "new19-0"));
+    assert_eq!(p["hasEarlier"], false);
+
+    // A new row: only it comes (append), and the older rows stay on the page.
+    std::fs::write(&log, lines.join("\n") + "\n" + &user_line("new120", "newest") + "\n").unwrap();
+    let got = read_until(&mut ws, |v| v["type"] == "conversation");
+    let c = got.last().unwrap();
+    assert_eq!(c["mode"], "append", "{c}");
+    assert_eq!(c["items"].as_array().unwrap().iter().map(|i| i["id"].clone()).collect::<Vec<_>>(), vec![json!("new120-0")]);
+    assert_eq!(c["hasEarlier"], false);
+}
