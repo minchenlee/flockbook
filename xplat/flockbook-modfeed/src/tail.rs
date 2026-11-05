@@ -12,6 +12,8 @@ pub const BYTES: u64 = 2 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Range {
     pub lines: Vec<String>,
+    /// Each line's file offset.
+    pub offsets: Vec<u64>,
     /// File offset of the first whole line read.
     pub start: u64,
     /// File size when read. Bytes after the last newline (a line still being written) are left for the next read.
@@ -43,18 +45,28 @@ pub fn read(path: &Path, from: Option<u64>, bytes: u64) -> std::io::Result<Range
     let mut body: &[u8] = &data;
     if from.is_none() && start > 0 {
         let Some(nl) = body.iter().position(|&b| b == b'\n') else {
-            return Ok(Range { lines: vec![], start: size, size });
+            return Ok(Range { lines: vec![], offsets: vec![], start: size, size });
         };
         start += nl as u64 + 1;
         body = &body[nl + 1..];
     }
     let mut parts: Vec<&[u8]> = body.split(|&b| b == b'\n').collect();
     parts.pop(); // after the last "\n": empty, or a line still being written
-    Ok(Range {
-        lines: parts.into_iter().filter(|p| !p.is_empty()).map(|p| String::from_utf8_lossy(p).into_owned()).collect(),
-        start,
-        size,
-    })
+    let (lines, offsets) = whole(parts, start);
+    Ok(Range { lines, offsets, start, size })
+}
+
+/// The non-empty lines of `parts` (split at newlines, the first at `start`), and their file offsets.
+fn whole(parts: Vec<&[u8]>, start: u64) -> (Vec<String>, Vec<u64>) {
+    let (mut lines, mut offsets, mut at) = (vec![], vec![], start);
+    for p in parts {
+        if !p.is_empty() {
+            lines.push(String::from_utf8_lossy(p).into_owned());
+            offsets.push(at);
+        }
+        at += p.len() as u64 + 1;
+    }
+    (lines, offsets)
 }
 
 /// The whole lines that end before `before` (a line start): up to `bytes` back, a cut first line dropped.
@@ -67,22 +79,29 @@ pub fn read_before(path: &Path, before: u64, bytes: u64) -> std::io::Result<Rang
     let mut body: &[u8] = &data;
     if start > 0 {
         let Some(nl) = body.iter().position(|&b| b == b'\n') else {
-            return Ok(Range { lines: vec![], start: end, size });
+            return Ok(Range { lines: vec![], offsets: vec![], start: end, size });
         };
         start += nl as u64 + 1;
         body = &body[nl + 1..];
     }
-    Ok(Range {
-        lines: body.split(|&b| b == b'\n').filter(|p| !p.is_empty()).map(|p| String::from_utf8_lossy(p).into_owned()).collect(),
-        start,
-        size,
-    })
+    let (lines, offsets) = whole(body.split(|&b| b == b'\n').collect(), start);
+    Ok(Range { lines, offsets, start, size })
 }
 
 pub fn items(lines: &[String]) -> Vec<ConversationItem> {
     let mut p = ConversationParser::new();
     for l in lines {
         p.feed(l);
+    }
+    p.items()
+}
+
+/// `items`, with each line's file offset (`start`: the first line's): picture refs point into the log. Codex, Grok and
+/// Cursor items then get ids from their offsets, so rows differ from `items`' (only `serve` reads this way).
+pub fn items_at(range: &Range) -> Vec<ConversationItem> {
+    let mut p = ConversationParser::new();
+    for (l, at) in range.lines.iter().zip(&range.offsets) {
+        p.feed_at(l, Some(*at));
     }
     p.items()
 }

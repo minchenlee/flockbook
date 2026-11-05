@@ -196,14 +196,14 @@ pub fn run(argv: &[String]) -> String {
                     return r.fail("usage", "feed --before needs a number and --path <log>");
                 };
                 let Some(url) = log.filter(|u| u.to_string_lossy() == want) else { return r.fail("moved", "the agent now writes another log") };
-                return match feed::older(url, before, &mut r.out, &now, &tz) {
+                return match feed::older(url, before, has("--pictures"), &mut r.out, &now, &tz) {
                     Ok(()) => r.finish(true),
                     Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
                 };
             }
             let mut cache = locate::read_cache(cache_url);
             let tid = found.pane.terminal_id.clone();
-            match feed::run(log, &kind, opt("--cursor").as_deref(), cache.feeds.get(&tid), &mut r.out, &now, &tz) {
+            match feed::run(log, &kind, opt("--cursor").as_deref(), cache.feeds.get(&tid), has("--pictures"), &mut r.out, &now, &tz) {
                 Ok(state) => {
                     if cache_url.is_some() && cache.feeds.get(&tid) != state.as_ref() {
                         match state {

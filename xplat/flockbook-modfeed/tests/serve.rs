@@ -627,3 +627,95 @@ fn never_comes_from_the_herdr_app_home() {
     assert!(here.calls("machine.list").is_empty(), "no machine list");
     assert!(here.calls("doc.get").iter().all(|p| p.get("on").is_none()), "no document of box: {:?}", here.calls("doc.get"));
 }
+
+/// A PNG header `w`×`h`, then `pad` bytes (the hub sends the log's bytes as they are; nothing decodes them here).
+fn png(w: u32, h: u32, pad: usize) -> Vec<u8> {
+    let mut b = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
+    b.extend(b"IHDR");
+    b.extend(w.to_be_bytes());
+    b.extend(h.to_be_bytes());
+    b.extend(std::iter::repeat_n(7u8, pad));
+    b
+}
+
+fn image_block(bytes: &[u8], mime: &str) -> Value {
+    use base64::Engine;
+    json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64::engine::general_purpose::STANDARD.encode(bytes)}})
+}
+
+#[test]
+fn pictures_come_from_the_log() {
+    // u1: a PNG of 700 KB (two parts), a GIF (not offered), a PNG too large to send. Then a Read whose result is a PNG.
+    let big = png(100, 50, 700_000);
+    let gif: Vec<u8> = [b"GIF89a".as_slice(), &[10, 0, 20, 0], &[0u8; 30]].concat();
+    let huge = png(20_000, 20_000, 40);
+    let shot = png(200, 100, 30);
+    let lines = [
+        json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-03T01:40:00.000Z", "message": {"role": "user", "content": [
+            {"type": "text", "text": "look"}, image_block(&big, "image/png"), image_block(&gif, "image/gif"), image_block(&huge, "image/png")]}}),
+        json!({"type": "assistant", "uuid": "a1", "timestamp": "2026-11-03T01:40:01.000Z", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "/home/you/shot.png"}}]}}),
+        json!({"type": "user", "uuid": "u2", "timestamp": "2026-11-03T01:40:02.000Z", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "r1", "content": [image_block(&shot, "image/png")]}]}}),
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("sess-pics.jsonl");
+    std::fs::write(&log, lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n") + "\n").unwrap();
+    let (fake, cache) = with_log(dir.path(), &log);
+    let srv = start(&fake.path, &["--cache", &cache]);
+    let mut ws = socket(srv.port);
+    say(&mut ws, json!({"v": 1, "id": "h", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "h");
+    let pane = got.iter().find(|m| m["type"] == "snapshot").unwrap()["workspaces"][0]["tabs"][0]["panes"][0]["id"].as_str().unwrap().to_string();
+    let ask = |ws: &mut tungstenite::WebSocket<TcpStream>, id: &str, item: &str, index: i64| {
+        say(ws, json!({"v": 1, "id": id, "type": "picture", "pane": pane, "item": item, "index": index, "full": false}));
+        read_until(ws, |v| v["type"] == "reply" && v["re"] == id)
+    };
+
+    // Not watched yet: refused.
+    let r = ask(&mut ws, "p0", "u1-0", 0);
+    assert_eq!(r.last().unwrap()["error"]["code"], "badRequest", "{r:?}");
+
+    say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": pane}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
+    let items = got.iter().find(|m| m["type"] == "conversation").unwrap()["items"].as_array().unwrap().clone();
+    let user = items.iter().find(|i| i["kind"] == "user").unwrap();
+    assert_eq!(user["images"], json!([{"width": 100, "height": 50}, {"width": 10, "height": 20}, {"width": 20000, "height": 20000}]));
+    let tools = items.iter().find(|i| i["kind"] == "tools").unwrap();
+    assert_eq!(tools["images"], json!([{"width": 200, "height": 100}]));
+    let (uid, tid) = (user["id"].as_str().unwrap().to_string(), tools["id"].as_str().unwrap().to_string());
+
+    // The PNG: its own bytes in two parts, then ok.
+    let r = ask(&mut ws, "p1", &uid, 0);
+    assert_eq!(r.last().unwrap()["ok"], true, "{:?}", r.last());
+    let parts: Vec<&Value> = r.iter().filter(|m| m["type"] == "picturePart").collect();
+    assert_eq!(parts.len(), 2);
+    for (i, p) in parts.iter().enumerate() {
+        assert_eq!((p["re"].as_str(), p["pane"].as_str(), p["item"].as_str()), (Some("p1"), Some(pane.as_str()), Some(uid.as_str())));
+        assert_eq!((p["index"].as_i64(), p["part"].as_i64(), p["parts"].as_i64()), (Some(0), Some(i as i64), Some(2)));
+        assert_eq!((p["mime"].as_str(), p["width"].as_i64(), p["height"].as_i64()), (Some("image/png"), Some(100), Some(50)));
+    }
+    use base64::Engine;
+    let back: Vec<u8> = parts.iter().flat_map(|p| base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap()).unwrap()).collect();
+    assert_eq!(back, big);
+
+    // A tool's picture.
+    let r = ask(&mut ws, "p2", &tid, 0);
+    assert_eq!(r.last().unwrap()["ok"], true, "{:?}", r.last());
+    assert_eq!(r.iter().filter(|m| m["type"] == "picturePart").count(), 1);
+
+    // A GIF is not offered; a picture too large is not sent; a bad index or item is not found.
+    for (id, item, index, code) in
+        [("p3", uid.as_str(), 1, "failed"), ("p4", uid.as_str(), 2, "failed"), ("p5", uid.as_str(), 3, "notFound"), ("p6", "nope", 0, "notFound"), ("p7", uid.as_str(), -1, "badRequest")]
+    {
+        let r = ask(&mut ws, id, item, index);
+        assert_eq!(r.last().unwrap()["error"]["code"], code, "{id}: {r:?}");
+        assert!(r.iter().all(|m| m["type"] != "picturePart"), "{id}");
+    }
+
+    // The log was rewritten: the picture is no longer there, nothing else is sent in its place.
+    std::fs::write(&log, "").unwrap();
+    let r = ask(&mut ws, "p8", &uid, 0);
+    assert_eq!(r.last().unwrap()["error"]["code"], "notFound", "{r:?}");
+    assert!(r.iter().all(|m| m["type"] != "picturePart"));
+}

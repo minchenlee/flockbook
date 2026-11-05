@@ -43,7 +43,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | Command | Arguments | Lines after `header` |
 |---|---|---|
 | `version` | — | `version` |
-| `feed` | `--terminal <addr>` `[--cursor <c>]` `[--cache <file>]` | `log`, then `unchanged`, or `splice` and `row`s |
+| `feed` | `--terminal <addr>` `[--cursor <c>]` `[--cache <file>]` `[--pictures]` | `log`, then `unchanged`, or `splice` and `row`s |
 | `status` | `--terminal <addr>` `[--cache <file>]` | `status` |
 | `card` | `--terminal <addr>` `[--cache <file>]` | `card` |
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
@@ -241,12 +241,20 @@ the cursor are not touched. A `moved` error: the agent now writes another log th
 
 ### `row` (`feed`)
 
+With `--pictures` (what `serve` asks for, also with `--before`), the log is parsed with each line's offset, and
+`user` and `tools` rows with pictures get `pics`: one entry per picture, the owner's for a user row, the calls'
+result pictures in call order for a tools row. `{"format":"png","width":3,"height":4,"offset":1290,"index":0,
+"digest":"<16 hex digits>"}`: the line's file offset, the picture's place in that line, and the first 8 bytes of
+the SHA-256 of its base64. Codex, Grok and Cursor row ids then come from line offsets, so they differ from the
+rows without `--pictures`. The mod never passes it.
+
 One per conversation row, in order. `id` is stable for the same log and `start`: the mod keys row
 heights by it.
 
 | `k` | Fields | Shown as |
 |---|---|---|
 | `user` | `text`, `ts`, `images` (count, when any) | A right-aligned bubble. |
+| | `pics` (with `--pictures` only) | Where the pictures are in the log, for `serve`. |
 | `assistant` | `text` (markdown), `ts` | Full-width markdown. |
 | `tools` | `chips`, `ts` | A chip: "Ran 3 commands", expands to the calls. |
 | `perm` | `perm`, `text` (the title), `ts` | The approval card (when `perm.state` is `pending`). |

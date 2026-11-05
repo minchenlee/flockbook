@@ -45,6 +45,9 @@ of the conversation. Claude Code's can be pulled back to the composer, as on the
 Escape, and only text its log gives exactly. The helper keeps a pulled text until a page has it in its composer;
 a page that was not connected gets it at its next connect. Codex's and Grok's are changed in their terminals.
 
+Pictures in the conversation (ones you pasted, and screenshots a tool returned) load when they scroll into view.
+The helper reads each one back from the log when the page asks, and checks that it is still the same picture.
+
 A connection whose peer stops reading is closed after 5 s without progress on a message.
 
 ## Limits
@@ -58,7 +61,11 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
   that terminal: a link that drops mid-pull could take the text from the agent and never bring it back.
 - Scrolling back goes up to 2,000 older messages per conversation (or 32 MB of them); the Mac app shows the whole log.
 - A pulled text that no page has taken yet is kept in memory only: it is gone when `serve` stops.
-- Not in this version: pictures, image upload, and notifications.
+- Pictures go as they are in the log, PNG, JPEG and WebP only, up to 10 MB and 12,000 pixels a side.
+  The Mac app re-encodes them (smaller previews, GIFs too); the helper does not.
+  Others show an empty box. At most 300 pictures (or 256 MB) go out in 10 minutes, on all connections together.
+- Pictures show for this machine's terminals only, not for terminals on another machine.
+- Not in this version: image upload and notifications.
   The helper answers those requests with "Not offered by this helper."
 
 ## Start it

@@ -1,7 +1,7 @@
 //! The phone page's protocol (remote protocol v1, `web/src/protocol.ts`; the Mac app's `HubSession.swift`) on the
 //! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt, the agent's queue), loadEarlier,
-//! pulledAck, ping. Approve, answer, send and pullQueued come only over `POST /api` (`post`); on the socket they are
-//! refused. Pictures, uploads and notifications are not offered: those requests get a `failed` reply.
+//! pulledAck, picture, ping. Approve, answer, send and pullQueued come only over `POST /api` (`post`); on the socket
+//! they are refused. Uploads and notifications are not offered: those requests get a `failed` reply.
 //!
 //! Every read and every key goes through `cli::run`, the same code the mod's sidecar runs, so the claims, the
 //! screen checks and the results are the mod's.
@@ -24,6 +24,17 @@ pub const MAX_OTHER: usize = 2_000;
 
 /// The requests that send keys: only `POST /api` takes them.
 pub const KEYS: [&str; 4] = ["approve", "answer", "send", "pullQueued"];
+
+/// A picture goes as it is in the log (no re-encoding, unlike the Mac hub): PNG, JPEG and WebP only, at most
+/// `MAX_PICTURE` bytes (`HubImage.maxBytes`) and `MAX_SIDE`/`MAX_PIXELS`, in parts of `PICTURE_PART` bytes.
+pub const MAX_PICTURE: usize = 10 << 20;
+pub const PICTURE_PART: usize = 640 << 10;
+pub const MAX_SIDE: i64 = 12_000;
+pub const MAX_PIXELS: i64 = 50_000_000;
+/// Pictures sent in `PICTURE_WINDOW_S`, on all connections together (one owner): at most this many, and bytes.
+pub const MAX_PICTURES: usize = 300;
+pub const MAX_PICTURE_BYTES: usize = 256 << 20;
+const PICTURE_WINDOW_S: u64 = 600;
 
 /// How often the queue of a terminal on another machine is read (each read runs the helper there).
 const REMOTE_QUEUE_S: u64 = 5;
@@ -209,7 +220,51 @@ pub fn item(row: &Value) -> Option<Value> {
     if let Some(t) = time(&row["ts"]) {
         o["time"] = json!(t);
     }
+    if let Some(p) = row["pics"].as_array().filter(|p| !p.is_empty()) {
+        o["images"] = p.iter().map(|x| json!({"width": x["width"], "height": x["height"]})).collect();
+    }
     Some(o)
+}
+
+/// The log ref a row's `pics` entry names (`rows::FeedPic`).
+fn pic_ref(p: &Value) -> Option<herdr_core::log_image::Ref> {
+    use herdr_core::log_image::Format;
+    let format = match p["format"].as_str()? {
+        "png" => Format::Png,
+        "jpeg" => Format::Jpeg,
+        "webp" => Format::Webp,
+        "gif" => Format::Gif,
+        _ => return None,
+    };
+    let digest = u64::from_str_radix(p["digest"].as_str()?, 16).ok()?;
+    Some(herdr_core::log_image::Ref { format, width: p["width"].as_i64()?, height: p["height"].as_i64()?, offset: Some(p["offset"].as_u64()?), index: p["index"].as_u64()? as usize, digest })
+}
+
+/// A picture's mime type and size when it may be sent as it is; else why not.
+pub fn offered(b: &[u8]) -> Result<(&'static str, i64, i64), &'static str> {
+    use herdr_core::log_image::Format;
+    let Some((f, w, h)) = herdr_core::log_image::header(b) else { return Err("The picture could not be read.") };
+    let mime = match f {
+        Format::Png => "image/png",
+        Format::Jpeg => "image/jpeg",
+        Format::Webp => "image/webp",
+        Format::Gif => return Err("This picture type is not offered by this helper."),
+    };
+    if b.len() > MAX_PICTURE || w > MAX_SIDE || h > MAX_SIDE || w.saturating_mul(h) > MAX_PIXELS {
+        return Err("The picture is too large to send.");
+    }
+    Ok((mime, w, h))
+}
+
+/// The pictures sent lately (when, bytes), on all connections.
+static SENT_PICTURES: std::sync::Mutex<std::collections::VecDeque<(std::time::Instant, usize)>> = std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// Room for one more picture now: under `MAX_PICTURES` and `MAX_PICTURE_BYTES` in the window.
+pub fn picture_room(sent: &mut std::collections::VecDeque<(std::time::Instant, usize)>, now: std::time::Instant) -> bool {
+    while sent.front().is_some_and(|(t, _)| now.duration_since(*t).as_secs() >= PICTURE_WINDOW_S) {
+        sent.pop_front();
+    }
+    sent.len() < MAX_PICTURES && sent.iter().map(|x| x.1).sum::<usize>() < MAX_PICTURE_BYTES
 }
 
 /// The `card` line as a `prompt` push: what the agent waits for on screen now, keyed by the card's `request` (the id
@@ -436,6 +491,12 @@ impl Session {
                 pulled_store().retain(|x| x.id != p);
                 vec![ok(&id)]
             }
+            "picture" => {
+                let (Some(pane), Some(item), Some(index)) = (m["pane"].as_str(), m["item"].as_str(), m["index"].as_u64()) else {
+                    return vec![fail(&id, "badRequest", "picture needs pane, item and index.")];
+                };
+                self.picture(&id, pane, item, index as usize, m["full"] == true)
+            }
             "pushUnsubscribe" => vec![ok(&id)],
             _ => vec![fail(&id, "failed", "Not offered by this helper.")],
         }
@@ -528,7 +589,7 @@ impl Session {
         let Some(p) = self.pane(pane).cloned() else { return vec![] };
         let mut out = vec![];
         let terminal = p.terminal_id.clone();
-        let mut argv = self.base("feed", &terminal);
+        let mut argv = self.feed_argv(&terminal);
         let cursor = self.feeds.get(pane).and_then(|f| f.cursor.clone());
         if let Some(c) = &cursor {
             argv.extend(["--cursor".into(), c.clone()]);
@@ -612,6 +673,54 @@ impl Session {
     /// `loadEarlier`: up to WINDOW items before `before` in the watched pane that shows `session` (the Mac hub's
     /// `loadEarlier`). The log is read further back only when fewer than WINDOW are here. Only this connection's own
     /// log path and offset go to `feed --before`; the page's values are only compared.
+    /// `feed` for `terminal`: on this machine its rows say where their pictures are (`--pictures`). A terminal on
+    /// another machine shows none: its log is there.
+    fn feed_argv(&self, terminal: &str) -> Vec<String> {
+        let mut a = self.base("feed", terminal);
+        if matches!(crate::remote::split(terminal), Ok(None)) {
+            a.push("--pictures".into());
+        }
+        a
+    }
+
+    /// One picture of a watched pane's conversation (remote-protocol.md 3.4), read back from the log (`log_image::read`
+    /// checks its fingerprint) and sent as it is, in `picturePart`s, then ok.
+    fn picture(&mut self, re: &str, pane: &str, item: &str, index: usize, full: bool) -> Vec<Value> {
+        let Some(feed) = self.feeds.get(pane).filter(|_| self.watched.iter().any(|p| p == pane)) else {
+            return vec![fail(re, "badRequest", "Watch the pane first.")];
+        };
+        let Some(row) = feed.older.iter().chain(&feed.rows).find(|r| r["id"] == item && self::item(r).is_some()) else {
+            return vec![fail(re, "notFound", &format!("No item {item}."))];
+        };
+        let Some(p) = row["pics"].as_array().and_then(|p| p.get(index)) else {
+            return vec![fail(re, "notFound", &format!("No picture {index} in item {item}."))];
+        };
+        let gone = || vec![fail(re, "notFound", "The picture is no longer in the log.")];
+        let (Some(r), Some(path)) = (pic_ref(p), feed.path.clone()) else { return gone() };
+        let now = std::time::Instant::now();
+        if !picture_room(&mut SENT_PICTURES.lock().unwrap_or_else(|e| e.into_inner()), now) {
+            return vec![fail(re, "rateLimited", "Too many pictures at once. Try again soon.")];
+        }
+        let Some(bytes) = herdr_core::log_image::read(&r, std::path::Path::new(&path)) else { return gone() };
+        let (mime, width, height) = match offered(&bytes) {
+            Ok(x) => x,
+            Err(why) => return vec![fail(re, "failed", why)],
+        };
+        SENT_PICTURES.lock().unwrap_or_else(|e| e.into_inner()).push_back((now, bytes.len()));
+        use base64::Engine;
+        let chunks: Vec<&[u8]> = bytes.chunks(PICTURE_PART).collect();
+        let mut out: Vec<Value> = chunks
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                json!({"type": "picturePart", "re": re, "pane": pane, "item": item, "index": index, "full": full, "part": i, "parts": chunks.len(),
+                       "mime": mime, "width": width, "height": height, "data": base64::engine::general_purpose::STANDARD.encode(d)})
+            })
+            .collect();
+        out.push(ok(re));
+        out
+    }
+
     fn load_earlier(&mut self, session: &str, before: &str, id: &str) -> Vec<Value> {
         let Some(pane) = self.watched.iter().find(|p| self.feeds.get(*p).is_some_and(|f| f.session == session)).cloned() else {
             return vec![fail(id, "notFound", &format!("No watched pane shows session {session}."))];
@@ -622,7 +731,7 @@ impl Session {
         let Some(idx) = at(&feed.items()) else { return vec![fail(id, "notFound", &format!("No item {before}."))] };
         if idx < WINDOW {
             if let (Some(from), Some(path)) = (feed.older_from(), feed.path.clone()) {
-                let mut argv = self.base("feed", &terminal);
+                let mut argv = self.feed_argv(&terminal);
                 argv.extend(["--before".into(), from.to_string(), "--path".into(), path.clone()]);
                 let lines = run(&argv);
                 let head = lines.iter().find(|l| l["type"] == "older");
@@ -718,6 +827,58 @@ fn parse(data: &str) -> Result<(Value, String), Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn png(w: u32, h: u32, len: usize) -> Vec<u8> {
+        let mut b = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
+        b.extend(b"IHDR");
+        b.extend(w.to_be_bytes());
+        b.extend(h.to_be_bytes());
+        b.resize(len.max(b.len()), 0);
+        b
+    }
+
+    #[test]
+    fn pictures_offered_as_they_are() {
+        assert_eq!(offered(&png(10, 20, 100)), Ok(("image/png", 10, 20)));
+        let jpeg = [0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x30, 0x00, 0x40, 0x03, 0, 0, 0, 0, 0];
+        assert_eq!(offered(&jpeg), Ok(("image/jpeg", 64, 48)));
+        let mut webp = b"RIFF\0\0\0\0WEBPVP8X".to_vec();
+        webp.extend([0u8; 8]);
+        webp.extend([9, 0, 0, 4, 0, 0]); // 10 x 5
+        assert_eq!(offered(&webp), Ok(("image/webp", 10, 5)));
+        assert!(offered(b"GIF89a\x0a\x00\x14\x00").unwrap_err().contains("not offered"));
+        assert!(offered(b"<svg/>").is_err());
+        assert!(offered(&png(12_001, 1, 100)).unwrap_err().contains("too large"));
+        assert!(offered(&png(8_000, 8_000, 100)).unwrap_err().contains("too large"), "64 M pixels");
+        assert!(offered(&png(10, 10, MAX_PICTURE)).is_ok());
+        assert!(offered(&png(10, 10, MAX_PICTURE + 1)).unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn pictures_have_a_window() {
+        let t0 = std::time::Instant::now();
+        let mut sent = std::collections::VecDeque::new();
+        for _ in 0..MAX_PICTURES {
+            assert!(picture_room(&mut sent, t0));
+            sent.push_back((t0, 1));
+        }
+        assert!(!picture_room(&mut sent, t0), "count");
+        assert!(picture_room(&mut sent, t0 + std::time::Duration::from_secs(PICTURE_WINDOW_S)), "the window moved on");
+        assert!(sent.is_empty());
+        sent.push_back((t0, MAX_PICTURE_BYTES));
+        assert!(!picture_room(&mut sent, t0), "bytes");
+    }
+
+    #[test]
+    fn rows_say_where_pictures_are() {
+        let u = item(&json!({"id": "u1", "k": "user", "text": "", "type": "row",
+            "pics": [{"format": "png", "width": 3, "height": 4, "offset": 0, "index": 0, "digest": "00ff00ff00ff00ff"}]})).unwrap();
+        assert_eq!(u["images"], json!([{"width": 3, "height": 4}]));
+        let r = pic_ref(&json!({"format": "png", "width": 3, "height": 4, "offset": 9, "index": 2, "digest": "00ff00ff00ff00ff"})).unwrap();
+        assert_eq!((r.offset, r.index, r.digest), (Some(9), 2, 0x00ff00ff00ff00ff));
+        assert!(pic_ref(&json!({"format": "bmp", "width": 3, "height": 4, "offset": 9, "index": 2, "digest": "00"})).is_none());
+        assert!(item(&json!({"id": "u2", "k": "user", "text": "", "type": "row"})).unwrap().get("images").is_none());
+    }
 
     #[test]
     fn rows_to_items() {
