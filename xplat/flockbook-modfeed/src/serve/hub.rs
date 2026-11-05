@@ -14,6 +14,10 @@ use std::collections::HashMap;
 
 /// The newest rows sent per conversation (the Mac hub's window).
 pub const WINDOW: usize = 100;
+/// The most older rows (`loadEarlier`) one pane keeps on one connection, by count and by bytes of JSON. Past them,
+/// `hasEarlier` is false: the page scrolls no further back (the Mac app has the whole log; the helper keeps a bound).
+pub const MAX_OLDER: usize = 2_000;
+pub const MAX_OLDER_BYTES: usize = 32 << 20;
 /// The longest text `send` takes, and the longest own answer to a question (the Mac hub's limits).
 pub const MAX_SEND: usize = 16_000;
 pub const MAX_OTHER: usize = 2_000;
@@ -270,6 +274,9 @@ struct Feed {
     start: Option<u64>,
     older_start: Option<u64>,
     first: bool,
+    /// `older` reached MAX_OLDER or MAX_OLDER_BYTES (its bytes): nothing more is read back.
+    full: bool,
+    older_bytes: usize,
     /// The conversation's `session` sent to the page: the log, or the pane when there is none.
     session: String,
     /// The oldest item the page has after a `loadEarlier`; None: the newest WINDOW.
@@ -287,10 +294,12 @@ impl Feed {
         self.older.clear();
         self.older_start = None;
         self.first = false;
+        self.full = false;
+        self.older_bytes = 0;
     }
     /// Where the next `feed --before` reads up to; None when the log's first row is already here.
     fn older_from(&self) -> Option<u64> {
-        if self.first || self.path.is_none() || self.start.unwrap_or(0) == 0 {
+        if self.first || self.full || self.path.is_none() || self.start.unwrap_or(0) == 0 {
             return None;
         }
         self.older_start.or(self.start)
@@ -614,7 +623,19 @@ impl Session {
                 let start = head["start"].as_u64();
                 let feed = self.feeds.get_mut(&pane).expect("watched");
                 let have: std::collections::HashSet<Value> = feed.older.iter().chain(&feed.rows).map(|r| r["id"].clone()).collect();
-                let add: Vec<Value> = lines.iter().filter(|l| l["type"] == "row" && !have.contains(&l["id"])).cloned().collect();
+                let mut add: Vec<Value> = lines.iter().filter(|l| l["type"] == "row" && !have.contains(&l["id"])).cloned().collect();
+                // Within the bound: the newest of them, and then no more reads.
+                let mut keep = 0;
+                for r in add.iter().rev() {
+                    let b = r.to_string().len();
+                    if feed.older.len() + keep >= MAX_OLDER || feed.older_bytes + b > MAX_OLDER_BYTES {
+                        feed.full = true;
+                        break;
+                    }
+                    feed.older_bytes += b;
+                    keep += 1;
+                }
+                add.drain(..add.len() - keep);
                 feed.older.splice(0..0, add);
                 feed.older_start = start;
                 feed.first = start == Some(0);
@@ -634,8 +655,6 @@ impl Session {
     }
 }
 
-/// A client message: protocol 1, an id. Errors are the reply to send.
-/// A `Value`, not a `Map`: a missing field indexes as null (a `Map` index panics).
 /// `pullQueued`: the agent's queue back to the page's composer (`cli::pull`). The text is kept (`PULLED`) before the
 /// agent's box is cleared, until the composer confirms it (`pulledAck`).
 fn pull_queued(re: &str, pane: &str, terminal: &str, cache: Option<&std::path::Path>) -> Vec<Value> {
@@ -672,6 +691,8 @@ fn pull_queued(re: &str, pane: &str, terminal: &str, cache: Option<&std::path::P
     }
 }
 
+/// A client message: protocol 1, an id. Errors are the reply to send.
+/// A `Value`, not a `Map`: a missing field indexes as null (a `Map` index panics).
 fn parse(data: &str) -> Result<(Value, String), Value> {
     let v: Value = serde_json::from_str(data).map_err(|_| fail("", "badRequest", "Not a protocol 1 client message."))?;
     let id = v["id"].as_str().unwrap_or("").to_string();

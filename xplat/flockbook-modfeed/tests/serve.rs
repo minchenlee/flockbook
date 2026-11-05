@@ -557,3 +557,40 @@ fn the_agents_queue_and_pull_back() {
     let got = read_until(&mut ws, |v| v["type"] == "queued");
     assert_eq!(got.last().unwrap()["items"], json!([]));
 }
+
+#[test]
+fn older_rows_have_a_bound() {
+    // 2300 old rows beyond the tail, then the tail's 120: loadEarlier keeps at most MAX_OLDER of the old ones.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("sess-big.jsonl");
+    let mut lines: Vec<String> = (0..2300).map(|i| user_line(&format!("old{i}"), &format!("old {i}"))).collect();
+    let pad = "x".repeat(1000);
+    lines.extend((0..2200).map(|_| format!(r#"{{"type":"file-history-snapshot","pad":"{pad}"}}"#)));
+    lines.extend((0..120).map(|i| user_line(&format!("new{i}"), &format!("new {i}"))));
+    std::fs::write(&log, lines.join("\n") + "\n").unwrap();
+    let (fake, cache) = with_log(dir.path(), &log);
+    let srv = start(&fake.path, &["--cache", &cache]);
+    let mut ws = socket(srv.port);
+    say(&mut ws, json!({"v": 1, "id": "h", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "h");
+    let pane = got.iter().find(|m| m["type"] == "snapshot").unwrap()["workspaces"][0]["tabs"][0]["panes"][0]["id"].as_str().unwrap().to_string();
+    say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": pane}));
+    read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
+    let session = log.to_string_lossy().to_string();
+    let (mut before, mut total, mut calls) = ("new20-0".to_string(), 0, 0);
+    loop {
+        calls += 1;
+        assert!(calls < 60, "it ends");
+        say(&mut ws, json!({"v": 1, "id": format!("e{calls}"), "type": "loadEarlier", "session": session, "before": before}));
+        let r = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == format!("e{calls}"));
+        let p = r.iter().find(|m| m["type"] == "conversation").unwrap_or_else(|| panic!("{r:?}"));
+        let items = p["items"].as_array().unwrap();
+        total += items.len();
+        if p["hasEarlier"] == false || items.is_empty() {
+            assert_eq!(p["hasEarlier"], false);
+            break;
+        }
+        before = items[0]["id"].as_str().unwrap().to_string();
+    }
+    assert_eq!(total, 20 + modfeedkit::serve::hub::MAX_OLDER, "the 20 tail rows before new20, then the bound");
+}

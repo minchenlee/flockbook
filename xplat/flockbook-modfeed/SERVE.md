@@ -55,6 +55,7 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
     not trust.
 - Pull back works on this machine's terminals only. On another machine the queue shows, but you change it in
   that terminal: a link that drops mid-pull could take the text from the agent and never bring it back.
+- Scrolling back goes up to 2,000 older messages per conversation (or 32 MB of them); the Mac app shows the whole log.
 - A pulled text that no page has taken yet is kept in memory only: it is gone when `serve` stops.
 - Not in this version: pictures, image upload, and notifications.
   The helper answers those requests with "Not offered by this helper."
