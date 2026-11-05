@@ -3,7 +3,7 @@
 // height, about 1.618 × the size). Over-guessing leaves a gap; under-guessing cuts the row, so the
 // guesses lean high: prose wraps by unit (a Latin word or an inline code span does not break, closing
 // full-width punctuation stays with the character before it, opening punctuation with the one after),
-// letters are counted wide, and END_PAD px go on the end.
+// letters are counted per character a little wide, and END_PAD px go on the end.
 // No percentage on top: on a long pasted message 8% of the height was many lines of empty space.
 export const READ_W = 760;  // the reading column's width at most
 export const GUTTER = 24;   // each side of the column
@@ -16,8 +16,22 @@ export const FS = 16, LH = 26;
 // Kept under the prose, for what the count misses (a bold word, an emoji). Small: the guess is meant to
 // be within a line of the drawn height.
 const END_PAD = 6;
-// Latin letters in prose, in em: measured about 0.47 em (spaces included); a little more.
-const LATIN_EM = 0.5;
+// Latin letters in prose: Helvetica's widths (1/1000 em, ASCII 33-126), 6% wider. The Mac's system font draws
+// a hyphenated lowercase word 6% wider than Helvetica and digits 0.6 em (measured, Herdr app 0.1.13); a flat 0.5 em was
+// narrower than drawn on digits and capitals, and a line that just fit in the guess wrapped on screen.
+const HELV = [278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015,
+  667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611,
+  278, 278, 278, 469, 556, 333,
+  556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500,
+  334, 260, 334, 584];
+const LATIN_SCALE = 1.06;  // more puts the long VM-measured message (Linux font) a line over
+// Other narrow characters (an en dash, an accented letter): 0.6 em.
+const latinWidth = (u, fs) => {
+  let w = 0;
+  for (const ch of u) { const c = ch.codePointAt(0); w += c >= 33 && c <= 126 ? HELV[c - 33] : 600; }
+  return w * LATIN_SCALE * fs / 1000;
+};
 // Inline code: Menlo at 14 px, 0.6 em a character, 4 px padding each side.
 const CODE_CH = 14 * 0.6, CODE_PAD = 8;
 // Full-width punctuation that may not start a line: it goes down with the character before it.
@@ -37,7 +51,7 @@ export function proseLines(text, width, fs = FS) {
   const wide = (u) => isWide(u.codePointAt(0));
   const size = (u) => u[0] === "`" && u.length > 1 ? (u.length - 2) * CODE_CH + CODE_PAD
     : /^\s+$/.test(u) ? fs * 0.3 * u.length
-      : wide(u) ? fs : u.length * fs * LATIN_EM;
+      : wide(u) ? fs : latinWidth(u, fs);
   let n = 1, w = 0;
   for (let i = 0; i < units.length; i++) {
     let u = units[i], uw = size(u);
@@ -74,7 +88,8 @@ export function markdownHeight(text, width) {
   // break draws as a space), so its lines are counted once, joined: counted one by one, a long pasted
   // message with short source lines came out many lines too tall.
   let para = null, lastLevel = null;  // lastLevel: the last list item's nesting, while in a list
-  const close = () => { if (para) p += proseLines(para.text, para.width, para.fs) * para.lh + para.extra; para = null; };
+  // "**" (bold) is markup, not drawn.
+  const close = () => { if (para) p += proseLines(para.text.replace(/\*\*/g, ""), para.width, para.fs) * para.lh + para.extra; para = null; };
   const lines = String(text).split("\n");
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li].replace(/\t/g, "    ");
