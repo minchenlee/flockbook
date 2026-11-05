@@ -52,7 +52,7 @@ beforeEach(() => {
 async function screen() {
   await loadConfig();
   await pollPhone();
-  const v = new SettingsView(fakeCx());
+  const v = new SettingsView(fakeCx()); v.section = "phone";
   return { v, el: () => v.render(fakeCx()) };
 }
 const click = (el, id) => byId(el, id)._h.on_click({}, fakeCx());
@@ -127,7 +127,7 @@ test("while On waits for Serve, the status is asked every 3 s; the address and Q
   await loadConfig();
   await pollPhone();
   const cx = fakeCx();
-  const v = new SettingsView(cx);
+  const v = new SettingsView(cx); v.section = "phone";
   await cx.settle();
   const tick = cx.timers.find((x) => !x.once && x.ms <= 3000);
   assert.ok(tick, "a timer of 3 s or less");
@@ -216,4 +216,25 @@ test("keyboard: Enter on On turns it on", async () => {
   on._h.on_key_down({ key: "enter" }, { ...fakeCx(), stop_propagation() {} });
   await settle(); await settle();
   assert.deepEqual(phoneCalls(), ["phone status", "phone on"]);
+});
+
+test("the login field looks like a field: a frame and background, the row line's text size, a plain placeholder", async () => {
+  const { v, el } = await screen();
+  const s = byId(el(), "set-phone");
+  const f = byId(s, "phone-login");
+  assert.ok(f, "a frame around the field");
+  assert.equal(f._a.border, 1);
+  assert.equal(f._a.border_color, "#border");
+  assert.equal(f._a.bg, "#background");
+  assert.equal(typeof f._a.rounded, "number");
+  assert.equal(f._a.text_size, 12, "as the line under a row's title");
+  assert.ok(f.kids.some((k) => k.tag === "input"), "the input inside");
+  assert.equal(v.login.placeholder, "Default: this machine's Tailscale login");
+  const words = textOf(s);
+  assert.doesNotMatch(words, /Empty/);
+  assert.match(words, /Only this account may open the page\. Now: me@example\.com\./);
+  // As the Read-only row: the title and its line on the left, the field on the right.
+  const row = byId(s, "phone-login-row");
+  assert.match(textOf(row.kids[0]), /^Tailscale login Only this account/);
+  assert.equal(row.kids[1], f);
 });

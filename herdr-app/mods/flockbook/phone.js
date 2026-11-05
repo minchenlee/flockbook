@@ -104,11 +104,14 @@ export function phoneBody(t, owner, { seg, small }) {
       .child(h_flex().gap(6).items_center().child(mono("phone-guide", GUIDE)).child(copy("phone-guide-copy", GUIDE, "Copy link")));
     return body;
   }
-  // The login: empty uses the one Tailscale says.
-  body.child(h_flex().w_full().gap(12).items_center()
-    .child(div().w(120).flex_none().text_size(12.5).text_color(t.foreground).child("Tailscale login"))
-    .child(div().flex_1().min_w(0).child(owner.loginInput()))
-  ).child(note(`Only this account may open the page. Empty: ${ts.login}, the account this machine is signed in with. Now: ${l.user ?? ts.login}.`));
+  // The login: empty uses the one Tailscale says. A row as Read-only's: the title and its line on the left,
+  // on the right the field in a frame as Herdr's own (`background`, a `border` line), its text as the line's.
+  body.child(h_flex().id("phone-login-row").w_full().gap(12).items_center()
+    .child(v_flex().flex_1().min_w(0).gap(2)
+      .child(div().text_size(12.5).text_color(t.foreground).child("Tailscale login"))
+      .child(note(`Only this account may open the page. Now: ${l.user ?? ts.login}.`)))
+    .child(h_flex().id("phone-login").w(260).h(30).flex_none().px(10).items_center().rounded(6)
+      .bg(t.background).border(1).border_color(t.border).text_size(12).child(owner.loginInput())));
   body.child(h_flex().w_full().gap(12).items_center()
     .child(v_flex().flex_1().min_w(0).gap(2)
       .child(div().text_size(12.5).text_color(t.foreground).child("Read-only"))
