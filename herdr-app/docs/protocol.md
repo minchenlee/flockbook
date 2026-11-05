@@ -153,10 +153,12 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check"],"type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
+`release`: the Flockbook release this helper was built for (`x.y.z`, what `update-check` compares with), or
+`null` for a build from source. The release's package job checks that every helper it ships says the tag's version.
 
 ### `update` (`update-check`)
 

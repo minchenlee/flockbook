@@ -33,7 +33,8 @@ jobs:
   helpers:
     uses: ./.github/workflows/helpers.yml
     with:
-      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      # The tag's name (vX.Y.Z): the helpers bake it in, and their package job checks they all say it.
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
   # Signed + notarized universal Flockbook.app as .zip and .dmg. Signing: import the
   # Developer ID cert into a temporary keychain, sign with hardened runtime, notarize, staple. Without secrets: ad-hoc sign, no notarization,

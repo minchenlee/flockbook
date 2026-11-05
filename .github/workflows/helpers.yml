@@ -23,6 +23,7 @@ on:
       - "scripts/package-mod.sh"
       - "scripts/install-from-release.sh"
       - "scripts/known-files.mjs"
+      - "scripts/helper-release.mjs"
       - ".github/workflows/helpers.yml"
 
 permissions:
@@ -31,8 +32,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_PROFILE_RELEASE_STRIP: "true"
-  # A release (ref vX.Y.Z) bakes its version in, for update-check; other builds have none and never ask.
-  FLOCKBOOK_VERSION: ${{ startsWith(inputs.ref, 'v') && inputs.ref || '' }}
+  # What is built: the release's tag (vX.Y.Z, or refs/tags/vX.Y.Z on a tag push), else the triggering ref.
+  # A release bakes its version in (FLOCKBOOK_VERSION, for update-check); other builds have none and never ask.
+  FLOCKBOOK_REF: ${{ inputs.ref || github.ref }}
   # The install's table of older Flockbook files must be there (scripts/known-files.mjs): no table, no helper.
   FLOCKBOOK_REQUIRE_KNOWN_FILES: "1"
 
@@ -59,6 +61,11 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - name: The release version to bake in
+        run: |
+          v=$(node scripts/helper-release.mjs version "$FLOCKBOOK_REF")
+          echo "ref $FLOCKBOOK_REF: release ${v:-none}"
+          [ -z "$v" ] || echo "FLOCKBOOK_VERSION=$v" >> "$GITHUB_ENV"
       - name: Build
         working-directory: xplat
         run: |
@@ -74,7 +81,7 @@ jobs:
           ls -l "$exe"
           mkdir -p out/${{ matrix.target }}
           cp "$exe" out/${{ matrix.target }}/flockbook-modfeed
-          "$exe" version | head -1 | tee out/${{ matrix.target }}/version.txt
+          "$exe" version | tee out/${{ matrix.target }}/version.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: helper-${{ matrix.target }}
@@ -95,6 +102,11 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: The release version to bake in
+        run: |
+          v=$(node scripts/helper-release.mjs version "$FLOCKBOOK_REF")
+          echo "ref $FLOCKBOOK_REF: release ${v:-none}"
+          [ -z "$v" ] || echo "FLOCKBOOK_VERSION=$v" >> "$GITHUB_ENV"
       - name: Build both and join them
         run: |
           set -eu
@@ -106,7 +118,7 @@ jobs:
           lipo -create xplat/target/{aarch64,x86_64}-apple-darwin/release/flockbook-modfeed -output "$exe"
           lipo -info "$exe"
           ls -l "$exe"
-          "$exe" version | head -1 | tee out/universal-apple-darwin/version.txt
+          "$exe" version | tee out/universal-apple-darwin/version.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: helper-universal-apple-darwin
@@ -136,6 +148,8 @@ jobs:
           n=$(for f in helpers/*/version.txt; do python3 -c 'import json,sys; h=json.loads(open(sys.argv[1]).readline()); print(h["type"], h["protocol"], h["sidecar"])' "$f"; done | sort -u | wc -l)
           [ "$(ls helpers/*/version.txt | wc -l)" -eq 3 ] || { echo "want 3 helpers"; exit 1; }
           [ "$n" -eq 1 ] || { echo "the helpers disagree on the protocol"; exit 1; }
+          # A release: every helper says the tag's version (else update-check never offers anything); else none.
+          node scripts/helper-release.mjs check "$FLOCKBOOK_REF" helpers/*/version.txt
           rm helpers/*/version.txt
       - name: Package (ad-hoc signed)
         run: VERSION=0.0.0-ci HELPERS=helpers scripts/package-mod.sh

@@ -29,6 +29,12 @@ pub fn own_version() -> Option<(u64, u64, u64)> {
     std::env::var("FLOCKBOOK_UPDATE_VERSION").ok().as_deref().or(option_env!("FLOCKBOOK_VERSION")).and_then(version)
 }
 
+/// The release version baked in at build time only (no test stand-in): `version` reports it, so the
+/// release's package job can check that every helper it ships says the tag's version.
+pub fn release() -> Option<String> {
+    option_env!("FLOCKBOOK_VERSION").and_then(version).map(show)
+}
+
 /// The latest release's version from GitHub (FLOCKBOOK_UPDATE_URL points elsewhere, for tests).
 fn fetch() -> Option<(u64, u64, u64)> {
     let url = std::env::var("FLOCKBOOK_UPDATE_URL").unwrap_or_else(|_| LATEST.to_string());

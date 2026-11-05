@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, run, openOverlay, closeOverlay, agents, shared, setShared } from "herdr";
-import { openTerminal, showScreen, shownScreen, showAgent, openTab, KEY_SCREEN, KEY_REMOVE, machineOf } from "./state.js";
+import { openTerminal, showScreen, shownScreen, showAgent, openTab, showSettings, KEY_SCREEN, KEY_REMOVE, machineOf } from "./state.js";
 import { setting } from "./config.js";
 
 const ROW_H = 28, PAD = 6, WIDTH = 220;
@@ -31,6 +31,7 @@ export function act(item) {
     case "open-tab": return openTab(a.space, { id: a.tab });
     // The chat shows a card that asks before anything is removed.
     case "remove-helper": setShared(KEY_REMOVE, a.machine); return showScreen("chat");
+    case "settings": return showSettings();
     case "copy": return null;   // handled in the view (needs cx)
   }
   return null;
@@ -50,8 +51,10 @@ export function tabItems(tab, { agent = null, spaceId = null, list = [] } = {}) 
     shown && agent ? (shownScreen() === "tab" ? { label: "Show chat", act: "chat" } : { label: "Show panes", act: "panes" }) : null,
     shown ? { label: "Split right", cmd: "pane.split", args: { direction: "right" } } : null,
     shown ? { label: "Split down", cmd: "pane.split", args: { direction: "down" } } : null,
-    // Never: no helper on other machines, so nothing to remove from here either.
-    machine && setting("remote_helper") !== "never" ? { label: `Remove helper from ${machine}…`, act: "remove-helper", args: { machine }, sep: true } : null,
+    // Never: nothing runs there, and nothing is removed from here either; the line says where to change that.
+    machine ? (setting("remote_helper") !== "never"
+      ? { label: `Remove helper from ${machine}…`, act: "remove-helper", args: { machine }, sep: true }
+      : { label: "Remove helper: choose Ask in Flockbook settings first…", act: "settings", sep: true }) : null,
     { label: "Put away", cmd: "tab.settle", args: { id: tab.id }, sep: true },
     { label: "Close tab", cmd: "tab.close", args: { id: tab.id }, danger: true },
   ];

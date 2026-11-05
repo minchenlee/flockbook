@@ -121,7 +121,8 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   - **Status row** Hide: no tags (model, context, cost, folder, branch) above the reply box (the branch beside the send button stays).
   - **Helper on other machines** Never: for a tab on another machine the chat says, in one line,
     "Flockbook does not run its helper on other machines. To change it: Flockbook settings, Helper
-    on other machines: Ask." No install card, no Remove helper in the tab menu, and the helper
+    on other machines: Ask." No install card; the tab menu has "Remove helper: choose Ask in Flockbook
+    settings first…" (it opens them) in place of Remove helper; and the helper
     itself refuses every command for a terminal there and `helper install` / `remove` (`remote-off`). To remove a helper that is
     already there, choose Ask first.
 - **Sidebar**: ⌘B or the sidebar button shows and hides it. With it hidden, the pointer at the

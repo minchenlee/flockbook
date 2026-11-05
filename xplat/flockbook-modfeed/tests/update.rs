@@ -139,6 +139,9 @@ fn offline_or_a_bad_answer_shows_nothing_and_waits_a_day() {
 
 #[test]
 fn a_build_without_a_release_version_never_asks() {
+    if option_env!("FLOCKBOOK_VERSION").is_some() {
+        return; // a release build has one
+    }
     let t = t();
     t.publish("v0.9.0");
     let u = t.run(None, &[]);
@@ -202,5 +205,16 @@ fn remote_helper_never_runs_nothing_on_other_machines() {
 fn version_lists_update_check() {
     let o = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed")).arg("version").output().unwrap();
     assert!(String::from_utf8_lossy(&o.stdout).contains("\"update-check\""));
+}
+
+// `version` names the release baked in at build time, which the release's package job checks against the tag.
+// The test stand-in does not change it: only the build does.
+#[test]
+fn version_names_the_baked_release() {
+    let o = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed")).arg("version").env("FLOCKBOOK_UPDATE_VERSION", "0.8.0").output().unwrap();
+    let line = String::from_utf8_lossy(&o.stdout).lines().find(|l| l.contains("\"type\":\"version\"")).unwrap().to_string();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let want = option_env!("FLOCKBOOK_VERSION").map(|s| s.trim_start_matches('v').to_string());
+    assert_eq!(v["release"], serde_json::json!(want), "{line}");
 }
 

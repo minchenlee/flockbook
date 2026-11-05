@@ -11,9 +11,10 @@ import { SideView } from "../mods/flockbook/side.js";
 import { Composer } from "../mods/flockbook/composer.js";
 import { ChatView } from "../mods/flockbook/chat.js";
 import { command, TopView } from "../mods/flockbook/top.js";
-import { toggleSidebar, peekAtEdge } from "../mods/flockbook/state.js";
+import { toggleSidebar, peekAtEdge, KEY_SCREEN } from "../mods/flockbook/state.js";
 import { SETTINGS } from "../mods/flockbook/settings.js";
-import { tabItems } from "../mods/flockbook/menu.js";
+import { tabItems, act } from "../mods/flockbook/menu.js";
+import { shared } from "herdr";
 import * as sidecar from "../mods/flockbook/sidecar.js";
 
 const HOME = "/home/test/.config/herdr-app";
@@ -241,7 +242,13 @@ test("helper on other machines, Never: the tab menu has no Remove helper", async
   await loadConfig();
   assert.ok(tabItems(tab, { agent: fake.agents[0], list: [tab] }).some((i) => i?.act === "remove-helper"));
   await setSetting("remote_helper", "never");
-  assert.ok(!tabItems(tab, { agent: fake.agents[0], list: [tab] }).some((i) => i?.act === "remove-helper"));
+  const items = tabItems(tab, { agent: fake.agents[0], list: [tab] });
+  assert.ok(!items.some((i) => i?.act === "remove-helper"));
+  // It says how to remove it instead, and takes you there.
+  const hint = items.find((i) => i?.act === "settings");
+  assert.match(hint.label, /choose Ask in Flockbook settings first/);
+  act(hint);
+  assert.equal(shared(KEY_SCREEN), "settings");
 });
 
 test("sidebar hidden: a small dot on the top bar's sidebar button, until the sidebar opens or Not now", async () => {
