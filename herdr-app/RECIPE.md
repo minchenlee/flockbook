@@ -14,9 +14,10 @@ a card. The sidebar is hidden and slides out from the window's left edge.
 The window has no title bar. The macOS window buttons sit at 18, 22. The theme is black and white
 (`flockbook` dark, `flockbook-light` light); the Mac themes (`flockbook-mac`, `flockbook-mac-light`)
 use blue `#007aff` for working, green `#34c759` for done and orange `#ff9500` for blocked.
-Dark colors: the window shows `#0b0b0b` behind the chat and the sidebar alike (the theme names
-canvas `#000000` and chrome `#0b0b0b`; the window paints both `#0b0b0b`), raised `#161616`, hover
-`#1c1c1c`, selected `#262626`, border `#363636`, muted `#9a9a9a`, dim `#5f5f5f`, accent and
+Dark colors: the base colors are the same as `flockbook-mac`. The window shows `#202020` behind the
+chat and the sidebar alike (the theme names canvas `#202020` and chrome `#1c1c1c`; the window paints
+both `#202020`), raised `#262626`, hover `#2e2e2e`, selected `#383838`, text selection `#3a3a3a`,
+border `#363636`, muted `#9a9a9a`, dim `#707070` (3.3:1 on the canvas, as before), accent and
 foreground `#ededed`.
 
 Left to right:
