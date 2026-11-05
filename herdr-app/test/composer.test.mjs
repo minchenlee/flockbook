@@ -144,14 +144,16 @@ test("⌘V with an image and no text on the clipboard attaches the sidecar's PNG
   assert.match(textOf(byId(v.render(cx), "file-0")), /paste-1\.png/);
 });
 
-test("Shift+Enter puts a new line at the cursor and sends nothing; Enter sends", async () => {
+test("Shift+Enter leaves the new line to the box and sends nothing; Enter sends", async () => {
+  // The box puts the new line in itself (at the cursor, over a selection) and then reports a submit with
+  // shift. The handler must not add a second one.
   const cx = fakeCx(); const c = new Composer(cx);
   const b = c.box(fake.agents[0]);
   b.input.set_value("first line");
   b.input._h.submit({ shift: true }, cx); await cx.settle();
   assert.equal(sent.length, 0, "Shift+Enter does not send");
-  assert.equal(b.input.value(), "first line\n");
-  b.input.replace("second line");
+  assert.equal(b.input.value(), "first line", "the handler adds no text");
+  b.input.set_value("first line\nsecond line");
   b.input._h.submit({}, cx); await cx.settle();
   assert.equal(sent.length, 1, "Enter sends");
   assert.equal(sent[0][sent[0].indexOf("--text") + 1], "first line\nsecond line");

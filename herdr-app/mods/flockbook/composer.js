@@ -79,9 +79,10 @@ export class Composer {
   constructor(_cx) {
     this.input = TextareaState.new({ placeholder: "Reply to the agent", rows: 1 });
     this.input.set_auto_grow?.(1, 8);
-    // Enter sends. Shift+Enter is a new line at the cursor (replace puts the text at the cursor or over the selection).
+    // Enter sends. On Shift+Enter the box puts the new line in itself (at the cursor, over a selection);
+    // the submit with shift only reports it, so do nothing here. Adding "\n" here gives two new lines.
     this.input.on("submit", (e, cx) => {
-      if (e?.shift) { this.input.replace("\n"); return; }
+      if (e?.shift) return;
       cx.spawn((cx) => this.submit(cx));
     });
     this.empty = true;
