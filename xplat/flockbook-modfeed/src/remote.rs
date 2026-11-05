@@ -376,6 +376,10 @@ pub fn forward(client: &HcClient, cmd: &str, args: &[String], machine: &str, ter
                 it.next();
                 cached = true;
             }
+            // This computer's herdr-app home (its config.json) is not the other machine's.
+            "--home" => {
+                it.next();
+            }
             "--file" => files.extend(it.next().cloned()),
             "--text" => {
                 there.push("--text".into());

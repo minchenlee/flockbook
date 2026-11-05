@@ -5,7 +5,8 @@ import { h_flex } from "gpui-base";
 import { theme, layout, window, settings, openOverlay, run, setAgentOrder, nextCommand, shared, setShared } from "herdr";
 import { openMenu, tabItems } from "./menu.js";
 import { spaceAgents, spaceTabs, activeTab, currentAgent, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
-  SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, watchEdge } from "./state.js";
+  SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
+import { loadConfig, pollUpdate } from "./config.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -41,6 +42,7 @@ export function command(c) {
   if (c === "needs") return showNeeds();
   if (c === "sidebar") return toggleSidebar();
   if (c === "overview") return showOverview();
+  if (c === "settings") return showSettings();
   if ((c === "move-left" || c === "move-right") && i >= 0) {
     const to = i + (c === "move-left" ? -1 : 1);
     if (to >= 0 && to < tabs.length) run("tab.move", { id: tab.id, index: tabs[to].index });
@@ -63,6 +65,11 @@ export function startTop(cx, owner) {
     }
   });
   cx?.spawn?.(async (cx) => { await loadSidebar(); cx.notify(); });
+  // The settings file, read again each minute (someone may edit it), and the update check (pollUpdate
+  // asks the helper at most once an hour).
+  const settings = async (cx) => { await loadConfig(); await pollUpdate(); cx.notify(); };
+  cx?.spawn?.(settings);
+  cx?.timer?.every(60_000, (cx) => cx.spawn(settings));
 }
 
 // Keeps the screen right for the shown tab: the chat for an agent, the tab's terminals for a

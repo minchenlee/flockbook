@@ -1,5 +1,5 @@
 // Flockbook for herdr-app: one mod, four views. The layout picks the view with props.view
-// ("top", "side", "chat", "needs", "overview"). One folder, because a mod cannot import another mod's files.
+// ("top", "side", "chat", "needs", "overview", "settings"). One folder, because a mod cannot import another mod's files.
 import { View, div } from "gpui-kit";
 import { theme, props } from "herdr";
 import { TopView } from "./top.js";
@@ -9,8 +9,9 @@ import { NeedsView } from "./needs.js";
 import { TermBar } from "./termbar.js";
 import { OverviewView } from "./overview.js";
 import { MenuView } from "./menu.js";
+import { SettingsView } from "./settings.js";
 
-const VIEWS = { top: TopView, side: SideView, chat: ChatView, needs: NeedsView, termbar: TermBar, overview: OverviewView, menu: MenuView };
+const VIEWS = { top: TopView, side: SideView, chat: ChatView, needs: NeedsView, termbar: TermBar, overview: OverviewView, menu: MenuView, settings: SettingsView };
 
 export default class Flockbook extends View {
   // The block's props come from props(); init's first argument is not them.

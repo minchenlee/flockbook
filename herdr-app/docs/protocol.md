@@ -51,12 +51,18 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
+| `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
 
 `card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
 `--cache` is a file the sidecar may read and write; the mod passes `<herdr-app home>/flockbook/cache.json`.
+`--home <herdr-app home>`: every command takes it, and the mod always passes its `appHome()`, last; the last `--home`
+counts, so a `--text` that says `--home` is not taken for it. The sidecar reads the
+settings in `<home>/flockbook/config.json` from it (without it: the folder the sidecar is in, when that is
+`<home>/flockbook/bin`). With `"remote_helper": "never"`, every command for a terminal on another machine, and
+`helper install` and `remove`, stop with the error `remote-off` before anything runs there.
 
 ### Terminals on another machine (`m/t7`; Rust sidecar only)
 
@@ -140,16 +146,28 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 | `remote_helper_missing` | Machine `m` has no helper yet. `install`: what the install card shows, or `null`. |
 | `remote_helper_outdated` | The helper there is another version. `remote`: its `protocol` and `sidecar`; `install` as above. |
 | `remote_helper_unsupported` | No helper for that machine's platform (Windows, or another CPU). `message` says which. |
+| `remote-off` | The person chose Never for the helper on other machines (config.json `remote_helper`). Nothing ran there. |
 | `remote_failed` | hc could not run it there: unknown machine, no answer in 30 s, or too much output. |
 | `checksum` | `helper install`: the file is not the one the user said yes to, or it arrived changed. Nothing was installed. |
 
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper"],"type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check"],"type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
+
+### `update` (`update-check`)
+
+```json
+{"command":"curl -fsSL https://github.com/minchenlee/flockbook/releases/latest/download/install.sh | sh","current":"0.8.0","latest":"0.9.0","state":"newer","type":"update"}
+```
+
+`state`: `newer` (show the line), `current`, `dismissed` (`--dismiss` hid that version), `off` (config.json
+`check_updates: false`; nothing asked), `unknown` (the sidecar has no release version: built from source; nothing
+asked), `no-home`, or `error` (no answer yet, for example offline). Only `newer` shows anything. It asks
+`api.github.com` for the latest release at most once a day, and keeps the answer in `<home>/flockbook/update-check.json`.
 
 ### `installed` (`helper install`), `removed` (`helper remove`)
 

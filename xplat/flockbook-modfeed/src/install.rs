@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 }
-pub use embedded::{FILES, KEYS};
+pub use embedded::{FILES, KEYS, KNOWN};
 
 const RELEASES: &str = "https://github.com/minchenlee/flockbook/releases";
 const HELP: &str = "\
@@ -139,6 +139,104 @@ fn read_remote(dir: &Path) -> Result<(Vec<Remote>, Vec<u8>), String> {
 
 type Keys = IndexMap<String, IndexMap<String, Value>>;
 
+/// The known-files table: path in the home -> (sha256 -> the Flockbook version that had it).
+pub type Known = BTreeMap<String, BTreeMap<String, String>>;
+
+/// Reads `<sha256>  <version>  <path>` lines (scripts/known-files.mjs); `#` lines and bad lines are skipped.
+pub fn known_files(text: &[u8]) -> Known {
+    let mut k = Known::new();
+    for line in String::from_utf8_lossy(text).lines() {
+        let mut it = line.split_whitespace();
+        if let (Some(h), Some(v), Some(p), None) = (it.next(), it.next(), it.next(), it.next()) {
+            if h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()) && !line.starts_with('#') {
+                k.entry(p.to_string()).or_default().insert(h.to_ascii_lowercase(), v.to_string());
+            }
+        }
+    }
+    k
+}
+
+/// What the install finds in a home before it writes.
+#[derive(Debug, Default, PartialEq)]
+pub struct Sorted {
+    /// The person's files (or files they changed): the install stops.
+    pub clash: BTreeSet<String>,
+    /// Files of an older Flockbook that this version replaces: path -> that version.
+    pub older: BTreeMap<String, String>,
+    /// Files of an older Flockbook that this version no longer has, removed: path -> that version.
+    pub gone: BTreeMap<String, String>,
+}
+
+/// A path a Flockbook install owns: only these are ever replaced or removed as an older Flockbook's.
+fn own_path(rel: &str) -> bool {
+    !rel.split('/').any(|c| c == ".." || c.is_empty())
+        && (rel == "layouts/flockbook.json" || rel.starts_with("mods/flockbook/") || (rel.starts_with("themes/") && rel.matches('/').count() == 1))
+}
+
+/// Sorts what is in `home` against this version's `files`, the install.json of an earlier install (`mine`) and
+/// the files of every earlier version (`known`). A file is ours when it is missing, already the same, what
+/// install.json says we put there, or byte for byte a file of an older Flockbook.
+pub fn sort_files(home: &Path, files: &BTreeMap<&str, &[u8]>, mine: &BTreeMap<String, String>, known: &Known) -> Sorted {
+    let mut s = Sorted::default();
+    let known_as = |rel: &str, h: &str| known.get(rel).and_then(|m| m.get(h)).filter(|_| own_path(rel)).cloned();
+    for (rel, bytes) in files {
+        let dest = home.join(rel);
+        if !dest.exists() {
+            continue;
+        }
+        match if dest.is_file() { sha_file(&dest) } else { None } {
+            None => {
+                s.clash.insert(rel.to_string());
+            }
+            Some(h) if h == sha(bytes) || mine.get(*rel) == Some(&h) => {}
+            Some(h) => match known_as(rel, &h) {
+                Some(v) => {
+                    s.older.insert(rel.to_string(), v);
+                }
+                None => {
+                    s.clash.insert(rel.to_string());
+                }
+            },
+        }
+    }
+    // Files in the person's mods/flockbook that this version does not have: an older Flockbook's, or theirs.
+    let mod_dest = home.join("mods").join("flockbook");
+    if mod_dest.is_dir() {
+        let mut found = Vec::new();
+        walk_files(&mod_dest, &mut found);
+        for p in found {
+            let rel = rel_of(&p, home);
+            let n = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            // herdr-app writes jsconfig.json and *.d.ts at the mod's top level (see .gitignore).
+            let generated = p.parent() == Some(mod_dest.as_path()) && (n == "jsconfig.json" || n.ends_with(".d.ts"));
+            if files.contains_key(rel.as_str()) || mine.contains_key(&rel) || n == ".DS_Store" || generated {
+                continue;
+            }
+            match sha_file(&p).and_then(|h| known_as(&rel, &h)) {
+                Some(v) => {
+                    s.gone.insert(rel, v);
+                }
+                None => {
+                    s.clash.insert(rel);
+                }
+            }
+        }
+    } else if mod_dest.exists() {
+        s.clash.insert("mods/flockbook".to_string());
+    }
+    // A theme or layout of an older Flockbook that this version dropped: removed only when unchanged.
+    for (rel, sums) in known {
+        if rel.starts_with("mods/") || files.contains_key(rel.as_str()) || mine.contains_key(rel) || !own_path(rel) {
+            continue;
+        }
+        let dest = home.join(rel);
+        if let Some(v) = dest.is_file().then(|| sha_file(&dest)).flatten().and_then(|h| sums.get(&h).cloned()) {
+            s.gone.insert(rel.clone(), v);
+        }
+    }
+    s
+}
+
 pub fn run(args: &[String]) -> i32 {
     let mut home: Option<String> = None;
     let mut helper: Option<String> = None;
@@ -205,41 +303,9 @@ pub fn run(args: &[String]) -> i32 {
         .map(|m| m.into_iter().filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string()))).collect())
         .unwrap_or_default();
 
-    // A file is ours to replace when it is missing, already the same, or exactly what we put there.
-    let mut clash = BTreeSet::new();
-    for (rel, bytes) in &files {
-        let dest = home.join(rel);
-        if !dest.exists() {
-            continue;
-        }
-        let have = if dest.is_file() { sha_file(&dest) } else { None };
-        match have {
-            None => {
-                clash.insert(rel.to_string());
-            }
-            Some(h) if h != sha(bytes) && mine.get(*rel) != Some(&h) => {
-                clash.insert(rel.to_string());
-            }
-            _ => {}
-        }
-    }
-    // Files in the person's mods/flockbook that we never put there also mean the folder is theirs.
+    let known = known_files(KNOWN);
+    let Sorted { clash, older, gone } = sort_files(&home, &files, &mine, &known);
     let mod_dest = home.join("mods").join("flockbook");
-    if mod_dest.is_dir() {
-        let mut found = Vec::new();
-        walk_files(&mod_dest, &mut found);
-        for p in found {
-            let rel = rel_of(&p, &home);
-            let n = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            // herdr-app writes jsconfig.json and *.d.ts at the mod's top level (see .gitignore).
-            let generated = p.parent() == Some(mod_dest.as_path()) && (n == "jsconfig.json" || n.ends_with(".d.ts"));
-            if !files.contains_key(rel.as_str()) && !mine.contains_key(&rel) && n != ".DS_Store" && !generated {
-                clash.insert(rel);
-            }
-        }
-    } else if mod_dest.exists() {
-        clash.insert("mods/flockbook".to_string());
-    }
     if !clash.is_empty() {
         let mut lines = vec![format!("STOP: these are already in {} and were not installed by this script (or you changed them):", home.display())];
         lines.extend(clash.iter().map(|r| format!("  {r}")));
@@ -292,6 +358,12 @@ pub fn run(args: &[String]) -> i32 {
         println!("  {rel}");
     }
     println!("  mods/flockbook/... ({} files)", files.keys().filter(|r| r.starts_with("mods/")).count());
+    for (rel, v) in &older {
+        println!("    {rel}: older Flockbook ({v}), replaced");
+    }
+    for (rel, v) in &gone {
+        println!("    {rel}: older Flockbook ({v}), removed (this version does not have it)");
+    }
     println!("  keys.json ({})", if old_keys.is_empty() { "new" } else { "merged" });
     for (section, key, theirs, cmd) in &kept {
         println!("    kept your {section} {key} = {} (Flockbook uses it for {})", show(theirs), show(cmd));
@@ -313,6 +385,13 @@ pub fn run(args: &[String]) -> i32 {
     let written = (|| -> std::io::Result<()> {
         for (rel, bytes) in &files {
             put(&home.join(rel), bytes, false)?;
+        }
+        // Files of an older Flockbook that this version no longer has, if still byte for byte that version's.
+        for rel in gone.keys() {
+            let dest = home.join(rel);
+            if sha_file(&dest).is_some_and(|h| known.get(rel).is_some_and(|m| m.contains_key(&h))) {
+                fs::remove_file(&dest)?;
+            }
         }
         // Files an earlier install put there that this version no longer has, if still unchanged.
         for (rel, h) in &mine {

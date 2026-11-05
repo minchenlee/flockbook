@@ -20,9 +20,12 @@ export function parseAnswer(stdout) {
 }
 
 // Runs one command. Always resolves: a broken or missing sidecar comes back as `error`.
+// Every call names this app's home (--home), so the helper follows the same flockbook/config.json. It goes
+// last, and the helper reads the last --home, so a text that says "--home" is not taken for it.
 export async function call(cmd, args = []) {
+  const argv = [cmd, ...args, "--home", appHome()];
   let r;
-  try { r = await exec(sidecarPath(), [cmd, ...args]); }
+  try { r = await exec(sidecarPath(), argv); }
   catch (e) { return { header: null, end: null, lines: [], error: { code: "no-sidecar", message: `The Flockbook sidecar could not start (${e}).` } }; }
   const a = parseAnswer(r && r.stdout);
   if (!a.header || !a.end) {
@@ -47,6 +50,8 @@ export const answer = (terminal, request, answers) => call("answer", ["--termina
 // `--cache`: the sidecar remembers machines beside it (a platform, a missing helper), and install or remove resets that.
 export const installHelper = (machine, sha256) => call("helper", ["install", "--machine", machine, "--sha256", sha256, "--cache", cachePath()]);
 export const removeHelper = (machine) => call("helper", ["remove", "--machine", machine, "--cache", cachePath()]);
+// A newer Flockbook? `dismiss`: hide that version's line (docs/protocol.md, update).
+export const updateCheck = (dismiss = null) => call("update-check", dismiss ? ["--dismiss", dismiss] : []);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 // `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
 export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,

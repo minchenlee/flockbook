@@ -11,11 +11,15 @@
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
 //!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
 //!   flockbook-modfeed helper remove --machine <m>
+//!   flockbook-modfeed update-check --home <herdr-app home> [--dismiss <version>]   (a newer release? once a day)
+//!
+//! Every command takes `--home <herdr-app home>` (the mod passes it): its flockbook/config.json has the
+//! settings the helper follows. Without it, the folder this helper is in when that is <home>/flockbook/bin.
 //!
 //! A terminal `m/tN` on another machine: the command runs there, in the helper there (`remote`). Rust only.
 
 use crate::protocol::{JsonLines, PROTOCOL_VERSION, SIDECAR_VERSION};
-use crate::{cards, feed, locate, paste, remote, status};
+use crate::{cards, config, feed, locate, paste, remote, status, update};
 use herdr_core::hc::{HcClient, HcSession};
 use herdr_core::PaneScreen;
 use herdr_core::resolver::SessionResolver;
@@ -48,11 +52,13 @@ pub fn run(argv: &[String]) -> String {
         args.get(i + 1).cloned()
     };
     let has = |name: &str| args.iter().any(|a| a == name);
+    // The mod puts --home last; the last one counts, so a text that says "--home" is not taken for it.
+    let home = || args.iter().rposition(|a| a == "--home").and_then(|i| args.get(i + 1).cloned());
     let mut r = Run { t0: Instant::now(), out: JsonLines::new() };
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper"]}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check"]}));
             r.finish(true)
         }
         "paste-image" => {
@@ -69,10 +75,19 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => r.fail("write", &format!("cannot save the image: {e}")),
             }
         }
+        "update-check" => {
+            let dir = config::dir(home().as_deref());
+            let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            r.out.emit_value(update::check(dir.as_deref(), now, opt("--dismiss").as_deref()));
+            r.finish(true)
+        }
         "helper" => {
             let (Some(what), Some(machine)) = (args.first().cloned(), opt("--machine")) else {
                 return r.fail("usage", "helper needs install or remove, and --machine <m>");
             };
+            if config::load(config::dir(home().as_deref()).as_deref()).remote_never {
+                return r.fail("remote-off", config::REMOTE_OFF);
+            }
             let session = HcSession::resolve_env();
             if !session.is_available() {
                 return r.fail("no-core", "herdr-core is not running");
@@ -93,6 +108,10 @@ pub fn run(argv: &[String]) -> String {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
             let cache_path = opt("--cache").map(PathBuf::from);
             let cache_url = cache_path.as_deref();
+            // Another machine, and the person chose Never: nothing runs there, not even a look.
+            if matches!(remote::split(&terminal), Ok(Some(_))) && config::load(config::dir(home().as_deref()).as_deref()).remote_never {
+                return r.fail("remote-off", config::REMOTE_OFF);
+            }
             let session = HcSession::resolve_env();
             if !session.is_available() {
                 return r.fail("no-core", "herdr-core is not running");

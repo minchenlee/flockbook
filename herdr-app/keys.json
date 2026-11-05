@@ -27,6 +27,7 @@
     "cmd--": "app.zoom_out",
     "cmd-0": "app.zoom_reset",
     "cmd-,": "app.settings",
+    "cmd-shift-,": "flockbook.settings",
     "cmd-/": "app.help",
     "cmd-shift-\\": "flockbook.overview"
   }

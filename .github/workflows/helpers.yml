@@ -30,6 +30,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_PROFILE_RELEASE_STRIP: "true"
+  # A release (ref vX.Y.Z) bakes its version in, for update-check; other builds have none and never ask.
+  FLOCKBOOK_VERSION: ${{ startsWith(inputs.ref, 'v') && inputs.ref || '' }}
+  # The install's table of older Flockbook files must be there (scripts/known-files.mjs): no table, no helper.
+  FLOCKBOOK_REQUIRE_KNOWN_FILES: "1"
 
 jobs:
   linux:
@@ -48,6 +52,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0   # the known-files table is made from the tags and main's history
       - name: Install Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -83,6 +88,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0   # the known-files table is made from the tags and main's history
       - name: Install Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -116,6 +122,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0   # the known-files table is made from the tags and main's history
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: helper-*
