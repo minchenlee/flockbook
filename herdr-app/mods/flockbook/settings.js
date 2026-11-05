@@ -1,12 +1,17 @@
 // The "settings" view: the Flockbook settings dialog (sidebar row "Flockbook", ⌘⇧, or the tab menu),
-// over the window as Herdr's own Settings; Esc, a click beside it or its close button closes it. Three settings, each two
-// choices, saved in <appHome>/flockbook/config.json (config.js). Tab moves through the choices; Enter or
-// Space picks one. Also the update line, which the sidebar shows too.
+// over the window as Herdr's own Settings; Esc, a click beside it or its close button closes it. Three
+// settings, each two choices, saved in <appHome>/flockbook/config.json (config.js), and the Phone page
+// (phone.js). Tab moves through the choices; Enter or Space picks one. Also the update line, which the
+// sidebar shows too.
 import { div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { setting, setSetting, loadConfig, configBad, configPath, updateShown, dismissUpdate } from "./config.js";
 import { icon, settingsClosed } from "./state.js";
+import { pollPhone, phoneOn, phoneBlocked, phoneChoose, phoneUser, phoneBody, setPhoneOption } from "./phone.js";
+
+const PHONE = { title: "Phone page",
+  about: "The Flockbook page on your phone, through Tailscale. On: it runs in the background, also after Herdr app quits, and starts again at login." };
 
 export const SETTINGS = [
   { key: "check_updates", title: "Check for updates", choices: [[true, "On", "on"], [false, "Off", "off"]],
@@ -21,12 +26,14 @@ const picks = (e) => e?.key === "enter" || e?.key === "space" || e?.key === " ";
 
 // "Flockbook X is out" with Copy (the one-line install) and Not now. Null when there is nothing to say.
 // `full`: the command is written out too (the settings dialog; the sidebar is narrow).
+const smallButton = (t) => (id, label, act) => div().id(id).h(24).px(9).flex().items_center().rounded(6).text_size(12)
+  .text_color(t.foreground).bg(t.chrome).border(1).border_color(t.border).hover((s) => s.bg(t.hover))
+  .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => act(cx)).child(label);
+
 export function updateLine(t, owner, full = false) {
   const u = updateShown();
   if (!u) return null;
-  const small = (id, label, act) => div().id(id).h(24).px(9).flex().items_center().rounded(6).text_size(12)
-    .text_color(t.foreground).bg(t.chrome).border(1).border_color(t.border).hover((s) => s.bg(t.hover))
-    .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => act(cx)).child(label);
+  const small = smallButton(t);
   const copy = (cx) => { cx.write_to_clipboard?.(u.command); owner.copied = u.latest; cx.notify?.(); };
   return v_flex().id("update-line").w_full().px(10).py(8).gap(6).rounded(8).bg(t.raised).border(1).border_color(t.border)
     .child(div().text_size(12.5).text_color(t.foreground).child(`Flockbook ${u.latest} is out`))
@@ -40,10 +47,23 @@ export class SettingsView {
   constructor(cx) {
     this.copied = null;
     this.overlay = props()?.overlay ?? null;
-    cx?.spawn?.(async (cx) => { await loadConfig(); cx.notify(); });
+    // The Phone page's login: saved on Enter or when the field loses the keys.
+    this.login = InputState.new({ placeholder: "Empty: the login Tailscale says" });
+    const save = (_e, cx) => {
+      const v = this.login.value().trim();
+      if (v === phoneUser()) return;
+      cx.spawn(async (cx) => { await setPhoneOption("phone_user", v); cx.notify(); });
+    };
+    this.login.on("submit", save);
+    this.login.on("blur", save);
+    cx?.spawn?.(async (cx) => { await loadConfig(); this.login.set_value(phoneUser()); cx.notify(); });
+    cx?.spawn?.(async (cx) => { await pollPhone(false); cx.notify(); });
+    cx?.timer?.every(10_000, (cx) => cx.spawn(async (cx) => { await pollPhone(); cx.notify(); }));
   }
 
   close(_cx) { settingsClosed(this.overlay); }
+
+  loginInput() { return Input.new(this.login); }
 
   choose(key, value, cx) { cx.spawn(async (cx) => { await setSetting(key, value); cx.notify(); }); }
 
@@ -63,18 +83,20 @@ export class SettingsView {
   content(t, _cx) {
     const bad = configBad();
     let stop = 0;
-    const segment = (s) => h_flex().flex_none().p(2).gap(2).rounded(8).bg(t.chrome).border(1).border_color(t.border)
-      .children(s.choices.map(([value, label, slug]) => {
-        const on = setting(s.key) === value;
-        return div().id(`set-${s.key}-${slug}`).h(26).px(12).flex().items_center().rounded(6).text_size(12.5)
-          .tab_index(++stop).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+    // Two choices: `current` is the chosen value, `pick(value, cx)` acts, `off`: nothing can be picked.
+    const seg = (key, choices, pick, current = setting(key), off = bad) => h_flex().flex_none().p(2).gap(2).rounded(8).bg(t.chrome).border(1).border_color(t.border)
+      .children(choices.map(([value, label, slug]) => {
+        const on = current === value;
+        return div().id(`set-${key}-${slug}`).h(26).px(12).flex().items_center().rounded(6).text_size(12.5)
+          .tab_index(++stop).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : off ? t.dim : t.muted)
           .when(on, (el) => el.font_semibold())
-          .when(!bad, (el) => el.hover((x) => x.bg(on ? t.selected : t.hover)))
+          .when(!off, (el) => el.hover((x) => x.bg(on ? t.selected : t.hover)))
           .focus((x) => x.border(1).border_color(t.accent))
-          .on_click((_e, cx) => { if (!bad) this.choose(s.key, value, cx); })
-          .on_key_down((e, cx) => { if (picks(e) && !bad) { cx.stop_propagation?.(); this.choose(s.key, value, cx); } })
+          .on_click((_e, cx) => { if (!off) pick(value, cx); })
+          .on_key_down((e, cx) => { if (picks(e) && !off) { cx.stop_propagation?.(); pick(value, cx); } })
           .child(label);
       }));
+    const segment = (s) => seg(s.key, s.choices, (v, cx) => this.choose(s.key, v, cx));
     const row = (s) => h_flex().id(`set-${s.key}`).w_full().py(14).gap(24).items_center().border_b(1).border_color(t.border)
       .child(v_flex().flex_1().min_w(0).gap(3)
         .child(div().text_size(13.5).text_color(t.foreground).child(s.title))
@@ -87,6 +109,13 @@ export class SettingsView {
           .text_size(12.5).text_color(t.foreground)
           .child("config.json could not be read (it is not valid JSON), so the defaults apply. Fix the file or remove it to change these here.")))
         .children(SETTINGS.map(row))
+        .child(v_flex().id("set-phone").w_full().py(14).gap(12).border_b(1).border_color(t.border)
+          .child(h_flex().w_full().gap(24).items_center()
+            .child(v_flex().flex_1().min_w(0).gap(3)
+              .child(div().text_size(13.5).text_color(t.foreground).child(PHONE.title))
+              .child(div().text_size(12).text_color(t.muted).child(PHONE.about)))
+            .child(seg("phone", [[false, "Off", "off"], [true, "On", "on"]], (v, cx) => phoneChoose(v, cx), phoneOn(), phoneBlocked())))
+          .child(phoneBody(t, this, { seg, small: smallButton(t) })))
         .when(Boolean(updateShown()), (el) => el.child(div().pt(16).child(updateLine(t, this, true)))));
   }
 }

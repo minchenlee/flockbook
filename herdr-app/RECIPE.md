@@ -89,8 +89,13 @@ Left to right:
      Changes apply at once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
      12 px muted, and on the right a two-choice switch: 26 px choices in a `chrome` frame, the chosen
      one `selected` and semibold): **Check for updates** On | Off, **Status row** Show | Hide,
-     **Helper on other machines** Ask | Never. A box with a `blocked` border when config.json is not
+     **Helper on other machines** Ask | Never, **Phone page** Off | On. A box with a `blocked` border when config.json is not
      JSON. The update line with the command written out (Menlo 11.5 px) when one is out.
+     Under Phone page: a status dot and line (Running in `done`, a problem in `blocked`); without
+     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** field (empty:
+     the login found, which the line under it names), **Read-only** Off | On, and while on either
+     the one `tailscale serve --bg 8787` command with Copy or, once Serve is set, the address with
+     Copy and a 140 px QR code on a white 8 px box. Linux adds a line on `loginctl enable-linger`.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
      above them, 8 px padding, 6 px gaps, 8 px corners, 1 px border, `muted` border on focus).
 
@@ -124,7 +129,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Flockbook settings** (the Flockbook row, or ⌘⇧,): saved in `<herdr-app home>/flockbook/config.json`
   as `{"check_updates": true, "status_row": "show", "remote_helper": "ask"}`. The install never
   creates the file; a missing file or key is the default, and so is a value that is not one of the
-  choices. A file that is not JSON is the defaults too: the screen says so, and its switches do
+  choices. A file that is not JSON is the defaults too: the dialog says so, and its switches do
   nothing until the file is fixed or removed (it is never overwritten). A change keeps the other keys,
   is written against the text just read (someone else's change is read again, not lost), and every
   view shows it at once. The file is read again each minute and when the dialog opens.
@@ -139,6 +144,14 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
     settings first…" (it opens them) in place of Remove helper; and the helper
     itself refuses every command for a terminal there and `helper install` / `remove` (`remote-off`). To remove a helper that is
     already there, choose Ask first.
+  - **Phone page** On: the helper (`phone on`) writes the phone page's user service (a launchd agent
+    on macOS, a systemd user unit on Linux, from `serve --print`, marked as Flockbook's) and loads
+    it, so it keeps running after Herdr app quits and starts at login. Off stops it and removes that
+    one file. A service set up by hand (SERVE.md) has no marker: the section says so and leaves it.
+    No Tailscale: On cannot be picked. The login and Read-only apply at once (the service is written
+    again). The port is config.json `phone_port` (8787), not in the dialog: for a port already taken.
+    Flockbook never changes Tailscale settings; it shows the Serve command. An install that replaces
+    the helper restarts this service. While the dialog is open it asks the helper again every 10 s.
 - **Sidebar**: ⌘B or the sidebar button shows and hides it. With it hidden, the pointer at the
   window's left 4 px slides it out as a floating panel (260 px wide, 8 px from the edges, 14 px
   corners, a large shadow), which closes when the pointer leaves it, on Esc or a click beside it.

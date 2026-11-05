@@ -19,7 +19,7 @@
 //! A terminal `m/tN` on another machine: the command runs there, in the helper there (`remote`). Rust only.
 
 use crate::protocol::{JsonLines, PROTOCOL_VERSION, SIDECAR_VERSION};
-use crate::{cards, config, feed, locate, paste, remote, status, update};
+use crate::{cards, config, feed, locate, paste, phone, remote, status, update};
 use herdr_core::hc::{HcClient, HcSession};
 use herdr_core::PaneScreen;
 use herdr_core::resolver::SessionResolver;
@@ -58,7 +58,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "phone"], "release": update::release()}));
             r.finish(true)
         }
         "paste-image" => {
@@ -89,6 +89,22 @@ pub fn run(argv: &[String]) -> String {
             let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             r.out.emit_value(update::check(dir.as_deref(), now, opt("--dismiss").as_deref()));
             r.finish(true)
+        }
+        "phone" => {
+            let dir = config::dir(home().as_deref());
+            let cfg = config::load(dir.as_deref());
+            let env = phone::Env::from_process();
+            let done = match args.first().map(String::as_str) {
+                Some("status") => Ok(()),
+                Some("on") => phone::on(&env, &cfg),
+                Some("off") => phone::off(&env),
+                _ => return r.fail("usage", "phone needs status, on or off"),
+            };
+            r.out.emit_value(phone::status(&env, &cfg, dir.as_deref()));
+            match done {
+                Ok(()) => r.finish(true),
+                Err((code, message)) => r.fail(code, &message),
+            }
         }
         "helper" => {
             let (Some(what), Some(machine)) = (args.first().cloned(), opt("--machine")) else {

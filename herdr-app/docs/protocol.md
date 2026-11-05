@@ -52,6 +52,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
+| `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
 
 `card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
@@ -146,6 +147,9 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 | `remote_helper_missing` | Machine `m` has no helper yet. `install`: what the install card shows, or `null`. |
 | `remote_helper_outdated` | The helper there is another version. `remote`: its `protocol` and `sidecar`; `install` as above. |
 | `remote_helper_unsupported` | No helper for that machine's platform (Windows, or another CPU). `message` says which. |
+| `no-tailscale` | `phone on`: Tailscale is not installed, not running or not signed in. Nothing was written. |
+| `by-hand` | `phone on` / `off`: the service file was set up by hand (no Flockbook marker). It was not changed. |
+| `service` | `phone on`: launchctl or systemctl failed; `message` says which and its output. |
 | `remote-off` | The person chose Never for the helper on other machines (config.json `remote_helper`). Nothing ran there. |
 | `remote_failed` | hc could not run it there: unknown machine, no answer in 30 s, or too much output. |
 | `checksum` | `helper install`: the file is not the one the user said yes to, or it arrived changed. Nothing was installed. |
@@ -153,7 +157,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","phone"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -170,6 +174,26 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 `check_updates: false`; nothing asked), `unknown` (the sidecar has no release version: built from source; nothing
 asked), `no-home`, or `error` (no answer yet, for example offline). Only `newer` shows anything. It asks
 `api.github.com` for the latest release at most once a day, and keeps the answer in `<home>/flockbook/update-check.json`.
+
+### `phone` (`phone status`, `on`, `off`)
+
+```json
+{"port":8787,"qr":"<home>/flockbook/phone-qr.svg","read_only":false,"serve":{"command":"tailscale serve --bg 8787","set":true,"url":"https://box.tail1.ts.net/"},"service":{"file":"/home/me/.config/systemd/user/flockbook-serve.service","kind":"systemd","message":null,"state":"running"},"tailscale":{"dns":"box.tail1.ts.net","login":"me@example.com"},"tailscale_error":null,"type":"phone","user":"me@example.com"}
+```
+
+The phone page (`serve`, SERVE.md) as a user service. Every answer has this line, also after an `error`.
+`on` writes the service file that `serve --print` makes, with a marker line and the app's `HC_SESSION` /
+`HC_SOCKET`, and loads it (launchd agent `~/Library/LaunchAgents/dev.flockbook.serve.plist`; systemd user unit
+`~/.config/systemd/user/flockbook-serve.service`). Run again, it writes the file again with the current
+settings and restarts it. `off` stops it and removes that file, only when it has the marker.
+
+- `tailscale`: the login and machine name from `tailscale status --json`, or null with `tailscale_error`.
+- `user`, `port`, `read_only`: config.json `phone_user` (empty: the Tailscale login), `phone_port` (8787),
+  `phone_read_only` (false).
+- `serve`: whether Tailscale Serve sends to that port (`tailscale serve status --json`; only read), its
+  address, and the one command to set it. `qr`: an SVG QR code of the address, once it is set.
+- `service.state`: `off` (no file), `running`, `stopped`, `error` (`message` says where its log is), or
+  `by-hand` (a file without the marker; never changed).
 
 ### `installed` (`helper install`), `removed` (`helper remove`)
 
