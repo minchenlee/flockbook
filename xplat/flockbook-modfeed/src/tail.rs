@@ -72,20 +72,53 @@ fn whole(parts: Vec<&[u8]>, start: u64) -> (Vec<String>, Vec<u64>) {
 /// The whole lines that end before `before` (a line start): up to `bytes` back, a cut first line dropped.
 /// `start` 0 means the file's start was reached.
 pub fn read_before(path: &Path, before: u64, bytes: u64) -> std::io::Result<Range> {
+    read_before_max(path, before, bytes, MAX_LINE)
+}
+
+/// A line longer than this before the range (a screenshot) is skipped, not read: rows do not show it whole.
+pub const MAX_LINE: u64 = 16 * 1024 * 1024;
+
+/// `read_before` with the longest line it reads whole: a longer one gives no lines and `start` at its start.
+pub fn read_before_max(path: &Path, before: u64, bytes: u64, max_line: u64) -> std::io::Result<Range> {
     let size = size_of(path)?;
     let end = before.min(size);
     let mut start = end.saturating_sub(bytes);
     let data = read_span(path, start, end)?;
     let mut body: &[u8] = &data;
     if start > 0 {
-        let Some(nl) = body.iter().position(|&b| b == b'\n') else {
-            return Ok(Range { lines: vec![], offsets: vec![], start: end, size });
+        // The last byte is the newline that ends the line before `before`: a newline that starts a whole line
+        // must come before it.
+        let Some(nl) = body[..body.len().saturating_sub(1)].iter().position(|&b| b == b'\n') else {
+            // One line longer than `bytes` (a tool result with a screenshot): the range still moves back, to its
+            // start (staying at `before` would stop older rows there for good). Read whole up to `max_line`.
+            let from = line_start(path, start)?;
+            if end - from > max_line {
+                return Ok(Range { lines: vec![], offsets: vec![], start: from, size });
+            }
+            let data = read_span(path, from, end)?;
+            let (lines, offsets) = whole(data.split(|&b| b == b'\n').collect(), from);
+            return Ok(Range { lines, offsets, start: from, size });
         };
         start += nl as u64 + 1;
         body = &body[nl + 1..];
     }
     let (lines, offsets) = whole(body.split(|&b| b == b'\n').collect(), start);
     Ok(Range { lines, offsets, start, size })
+}
+
+/// The start of the line that holds byte `at`: just after the newline before it, or 0.
+fn line_start(path: &Path, at: u64) -> std::io::Result<u64> {
+    const STEP: u64 = 64 * 1024;
+    let mut end = at;
+    while end > 0 {
+        let from = end.saturating_sub(STEP);
+        let data = read_span(path, from, end)?;
+        if let Some(nl) = data.iter().rposition(|&b| b == b'\n') {
+            return Ok(from + nl as u64 + 1);
+        }
+        end = from;
+    }
+    Ok(0)
 }
 
 pub fn items(lines: &[String]) -> Vec<ConversationItem> {

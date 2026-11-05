@@ -3,8 +3,8 @@
 // cannot be scrolled from code, and the chat must open at the newest message. Every row shows in full.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { theme, run } from "herdr";
-import { currentAgent, machineOf, icon, SPIN_MS, FADE, shownScreen, watchEdge, noteWindowHeight } from "./state.js";
+import { theme, run, shared } from "herdr";
+import { currentAgent, machineOf, icon, SPIN_MS, FADE, shownScreen, watchEdge, noteWindowHeight, KEY_WIN_H } from "./state.js";
 import { Appear } from "./motion.js";
 import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
@@ -18,6 +18,9 @@ import { HelperUI, isRemoteProblem } from "./helpercard.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
+// Older rows load by themselves while all rows fit on screen (with FILL_PX to spare), at most AUTO_OLDER
+// times a chat is opened: a log whose last 2 MB is only tool output can hold no rows for a long way back.
+const AUTO_OLDER = 5, FILL_PX = 400;
 
 // The chip's SF Symbols name, mapped to one of this mod's icons.
 export function chipIcon(symbol) {
@@ -75,7 +78,7 @@ export class ChatView {
   switchTo(address) {
     this.address = address; this.cards.shown = address;
     if (address && !this.feeds.has(address)) this.feeds.set(address, emptyFeed(address));
-    this.follow = true; this.open = new Set();
+    this.follow = true; this.open = new Set(); this.autoOlder = 0;
     this.toNewest();
   }
 
@@ -106,7 +109,11 @@ export class ChatView {
       const answer = await sidecar.older(f.address, before, f.path);
       record("feed.older", now() - t0);
       const added = applyOlder(f, answer, before);
-      if (added && f === this.feed()) this.scroll.scroll_to_item(added, "top");
+      // Following the end: rows added on top keep the end in view. Reading: the same row stays where it was.
+      if (added && f === this.feed()) { if (this.follow) this.toNewest(); else this.scroll.scroll_to_item(added, "top"); }
+      // Only tool output in that range: go on back, within the same cap.
+      const back = olderFrom(f);
+      if (!added && f === this.feed() && back !== null && back < before && this.autoOlder < AUTO_OLDER) { this.autoOlder++; this.wantOlder = true; }
     } finally { this.olderBusy = false; cx.notify(); }
   }
 
@@ -260,7 +267,12 @@ export class ChatView {
       .child(v_virtual_list("chat", n, sizes, (i) => rows[i].id, (range) => {
         const t0 = now();
         if (range.end >= n) this.follow = true;
-        this.topSeen = range.start === 0 && range.end < n;
+        this.topSeen = range.start === 0;
+        // All rows fit on screen: a list that does not scroll gets no wheel to load older rows, so load them here.
+        const fits = range.end >= n || sizes.reduce((a, b) => a + b, 0) < (shared(KEY_WIN_H) ?? 800) + FILL_PX;
+        if (this.topSeen && fits && !this.wantOlder && !this.olderBusy && this.autoOlder < AUTO_OLDER && olderFrom(f) !== null) {
+          this.autoOlder++; this.wantOlder = true;
+        }
         const out = [];
         for (let i = range.start; i < range.end; i++) out.push(i === 0 ? div().w_full().pt(BAR_H).child(this.item(rows[i], t)) : this.item(rows[i], t));
         record("chat.rows", now() - t0, range.end - range.start);

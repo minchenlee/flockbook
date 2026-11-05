@@ -91,6 +91,27 @@ fn tail_older_paste() {
 }
 
 #[test]
+fn older_moves_back_past_a_line_longer_than_the_span() {
+    // A tool result with a screenshot can be one line longer than the 2 MB read before `before`. Its bytes hold no
+    // newline: the range must still move back (to that line's start) instead of staying at `before`.
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("big.jsonl");
+    let small = r#"{"type":"user","uuid":"u1","message":{"content":"first"}}"#;
+    let big = format!(r#"{{"type":"user","uuid":"r1","message":{{"content":"{}"}}}}"#, "x".repeat(5000));
+    let last = r#"{"type":"user","uuid":"u2","message":{"content":"last"}}"#;
+    std::fs::write(&f, format!("{small}\n{big}\n{last}\n")).unwrap();
+    let before = (small.len() + 1 + big.len() + 1) as u64;   // the start of `last`
+    let r = tail::read_before(&f, before, 1000).unwrap();
+    assert_eq!(r.start, (small.len() + 1) as u64, "modfeed older: start is the long line's start");
+    assert_eq!(r.lines, vec![big.clone()], "modfeed older: the long line is read whole");
+    let r2 = tail::read_before(&f, r.start, 1000).unwrap();
+    assert!(r2.start == 0 && r2.lines == vec![small.to_string()], "modfeed older: then on back to the start");
+    // Longer than the cap: not read, but start still moves to its start.
+    let skip = tail::read_before_max(&f, before, 1000, 2000).unwrap();
+    assert!(skip.lines.is_empty() && skip.start == (small.len() + 1) as u64, "modfeed older: a line over the cap is skipped: {skip:?}");
+}
+
+#[test]
 fn feed_splices() {
     let dir = tempfile::tempdir().unwrap();
     let t = turn();

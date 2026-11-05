@@ -262,6 +262,8 @@ test("reaching the top asks for older rows once and keeps the same row in view",
     ? jl(header, { type: "older", path: "/logs/s.jsonl", start: 0, count: 2 }, user("u0", "old"), asst("a0", "older"), end)
     : jl(header, { ...logLine("c1"), start: 4000 }, { type: "splice", at: 0, count: 2 }, user("u1", "a"), asst("a1", "b"), end);
   const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  await v.tick(cx); await cx.settle();   // the chat screen is up (its first tick opens it at the end)
+  v.autoOlder = 5;   // loads by themselves used up (they fill a short chat): here only the wheel loads
   let el = v.render(cx); lastList._args.render({ start: 0, end: 1 });
   assert.ok(!v.wantOlder, "the first row on screen alone loads nothing");
   const wheel = (n) => (n?._h?.on_scroll_wheel ? n : (n?.kids ?? []).map(wheel).find(Boolean));
@@ -276,6 +278,54 @@ test("reaching the top asks for older rows once and keeps the same row in view",
   const asks = log.exec.filter((e) => e[1]?.includes?.("--before") || JSON.stringify(e).includes("--before"));
   assert.equal(asks.length, 1);
   assert.equal(olderFrom(v.feed()), null);
+});
+
+// A log whose last 2 MB holds few rows (big tool results): rows before `start`, read 2 MB at a time.
+const shortTail = (olderAnswers) => {
+  const asked = [];
+  fake.exec = (_c, args) => {
+    const i = args.indexOf("--before");
+    if (i < 0) return jl(header, { ...logLine("c1"), start: 9000 }, { type: "splice", at: 0, count: 1 }, asst("a9", "last"), end);
+    const before = Number(args[i + 1]); asked.push(before);
+    const [start, rows] = olderAnswers(before);
+    return jl(header, { type: "older", path: "/logs/s.jsonl", start, count: rows.length }, ...rows, end);
+  };
+  return asked;
+};
+const runTicks = async (v, cx, n = 12) => { for (let k = 0; k < n; k++) { v.render(cx); lastList._args.render({ start: 0, end: lastList._args.n }); await v.tick(cx); await cx.settle(); } };
+
+test("rows that all fit on screen load older rows by themselves, until the log's start", async () => {
+  const asked = shortTail((before) => [before - 3000, [user(`u${before}`, "q"), asst(`a${before}`, "r")]]);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  await runTicks(v, cx);
+  assert.deepEqual(asked, [9000, 6000, 3000]);
+  assert.equal(v.feed().rows.length, 7);
+  assert.equal(olderFrom(v.feed()), null, "the start of the log was reached");
+});
+
+test("loading older rows by themselves stops after 5 loads per open (a log of huge tool results)", async () => {
+  const asked = shortTail((before) => [before - 1, []]);   // only tool output: no rows, every time
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  await runTicks(v, cx, 20);
+  assert.deepEqual(asked, [9000, 8999, 8998, 8997, 8996], "a range with no rows goes on back, at most 5 times");
+});
+
+test("the first row on screen is the top, also when the last row is on screen too", async () => {
+  shortTail(() => [0, []]);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  v.render(cx); lastList._args.render({ start: 0, end: 1 });
+  assert.equal(v.topSeen, true);
+});
+
+test("older rows added while following the end keep the end in view and the ↓ button hidden", async () => {
+  shortTail((before) => [0, [user("u0", "q"), asst("a0", "r")]]);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  calls.length = 0;
+  await runTicks(v, cx, 3);
+  assert.equal(v.feed().rows.length, 3);
+  assert.equal(v.follow, true);
+  assert.deepEqual(calls.filter((c) => c[0] === "scroll_to_item").at(-1), ["scroll_to_item", 2, "top"], "the newest row, not the old first one");
+  assert.equal(byId(v.render(cx), "jump")._a.opacity, 0);
 });
 
 test("no element above a chat reply's text stops the press (Herdr 0.1.13: that makes the text unselectable)", async () => {
