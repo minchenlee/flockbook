@@ -26,7 +26,7 @@ export function updateLine(t, owner, full = false) {
   if (!u) return null;
   const small = (id, label, act) => div().id(id).h(24).px(9).flex().items_center().rounded(6).text_size(12)
     .text_color(t.foreground).bg(t.chrome).border(1).border_color(t.border).hover((s) => s.bg(t.hover))
-    .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => act(cx));
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => act(cx)).child(label);
   const copy = (cx) => { cx.write_to_clipboard?.(u.command); owner.copied = u.latest; cx.notify?.(); };
   return v_flex().id("update-line").w_full().px(10).py(8).gap(6).rounded(8).bg(t.raised).border(1).border_color(t.border)
     .child(div().text_size(12.5).text_color(t.foreground).child(`Flockbook ${u.latest} is out`))

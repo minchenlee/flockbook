@@ -22,6 +22,7 @@ on:
       - "herdr-app/**"
       - "scripts/package-mod.sh"
       - "scripts/install-from-release.sh"
+      - "scripts/known-files.mjs"
       - ".github/workflows/helpers.yml"
 
 permissions:

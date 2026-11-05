@@ -138,6 +138,8 @@ test("update line: a newer release shows one line in the sidebar, Copy puts the 
   const el = new SideView(fakeCx()).render(fakeCx());
   const line = byId(el, "update-line");
   assert.match(textOf(line), /Flockbook 0\.9\.0 is out/);
+  assert.match(textOf(byId(line, "update-copy")), /^Copy install command$/);
+  assert.match(textOf(byId(line, "update-dismiss")), /^Not now$/);
   let copied = null;
   const cx = { ...fakeCx(), write_to_clipboard: (s) => { copied = s; } };
   byId(line, "update-copy")._h.on_click({}, cx);
