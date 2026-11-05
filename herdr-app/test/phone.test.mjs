@@ -16,13 +16,13 @@ const header = (cmd) => ({ type: "header", protocol: 1, sidecar: "0.1.0", cmd })
 const end = (ok = true) => ({ type: "end", ok });
 
 // The fake helper: Tailscale signed in unless `ts` is null; the service as `state`; Serve set when `url`.
-let file, ts, state, url, fail;
+let file, ts, state, url, fail, reason;
 const line = () => ({
   type: "phone",
   tailscale: ts, tailscale_error: ts ? null : "Tailscale is not installed.",
   user: JSON.parse(file ?? "{}").phone_user || ts?.login || null,
   port: 8787, read_only: JSON.parse(file ?? "{}").phone_read_only === true,
-  serve: { set: Boolean(url), url, command: "tailscale serve --bg 8787" },
+  serve: { set: Boolean(url), url, command: reason ? "tailscale serve --bg --https=8443 8787" : "tailscale serve --bg 8787", reason: reason ?? null },
   qr: url ? `${HOME}/flockbook/phone-qr.svg` : null,
   service: { kind: "systemd", state, file: "/home/test/.config/systemd/user/flockbook-serve.service",
     message: state === "error" ? "It failed. Its log: journalctl --user -u flockbook-serve" : state === "by-hand" ? "Set up by hand (see SERVE.md)." : null },
@@ -30,7 +30,7 @@ const line = () => ({
 const phoneCalls = () => log.exec.filter(([, a]) => a[0] === "phone").map(([, a]) => a.slice(0, a.indexOf("--home")).join(" "));
 
 beforeEach(() => {
-  reset(); file = null; ts = { login: "me@example.com", dns: "box.tail1.ts.net" }; state = "off"; url = null; fail = null;
+  reset(); file = null; ts = { login: "me@example.com", dns: "box.tail1.ts.net" }; state = "off"; url = null; fail = null; reason = null;
   fake.readText = (p) => (p === CONFIG ? file : null);
   fake.writeText = (p, text, expected) => { if (p !== CONFIG) return null; if (expected !== file) throw new Error("stale"); file = text; return null; };
   fake.exec = (_c, args) => {
@@ -96,6 +96,55 @@ test("On runs the page as a service; the status says Running and shows the one S
   assert.match(textOf(s), /never changes your Tailscale settings/i);
   assert.match(textOf(s), /loginctl enable-linger/, "systemd: it stops at logout without lingering");
   void v;
+});
+
+test("On, Serve not set: the step is right under Running, above the login and Read-only", async () => {
+  state = "running";
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  const text = textOf(s);
+  const at = (re) => text.search(re);
+  assert.ok(at(/Running/) >= 0 && at(/One step left: run this once in a terminal/) > at(/Running/), text);
+  assert.ok(at(/tailscale serve --bg 8787/) < at(/Tailscale login/), "the command before the login field");
+  assert.ok(at(/tailscale serve --bg 8787/) < at(/Read-only/), "and before Read-only");
+  assert.ok(byId(s, "phone-serve-copy"));
+  assert.equal(byId(s, "phone-serve-reason"), null, "443 free: no reason line");
+});
+
+test("443 used by another service: the 8443 command and one line that says why", async () => {
+  state = "running"; reason = "443 is used by another service on this machine, so the page goes on 8443; the plain command would replace it.";
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  assert.equal(textOf(byId(s, "phone-serve-command")), "tailscale serve --bg --https=8443 8787");
+  assert.match(textOf(byId(s, "phone-serve-reason")), /443 is used by another service/);
+  const cx = { ...fakeCx(), write_to_clipboard: (x) => { cx.copied = x; } };
+  byId(s, "phone-serve-copy")._h.on_click({}, cx);
+  assert.equal(cx.copied, "tailscale serve --bg --https=8443 8787");
+});
+
+test("while On waits for Serve, the status is asked every 3 s; the address and QR show without reopening", async () => {
+  state = "running";
+  await loadConfig();
+  await pollPhone();
+  const cx = fakeCx();
+  const v = new SettingsView(cx);
+  await cx.settle();
+  const tick = cx.timers.find((x) => !x.once && x.ms <= 3000);
+  assert.ok(tick, "a timer of 3 s or less");
+  const fire = async () => { const c = fakeCx(); tick.f(c); await c.settle(); };
+  const before = phoneCalls().length;
+  await fire();
+  assert.equal(phoneCalls().length, before + 1, "asked again at once while waiting");
+  url = "https://box.tail1.ts.net/";
+  await fire();
+  const s = byId(v.render(fakeCx()), "set-phone");
+  assert.equal(textOf(byId(s, "phone-url")), "https://box.tail1.ts.net/");
+  assert.ok(byId(s, "phone-qr"));
+  assert.equal(byId(s, "phone-serve-command"), null);
+  // Set: back to every 10 s (the last answer is fresh).
+  const n = phoneCalls().length;
+  await fire();
+  assert.equal(phoneCalls().length, n, "not asked again within 10 s once set");
 });
 
 test("once Serve is set: the address to open, Copy, and a QR code", async () => {

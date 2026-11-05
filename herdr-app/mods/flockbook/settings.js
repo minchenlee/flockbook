@@ -8,7 +8,7 @@ import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { setting, setSetting, loadConfig, configBad, configPath, updateShown, dismissUpdate } from "./config.js";
 import { icon, settingsClosed } from "./state.js";
-import { pollPhone, phoneOn, phoneBlocked, phoneChoose, phoneUser, phoneBody, setPhoneOption } from "./phone.js";
+import { pollPhone, phoneTick, PHONE_TICK_MS, phoneOn, phoneBlocked, phoneChoose, phoneUser, phoneBody, setPhoneOption } from "./phone.js";
 
 const PHONE = { title: "Phone page",
   about: "The Flockbook page on your phone, through Tailscale. On: it runs in the background, also after Herdr app quits, and starts again at login." };
@@ -58,7 +58,8 @@ export class SettingsView {
     this.login.on("blur", save);
     cx?.spawn?.(async (cx) => { await loadConfig(); this.login.set_value(phoneUser()); cx.notify(); });
     cx?.spawn?.(async (cx) => { await pollPhone(false); cx.notify(); });
-    cx?.timer?.every(10_000, (cx) => cx.spawn(async (cx) => { await pollPhone(); cx.notify(); }));
+    // Every 10 s; every 3 s while On waits for Serve (phone.js).
+    cx?.timer?.every(PHONE_TICK_MS, (cx) => cx.spawn(async (cx) => { await phoneTick(); cx.notify(); }));
   }
 
   close(_cx) { settingsClosed(this.overlay); }

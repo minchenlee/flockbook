@@ -112,6 +112,10 @@ tailscale serve --bg 8787
 
 Open `https://<machine>.<tailnet>.ts.net/` on the phone.
 
+If `tailscale serve status` shows 443 `/` already going to another local service, the plain command replaces
+it. Put the page on another HTTPS port instead: `tailscale serve --bg --https=8443 8787`, and open
+`https://<machine>.<tailnet>.ts.net:8443/`.
+
 `--user` is your login as `tailscale whois <phone's tailscale IP>` shows it.
 
 Options:

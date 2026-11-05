@@ -125,25 +125,57 @@ pub fn tailscale(env: &Env) -> Result<(String, String), String> {
     Ok((login, dns))
 }
 
-/// The https address Tailscale Serve gives this port, if Serve is set for it.
-pub fn serve_url(env: &Env, port: u16) -> Option<String> {
-    let (code, out, _) = env.run("tailscale", &["serve", "status", "--json"])?;
-    if code != 0 {
-        return None;
-    }
-    let v: Value = serde_json::from_str(&out).ok()?;
+/// Tailscale Serve for this port: the https address when it is set, and else the command that sets it.
+pub struct ServeStep {
+    pub url: Option<String>,
+    pub command: String,
+    /// Why the command is not the plain one: 443 "/" goes to another local service.
+    pub reason: Option<String>,
+}
+
+/// HTTPS ports to use, in order, when 443 "/" is another service's.
+const OTHER_HTTPS: [u16; 4] = [8443, 10443, 18443, 28443];
+
+/// Reads `tailscale serve status --json` only. With 443 "/" already used by something that is not this page,
+/// `tailscale serve --bg <port>` would replace it, so the command names the first free HTTPS port instead.
+pub fn serve_step(env: &Env, port: u16) -> ServeStep {
+    let plain = ServeStep { url: None, command: format!("tailscale serve --bg {port}"), reason: None };
+    let Some((0, out, _)) = env.run("tailscale", &["serve", "status", "--json"]) else { return plain };
+    let Ok(v) = serde_json::from_str::<Value>(&out) else { return plain };
     let ours = |proxy: &str| {
         let p = proxy.trim_end_matches('/');
         [format!("127.0.0.1:{port}"), format!("localhost:{port}")].iter().any(|t| p.ends_with(t.as_str())) || p == port.to_string()
     };
-    for (host, web) in v.get("Web")?.as_object()? {
-        let handlers = web.get("Handlers").and_then(Value::as_object);
+    let web = v.get("Web").and_then(Value::as_object);
+    for (host, w) in web.into_iter().flatten() {
+        let handlers = w.get("Handlers").and_then(Value::as_object);
         if handlers.is_some_and(|h| h.values().any(|x| x.get("Proxy").and_then(Value::as_str).is_some_and(ours))) {
             let host = host.strip_suffix(":443").unwrap_or(host);
-            return Some(format!("https://{host}/"));
+            return ServeStep { url: Some(format!("https://{host}/")), ..plain };
         }
     }
-    None
+    let on_port = |n: u16| {
+        let suffix = format!(":{n}");
+        let tcp = v.get("TCP").and_then(|t| t.get(n.to_string())).is_some();
+        let web = web.into_iter().flatten().filter(|(h, _)| h.ends_with(&suffix)).map(|(_, w)| w).collect::<Vec<_>>();
+        (tcp, web)
+    };
+    let (_, on_443) = on_port(443);
+    if !on_443.iter().any(|w| w.get("Handlers").and_then(|h| h.get("/")).is_some()) {
+        return plain;
+    }
+    let free = OTHER_HTTPS.into_iter().find(|&n| {
+        let (tcp, web) = on_port(n);
+        !tcp && web.is_empty()
+    });
+    let Some(n) = free else {
+        return ServeStep { reason: Some("443 is used by another service, and so are 8443, 10443, 18443 and 28443. Pick a free HTTPS port for --https.".into()), command: format!("tailscale serve --bg --https=<port> {port}"), ..plain };
+    };
+    ServeStep {
+        command: format!("tailscale serve --bg --https={n} {port}"),
+        reason: Some(format!("443 is used by another service on this machine, so the page goes on {n}; the plain command would replace it.")),
+        ..plain
+    }
 }
 
 /// A QR code of `text` as an SVG: one path of the dark modules, with a 4-module margin.
@@ -233,7 +265,8 @@ pub fn service_state(env: &Env) -> Value {
 pub fn status(env: &Env, cfg: &Config, dir: Option<&Path>) -> Value {
     let ts = tailscale(env);
     let user = if !cfg.phone_user.is_empty() { Some(cfg.phone_user.clone()) } else { ts.as_ref().ok().map(|(l, _)| l.clone()) };
-    let url = ts.as_ref().ok().and_then(|_| serve_url(env, cfg.phone_port));
+    let step = ts.as_ref().ok().map(|_| serve_step(env, cfg.phone_port));
+    let url = step.as_ref().and_then(|s| s.url.clone());
     let qr = match (&url, dir) {
         (Some(u), Some(d)) => qr_svg(u).and_then(|svg| {
             let p = d.join("phone-qr.svg");
@@ -252,7 +285,12 @@ pub fn status(env: &Env, cfg: &Config, dir: Option<&Path>) -> Value {
         "user": user,
         "port": cfg.phone_port,
         "read_only": cfg.phone_read_only,
-        "serve": {"set": url.is_some(), "url": url, "command": format!("tailscale serve --bg {}", cfg.phone_port)},
+        "serve": {
+            "set": url.is_some(),
+            "url": url,
+            "command": step.as_ref().map_or_else(|| format!("tailscale serve --bg {}", cfg.phone_port), |s| s.command.clone()),
+            "reason": step.as_ref().and_then(|s| s.reason.clone()),
+        },
         "qr": qr,
         "service": service_state(env),
     })

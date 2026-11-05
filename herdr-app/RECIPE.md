@@ -92,11 +92,14 @@ Left to right:
      one `selected` and semibold): **Check for updates** On | Off, **Status row** Show | Hide,
      **Helper on other machines** Ask | Never, **Phone page** Off | On. A box with a `blocked` border when config.json is not
      JSON. The update line with the command written out (Menlo 11.5 px) when one is out.
-     Under Phone page: a status dot and line (Running in `done`, a problem in `blocked`); without
+     Under Phone page: a status dot and line (Running in `done`, a problem in `blocked`). While on
+     and Serve not set, right under it: "One step left: run this once in a terminal.", the one
+     `tailscale serve` command with Copy (`--https=8443` when 443 is another service's, with a
+     `muted` line that says so), and the status is asked every 3 s until Serve is set. Without
      Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** field (empty:
-     the login found, which the line under it names), **Read-only** Off | On, and while on either
-     the one `tailscale serve --bg 8787` command with Copy or, once Serve is set, the address with
-     Copy and a 140 px QR code on a white 8 px box. Linux adds a line on `loginctl enable-linger`.
+     the login found, which the line under it names), **Read-only** Off | On, and once Serve is set
+     the address with Copy and a 140 px QR code on a white 8 px box. Linux adds a line on
+     `loginctl enable-linger`.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
      above them, 8 px padding, 6 px gaps, 8 px corners, 1 px border, `muted` border on focus).
 

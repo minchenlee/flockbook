@@ -181,7 +181,7 @@ asked), `no-home`, or `error` (no answer yet, for example offline). Only `newer`
 ### `phone` (`phone status`, `on`, `off`)
 
 ```json
-{"port":8787,"qr":"<home>/flockbook/phone-qr.svg","read_only":false,"serve":{"command":"tailscale serve --bg 8787","set":true,"url":"https://box.tail1.ts.net/"},"service":{"file":"/home/me/.config/systemd/user/flockbook-serve.service","kind":"systemd","message":null,"state":"running"},"tailscale":{"dns":"box.tail1.ts.net","login":"me@example.com"},"tailscale_error":null,"type":"phone","user":"me@example.com"}
+{"port":8787,"qr":"<home>/flockbook/phone-qr.svg","read_only":false,"serve":{"command":"tailscale serve --bg 8787","reason":null,"set":true,"url":"https://box.tail1.ts.net/"},"service":{"file":"/home/me/.config/systemd/user/flockbook-serve.service","kind":"systemd","message":null,"state":"running"},"tailscale":{"dns":"box.tail1.ts.net","login":"me@example.com"},"tailscale_error":null,"type":"phone","user":"me@example.com"}
 ```
 
 The phone page (`serve`, SERVE.md) as a user service. Every answer has this line, also after an `error`.
@@ -194,7 +194,10 @@ settings and restarts it. `off` stops it and removes that file, only when it has
 - `user`, `port`, `read_only`: config.json `phone_user` (empty: the Tailscale login), `phone_port` (8787),
   `phone_read_only` (false).
 - `serve`: whether Tailscale Serve sends to that port (`tailscale serve status --json`; only read), its
-  address, and the one command to set it. `qr`: an SVG QR code of the address, once it is set.
+  address, and the one command to set it. When 443 `/` already goes to another local service, the plain
+  command would replace it: `command` is `tailscale serve --bg --https=8443 <port>` (the first free of 8443,
+  10443, …) and `reason` says why (else null). The address keeps a port other than 443
+  (`https://box.tail1.ts.net:8443/`). `qr`: an SVG QR code of the address, once it is set.
 - `service.state`: `off` (no file), `running`, `stopped`, `error` (`message` says where its log is), or
   `by-hand` (a file without the marker; never changed).
 
