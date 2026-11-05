@@ -7,6 +7,7 @@ import { openMenu, tabItems } from "./menu.js";
 import { spaceAgents, spaceTabs, activeTab, currentAgent, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
   SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
 import { loadConfig, pollUpdate, updateDot } from "./config.js";
+import { dragger, dropPlace } from "./drag.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -34,29 +35,10 @@ export function lightsRoom() {
 
 export const BAR_H = 56;
 
-// The tab being dragged: { id, x, moved, target: { id, after } }. One drag at a time, so it is
-// kept here and every copy of the bar draws from it. A press starts it; it counts as a drag once
-// the pointer has moved DRAG_PX, and until then the release is a plain click.
-// Herdr's mouse moves carry no button state and arrive only over the bar, so a release outside
-// the bar is never seen: leaving the bar, another button, or a press elsewhere cancels instead.
-let drag = null;
-const DRAG_PX = 4;
+// The tab being dragged (drag.js): one at a time, so every copy of the bar draws from it.
+const drag = dragger("x");
+export { dropPlace };
 
-// Where a drop puts the dragged tab: its position in `tabs` after the move, or -1 when it would
-// stay where it is.
-export function dropPlace(tabs, d) {
-  const from = tabs.findIndex((x) => x.id === d?.id), on = tabs.findIndex((x) => x.id === d?.target?.id);
-  if (from < 0 || on < 0) return -1;
-  const slot = on + (d.target.after ? 1 : 0);
-  const to = slot > from ? slot - 1 : slot;
-  return to === from ? -1 : to;
-}
-
-function cancelDrag(cx) {
-  const shown = drag?.moved;
-  drag = null;
-  if (shown) cx?.notify?.();
-}
 const KEY_CMD = "flockbook.command";   // the last key command and when, so two copies don't both act
 
 // Keys bound to "flockbook.<command>" in keys.json.
@@ -127,7 +109,7 @@ export function topBar(t, over = false) {
   const capsule = (id) => h_flex().id(id).h(38).px(4).gap(2).items_center().flex_none().rounded(19)
     .bg(t.chrome).border(1).border_color(t.border).shadow_sm();
 
-  const dragging = drag?.moved ? drag : null;
+  const dragging = drag.shown;
   const lineOn = dragging && dropPlace(tabs, dragging) >= 0 ? dragging.target : null;
 
   const pill = (tab) => {
@@ -140,22 +122,15 @@ export function topBar(t, over = false) {
       .when(on, (el) => el.font_weight(600))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
       .when(dragging?.id === tab.id, (el) => el.opacity(0.45))
-      .on_mouse_down("left", (e, cx) => { cx.stop_propagation?.(); drag = { id: tab.id, x: e.position.x, moved: false, target: null }; })
-      .on_mouse_move((e, cx) => {
-        if (!drag || (!drag.moved && Math.abs(e.position.x - drag.x) < DRAG_PX)) return;
-        // The half of this pill under the pointer: its painted box, so a scrolled bar counts too.
-        const after = (e.local_position?.x ?? 0) >= (e.bounds?.width ?? 0) / 2;
-        const was = drag.moved ? drag.target : null;
-        drag.moved = true;
-        drag.target = { id: tab.id, after };
-        if (was?.id !== tab.id || was?.after !== after) cx.notify?.();
-      })
+      .on_mouse_down("left", (e, cx) => { cx.stop_propagation?.(); drag.press(tab.id, e); })
+      .on_mouse_move((e, cx) => { if (drag.over(tab.id, e)) cx.notify?.(); })
       // The release after a drag is not a click.
-      .on_click(() => { if (!drag?.moved) showTab(tab); })
+      .on_click(() => { if (!drag.shown) showTab(tab); })
       .on_mouse_down("right", (_e, cx) => {
         cx.stop_propagation?.();
-        if (drag?.moved) return cancelDrag(cx);
-        drag = null;
+        const shown = drag.shown;
+        drag.cancel(cx);
+        if (shown) return;
         openMenu(tabItems(tab, { agent: tabAgents(tab.id)[0] ?? null, list: tabs })); })
       .when(Boolean(line), (el) => el.child(div().id("drop-line").absolute().top(2).bottom(2).w(3).rounded(2).bg(t.accent)
         .when(line.after, (l) => l.right(-3.5)).when(!line.after, (l) => l.left(-3.5))))
@@ -168,14 +143,12 @@ export function topBar(t, over = false) {
   };
 
   const strip = capsule("tabs").min_w(0).flex_shrink(1)
-    .on_hover((inside, cx) => { if (!inside) cancelDrag(cx); })
-    .on_mouse_down_out((_e, cx) => cancelDrag(cx))
+    .on_hover((inside, cx) => { if (!inside) drag.cancel(cx); })
+    .on_mouse_down_out((_e, cx) => drag.cancel(cx))
     // On the whole capsule, not the pills' row: a release on its padding ends the press too.
     .on_mouse_up("left", (_e, cx) => {
-      const d = drag;
-      drag = null;
-      if (!d?.moved) return;
-      cx.notify?.();
+      const d = drag.release(cx);
+      if (!d) return;
       const to = dropPlace(tabs, d);
       if (to >= 0) run("tab.move", { id: d.id, index: tabs[to].index });
     })

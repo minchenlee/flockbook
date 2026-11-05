@@ -8,6 +8,11 @@ import { needing, showNeeds, showOverview, showSettings, shownScreen, icon, show
 import { statusMark, lightsRoom, BAR_H } from "./top.js";
 import { updateLine } from "./settings.js";
 import { updateSeen } from "./config.js";
+import { dragger, dropPlace } from "./drag.js";
+
+// The workspace being dragged up or down (drag.js): one at a time, so the docked and the floating
+// sidebar draw from the same one.
+const drag = dragger("y");
 
 // Status marks for a space's tabs: all of them up to 5, else the first 3 and "+N".
 export function tabMarks(tabs) {
@@ -62,12 +67,29 @@ export class SideView {
 
     // Every row: 10 px in, a 22 px icon or monogram column, then the label, so the labels, the
     // "Workspaces" heading and the right edges (badge, marks, +) line up.
+    const list = spaces();
+    const dragging = drag.shown;
+    const lineOn = dragging && dropPlace(list, dragging) >= 0 ? dragging.target : null;
     const space = (s) => {
       const { shown, more } = tabMarks(s.tabs ?? []);
-      return h_flex().id(`space-${s.id}`).h(34).px(10).gap(9).items_center().rounded(7)
-        .bg(s.active ? t.selected : t.chrome).hover((x) => x.bg(s.active ? t.selected : t.hover))
-        .on_mouse_down("left", stop).on_click(() => showSpace(s.id))
-        .on_mouse_down("right", (e, cx) => { cx.stop_propagation(); openMenu(spaceItems(s), this.floating && e?.position ? { x: e.position.x, y: e.position.y } : "pointer"); })
+      const line = lineOn?.id === s.id ? lineOn : null;
+      return h_flex().id(`space-${s.id}`).relative().h(34).px(10).gap(9).items_center().rounded(7)
+        .bg(s.active ? t.selected : t.chrome).when(!dragging, (el) => el.hover((x) => x.bg(s.active ? t.selected : t.hover)))
+        .when(dragging?.id === s.id, (el) => el.opacity(0.45))
+        .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); drag.press(s.id, e); })
+        .on_mouse_move((e, cx) => { if (drag.over(s.id, e)) cx.notify?.(); })
+        // The release after a drag is not a click.
+        .on_click(() => { if (!drag.shown) showSpace(s.id); })
+        .on_mouse_down("right", (e, cx) => {
+          cx.stop_propagation();
+          const was = drag.shown;
+          drag.cancel(cx);
+          if (was) return;
+          openMenu(spaceItems(s), this.floating && e?.position ? { x: e.position.x, y: e.position.y } : "pointer");
+        })
+        // The line in the 1 px gap between rows, above or below this one.
+        .when(Boolean(line), (el) => el.child(div().id("space-drop-line").absolute().left(4).right(4).h(2).rounded(1).bg(t.accent)
+          .when(line.after, (l) => l.bottom(-1.5)).when(!line.after, (l) => l.top(-1.5))))
         .child(div().size(22).flex_none().rounded(6).flex().items_center().justify_center().text_size(10.5).font_semibold()
           .bg(t.raised).border(1).border_color(t.border).text_color(t.muted).child(monogram(s.name)))
         .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(s.active ? t.foreground : t.muted).child(s.name))
@@ -101,7 +123,17 @@ export class SideView {
         .child(div().id("space-new").size(20).rounded(5).flex().items_center().justify_center().text_color(t.muted)
           .hover((s) => s.bg(t.hover)).on_mouse_down("left", stop).on_click(() => run("space.new"))
           .child(svg(icon("plus")).size(12))))
-      .child(v_flex().id("spaces").flex_1().min_h(0).gap(1).overflow_y_scrollbar().children(spaces().map(space)))
+      .child(v_flex().id("spaces").flex_1().min_h(0).gap(1).overflow_y_scrollbar()
+        .when(Boolean(dragging), (el) => el.cursor_grabbing())
+        .on_hover((inside, cx) => { if (!inside) drag.cancel(cx); })
+        .on_mouse_down_out((_e, cx) => drag.cancel(cx))
+        // On the whole list, not the rows: a release between rows or below the last ends the press too.
+        .on_mouse_up("left", (_e, cx) => {
+          const d = drag.release(cx);
+          const to = d ? dropPlace(list, d) : -1;
+          if (to >= 0) run("space.move", { id: d.id, index: list[to].index });
+        })
+        .children(list.map(space)))
       .when(Boolean(update), (el) => el.child(div().pb(4).child(update)))
       .child(row("side-flockbook", "sliders", "Flockbook", () => showSettings(), null, screen === "settings"))
       .child(row("side-settings", "gear", "Settings", () => run("app.settings")));
