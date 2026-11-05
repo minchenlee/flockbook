@@ -1,7 +1,7 @@
 //! The phone page's protocol (remote protocol v1, `web/src/protocol.ts`; the Mac app's `HubSession.swift`) on the
-//! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt), loadEarlier, ping. Approve, answer
-//! and send come only over `POST /api` (`post`); on the socket they are refused. Pictures, the queue, uploads and
-//! notifications are not offered: those requests get a `failed` reply.
+//! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt, the agent's queue), loadEarlier,
+//! pulledAck, ping. Approve, answer, send and pullQueued come only over `POST /api` (`post`); on the socket they are
+//! refused. Pictures, uploads and notifications are not offered: those requests get a `failed` reply.
 //!
 //! Every read and every key goes through `cli::run`, the same code the mod's sidecar runs, so the claims, the
 //! screen checks and the results are the mod's.
@@ -19,7 +19,53 @@ pub const MAX_SEND: usize = 16_000;
 pub const MAX_OTHER: usize = 2_000;
 
 /// The requests that send keys: only `POST /api` takes them.
-pub const KEYS: [&str; 3] = ["approve", "answer", "send"];
+pub const KEYS: [&str; 4] = ["approve", "answer", "send", "pullQueued"];
+
+/// How often the queue of a terminal on another machine is read (each read runs the helper there).
+const REMOTE_QUEUE_S: u64 = 5;
+
+/// A text pulled back from an agent's queue that no composer has confirmed yet (`pulledAck`). Kept in this process
+/// (POST and the socket are separate sessions), for every page of this owner: the next hello sends it again.
+#[derive(Clone, Debug, PartialEq)]
+struct Pulled {
+    id: String,
+    pane: String,
+    text: String,
+    note: Option<String>,
+    interrupted: bool,
+}
+
+static PULLED: std::sync::Mutex<Vec<Pulled>> = std::sync::Mutex::new(Vec::new());
+/// At most this many texts, and this many bytes of text: full, the pull clears nothing.
+const PULLED_MAX: usize = 100;
+const PULLED_BYTES: usize = 1 << 20;
+/// The note of a kept text whose pull has not ended (the helper stopped mid-pull).
+const UNFINISHED: &str = "Flockbook may not have finished clearing the agent's input box. Check the agent's terminal before you send it.";
+
+fn pulled_line(p: &Pulled) -> Value {
+    let mut v = json!({"type": "pulled", "id": p.id, "pane": p.pane, "text": p.text, "interrupted": p.interrupted});
+    if let Some(n) = &p.note {
+        v["note"] = json!(n);
+    }
+    v
+}
+
+fn pulled_store() -> std::sync::MutexGuard<'static, Vec<Pulled>> {
+    PULLED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Keeps `text` for `pane` under a new id; None: full.
+fn keep_pulled(pane: &str, text: &str) -> Option<String> {
+    let mut all = pulled_store();
+    if all.len() >= PULLED_MAX || all.iter().map(|p| p.text.len()).sum::<usize>() + text.len() > PULLED_BYTES {
+        return None;
+    }
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let id = format!("p{t:x}-{}", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    all.push(Pulled { id: id.clone(), pane: pane.into(), text: text.into(), note: Some(UNFINISHED.into()), interrupted: false });
+    Some(id)
+}
 
 /// Settings of one `serve`.
 #[derive(Debug, Clone)]
@@ -230,6 +276,9 @@ struct Feed {
     from: Option<Value>,
     sent: Option<Vec<Value>>,
     prompt: Option<Value>,
+    /// The last `queued` sent (None: none yet, as an empty one); when the queue was last read.
+    queued: Option<Value>,
+    queue_at: Option<std::time::Instant>,
 }
 
 impl Feed {
@@ -325,7 +374,11 @@ impl Session {
             if let Some(s) = session {
                 w["session"] = json!(s);
             }
-            return vec![w, json!({"type": "snapshot", "workspaces": snap}), ok(&id)];
+            // Pulled texts no composer confirmed yet (the connection dropped before), with their warning.
+            let mut out = vec![w, json!({"type": "snapshot", "workspaces": snap})];
+            out.extend(pulled_store().iter().map(pulled_line));
+            out.push(ok(&id));
+            return out;
         }
         if !self.welcomed {
             return vec![fail(&id, "unauthorized", "Send hello first.")];
@@ -360,7 +413,12 @@ impl Session {
                 };
                 self.load_earlier(session, before, &id)
             }
-            "pulledAck" | "pushUnsubscribe" => vec![ok(&id)],
+            "pulledAck" => {
+                let Some(p) = m["pulled"].as_str() else { return vec![fail(&id, "badRequest", "pulledAck needs pulled.")] };
+                pulled_store().retain(|x| x.id != p);
+                vec![ok(&id)]
+            }
+            "pushUnsubscribe" => vec![ok(&id)],
             _ => vec![fail(&id, "failed", "Not offered by this helper.")],
         }
     }
@@ -373,7 +431,7 @@ impl Session {
         };
         let ty = m["type"].as_str().unwrap_or("");
         if !KEYS.contains(&ty) {
-            return vec![fail(&id, "badRequest", "POST /api takes approve, answer and send.")];
+            return vec![fail(&id, "badRequest", "POST /api takes approve, answer, send and pullQueued.")];
         }
         if self.cfg.read_only {
             return vec![fail(&id, "readOnly", "This helper was started with --read-only.")];
@@ -386,6 +444,9 @@ impl Session {
         }
         // Typed values to the sidecar's own functions (`cli::keys`): nothing from the page is parsed as an option.
         let cache = self.cfg.cache.as_deref().map(std::path::Path::new);
+        if ty == "pullQueued" {
+            return pull_queued(&id, &pane, &p.terminal_id, cache);
+        }
         let keys = match ty {
             "approve" => {
                 let (Some(prompt), Some(allow)) = (m["prompt"].as_str(), m["allow"].as_bool()) else {
@@ -501,6 +562,30 @@ impl Session {
             feed.prompt = Some(pr.clone());
             out.push(pr);
         }
+        // The agent's own queue: on watch only when there is one; then each change, an empty one clearing it. Read
+        // only while the agent works; on another machine at most every REMOTE_QUEUE_S.
+        let reads = p.agent.as_ref().is_some_and(|a| a.status == AgentStatus::Working && crate::queue::reads(&a.kind));
+        let remote = matches!(crate::remote::split(&terminal), Ok(Some(_)));
+        let due = !remote || feed.queue_at.is_none_or(|t| t.elapsed().as_secs() >= REMOTE_QUEUE_S);
+        if !reads || due {
+            let mut q = if reads {
+                feed.queue_at = Some(std::time::Instant::now());
+                run(&self.base("queue", &terminal)).into_iter().find(|l| l["type"] == "queued").unwrap_or_else(|| crate::queue::line(None))
+            } else {
+                crate::queue::line(None)
+            };
+            q["pane"] = json!(pane);
+            let feed = self.feeds.entry(pane.to_string()).or_default();
+            let was = feed.queued.clone().unwrap_or_else(|| {
+                let mut e = crate::queue::line(None);
+                e["pane"] = json!(pane);
+                e
+            });
+            if q != was {
+                out.push(q.clone());
+            }
+            feed.queued = Some(q);
+        }
         out
     }
 }
@@ -551,6 +636,42 @@ impl Session {
 
 /// A client message: protocol 1, an id. Errors are the reply to send.
 /// A `Value`, not a `Map`: a missing field indexes as null (a `Map` index panics).
+/// `pullQueued`: the agent's queue back to the page's composer (`cli::pull`). The text is kept (`PULLED`) before the
+/// agent's box is cleared, until the composer confirms it (`pulledAck`).
+fn pull_queued(re: &str, pane: &str, terminal: &str, cache: Option<&std::path::Path>) -> Vec<Value> {
+    let mut kept: Option<String> = None;
+    let mut keep = |text: &str| {
+        kept = keep_pulled(pane, text);
+        kept.is_some()
+    };
+    let r = match cli::pull(terminal, cache, &mut keep) {
+        Ok(r) => r,
+        Err((code, message)) => return vec![done_reply(re, &[json!({"type": "error", "code": code, "message": message})])],
+    };
+    use crate::queue::Outcome;
+    let (note, interrupted) = match &r {
+        Outcome::Partial(_, why) => (Some(why.clone()), false),
+        Outcome::Interrupted(_) => (None, true),
+        _ => (None, false),
+    };
+    if let Some(id) = &kept {
+        if let Some(p) = pulled_store().iter_mut().find(|p| &p.id == id) {
+            (p.note, p.interrupted) = (note.clone(), interrupted);
+        }
+    }
+    match r {
+        Outcome::Pulled(text) | Outcome::Interrupted(text) | Outcome::Partial(text, _) => {
+            let mut l = pulled_line(&Pulled { id: String::new(), pane: pane.into(), text, note, interrupted });
+            match kept {
+                Some(id) => l["id"] = json!(id),
+                None => _ = l.as_object_mut().map(|o| o.remove("id")),
+            }
+            vec![l, ok(re)]
+        }
+        Outcome::Refused(why) | Outcome::Failed(why) => vec![fail(re, "failed", &why)],
+    }
+}
+
 fn parse(data: &str) -> Result<(Value, String), Value> {
     let v: Value = serde_json::from_str(data).map_err(|_| fail("", "badRequest", "Not a protocol 1 client message."))?;
     let id = v["id"].as_str().unwrap_or("").to_string();

@@ -7,6 +7,7 @@
 //!   flockbook-modfeed card   --terminal <addr> [--all] [--cache <file>]   (--all: load every question; sends keys)
 //!   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
 //!   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
+//!   flockbook-modfeed queue  --terminal <addr> [--cache <file>]   (the agent's own queue: one `queued` line; read only)
 //!   flockbook-modfeed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
 //!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
@@ -19,7 +20,7 @@
 //! A terminal `m/tN` on another machine: the command runs there, in the helper there (`remote`). Rust only.
 
 use crate::protocol::{JsonLines, PROTOCOL_VERSION, SIDECAR_VERSION};
-use crate::{cards, config, feed, locate, paste, remote, status, update};
+use crate::{cards, config, feed, locate, paste, queue, remote, status, update};
 use herdr_core::hc::{HcClient, HcSession};
 use herdr_core::PaneScreen;
 use herdr_core::resolver::SessionResolver;
@@ -58,7 +59,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue"], "release": update::release()}));
             r.finish(true)
         }
         "paste-image" => {
@@ -113,7 +114,7 @@ pub fn run(argv: &[String]) -> String {
                 Err((code, message)) => r.fail(code, &message),
             }
         }
-        "feed" | "status" | "card" | "approve" | "answer" | "send" => {
+        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" => {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
             let cache_path = opt("--cache").map(PathBuf::from);
             let cache_url = cache_path.as_deref();
@@ -148,6 +149,15 @@ pub fn run(argv: &[String]) -> String {
                     status::run(&kind, log, &status::default_settings(&env), &mut r.out, SystemTime::now());
                     return r.finish(true);
                 }
+                "queue" => {
+                        let screen = found.pane.agent.as_ref().filter(|a| a.status == herdr_core::AgentStatus::Working && queue::reads(&a.kind)).and_then(|_| client.visible_text(&found.pane.id).ok());
+                        let q = screen.and_then(|s| {
+                            let qlog = if kind == "claude" { queue::log_at(log) } else { Default::default() };
+                            queue::read(found.pane.agent.as_ref(), Some(&s), &qlog)
+                        });
+                        r.out.emit_value(queue::line(q.as_ref()));
+                        return r.finish(true);
+                    }
                 "card" => {
                     let c = cards::card(&found.pane, &client, log, has("--all"), cache_url);
                     r.out.emit(&c);
@@ -207,7 +217,7 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
             }
         }
-        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send"),
+        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, queue"),
     }
 }
 
@@ -305,4 +315,22 @@ fn remote_keys(machine: &str, there: &str, cache: Option<&Path>, keys: Keys) -> 
         return Ok(e.clone());
     }
     Ok(lines.into_iter().find(|l| l["type"] == "done").unwrap_or_else(|| json!({"type": "error", "code": "remote_failed", "message": format!("The helper on {machine} gave no answer.")})))
+}
+
+/// Pulls the queue of the agent in `terminal` (this machine only) back (`queue::run`): `keep` gets the text before the
+/// first Ctrl-U. Err: the error line's code and message. A terminal on another machine is refused: if the link to it
+/// dropped mid-pull, the text could leave the agent's box and never come back.
+pub fn pull(terminal: &str, cache: Option<&Path>, keep: &mut dyn FnMut(&str) -> bool) -> Result<queue::Outcome, (&'static str, String)> {
+    match remote::split(terminal) {
+        Err(()) => return Err(("bad_terminal", format!("not a terminal address: {terminal}"))),
+        Ok(Some((machine, _))) => {
+            return Ok(queue::Outcome::Refused(format!("Flockbook pulls back queued messages on this machine only. Edit it in the agent's terminal on {machine}. Nothing was sent.")))
+        }
+        Ok(None) => {}
+    }
+    let (found, client) = find(terminal, cache)?;
+    let Some(agent) = found.pane.agent.clone() else { return Err(("not-agent", format!("terminal {terminal} runs no agent"))) };
+    let log = queue::log_at(found.path.as_deref().map(Path::new));
+    let mut io = queue::Live { client: &client, pane_id: found.pane.id.clone() };
+    Ok(queue::run(&agent, &log, &mut io, keep))
 }

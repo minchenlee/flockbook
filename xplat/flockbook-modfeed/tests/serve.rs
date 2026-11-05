@@ -117,7 +117,7 @@ fn who_is_refused() {
     assert_eq!(http(p, "GET", "/", &[("Host", HOST), ("Tailscale-Funnel-Request", "?1")], "").0, 403, "Funnel without identity");
     let (c, hub) = http(p, "GET", "/hub.json", &me, "");
     assert_eq!(c, 200);
-    assert_eq!(serde_json::from_str::<Value>(&hub).unwrap(), json!({"auth": "tailscale", "post": ["approve", "answer", "send"]}));
+    assert_eq!(serde_json::from_str::<Value>(&hub).unwrap(), json!({"auth": "tailscale", "post": ["approve", "answer", "send", "pullQueued"]}));
     assert_eq!(http(p, "GET", "/hub.json", &[("Host", HOST)], "").0, 403, "every path is gated");
     assert_eq!(http(p, "GET", "/nope.js", &me, "").0, 404);
 
@@ -489,4 +489,71 @@ fn tabs_on_other_machines() {
     let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p2", "type": "send", "pane": "hc:box/t3", "text": "x", "agent": "codex"}));
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()[0]["ok"], false, "{body}");
     assert_eq!(there.calls("terminal.send").len(), 1);
+}
+
+#[test]
+fn the_agents_queue_and_pull_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("sess-q.jsonl");
+    let lines = [user_line("u1", "start"), r#"{"type":"queue-operation","operation":"enqueue","content":"QC reply GAMMA"}"#.to_string()];
+    std::fs::write(&log, lines.join("\n") + "\n").unwrap();
+    let (fake, cache) = with_log(dir.path(), &log);
+    fake.set_terminals(vec![claude("t1", "working", "")]);
+    let rule = "─".repeat(60);
+    let queued = format!("⏺ ALPHA\n❯ QC reply GAMMA\n  ctrl+enter to send now\n· Pouncing… (10s)\n{rule}\n❯ Press up to edit queued messages\n{rule}");
+    fake.set_screen("t1", &queued);
+    // Up brings the text into the box; Ctrl-U empties it.
+    let (r1, r2) = (rule.clone(), rule.clone());
+    fake.on_keys(Some(std::sync::Arc::new(move |a: &str, k: &[String], s: &mut common::State| {
+        let text = match k[0].as_str() {
+            "up" => format!("⏺ ALPHA\n{r1}\n❯ QC reply GAMMA\n{r2}"),
+            _ => format!("⏺ ALPHA\n{r1}\n❯ \n{r2}"),
+        };
+        s.screens.insert(a.to_string(), text);
+    })));
+    let srv = start(&fake.path, &["--cache", &cache]);
+    let mut ws = socket(srv.port);
+    say(&mut ws, json!({"v": 1, "id": "h", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "h");
+    let pane = got.iter().find(|m| m["type"] == "snapshot").unwrap()["workspaces"][0]["tabs"][0]["panes"][0]["id"].as_str().unwrap().to_string();
+    assert!(!got.iter().any(|m| m["type"] == "pulled"), "nothing pulled yet");
+
+    // Watch: the queue, as the log and the screen give it.
+    say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": pane}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
+    let q = got.iter().find(|m| m["type"] == "queued").unwrap_or_else(|| panic!("{got:?}"));
+    assert_eq!(q, &json!({"type": "queued", "pane": pane, "agent": "claude", "items": ["QC reply GAMMA"], "pullable": true, "pullsAll": true}));
+    // On the socket it is refused: keys go with POST.
+    say(&mut ws, json!({"v": 1, "id": "s", "type": "pullQueued", "pane": pane}));
+    let r = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "s");
+    assert_eq!(r.last().unwrap()["ok"], false);
+    assert!(fake.keys().is_empty());
+
+    // POST: Up, then Ctrl-U; the text comes back with an id.
+    let (c, body) = api(srv.port, &[], &json!({"v": 1, "id": "p", "type": "pullQueued", "pane": pane}));
+    assert_eq!(c, 200);
+    let r: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(r[1], json!({"type": "reply", "re": "p", "ok": true}), "{r}");
+    assert_eq!((r[0]["type"].as_str(), r[0]["text"].as_str(), r[0]["interrupted"].as_bool()), (Some("pulled"), Some("QC reply GAMMA"), Some(false)), "{r}");
+    assert!(r[0].get("note").is_none(), "{r}");
+    let id = r[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(fake.keys(), vec![vec!["up".to_string()], vec!["ctrl+u".to_string()]]);
+
+    // A page that did not confirm it gets it again at hello; after pulledAck, no more.
+    let mut ws2 = socket(srv.port);
+    say(&mut ws2, json!({"v": 1, "id": "h2", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    let got = read_until(&mut ws2, |v| v["type"] == "reply" && v["re"] == "h2");
+    let again = got.iter().find(|m| m["type"] == "pulled").unwrap();
+    assert_eq!((again["id"].as_str(), again["text"].as_str()), (Some(id.as_str()), Some("QC reply GAMMA")));
+    say(&mut ws2, json!({"v": 1, "id": "a", "type": "pulledAck", "pulled": id}));
+    read_until(&mut ws2, |v| v["type"] == "reply" && v["re"] == "a");
+    let mut ws3 = socket(srv.port);
+    say(&mut ws3, json!({"v": 1, "id": "h3", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    let got = read_until(&mut ws3, |v| v["type"] == "reply" && v["re"] == "h3");
+    assert!(!got.iter().any(|m| m["type"] == "pulled"), "{got:?}");
+
+    // The queue went: an empty one clears it on the page.
+    fake.set_screen("t1", &format!("⏺ ALPHA\n{rule}\n❯ \n{rule}"));
+    let got = read_until(&mut ws, |v| v["type"] == "queued");
+    assert_eq!(got.last().unwrap()["items"], json!([]));
 }

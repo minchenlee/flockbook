@@ -49,6 +49,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
+| `queue` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; `serve` and other machines) | `queued` |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
@@ -153,7 +154,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -309,6 +310,19 @@ as blocked, and for a pending `question` row.
 
 An approval card appears only when the screen shows the prompt ("Do you want …?" with "1. Yes").
 A running tool is not an approval.
+
+### `queued` (`queue`)
+
+The agent's own queue: messages typed while it works that it has not taken yet. Read only; the screen is read only
+while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` and `items` is empty.
+
+```json
+{"type":"queued","agent":"claude","items":["Also check the lint step.",null],"pullable":true,"pullsAll":true}
+```
+
+- `items`: oldest first; `null` is a queued message whose text neither the log nor the screen shows.
+- `pullable`: the agent's input box is empty, so the queue can be pulled back now.
+- `pullsAll`: Claude Code (Up takes back every queued message as one text).
 
 ### `done` (`approve`, `answer`, `send`)
 

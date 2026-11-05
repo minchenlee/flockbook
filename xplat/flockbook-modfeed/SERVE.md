@@ -39,6 +39,11 @@ Herdr layout, as in the Mac app. Their conversation, prompts and keys go through
 which makes the same checks there. `serve` never installs that helper: install it from the mod's card.
 A machine whose helper is off in Flockbook settings (`Never`) shows its tabs, but nothing is read or sent there.
 
+Messages you typed while the agent works (its own queue: Claude Code, Codex, Grok Build) show faded at the end
+of the conversation. Claude Code's can be pulled back to the composer, as on the Mac: Up, then Ctrl-U, never
+Escape, and only text its log gives exactly. The helper keeps a pulled text until a page has it in its composer;
+a page that was not connected gets it at its next connect. Codex's and Grok's are changed in their terminals.
+
 A connection whose peer stops reading is closed after 5 s without progress on a message.
 
 ## Limits
@@ -48,7 +53,10 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
   - For your own programs, that is the trust they already have: they can run `hc` and send keys themselves.
   - Other users of the machine are not kept out. Do not run `serve` on a machine you share with users you do
     not trust.
-- Not in this version: pictures, the agent's queue, image upload, and notifications.
+- Pull back works on this machine's terminals only. On another machine the queue shows, but you change it in
+  that terminal: a link that drops mid-pull could take the text from the agent and never bring it back.
+- A pulled text that no page has taken yet is kept in memory only: it is gone when `serve` stops.
+- Not in this version: pictures, image upload, and notifications.
   The helper answers those requests with "Not offered by this helper."
 
 ## Start it
