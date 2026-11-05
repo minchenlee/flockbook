@@ -27,6 +27,10 @@ impl Drop for Server {
 }
 
 fn start(sock: &str, extra: &[&str]) -> Server {
+    start_env(sock, extra, &[])
+}
+
+fn start_env(sock: &str, extra: &[&str], env: &[(&str, &str)]) -> Server {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("cache.json").to_string_lossy().to_string();
     let mut child = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed"))
@@ -35,6 +39,7 @@ fn start(sock: &str, extra: &[&str]) -> Server {
         .env_clear()
         .env("HC_SOCKET", sock)
         .env("HOME", "/nonexistent-home")
+        .envs(env.iter().copied())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -422,4 +427,66 @@ fn load_earlier_reads_back_in_the_log() {
     assert_eq!(c["mode"], "append", "{c}");
     assert_eq!(c["items"].as_array().unwrap().iter().map(|i| i["id"].clone()).collect::<Vec<_>>(), vec![json!("new120-0")]);
     assert_eq!(c["hasEarlier"], false);
+}
+
+/// One space `sp1` with tab `tb1` holding the given terminals, with pane titles (the official app's document).
+fn one_space(name: &str, tab: &str, terms: &[(&str, &str)]) -> Value {
+    let kids: Vec<Value> = terms.iter().enumerate().map(|(i, (t, title))| json!({"id": format!("p{i}"), "type": "block", "content": {"terminal": t}, "title": title})).collect();
+    json!({"spaces": [{"id": "sp1", "name": name, "folder": "/w", "tabs": [{"id": "tb1", "name": tab, "root": {"id": "r", "type": "row", "children": kids}}]}]})
+}
+
+#[test]
+fn tabs_on_other_machines() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("box-home");
+    let here = FakeHc::start();
+    let there = FakeHc::start();
+    let lab = |mut t: Value| {
+        t["labels"] = json!({"herdr.space": "sp1", "herdr.tab": "tb1"});
+        t
+    };
+    here.set_terminals(vec![lab(common::terminal("t1", &["zsh"], Some(11), None, None)), lab(claude("box/t3", "idle", ""))]);
+    there.set_terminals(vec![claude("t3", "idle", "")]);
+    here.add_machine("box", &home, &there.path);
+    here.set_machine_list(vec![json!({"name": "box", "state": "connected"}), json!({"name": "tmp", "state": "connected", "temporary": true}),
+                              json!({"name": "off", "state": "unreachable"})]);
+    here.set_doc("herdr-app", one_space("Here", "main", &[("t1", "")]));
+    here.set_doc("box/herdr-app", one_space("Remote", "build", &[("t3", "agent")]));
+    // The helper there (this test build).
+    let installed = home.join(modfeedkit::remote::HELPER_DIR).join(modfeedkit::remote::helper_version()).join("flockbook-modfeed");
+    std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_flockbook-modfeed"), &installed).unwrap();
+
+    let srv = start(&here.path, &[]);
+    let mut ws = socket(srv.port);
+    say(&mut ws, json!({"v": 1, "id": "h", "type": "hello", "token": "", "client": "test", "clientVersion": "1"}));
+    // The other machine's document is read in the background: it shows in this snapshot or a later one.
+    let got = read_until(&mut ws, |v| v["type"] == "snapshot" && v["workspaces"].as_array().is_some_and(|w| w.len() == 2 && w[1]["label"] == "Remote"));
+    let snap = &got.last().unwrap()["workspaces"];
+    assert_eq!(snap[0]["label"], "Here");
+    assert_eq!(snap[0]["tabs"][0]["label"], "main");
+    assert_eq!(snap[1]["id"], "hc:space:box/sp1");
+    let tab = &snap[1]["tabs"][0];
+    assert_eq!((tab["id"].as_str(), tab["label"].as_str()), (Some("hc:tab:box/sp1/tb1"), Some("build")));
+    let pane = &tab["panes"][0];
+    assert_eq!((pane["id"].as_str(), pane["label"].as_str()), (Some("hc:box/t3"), Some("agent")));
+    let ons: Vec<Value> = here.calls("doc.get").iter().filter_map(|p| p.get("on").cloned()).collect();
+    assert!(!ons.is_empty() && ons.iter().all(|o| o == "box"), "only box's document is read: {ons:?}");
+
+    // Watching it: the helper there reads it. Nothing is read here.
+    say(&mut ws, json!({"v": 1, "id": "w", "type": "watch", "pane": "hc:box/t3"}));
+    let got = read_until(&mut ws, |v| v["type"] == "reply" && v["re"] == "w");
+    assert_eq!(got.last().unwrap()["ok"], true, "{got:?}");
+    assert!(got.iter().any(|m| m["type"] == "conversation" && m["pane"] == "hc:box/t3"));
+    assert!(here.calls("terminal.read").is_empty());
+
+    // Send over POST: the agent there gets the text.
+    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p1", "type": "send", "pane": "hc:box/t3", "text": "hello there", "agent": "claude"}));
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()[0]["ok"], true, "{body}");
+    assert_eq!(there.calls("terminal.send").last().unwrap()["text"], "hello there");
+    assert!(here.calls("terminal.send").is_empty());
+    // Another agent kind than the page saw: nothing goes there.
+    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p2", "type": "send", "pane": "hc:box/t3", "text": "x", "agent": "codex"}));
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()[0]["ok"], false, "{body}");
+    assert_eq!(there.calls("terminal.send").len(), 1);
 }

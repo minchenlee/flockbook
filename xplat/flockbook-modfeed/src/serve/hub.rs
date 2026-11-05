@@ -8,7 +8,7 @@
 
 use crate::cli;
 use herdr_core::hc::{HcClient, HcSession};
-use herdr_core::{AgentStatus, PaneScreen, Workspace};
+use herdr_core::{AgentStatus, Workspace};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -300,7 +300,8 @@ impl Session {
     /// herdr-core's workspaces now; empty when it does not answer.
     fn load(&mut self) -> Value {
         let session = HcSession::resolve_env();
-        self.workspaces = if session.is_available() { HcClient::new(session, 8, 22).snapshot().unwrap_or_default() } else { vec![] };
+        // Spaces and tabs as the Mac app shows them, other machines' too (`layout`).
+        self.workspaces = if session.is_available() { super::layout::snapshot(&HcClient::new(session, 8, 22)).unwrap_or_default() } else { vec![] };
         snapshot(&self.workspaces)
     }
 

@@ -34,6 +34,11 @@ Approve, answer and send go only with `POST /api`:
 `send` names the agent and the conversation the page showed. When another agent or another conversation is
 in that pane now, nothing is sent (the same check as the mod's `send --expect-kind`, `--expect-path`).
 
+Terminals on other machines (`hc machine add`) show in their own spaces, named and ordered by that machine's
+Herdr layout, as in the Mac app. Their conversation, prompts and keys go through the helper on that machine,
+which makes the same checks there. `serve` never installs that helper: install it from the mod's card.
+A machine whose helper is off in Flockbook settings (`Never`) shows its tabs, but nothing is read or sent there.
+
 A connection whose peer stops reading is closed after 5 s without progress on a message.
 
 ## Limits

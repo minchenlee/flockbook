@@ -10,6 +10,7 @@ One short line: what this release is about.
 - Herdr app mod: a Flockbook settings screen (check for updates, status row, helper on other machines), a quiet line when a newer Flockbook is out, and the install upgrades an older, unchanged Flockbook (a gallery copy) in place. *(preview)*
 
 - Phone page on the Rust helper (`flockbook-modfeed serve`): scroll up for older messages, as on the Mac hub. New rows still come while you read them.
+- Phone page on the Rust helper: spaces and tabs as the Herdr app shows them, also tabs on other machines. Before, every terminal was in one tab. Reading, approving and sending on another machine go through the helper there.
 
 ### 🔒 Security
 
