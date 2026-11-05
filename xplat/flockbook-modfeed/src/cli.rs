@@ -239,6 +239,12 @@ pub enum Keys {
 
 /// Runs `keys` on the agent in `terminal`: the `done` line, or the `error` line (as `run` prints them).
 pub fn keys(terminal: &str, cache: Option<&Path>, keys: Keys) -> serde_json::Value {
+    let error = |code: &str, message: &str| json!({"type": "error", "code": code, "message": message});
+    match remote::split(terminal) {
+        Err(()) => return error("bad_terminal", &format!("not a terminal address: {terminal}")),
+        Ok(Some((machine, there))) => return remote_keys(&machine, &there, cache, keys).unwrap_or_else(|(c, m)| error(c, &m)),
+        Ok(None) => {}
+    }
     let (found, client) = match find(terminal, cache) {
         Ok(x) => x,
         Err((code, message)) => return json!({"type": "error", "code": code, "message": message}),
@@ -251,4 +257,52 @@ pub fn keys(terminal: &str, cache: Option<&Path>, keys: Keys) -> serde_json::Val
         Keys::Send { text, expect_kind, expect_path } => cards::send(&found.pane, &client, &text, &[], log, expect_kind.as_deref(), expect_path.as_deref()),
     };
     serde_json::to_value(&d).unwrap_or_else(|_| json!({"type": "done", "result": "failed"}))
+}
+
+/// `keys` on another machine: the same command the mod's sidecar forwards (`send --terminal m/tN`), so the helper
+/// there checks the prompt, the agent and the conversation. Its argv is built here from typed values. Only the text
+/// may start with `-` (it is the last value, after `--text`, and `forward` passes it as one argument); any other value
+/// that does would be read as an option there, so it is refused and nothing runs.
+fn remote_keys(machine: &str, there: &str, cache: Option<&Path>, keys: Keys) -> Result<serde_json::Value, (&'static str, String)> {
+    if config::load(config::dir(None).as_deref()).remote_never {
+        return Err(("remote-off", config::REMOTE_OFF.into()));
+    }
+    let session = HcSession::resolve_env();
+    if !session.is_available() {
+        return Err(("no-core", "herdr-core is not running".into()));
+    }
+    let terminal = format!("{machine}/{there}");
+    let (cmd, mut args): (&str, Vec<String>) = match keys {
+        Keys::Approve { request, allow } => ("approve", vec!["--request".into(), request, if allow { "--allow" } else { "--deny" }.into()]),
+        Keys::Answer { request, answers } => {
+            // As `cards::parse_answers` reads it there: one {picks, other} per question.
+            let a = serde_json::Value::Array(answers.iter().map(|a| json!({"picks": a.picks, "other": a.other})).collect()).to_string();
+            ("answer", vec!["--request".into(), request, "--answers".into(), a])
+        }
+        Keys::Send { text, expect_kind, expect_path } => {
+            let mut a = vec![];
+            for (o, v) in [("--expect-kind", expect_kind), ("--expect-path", expect_path)] {
+                if let Some(v) = v {
+                    a.extend([o.to_string(), v]);
+                }
+            }
+            a.extend(["--text".into(), text]);
+            ("send", a)
+        }
+    };
+    // Option, value pairs (approve ends with its flag); the text is the last value of send.
+    let text_at = (cmd == "send").then(|| args.len() - 1);
+    for (i, v) in args.iter().enumerate().skip(1).step_by(2) {
+        if Some(i) != text_at && (v.starts_with('-') || v.is_empty()) {
+            return Err(("usage", format!("{cmd}: a value that starts with '-' cannot go to {machine}")));
+        }
+    }
+    args.splice(0..0, ["--terminal".to_string(), terminal]);
+    let client = HcClient::new(session, 8, 22);
+    let text = remote::forward(&client, cmd, &args, machine, there, cache);
+    let lines: Vec<serde_json::Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    if let Some(e) = lines.iter().find(|l| l["type"] == "error") {
+        return Ok(e.clone());
+    }
+    Ok(lines.into_iter().find(|l| l["type"] == "done").unwrap_or_else(|| json!({"type": "error", "code": "remote_failed", "message": format!("The helper on {machine} gave no answer.")})))
 }
