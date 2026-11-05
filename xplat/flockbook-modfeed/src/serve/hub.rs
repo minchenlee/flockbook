@@ -773,6 +773,9 @@ mod tests {
 
     #[test]
     fn socket_refuses_keys() {
+        // hello loads a snapshot: never from the herdr-core this machine runs.
+        std::env::set_var("HC_SOCKET", "/nonexistent/flockbook-test/hc.sock");
+        std::env::remove_var("HERDR_DESK_HC_SOCKET");
         let mut s = Session::new(Config { cache: None, read_only: false, hub: "test".into(), home: None });
         s.welcomed = true;
         for t in KEYS {

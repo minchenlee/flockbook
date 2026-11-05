@@ -418,7 +418,7 @@ fn read_machine_docs(client: &HcClient, previous: &[(String, Value)]) -> Vec<(St
 /// The other machines' documents now: read in the background when older than the TTL (a slow machine never holds up a
 /// snapshot); a quick read shows in this snapshot, a slow one in a later one.
 fn machine_docs() -> Vec<(String, Value)> {
-    machine_docs_with(|previous| {
+    machine_docs_with(&MACHINE_DOCS, |previous| {
         let client = HcClient::new(herdr_core::hc::HcSession::resolve_env(), 8, 22);
         read_machine_docs(&client, previous)
     })
@@ -427,12 +427,13 @@ fn machine_docs() -> Vec<(String, Value)> {
 /// Ends a background read: `running` goes back to false even when the read panics, and then the next snapshot
 /// starts a new read at once (`at` cleared), so the layout never stops refreshing.
 struct ReadDone {
+    state: &'static Mutex<MachineDocs>,
     docs: Option<Vec<(String, Value)>>,
 }
 
 impl Drop for ReadDone {
     fn drop(&mut self) {
-        let mut g = MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
         match self.docs.take() {
             Some(d) => g.docs = d,
             None => g.at = None,
@@ -441,8 +442,11 @@ impl Drop for ReadDone {
     }
 }
 
-fn machine_docs_with(read: impl FnOnce(&[(String, Value)]) -> Vec<(String, Value)> + Send + 'static) -> Vec<(String, Value)> {
-    let lock = || MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner());
+fn machine_docs_with(
+    state: &'static Mutex<MachineDocs>,
+    read: impl FnOnce(&[(String, Value)]) -> Vec<(String, Value)> + Send + 'static,
+) -> Vec<(String, Value)> {
+    let lock = || state.lock().unwrap_or_else(|e| e.into_inner());
     let start = {
         let mut g = lock();
         let stale = g.at.is_none_or(|a| a.elapsed() > MACHINE_DOCS_TTL);
@@ -456,7 +460,7 @@ fn machine_docs_with(read: impl FnOnce(&[(String, Value)]) -> Vec<(String, Value
     };
     if let Some(previous) = start {
         std::thread::spawn(move || {
-            let mut done = ReadDone { docs: None };
+            let mut done = ReadDone { state, docs: None };
             done.docs = Some(read(&previous));
         });
         let until = Instant::now() + MACHINE_DOCS_WAIT;
@@ -566,22 +570,28 @@ mod tests {
         let n = Names::of(&json!({"spaces": {"sp1": {"name": "Work"}}, "tabMeta": [{"id": "tb1", "title": "Build"}], "x": {"id": "both", "label": "B"}}));
         assert_eq!(n.spaces.get("sp1").map(String::as_str), Some("Work"));
         assert_eq!(n.tabs.get("tb1").map(String::as_str), Some("Build"));
-        assert!(n.spaces.get("tb1").is_none());
+        assert!(!n.spaces.contains_key("tb1"));
         assert_eq!((n.spaces.get("both").map(String::as_str), n.tabs.get("both").map(String::as_str)), (Some("B"), Some("B")));
         assert!(fresh_id(&format!("sp{}", "a".repeat(32))) && !fresh_id("sp1"));
     }
 
     #[test]
     fn a_read_that_panics_is_retried() {
-        let running = || MACHINE_DOCS.lock().unwrap_or_else(|e| e.into_inner()).running;
-        let _ = machine_docs_with(|_| panic!("a reader that fails"));
+        // Its own state: a snapshot in another test may use MACHINE_DOCS meanwhile.
+        static STATE: Mutex<MachineDocs> = Mutex::new(MachineDocs { docs: vec![], at: None, running: false });
+        let running = || STATE.lock().unwrap_or_else(|e| e.into_inner()).running;
+        let _ = machine_docs_with(&STATE, |_| panic!("a reader that fails"));
         let until = Instant::now() + Duration::from_secs(5);
         while running() && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(!running(), "running goes back to false after a panic");
-        // The next snapshot reads again at once (no TTL wait), and its docs show.
-        let got = machine_docs_with(|_| vec![("box".into(), json!({"ok": 1}))]);
-        assert_eq!(got, vec![("box".to_string(), json!({"ok": 1}))]);
+        // The next snapshot starts a read at once (no TTL wait), and its docs show (in this snapshot or a later one).
+        let _ = machine_docs_with(&STATE, |_| vec![("box".into(), json!({"ok": 1}))]);
+        let docs = || STATE.lock().unwrap_or_else(|e| e.into_inner()).docs.clone();
+        while docs().is_empty() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(docs(), vec![("box".to_string(), json!({"ok": 1}))]);
     }
 }
