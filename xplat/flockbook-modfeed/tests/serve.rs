@@ -117,7 +117,7 @@ fn who_is_refused() {
     assert_eq!(http(p, "GET", "/", &[("Host", HOST), ("Tailscale-Funnel-Request", "?1")], "").0, 403, "Funnel without identity");
     let (c, hub) = http(p, "GET", "/hub.json", &me, "");
     assert_eq!(c, 200);
-    assert_eq!(serde_json::from_str::<Value>(&hub).unwrap(), json!({"auth": "tailscale", "post": ["approve", "answer", "send", "pullQueued"]}));
+    assert_eq!(serde_json::from_str::<Value>(&hub).unwrap(), json!({"auth": "tailscale", "post": ["approve", "answer", "send", "pullQueued", "attach"]}));
     assert_eq!(http(p, "GET", "/hub.json", &[("Host", HOST)], "").0, 403, "every path is gated");
     assert_eq!(http(p, "GET", "/nope.js", &me, "").0, 404);
 
@@ -718,4 +718,67 @@ fn pictures_come_from_the_log() {
     let r = ask(&mut ws, "p8", &uid, 0);
     assert_eq!(r.last().unwrap()["error"]["code"], "notFound", "{r:?}");
     assert!(r.iter().all(|m| m["type"] != "picturePart"));
+}
+
+#[test]
+fn pictures_go_up_with_post_and_out_with_send() {
+    use base64::Engine;
+    use std::os::unix::fs::PermissionsExt;
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("app-home");
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "")]);
+    let srv = start(&fake.path, &["--home", home.to_str().unwrap()]);
+    let call = |m: Value| -> Value { serde_json::from_str(&api(srv.port, &[], &m).1).unwrap() };
+    let up = |id: &str, name: &str, part: usize, parts: usize, data: &str| call(json!({"v": 1, "id": id, "type": "attach", "upload": name, "part": part, "parts": parts, "data": data}));
+    let code = |r: &Value| r.as_array().unwrap().last().unwrap()["error"]["code"].as_str().unwrap_or("").to_string();
+
+    // The page sends attach with POST.
+    let (_, hub) = http(srv.port, "GET", "/hub.json", &who(ME).iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>(), "");
+    let hub: Value = serde_json::from_str(&hub).unwrap();
+    assert!(hub["post"].as_array().unwrap().contains(&json!("attach")), "{hub}");
+
+    // A PNG of 700 KB in two parts: kept as it is, in the helper's own folder, mode 600.
+    let pic = png(30, 40, 700_000);
+    let (a, b) = pic.split_at(640 << 10);
+    assert_eq!(up("a0", "img-1", 0, 2, &b64(a)), json!([{"type": "reply", "re": "a0", "ok": true}]));
+    let r = up("a1", "img-1", 1, 2, &b64(b));
+    assert_eq!(r[0], json!({"type": "attached", "upload": "img-1", "width": 30, "height": 40, "bytes": pic.len()}), "{r}");
+    assert_eq!(r[1]["ok"], true);
+    let folder = home.join("flockbook").join("uploads");
+    assert_eq!(std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
+    let files: Vec<_> = std::fs::read_dir(&folder).unwrap().flatten().map(|e| e.path()).collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert_eq!(std::fs::read(&files[0]).unwrap(), pic);
+    assert_eq!(std::fs::metadata(&files[0]).unwrap().permissions().mode() & 0o777, 0o600);
+    let name = files[0].file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.starts_with("phone-") && name.ends_with(".png"), "{name}");
+
+    // HEIC: plain words. Another type, a bad name, too many parts, parts out of order, a part too long: refused.
+    let heic = [&[0, 0, 0, 24][..], b"ftypheic", &[0u8; 20]].concat();
+    let r = up("h", "img-2", 0, 1, &b64(&heic));
+    assert_eq!(code(&r), "badRequest");
+    assert_eq!(r[0]["error"]["message"], "This picture type cannot be sent; pick JPEG or PNG.");
+    let gif: Vec<u8> = [b"GIF89a".as_slice(), &[10, 0, 20, 0], &[0u8; 30]].concat();
+    assert_eq!(code(&up("g", "img-3", 0, 1, &b64(&gif))), "badRequest");
+    assert_eq!(code(&up("n", "../x", 0, 1, &b64(&pic[..100]))), "badRequest");
+    assert_eq!(code(&up("p", "img-4", 0, 17, &b64(&pic[..100]))), "badRequest");
+    assert_eq!(code(&up("o", "img-5", 1, 2, &b64(&pic[..100]))), "badRequest", "part 1 before part 0");
+    assert_eq!(code(&up("l", "img-6", 0, 1, &"A".repeat(900_000))), "badRequest", "longer than a part, refused before decoding");
+    assert_eq!(code(&up("d", "img-7", 0, 1, "not base64!")), "badRequest");
+    assert_eq!(code(&up("u", "img-1", 0, 1, &b64(&pic[..100]))), "badRequest", "img-1 is held");
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "nothing refused was written");
+
+    // Send: an unknown image sends nothing; the held one goes as its path, then it is no longer held.
+    let send = |id: &str, text: &str, names: &[&str]| call(json!({"v": 1, "id": id, "type": "send", "pane": "hc:t1", "text": text, "agent": "claude", "attachments": names}));
+    assert_eq!(code(&send("s0", "see", &["img-1", "nope"])), "badRequest");
+    assert_eq!(code(&send("s1", "see", &["img-1", "img-1"])), "badRequest");
+    assert!(fake.calls("terminal.send").is_empty());
+    let r = send("s2", "", &["img-1"]);
+    assert_eq!(r[0]["ok"], true, "{r}");
+    assert_eq!(fake.calls("terminal.send").last().unwrap()["text"], files[0].to_string_lossy().as_ref());
+    assert_eq!(code(&send("s3", "again", &["img-1"])), "badRequest", "sent: no longer held");
+    assert_eq!(fake.calls("terminal.send").len(), 1);
+    assert!(files[0].exists(), "the agent reads it later; the purge removes it");
 }

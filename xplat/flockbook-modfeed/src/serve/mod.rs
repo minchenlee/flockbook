@@ -9,6 +9,7 @@ pub mod gate;
 pub mod hub;
 pub mod layout;
 pub mod net;
+pub mod upload;
 
 pub const DEFAULT_PORT: u16 = 8787;
 

@@ -1,7 +1,7 @@
 //! The phone page's protocol (remote protocol v1, `web/src/protocol.ts`; the Mac app's `HubSession.swift`) on the
 //! sidecar's own commands. A subset: hello, snapshot, watch (conversation, prompt, the agent's queue), loadEarlier,
-//! pulledAck, picture, ping. Approve, answer, send and pullQueued come only over `POST /api` (`post`); on the socket
-//! they are refused. Uploads and notifications are not offered: those requests get a `failed` reply.
+//! pulledAck, picture, ping. Approve, answer, send, pullQueued and attach come only over `POST /api` (`post`); on the
+//! socket they are refused. Notifications are not offered: those requests get a `failed` reply.
 //!
 //! Every read and every key goes through `cli::run`, the same code the mod's sidecar runs, so the claims, the
 //! screen checks and the results are the mod's.
@@ -22,8 +22,8 @@ pub const MAX_OLDER_BYTES: usize = 32 << 20;
 pub const MAX_SEND: usize = 16_000;
 pub const MAX_OTHER: usize = 2_000;
 
-/// The requests that send keys: only `POST /api` takes them.
-pub const KEYS: [&str; 4] = ["approve", "answer", "send", "pullQueued"];
+/// The requests that send keys or store something (`attach`): only `POST /api` takes them.
+pub const KEYS: [&str; 5] = ["approve", "answer", "send", "pullQueued", "attach"];
 
 /// A picture goes as it is in the log (no re-encoding, unlike the Mac hub): PNG, JPEG and WebP only, at most
 /// `MAX_PICTURE` bytes (`HubImage.maxBytes`) and `MAX_SIDE`/`MAX_PIXELS`, in parts of `PICTURE_PART` bytes.
@@ -510,10 +510,13 @@ impl Session {
         };
         let ty = m["type"].as_str().unwrap_or("");
         if !KEYS.contains(&ty) {
-            return vec![fail(&id, "badRequest", "POST /api takes approve, answer, send and pullQueued.")];
+            return vec![fail(&id, "badRequest", "POST /api takes approve, answer, send, pullQueued and attach.")];
         }
         if self.cfg.read_only {
             return vec![fail(&id, "readOnly", "This helper was started with --read-only.")];
+        }
+        if ty == "attach" {
+            return self.attach(&m, &id);
         }
         let pane = m["pane"].as_str().unwrap_or("").to_string();
         self.load();
@@ -526,6 +529,7 @@ impl Session {
         if ty == "pullQueued" {
             return pull_queued(&id, &pane, &p.terminal_id, cache);
         }
+        let mut sent_names: Vec<String> = vec![];
         let keys = match ty {
             "approve" => {
                 let (Some(prompt), Some(allow)) = (m["prompt"].as_str(), m["allow"].as_bool()) else {
@@ -548,23 +552,44 @@ impl Session {
                 cli::Keys::Answer { request: q.into(), answers }
             }
             _ => {
-                let Some(text) = m["text"].as_str().filter(|t| !t.is_empty()) else { return vec![fail(&id, "badRequest", "send needs text.")] };
+                let text = m["text"].as_str().unwrap_or("");
                 if let Some(why) = input_problem(text, MAX_SEND) {
                     return vec![fail(&id, "badRequest", &why)];
                 }
-                if m["attachments"].as_array().is_some_and(|a| !a.is_empty()) {
-                    return vec![fail(&id, "badRequest", "This helper takes no pictures yet.")];
+                let names: Vec<String> = match m["attachments"].as_array() {
+                    None => vec![],
+                    Some(a) => match a.iter().map(|n| n.as_str().map(String::from)).collect::<Option<Vec<_>>>() {
+                        Some(n) => n,
+                        None => return vec![fail(&id, "badRequest", "attachments: upload names.")],
+                    },
+                };
+                if !names.is_empty() && !matches!(crate::remote::split(&p.terminal_id), Ok(None)) {
+                    return vec![fail(&id, "badRequest", "Images go to this machine's terminals only. Nothing was sent.")];
                 }
+                let files = match super::upload::files(&names) {
+                    Ok(f) => f,
+                    Err(why) => return vec![fail(&id, "badRequest", &why)],
+                };
+                if text.is_empty() && files.is_empty() {
+                    return vec![fail(&id, "badRequest", "Nothing to send.")];
+                }
+                // The text, then each image's path, as the Mac hub types them (the agent reads the files).
+                let quoted = files.iter().map(|f| herdr_core::hc::client::shell_quoted_if_needed(&f.to_string_lossy()));
+                let message = std::iter::once(text.to_string()).chain(quoted).filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ");
+                sent_names = names;
                 // The agent the page showed, and its log (the conversation's `session`, when it is a log): another
                 // agent or another conversation in this pane now gets nothing (the mod's --expect-kind, --expect-path).
                 let Some(kind) = m["agent"].as_str().filter(|k| !k.is_empty()) else {
                     return vec![fail(&id, "badRequest", "send needs agent: the agent kind the page shows.")];
                 };
                 let path = m["session"].as_str().filter(|s| !s.is_empty() && *s != pane && *s != p.terminal_id).map(String::from);
-                cli::Keys::Send { text: text.into(), expect_kind: Some(kind.into()), expect_path: path }
+                cli::Keys::Send { text: message, expect_kind: Some(kind.into()), expect_path: path }
             }
         };
         let line = cli::keys(&p.terminal_id, cache, self.cfg.home.as_deref(), keys);
+        if line["result"] == "sent" {
+            super::upload::sent(&sent_names);
+        }
         vec![done_reply(&id, std::slice::from_ref(&line))]
     }
 
@@ -673,6 +698,20 @@ impl Session {
     /// `loadEarlier`: up to WINDOW items before `before` in the watched pane that shows `session` (the Mac hub's
     /// `loadEarlier`). The log is read further back only when fewer than WINDOW are here. Only this connection's own
     /// log path and offset go to `feed --before`; the page's values are only compared.
+    /// `attach`: one part of an image for the next `send` (`upload::attach`).
+    fn attach(&self, m: &Value, id: &str) -> Vec<Value> {
+        let Some(home) = &self.cfg.home else { return vec![fail(id, "failed", "This helper takes no images: it has no herdr-app home.")] };
+        let (Some(name), Some(part), Some(parts), Some(data)) = (m["upload"].as_str(), m["part"].as_u64(), m["parts"].as_u64(), m["data"].as_str()) else {
+            return vec![fail(id, "badRequest", "attach needs upload, part, parts and data.")];
+        };
+        let dir = super::upload::folder(std::path::Path::new(home));
+        match super::upload::attach(&dir, name, part as usize, parts as usize, data, std::time::Instant::now(), std::time::SystemTime::now()) {
+            Ok(Some(attached)) => vec![attached, ok(id)],
+            Ok(None) => vec![ok(id)],
+            Err((code, why)) => vec![fail(id, code, &why)],
+        }
+    }
+
     /// `feed` for `terminal`: on this machine its rows say where their pictures are (`--pictures`). A terminal on
     /// another machine shows none: its log is there.
     fn feed_argv(&self, terminal: &str) -> Vec<String> {

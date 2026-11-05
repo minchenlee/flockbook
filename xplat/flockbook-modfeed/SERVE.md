@@ -48,6 +48,10 @@ a page that was not connected gets it at its next connect. Codex's and Grok's ar
 Pictures in the conversation (ones you pasted, and screenshots a tool returned) load when they scroll into view.
 The helper reads each one back from the log when the page asks, and checks that it is still the same picture.
 
+Images you add in the composer (+) go to the helper with POST, part by part, then go out with your message as file
+paths, as on the Mac. The helper keeps them in `<herdr-app home>/flockbook/uploads` (folder mode 700, files mode 600)
+under names it makes, and removes only its own files: after 7 days, or the oldest past 200 files or 512 MB.
+
 A connection whose peer stops reading is closed after 5 s without progress on a message.
 
 ## Limits
@@ -65,7 +69,17 @@ A connection whose peer stops reading is closed after 5 s without progress on a 
   The Mac app re-encodes them (smaller previews, GIFs too); the helper does not.
   Others show an empty box. At most 300 pictures (or 256 MB) go out in 10 minutes, on all connections together.
 - Pictures show for this machine's terminals only, not for terminals on another machine.
-- Not in this version: image upload and notifications.
+- Images you add are kept as they are: PNG, JPEG and WebP up to 10 MB. The Mac app re-encodes them; the helper does not,
+  so a photo keeps its metadata (EXIF, which can hold where it was taken).
+  HEIC (an iPhone's own type) is refused: "This picture type cannot be sent; pick JPEG or PNG."
+  At most 20 images (or 100 MB) in 10 minutes, and 8 waiting for a send.
+- Images go to this machine's terminals only. A send with images to another machine is refused; nothing goes.
+- Images waiting for a send are known in memory only: after `serve` restarts, add them again.
+- Pull back takes what is queued in the pane now. If the pane runs another Claude Code session than the page shows,
+  that session's text is pulled (the Mac hub does the same; the protocol says only the pane).
+- With two pages open, both get a pulled text that no page took yet, so it can land in two composers.
+- A long pull (a queued text of many lines) keeps the request open for a while: about half a second per line.
+- Not in this version: notifications.
   The helper answers those requests with "Not offered by this helper."
 
 ## Start it
