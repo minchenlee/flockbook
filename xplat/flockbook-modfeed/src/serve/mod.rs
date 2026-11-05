@@ -175,8 +175,9 @@ pub fn main(args: &[String]) -> i32 {
     eprintln!("serve: listening on http://127.0.0.1:{port} for {} (Tailscale Serve only; Funnel is refused)", o.user);
     // Notifications from serve's own loop, page open or not (`push`). Off, with the reason, when the files are not right.
     if let Some(h) = o.home.clone() {
-        let read = h.clone();
-        match push::start(std::path::Path::new(&h), std::time::Duration::from_secs(3), Box::new(push::curl_post), move || hub::workspaces(Some(&read))) {
+        let (read, dir) = (h.clone(), push::folder(std::path::Path::new(&h)));
+        let post = move |e: &str, hs: &[String], b: &[u8]| push::curl_post(&dir, e, hs, b);
+        match push::start(std::path::Path::new(&h), std::time::Duration::from_secs(3), Box::new(post), move || hub::workspaces(Some(&read))) {
             Ok(()) => eprintln!("serve: notifications ready"),
             Err(e) => eprintln!("serve: notifications off: {e}"),
         }

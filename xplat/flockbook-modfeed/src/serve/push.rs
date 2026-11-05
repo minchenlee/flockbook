@@ -118,7 +118,8 @@ pub const PUSH_HOSTS: [&str; 5] = ["fcm.googleapis.com", "android.googleapis.com
 /// The endpoint's origin ("https://host") when it is an https URL of a known push service, with no user and no
 /// other port; else None. Nothing else is ever contacted.
 pub fn allowed(endpoint: &str) -> Option<String> {
-    if endpoint.len() > 2048 || endpoint.chars().any(|c| c.is_control() || c.is_whitespace()) {
+    // ASCII only: a non-ASCII host could pass the suffix check and become another name in curl (IDNA).
+    if endpoint.len() > 2048 || !endpoint.is_ascii() || endpoint.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return None;
     }
     let rest = endpoint.strip_prefix("https://")?;
@@ -417,24 +418,44 @@ pub fn headers(s: &Sub, key: &p256::ecdsa::SigningKey, high: bool, now_s: u64) -
     ])
 }
 
-/// Posts one encrypted message with curl: https only, no redirect, 30 s, no config file. The HTTP status.
-pub fn curl_post(endpoint: &str, headers: &[String], body: &[u8]) -> u16 {
+/// curl's options: no ~/.curlrc (`-q`, first), https only, no redirect, 30 s, the status code out; the rest of the
+/// request (`curl_config`) comes on stdin (`-K -`). The endpoint and the VAPID token are not on the command line, which
+/// every user of the machine can read (`ps`).
+pub const CURL_ARGS: [&str; 16] = ["-q", "-sS", "--proto", "=https", "--max-redirs", "0", "-m", "30", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST", "-K", "-"];
+
+/// The config curl reads on stdin: the URL, the headers, and the body from `body` (a file only the owner can read).
+pub fn curl_config(endpoint: &str, headers: &[String], body: &Path) -> String {
+    let q = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace(['\n', '\r'], ""));
+    let mut c = format!("url = {}\n", q(endpoint));
+    for h in headers {
+        c += &format!("header = {}\n", q(h));
+    }
+    c + &format!("data-binary = {}\n", q(&format!("@{}", body.display())))
+}
+
+/// Posts one encrypted message with curl (`CURL_ARGS`). The body waits in `dir` (mode 600) while curl runs. The HTTP
+/// status; 0: no answer.
+pub fn curl_post(dir: &Path, endpoint: &str, headers: &[String], body: &[u8]) -> u16 {
     use std::io::Write;
     use std::process::{Command, Stdio};
     if allowed(endpoint).is_none() {
         return 0;
     }
-    let mut c = Command::new("curl");
-    c.args(["-q", "-sS", "--proto", "=https", "--max-redirs", "0", "-m", "30", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST"]);
-    for h in headers {
-        c.args(["-H", h]);
+    let mut rnd = [0u8; 8];
+    OsRng.fill_bytes(&mut rnd);
+    let file = dir.join(format!(".push-{}-{}.body", std::process::id(), b64url(&rnd)));
+    if write_private(&file, body).is_err() {
+        return 0;
     }
-    c.args(["--data-binary", "@-", "--url", endpoint]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let Ok(mut child) = c.spawn() else { return 0 };
-    if let Some(mut i) = child.stdin.take() {
-        let _ = i.write_all(body);
-    }
-    child.wait_with_output().ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok()).unwrap_or(0)
+    let status = (|| {
+        let mut child = Command::new("curl").args(CURL_ARGS).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+        let mut i = child.stdin.take()?;
+        let _ = i.write_all(curl_config(endpoint, headers, &file).as_bytes());
+        drop(i);
+        String::from_utf8_lossy(&child.wait_with_output().ok()?.stdout).trim().parse().ok()
+    })();
+    let _ = std::fs::remove_file(&file);
+    status.unwrap_or(0)
 }
 
 pub fn outcome(status: u16) -> Outcome {
@@ -454,12 +475,11 @@ pub struct Center {
     pub store: Store,
     throttle: Throttle,
     trigger: Trigger,
-    transport: Box<Transport>,
 }
 
 impl Center {
-    pub fn new(key: p256::ecdsa::SigningKey, store: Store, transport: Box<Transport>) -> Center {
-        Center { key, store, throttle: Throttle::default(), trigger: Trigger::default(), transport }
+    pub fn new(key: p256::ecdsa::SigningKey, store: Store) -> Center {
+        Center { key, store, throttle: Throttle::default(), trigger: Trigger::default() }
     }
 
     /// The key the page subscribes with (base64url, 65 bytes).
@@ -467,25 +487,10 @@ impl Center {
         b64url(self.key.verifying_key().to_encoded_point(false).as_bytes())
     }
 
-    /// Sends `n` to every phone; a gone one is removed. The phones reached.
-    pub fn send(&mut self, n: &Value, high: bool) -> usize {
-        let payload = n.to_string().into_bytes();
-        let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let mut reached = 0;
-        for s in self.store.all.clone() {
-            let (Some(ua), Some(auth), Some(h)) = (unb64url(&s.p256dh), unb64url(&s.auth), headers(&s, &self.key, high, now_s)) else { continue };
-            let Ok(body) = encrypt_fresh(&payload, &ua, &auth) else { continue };
-            match outcome((self.transport)(&s.endpoint, &h, &body)) {
-                Outcome::Sent => reached += 1,
-                Outcome::Gone => self.store.remove(&s.endpoint),
-                Outcome::Failed(_) => {}
-            }
-        }
-        reached
-    }
-
-    /// One round of the loop: the snapshot's changes, throttled, then held ones once there is room.
-    pub fn round(&mut self, workspaces: &[Workspace], now: Instant) {
+    /// The messages to send after this snapshot (and whether each is urgent): its changes, throttled, then held ones
+    /// once there is room.
+    pub fn plan(&mut self, workspaces: &[Workspace], now: Instant) -> Vec<(Value, bool)> {
+        let mut out = vec![];
         for e in self.trigger.update(workspaces) {
             if let Decision::Send { more } = self.throttle.decide(&e.pane, e.kind, now) {
                 let mut n = e.notice;
@@ -493,12 +498,57 @@ impl Center {
                     let b = n["body"].as_str().unwrap_or("").to_string();
                     n = notice(n["title"].as_str().unwrap_or(""), &if b.is_empty() { format!("+{more} more") } else { format!("{b} · +{more} more") }, n["tag"].as_str(), n["pane"].as_str());
                 }
-                self.send(&n, e.kind == Kind::NeedsYou);
+                out.push((n, e.kind == Kind::NeedsYou));
             }
         }
         let held = self.throttle.flush(now);
         if held > 0 {
-            self.send(&notice("Flockbook", &format!("{held} more agent updates. Open Flockbook to see them."), Some("more"), None), false);
+            out.push((notice("Flockbook", &format!("{held} more agent updates. Open Flockbook to see them."), Some("more"), None), false));
+        }
+        out
+    }
+}
+
+/// Posts each message to each phone. The endpoints that are gone (404, 410).
+pub fn deliver(subs: &[Sub], key: &p256::ecdsa::SigningKey, messages: &[(Value, bool)], transport: &Transport) -> Vec<String> {
+    let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut gone: Vec<String> = vec![];
+    for (n, high) in messages {
+        let payload = n.to_string().into_bytes();
+        for s in subs {
+            if gone.contains(&s.endpoint) {
+                continue;
+            }
+            let (Some(ua), Some(auth), Some(h)) = (unb64url(&s.p256dh), unb64url(&s.auth), headers(s, key, *high, now_s)) else { continue };
+            let Ok(body) = encrypt_fresh(&payload, &ua, &auth) else { continue };
+            if outcome(transport(&s.endpoint, &h, &body)) == Outcome::Gone {
+                gone.push(s.endpoint.clone());
+            }
+        }
+    }
+    gone
+}
+
+fn locked(c: &std::sync::Mutex<Option<Center>>) -> std::sync::MutexGuard<'_, Option<Center>> {
+    c.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// One round of the loop. The lock is held only to plan and to remove gone phones, never while curl runs (up to 30 s
+/// a phone): a page's hello and (un)subscribe take it too.
+pub fn round(center: &std::sync::Mutex<Option<Center>>, workspaces: &[Workspace], now: Instant, transport: &Transport) {
+    let (messages, subs, key) = {
+        let mut g = locked(center);
+        let Some(c) = g.as_mut() else { return };
+        let m = c.plan(workspaces, now);
+        if m.is_empty() || c.store.all.is_empty() {
+            return;
+        }
+        (m, c.store.all.clone(), c.key.clone())
+    };
+    let gone = deliver(&subs, &key, &messages, transport);
+    if let (false, Some(c)) = (gone.is_empty(), locked(center).as_mut()) {
+        for e in gone {
+            c.store.remove(&e);
         }
     }
 }
@@ -507,7 +557,7 @@ impl Center {
 pub static CENTER: std::sync::Mutex<Option<Center>> = std::sync::Mutex::new(None);
 
 pub fn center() -> std::sync::MutexGuard<'static, Option<Center>> {
-    CENTER.lock().unwrap_or_else(|e| e.into_inner())
+    locked(&CENTER)
 }
 
 /// Starts push for `home`: the key, the subscriptions, and the loop that reads the workspaces every `every`.
@@ -516,12 +566,10 @@ pub fn start(home: &Path, every: Duration, transport: Box<Transport>, read: impl
     let dir = folder(home);
     let key = load_key(&dir)?;
     let store = Store::open(&dir)?;
-    *center() = Some(Center::new(key, store, transport));
+    *center() = Some(Center::new(key, store));
     std::thread::spawn(move || loop {
         let ws = read();
-        if let Some(c) = center().as_mut() {
-            c.round(&ws, Instant::now());
-        }
+        round(&CENTER, &ws, Instant::now(), transport.as_ref());
         std::thread::sleep(every);
     });
     Ok(())
@@ -586,6 +634,8 @@ mod tests {
             "https://127.0.0.1/x",
             "https://fcm.googleapis.com/x y",
             "https://example.com/?fcm.googleapis.com",
+            "https://ex\u{0430}mple.fcm.googleapis.com/x",
+            "https://fcm.googleapis.com\u{3002}evil.example/x",
         ] {
             assert!(allowed(bad).is_none(), "{bad}");
         }
@@ -647,30 +697,38 @@ mod tests {
     }
 
     #[test]
+    fn curl_gets_the_secrets_on_stdin() {
+        assert_eq!(CURL_ARGS[0], "-q", "no ~/.curlrc");
+        assert!(CURL_ARGS.windows(2).any(|w| w == ["--max-redirs", "0"]) && CURL_ARGS.windows(2).any(|w| w == ["--proto", "=https"]));
+        assert_eq!(&CURL_ARGS[14..], ["-K", "-"]);
+        let h = vec!["Authorization: vapid t=SECRET.JWT, k=KEY".to_string(), "TTL: 3600".into()];
+        let c = curl_config("https://fcm.googleapis.com/x\"y\\z", &h, Path::new("/home/you/b"));
+        assert_eq!(c, "url = \"https://fcm.googleapis.com/x\\\"y\\\\z\"\nheader = \"Authorization: vapid t=SECRET.JWT, k=KEY\"\nheader = \"TTL: 3600\"\ndata-binary = \"@/home/you/b\"\n");
+        assert!(!curl_config("https://fcm.googleapis.com/x", &["a\nurl = https://evil".into()], Path::new("/b")).contains("\nurl = https://evil"), "one line each");
+    }
+
+    #[test]
     fn pushes_on_blocked_and_done_without_conversation() {
         type Posted = Vec<(String, Vec<String>, Vec<u8>)>;
         let sent: std::sync::Arc<std::sync::Mutex<Posted>> = Default::default();
-        let s2 = sent.clone();
         let status = std::sync::Arc::new(std::sync::Mutex::new(201u16));
-        let st2 = status.clone();
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::open(dir.path()).unwrap();
         let ua = p256::SecretKey::random(&mut OsRng);
         let phone = Sub { endpoint: "https://fcm.googleapis.com/fcm/send/x".into(), p256dh: b64url(ua.public_key().to_encoded_point(false).as_bytes()), auth: b64url(&[7; 16]), added: 1 };
         assert!(store.add(phone.clone()));
-        let mut c = Center::new(
-            p256::ecdsa::SigningKey::random(&mut OsRng),
-            store,
-            Box::new(move |e, h, b| {
-                s2.lock().unwrap().push((e.to_string(), h.to_vec(), b.to_vec()));
-                *st2.lock().unwrap()
-            }),
-        );
+        let center = std::sync::Arc::new(std::sync::Mutex::new(Some(Center::new(p256::ecdsa::SigningKey::random(&mut OsRng), store))));
+        let (s2, st2, c2) = (sent.clone(), status.clone(), center.clone());
+        let transport = move |e: &str, h: &[String], b: &[u8]| {
+            assert!(c2.try_lock().is_ok(), "the lock is free while a push goes out");
+            s2.lock().unwrap().push((e.to_string(), h.to_vec(), b.to_vec()));
+            *st2.lock().unwrap()
+        };
         let t0 = Instant::now();
-        c.round(&ws(AgentStatus::Blocked), t0);
+        round(&center, &ws(AgentStatus::Blocked), t0, &transport);
         assert!(sent.lock().unwrap().is_empty(), "the first snapshot only records");
-        c.round(&ws(AgentStatus::Working), t0);
-        c.round(&ws(AgentStatus::Blocked), t0);
+        round(&center, &ws(AgentStatus::Working), t0, &transport);
+        round(&center, &ws(AgentStatus::Blocked), t0, &transport);
         {
             let got = sent.lock().unwrap();
             assert_eq!(got.len(), 1);
@@ -680,12 +738,15 @@ mod tests {
             let n: Value = serde_json::from_slice(&decrypt(body, &ua, &[7; 16]).unwrap()).unwrap();
             assert_eq!(n, json!({"title": "Needs you · Fix the build", "body": "claude · site · build", "tag": "hc:t1", "pane": "hc:t1"}));
         }
-        c.round(&ws(AgentStatus::Done), t0);
-        assert_eq!(sent.lock().unwrap().len(), 2, "done after blocked");
         // The phone unsubscribed: 410 removes it, nothing more goes there.
         *status.lock().unwrap() = 410;
-        assert_eq!(c.send(&notice("t", "b", None, None), false), 0);
-        assert!(c.store.all.is_empty());
+        round(&center, &ws(AgentStatus::Done), t0, &transport);
+        assert_eq!(sent.lock().unwrap().len(), 2, "done after blocked");
+        assert!(center.lock().unwrap().as_ref().unwrap().store.all.is_empty());
         assert!(Store::open(dir.path()).unwrap().all.is_empty(), "gone from the file too");
+        round(&center, &ws(AgentStatus::Working), t0, &transport);
+        round(&center, &ws(AgentStatus::Blocked), t0 + PER_AGENT, &transport);
+        assert_eq!(sent.lock().unwrap().len(), 2, "no phone left");
     }
+
 }

@@ -1060,7 +1060,7 @@ mod tests {
         assert_eq!(s.receive(&sub("p1", fcm))[0]["error"]["code"], "failed", "push off: nothing kept");
         let key = p256::ecdsa::SigningKey::random(&mut rand_core::OsRng);
         let store = super::super::push::Store::open(dir.path()).unwrap();
-        *super::super::push::center() = Some(super::super::push::Center::new(key, store, Box::new(|_, _, _| 201)));
+        *super::super::push::center() = Some(super::super::push::Center::new(key, store));
         let w = welcome(&mut s);
         assert_eq!(w["pushOn"], false);
         assert_eq!(w["pushKey"].as_str().map(|k| super::super::push::unb64url(k).unwrap().len()), Some(65));
