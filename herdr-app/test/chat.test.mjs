@@ -64,14 +64,15 @@ test("estimates: code boxes and tables are guessed at their drawn height (no wra
   assert.equal(markdownHeight("```\na\nb\nc\n```", 600), 3 * 19 + 34);
   // table: 6 px margin + 1 px border each side; a row is 8 + 21 + 8 px plus a 1 px line (1 px high on the head row, on purpose).
   assert.equal(markdownHeight("| A | B |\n|---|---|\n| a | b |", 600), 14 + 17 + 21 + 17 + 21);
-  // Only the prose keeps the 8% wrap margin, so a long answer with code is not guessed far too tall.
+  // The prose gets a small pad at the end, once per text, so a long answer with code is not guessed far too tall.
   const prose = "word ".repeat(30);
   const code = "```\n" + "x = 1\n".repeat(30) + "```";
+  const pad = markdownHeight("a", 600) - LH;
   // The blank lines around a box add nothing: the box's own margin is the gap.
   const both = markdownHeight(`${prose}\n\n${code}\n\n${prose}`, 600);
-  assert.ok(Math.abs(both - (2 * markdownHeight(prose, 600) + markdownHeight(code, 600))) <= 1, `${both}`);  // 1 px: rounding
+  assert.ok(Math.abs(both - (2 * markdownHeight(prose, 600) - pad + markdownHeight(code, 600))) <= 1, `${both}`);  // 1 px: rounding
   // Between two paragraphs the blank line stays a 10 px gap.
-  assert.equal(markdownHeight("a\n\nb", 600), Math.ceil(2 * LH * 1.08 + 10));
+  assert.equal(markdownHeight("a\n\nb", 600), 2 * LH + 10 + pad);
 });
 
 test("chipIcon maps SF Symbols names to the mod's icons", () => {

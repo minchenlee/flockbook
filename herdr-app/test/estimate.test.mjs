@@ -8,9 +8,10 @@ import { markdownHeight, rowHeight } from "../mods/flockbook/estimate.js";
 
 const W = 748;
 const LINE = 26, GAP = 10, ITEM_GAP = 4;
-// Lines a full-width text takes when drawn: no line starts with full-width punctuation, so a line can
-// end one character early.
-const drawnCjkLines = (chars, width) => Math.ceil(chars * 16 / (width - 16));
+// Lines a full-width text takes when drawn: gpui fills each line to its width and lets punctuation start
+// a line (measured in the VM, Linux herdr-app 0.1.13: 35 characters fit a 564 px bubble, 36 wrap; gpui's
+// line wrapping is the same code on macOS).
+const drawnCjkLines = (chars, width) => Math.ceil(chars / Math.floor(width / 16));
 
 // Synthetic text, shaped like the cut reply: CJK with full-width punctuation, inline code, Latin words, a list.
 const reply = [
@@ -66,4 +67,43 @@ test("a long English answer is not guessed far taller than drawn (no big gap)", 
 
 test("an assistant row is its text's guess plus 16", () => {
   assert.equal(rowHeight({ k: "assistant", text: reply }, W), markdownHeight(reply, W) + 16);
+});
+
+// A user bubble's text width at a 760 px column: 78% of the column, less 14 px padding each side.
+const BUBBLE = Math.floor(760 * 0.78) - 28;
+
+test("a paragraph pasted with short source lines is guessed as one joined paragraph", () => {
+  // Markdown joins lines that start no new block (a soft break draws as a space): this draws as one line
+  // (measured in the VM). Counted line by line it was guessed three lines tall.
+  const text = "Line one of a paragraph\nline two joins it\nline three joins it too";
+  const guess = markdownHeight(text, BUBBLE);
+  assert.ok(guess >= LINE && guess < 2 * LINE, `${guess}`);
+});
+
+test("a long pasted message with a list is guessed within one line of its drawn height", () => {
+  // Synthetic, shaped like the long pasted worker message that left a big gap under its bubble: a title, a
+  // numbered list with nested items, CJK mixed with commands and paths, a line that continues an item.
+  const text = [
+    "worker-a：relay 計畫（等你同意才寫程式）",
+    "1. Server：新增 `serve` 子命令，預設 port 8787，只聽 127.0.0.1；加 --bind 才對外。原因：手機只透過 Tailscale 連進來，不需要對整個網路開 port，這樣也不用處理 TLS 憑證。",
+    "2. Login：第一次啟動產生一組 token，存在 state 目錄，權限 0600。",
+    "   - on：寫檔、載入（systemctl --user enable --now），然後等 health 回 200 才算成功。",
+    "   - off：只在檔案有我們的標記時才停掉並刪那一個檔；手動裝的檔案不動。",
+    "   - status：看 systemctl --user is-active，再連一下 127.0.0.1:port。",
+    "3. Client：設定頁加一欄 URL 和一欄 token，存檔後馬上重連。",
+    "重連失敗時顯示一行錯誤，不跳視窗。",
+    "4. Tests：unit 12 個，integration 3 個（含斷線重連、token 錯誤、port 被占用）。",
+    "   - Rust：temp HOME，PATH 上放假的 systemctl，記錄被呼叫的引數。",
+    "   - npm：設定區塊的各種狀態、鍵盤操作、Copy、--home 有傳。",
+    "   - VM：在 test-vm 用真的 systemd --user（我自己的 HOME/session）。",
+    "   - Docs：RECIPE、SERVE.md、next.md 各加一段。",
+    "問題：1) QR 要不要做（多一個 qrcode crate）？2) Port 和 token 用文字輸入欄可以嗎？還是 Port 先固定 8787，只讓改 token？",
+  ].join("\n");
+  // Drawn text height, measured in the VM (Linux herdr-app 0.1.13, 760 px column): the bubble is 554 px,
+  // 20 px of it padding. The guess was 1.18 times that before (8% on top, a character of slack a line,
+  // each source line counted alone).
+  const drawn = 534;
+  const guess = markdownHeight(text, BUBBLE);
+  assert.ok(guess >= drawn, `${guess} < ${drawn}`);
+  assert.ok(guess - drawn < LINE, `${guess} is a line or more over ${drawn}`);
 });
