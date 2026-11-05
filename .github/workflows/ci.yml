@@ -38,6 +38,7 @@ jobs:
     outputs:
       skip: ${{ steps.check.outputs.skip }}
       sidecar: ${{ steps.paths.outputs.sidecar }}
+      app: ${{ steps.paths.outputs.app }}
     steps:
       - id: check
         env:
@@ -65,23 +66,33 @@ jobs:
           M15: ${{ inputs.macos15_only }}
         run: |
           sidecar=1
+          # Whether the macOS app jobs run: not when every changed file is the Herdr app mod or docs (the Swift
+          # targets read nothing under herdr-app/; the mod job still runs). A manual run always runs them.
+          app=1
           if [ "$EVENT" = workflow_dispatch ]; then
             if [ -n "$ONLY" ] || [ "$M15" = true ]; then sidecar=0; fi
-          elif [ -n "$BASE" ] && [ "$BASE" != 0000000000000000000000000000000000000000 ]; then
+          else
+            # A new branch's first push has no "before": compare with main (the branch's fork point from it).
+            if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then BASE=main; fi
             if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[].filename'); then
               n=$(printf '%s\n' "$files" | grep -c . || true)
               if [ "$n" -lt 300 ] && ! printf '%s\n' "$files" | grep -Eq \
                 '^(xplat/(flockbook-modfeed|herdr-core)/|xplat/Cargo\.(toml|lock)$|Sources/(HerdrKit|ModFeedKit|flockbook-modfeed)/|scripts/modfeed-parity/|Tests/HerdrKitTests/Fixtures/|Package\.(swift|resolved)$|\.github/workflows/ci\.yml$)'; then
                 sidecar=0
               fi
+              if [ "$n" -gt 0 ] && [ "$n" -lt 300 ] && ! printf '%s\n' "$files" | grep -Evq '^(herdr-app/|docs/|[^/]+\.md$)'; then
+                app=0
+                echo "::notice title=macOS app jobs skipped::only the Herdr app mod or docs changed"
+              fi
             fi
           fi
           echo "sidecar=$sidecar" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build + checks
     needs: gate
-    if: ${{ needs.gate.outputs.skip != '1' && !inputs.macos15_only }}
+    if: ${{ needs.gate.outputs.skip != '1' && !inputs.macos15_only && needs.gate.outputs.app != '0' }}
     # macos-26 (arm64) carries Xcode 26.x; Package.swift needs Swift 6.2 and the macOS 26 SDK.
     runs-on: macos-26
     timeout-minutes: 45
@@ -232,7 +243,7 @@ jobs:
   build-macos15:
     name: Build for macOS 15
     needs: gate
-    if: ${{ needs.gate.outputs.skip != '1' }}
+    if: ${{ needs.gate.outputs.skip != '1' && needs.gate.outputs.app != '0' }}
     runs-on: macos-26
     timeout-minutes: 45
     env:
@@ -276,7 +287,7 @@ jobs:
   bundle-macos15:
     name: Bundle for macOS 15
     needs: gate
-    if: ${{ needs.gate.outputs.skip != '1' }}
+    if: ${{ needs.gate.outputs.skip != '1' && needs.gate.outputs.app != '0' }}
     runs-on: macos-26
     timeout-minutes: 45
     env:
