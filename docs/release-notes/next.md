@@ -11,4 +11,6 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 
+- Herdr app mod: Shift+Enter in the reply box starts a new line at the cursor. Before, it sent the reply. Enter still sends.
+
 ### ⚙️ Changes
