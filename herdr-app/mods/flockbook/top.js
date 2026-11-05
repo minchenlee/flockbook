@@ -163,16 +163,17 @@ export function topBar(t, over = false) {
   const strip = capsule("tabs").min_w(0).flex_shrink(1)
     .on_hover((inside, cx) => { if (!inside) cancelDrag(cx); })
     .on_mouse_down_out((_e, cx) => cancelDrag(cx))
+    // On the whole capsule, not the pills' row: a release on its padding ends the press too.
+    .on_mouse_up("left", (_e, cx) => {
+      const d = drag;
+      drag = null;
+      if (!d?.moved) return;
+      cx.notify?.();
+      const to = dropPlace(tabs, d);
+      if (to >= 0) run("tab.move", { id: d.id, index: tabs[to].index });
+    })
     .child(tabs.length ? h_flex().id("tab-scroll").min_w(0).gap(4).items_center().overflow_x_scrollbar()
       .when(Boolean(dragging), (el) => el.cursor_grabbing())
-      .on_mouse_up("left", (_e, cx) => {
-        const d = drag;
-        drag = null;
-        if (!d?.moved) return;
-        cx.notify?.();
-        const to = dropPlace(tabs, d);
-        if (to >= 0) run("tab.move", { id: d.id, index: tabs[to].index });
-      })
       .children(tabs.map(pill))
       : div().px(12).text_size(12.5).text_color(t.muted).child("No tabs in this space"));
   const tools = capsule("tools").px(5).gap(4)

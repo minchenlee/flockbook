@@ -163,7 +163,7 @@ const at = (id, dx) => ({ button: "left", click_count: 1, modifiers: {}, positio
 const pill = (el, id) => byId(el, `tab-${id}`);
 function press(el, id, dx = 20) { pill(el, id)._h.on_mouse_down(at(id, dx), fakeCx()); }
 function move(el, id, dx) { pill(el, id)._h.on_mouse_move(at(id, dx), fakeCx()); }
-function release(el, id, dx) { byId(el, "tab-scroll")._h.on_mouse_up(at(id, dx), fakeCx()); }
+function release(el, id, dx) { byId(el, "tabs")._h.on_mouse_up(at(id, dx), fakeCx()); }
 const render = () => new TopView(fakeCx()).render(fakeCx());
 
 test("drag a tab right: the line shows after the tab under the pointer, release moves it there once", () => {
@@ -195,7 +195,7 @@ test("the place is counted from the pointer on the pill, so a scrolled bar gives
   pill(el, "tb-t1")._h.on_mouse_down(shift(at("tb-t1", 20)), fakeCx());
   pill(el, "tb-t1")._h.on_mouse_move(shift(at("tb-t1", 30)), fakeCx());
   pill(el, "tb-t2")._h.on_mouse_move(shift(at("tb-t2", 70)), fakeCx());
-  byId(el, "tab-scroll")._h.on_mouse_up(shift(at("tb-t2", 70)), fakeCx());
+  byId(el, "tabs")._h.on_mouse_up(shift(at("tb-t2", 70)), fakeCx());
   assert.deepEqual(log.run, [["tab.move", { id: "tb-t1", index: 2 }]]);
 });
 
@@ -242,4 +242,24 @@ test("another mouse button, or a press outside the bar, cancels the drag", () =>
   byId(el, "tabs")._h.on_mouse_down_out(at("tb-t3", 60), fakeCx());
   release(el, "tb-t3", 60);
   assert.deepEqual(log.run, []);
+});
+
+test("a release on the bar's edge, outside the pills, ends the press: a later move starts nothing", () => {
+  let el = render();
+  press(el, "tb-t1");
+  byId(el, "tabs")._h.on_mouse_up(at("tb-t1", -6), fakeCx());
+  move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  el = render();
+  assert.equal(byId(el, "drop-line"), null, "no drag without a press");
+  assert.equal(pill(el, "tb-t1")._a.opacity, undefined);
+  pill(el, "tb-t1")._h.on_click({}, fakeCx());
+  assert.deepEqual(log.run.map((r) => r[0]), ["tab.select", "layout.select"], "the next click is a click");
+});
+
+test("a drag released on the bar's edge drops at the last place shown", () => {
+  const el = render();
+  press(el, "tb-t1"); move(el, "tb-t1", 30); move(el, "tb-t3", 60);
+  byId(el, "tabs")._h.on_mouse_up(at("tb-sh", 85), fakeCx());
+  assert.deepEqual(log.run, [["tab.move", { id: "tb-t1", index: 3 }]]);
+  assert.equal(byId(render(), "drop-line"), null);
 });
