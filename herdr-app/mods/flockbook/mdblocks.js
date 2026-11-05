@@ -3,7 +3,7 @@
 // TextView markdown. Heights stay as estimate.js guesses them (same line heights).
 import { div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { tableCells, colWidths } from "./estimate.js";
+import { tableCells, colWidths, markdownHeight } from "./estimate.js";
 
 export { tableCells };
 
@@ -45,14 +45,35 @@ export function splitBlocks(text) {
   return out;
 }
 
-// Leading spaces kept (no-break spaces); tabs as 4.
-const keepIndent = (line) => line.replace(/\t/g, "    ").replace(/^ +/, (s) => " ".repeat(s.length));
+// The block as written, for Copy: CRs dropped, normal spaces and tabs.
+export function codeCopyText(b) {
+  return b.text.split("\n").map((l) => l.replace(/\r$/, "")).join("\n");
+}
 
-function codeBox(b, t) {
-  const lines = b.text.split("\n");
+// The block as one markdown paragraph, so a drag selects across its lines: every ASCII punctuation
+// escaped (drawn as text, not markup), leading spaces as no-break spaces (markdown drops them), tabs
+// as 4, an empty line as one no-break space (else the paragraph ends), lines joined by hard breaks.
+const NBSP = "\u00a0";
+export function codeMarkdown(text) {
+  return codeCopyText({ text }).split("\n").map((l) => {
+    const e = l.replace(/\t/g, "    ").replace(/[!-/:-@[-`{-~]/g, "\\$&");
+    return e.replace(/^ +/, (s) => NBSP.repeat(s.length)) || NBSP;
+  }).join("\\\n");
+}
+
+// The code box under `y` (px from the text's top, at `width`), as written for Copy; null when `y` is not
+// on one. Box places are the estimate's, the same guess the row heights use.
+export function codeBlockAt(text, width, y) {
+  const spans = [];
+  markdownHeight(String(text ?? ""), width, spans);
+  const s = spans.find((b) => y >= b.top && y <= b.bottom);
+  return s ? s.lines.join("\n") : null;
+}
+
+function codeBox(key, b, t) {
   return v_flex().w_full().my(6).px(14).py(10).rounded(12).bg(t.raised).border(1).border_color(t.border)
     .font_family("Menlo").text_size(13).text_color(t.foreground)
-    .children(lines.map((l) => div().min_h(19).child(keepIndent(l) || " ")));
+    .child(TextView.markdown(key, codeMarkdown(b.text)).selectable(true));
 }
 
 // Cells get a fixed width: a TextView in a flexible cell keeps its full one-line width and spills
@@ -80,7 +101,7 @@ export function markdownView(id, text, t, width) {
   const blocks = splitBlocks(text);
   if (blocks.length === 1 && blocks[0].k === "md") return TextView.markdown(`md-${id}`, blocks[0].text).selectable(true);
   return v_flex().w_full().children(blocks.map((b, i) =>
-    b.k === "code" ? codeBox(b, t)
+    b.k === "code" ? codeBox(`md-${id}-k${i}`, b, t)
       : b.k === "table" ? table(`md-${id}-t${i}`, b, t, width)
         : TextView.markdown(`md-${id}-${i}`, b.text).selectable(true)));
 }

@@ -78,8 +78,10 @@ export function wrapLines(text, width, fs = 14) {
   return n;
 }
 
-export function markdownHeight(text, width) {
-  const CODE_LH = 19;
+// `spans`, when given, gets each code box as drawn: { top, bottom, lines } in px from the text's top
+// (the box itself, without its 6 px margin) and its source lines, for finding the box under a point.
+export function markdownHeight(text, width, spans = null) {
+  const CODE_LH = 21;  // TextView at 13 px (Menlo): its own line height, as table text (13.5 px) draws 21
   let h = 0, p = 0, inCode = false, prevBlank = true;  // h: drawn exactly; p: prose, wraps
   // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
   let gap = 0;
@@ -94,8 +96,13 @@ export function markdownHeight(text, width) {
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li].replace(/\t/g, "    ");
     // A code box as mdblocks.js draws it: 6 px margin, 10 px padding and a 1 px border, each side.
-    if (/^\s*```/.test(line)) { close(); lastLevel = null; if (!inCode) { box(); h += 34; } else prevBlank = true; inCode = !inCode; continue; }
-    if (inCode) { h += CODE_LH * Math.max(1, wrapLines(line, width - 30, 13)); continue; }
+    if (/^\s*```/.test(line)) {
+      close(); lastLevel = null;
+      if (!inCode) { box(); if (spans) spans.push({ top: h + p + 6, bottom: 0, lines: [] }); h += 34; }
+      else { prevBlank = true; if (spans) spans.at(-1).bottom = h + p - 6; }
+      inCode = !inCode; continue;
+    }
+    if (inCode) { if (spans) spans.at(-1).lines.push(lines[li].replace(/\r$/, "")); h += CODE_LH * Math.max(1, wrapLines(line, width - 30, 13)); continue; }
     if (!line.trim()) { close(); if (!prevBlank) { h += 10; gap = 10; } prevBlank = true; continue; }
     prevBlank = false; gap = 0;
     let m;
@@ -135,6 +142,7 @@ export function markdownHeight(text, width) {
     lastLevel = null; para = { text: line, width, fs: FS, lh: LH, extra: 0 };
   }
   close();
+  if (spans && inCode) spans.at(-1).bottom = h + p - 6;   // an unclosed fence runs to the end
   return Math.ceil(h + p + (p > 0 ? END_PAD : 0));
 }
 

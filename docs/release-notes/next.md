@@ -22,5 +22,6 @@ One short line: what this release is about.
 - Herdr app mod: a chat whose newest part is mostly long tool output (screenshots) loads earlier messages by itself until the screen is full. Before, it showed only the last reply and scrolling up loaded nothing.
 - Herdr app mod: a chat reply that mixes Chinese with English words or numbers (often in a list) no longer loses its last line under the next row.
 - Herdr app mod: an expanded "Ran N commands" shows a multi-line command (a heredoc) as its first line with "…", instead of drawing every line over the rows around it.
+- Herdr app mod: text in a code block can be selected and copied with ⌘C, also across lines, like the rest of a reply. Right-click a code block for Copy code, which copies the whole block.
 
 ### ⚙️ Changes

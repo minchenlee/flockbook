@@ -68,3 +68,61 @@ test("column widths follow the content: short columns keep their size, the space
   // Narrow table: no column under 64.
   assert.ok(colWidths(200, rows, 4).every((w) => w >= 64));
 });
+
+// What a reader sees in the code box's TextView: markdown escapes and hard breaks undone.
+const shown = (md) => md.replace(/\\\n/g, "\n").replace(/\\([!-/:-@[-`{-~])/g, "$1");
+const nodes = (el) => { const all = []; (function walk(n) { if (!n) return; all.push(n); (n.kids ?? []).forEach(walk); })(el); return all; };
+
+test("a code box is one selectable text, so a drag selects across its lines", () => {
+  const T = new Proxy({}, { get: (_t, k) => `#${k}` });
+  const el = markdownView("r1", "Run this:\n\n```sh\ntailscale serve --bg --https=8443 8787\n  echo *ok* # [x](y) <b>\n\n\tdone\n```", T);
+  const views = nodes(el).filter((n) => n.tag === "md");
+  const code = views.find((v) => /tailscale/.test(v._a.text));
+  assert.ok(code, "the code is in a TextView");
+  assert.equal(code._a.selectable, true);
+  assert.equal(shown(code._a.text), "tailscale serve --bg --https=8443 8787\n  echo *ok* # [x](y) <b>\n \n    done",
+    "every line in one view; indent kept; markup drawn as text; a blank line kept");
+  assert.ok(nodes(el).some((n) => n._a?.rounded === 12 && nodes(n).includes(code)), "inside our rounded box");
+});
+
+test("code box text: CRLF lines lose the CR; a line ending in a backslash keeps it", () => {
+  const T = new Proxy({}, { get: (_t, k) => `#${k}` });
+  const el = markdownView("r2", "```\na\r\nb \\\r\nc\n```", T);
+  const code = nodes(el).find((n) => n.tag === "md");
+  assert.equal(shown(code._a.text), "a\nb \\\nc");
+});
+
+test("Copy text is the block as written: normal spaces and tabs, no no-break spaces", async () => {
+  const { codeCopyText } = await import("../mods/flockbook/mdblocks.js");
+  const b = splitBlocks("```\n  two\n\tone tab\r\n\nend\n```")[0];
+  assert.equal(codeCopyText(b), "  two\n\tone tab\n\nend");
+  assert.ok(!codeCopyText(b).includes(" "));
+});
+
+test("a code line is guessed as tall as a TextView line at 13 px (21 px), not shorter", () => {
+  const one = markdownHeight("```\nx\n```", 760), three = markdownHeight("```\nx\ny\nz\n```", 760);
+  assert.equal(three - one, 2 * 21);
+});
+
+test("codeBlockAt finds the code box under a point: several boxes, a box at the top and at the bottom", async () => {
+  const { codeBlockAt } = await import("../mods/flockbook/mdblocks.js");
+  const W = 700;
+  const before = "Intro line.\n\n";
+  const text = `${before}\`\`\`sh\n  first\n\`\`\`\nMiddle words here.\n\n\`\`\`\nsecond\n\tline\n\`\`\`\nEnd.`;
+  const top1 = markdownHeight(before + "x", W) - markdownHeight("x", W) + 6;   // under the prose, past the margin
+  assert.equal(codeBlockAt(text, W, top1 + 10), "  first");
+  assert.equal(codeBlockAt(text, W, 2), null, "on the prose above");
+  const total = markdownHeight(text, W);
+  // The second box ends above "End." (one line + the end pad).
+  const endH = markdownHeight("End.", W);
+  assert.equal(codeBlockAt(text, W, total - endH - 10), "second\n\tline");
+  assert.equal(codeBlockAt(text, W, total - 5), null, "on the last line");
+  // Between the boxes: the middle paragraph.
+  assert.equal(codeBlockAt(text, W, top1 + 6 + 19 + 21 + 8), null);
+  // A text that is only a box: top edge and bottom edge.
+  const only = "```\na\r\nb\n```";
+  assert.equal(codeBlockAt(only, W, 7), "a\nb");
+  assert.equal(codeBlockAt(only, W, markdownHeight(only, W) - 7), "a\nb");
+  assert.equal(codeBlockAt(only, W, 3), null, "in the margin");
+  assert.equal(codeBlockAt("no code at all", W, 5), null);
+});
