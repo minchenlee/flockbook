@@ -42,7 +42,7 @@ This needs herdr-app on macOS or Linux. The mod runs programs: its helper `flock
 `hc` and sends keys and text to an agent's terminal, only when you press or type) and, on macOS,
 `osascript` (the file dialog). On Linux the + file dialog is off: drop files on the chat or paste an image. It reads the agents' session logs outside its folder (`~/.claude/projects/`,
 `~/.codex/sessions/` and others; see `RECIPE.md`). It goes on the network only to check once a day for
-a newer Flockbook (api.github.com); turn it off on the Flockbook screen (sidebar, **Flockbook**), which
+a newer Flockbook (api.github.com); turn it off in the Flockbook settings (sidebar, **Flockbook**), which
 also has the status row and the helper on other machines. They are kept in `flockbook/config.json`.
 
 `flockbook-modfeed install` (the layout, the mod, the themes and the keys are built into the helper)

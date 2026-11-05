@@ -1,6 +1,6 @@
 //! `<herdr-app home>/flockbook/config.json`: the Flockbook settings the person sets in the mod.
 //! `{"check_updates": true, "status_row": "show", "remote_helper": "ask"}`; a missing file or key is the
-//! default, and so is a file that is not JSON (the mod's Flockbook screen says it could not read it).
+//! default, and so is a file that is not JSON (the mod's Flockbook settings say they could not read it).
 //! The install never creates or changes this file. The helper reads the keys that change what it does.
 
 use serde_json::Value;

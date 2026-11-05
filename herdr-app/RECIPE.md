@@ -36,10 +36,10 @@ Left to right:
      floating sidebar. The tab drag in the top bar and this one share `drag.js`.
    - At the bottom: the update line when a newer Flockbook is out (a `raised` 8 px box: "Flockbook
      X.Y.Z is out", then **Copy install command** and **Not now**), a **Flockbook** row (the
-     Flockbook screen), and **Settings**.
+     Flockbook settings dialog), and **Settings**.
    While the sidebar is hidden and a newer Flockbook is out, the top bar's sidebar button has a 7 px
    `accent` dot, until the sidebar opens (docked or floating) or **Not now**.
-2. **Work area**: a stack of five screens. The bar floats over the first four.
+2. **Work area**: a stack of four screens. The bar floats over the first three.
    - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
      round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
      Centered: a tab capsule and a tools capsule, both 38 px tall, fully round, `chrome` with a 1 px
@@ -82,8 +82,12 @@ Left to right:
      N need you", and a "Group by Status | Workspace" switch. Then groups of 64 px cards (1 to 3
      columns, at least 300 px each, 12 px gaps): a status mark, the tab label (14 px semibold), how
      long ago it changed ("13m"), and the space and agent in 12 px muted.
-   - **Flockbook**: at most 640 px wide. "Flockbook" (18 px), "Saved in <file>. Changes apply at
-     once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
+   - **Flockbook settings**: not a screen but a dialog over the window, as Herdr's own Settings
+     (`openOverlay` `kind: "dialog"`, 760 px × 0.8 of the window, Herdr's frame: rounded corners,
+     shadow, the window dimmed behind it). Esc, a click beside it, or its close button (28 px, top
+     right) closes it; opening it again replaces it. The sidebar's Flockbook row, ⌘⇧, and the tab
+     menu's "choose Ask in Flockbook settings first…" open it. "Flockbook" (18 px), "Saved in <file>.
+     Changes apply at once." (12 px muted), then one row per setting (the name in 13.5 px, a line on what it does in
      12 px muted, and on the right a two-choice switch: 26 px choices in a `chrome` frame, the chosen
      one `selected` and semibold): **Check for updates** On | Off, **Status row** Show | Hide,
      **Helper on other machines** Ask | Never. A box with a `blocked` border when config.json is not
@@ -124,7 +128,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   choices. A file that is not JSON is the defaults too: the screen says so, and its switches do
   nothing until the file is fixed or removed (it is never overwritten). A change keeps the other keys,
   is written against the text just read (someone else's change is read again, not lost), and every
-  view shows it at once. The file is read again each minute and when the screen opens.
+  view shows it at once. The file is read again each minute and when the dialog opens.
   - **Check for updates** On: the mod asks the helper (`update-check`) at most once an hour; the
     helper asks GitHub at most once a day. A newer release shows the update line; **Copy install
     command** puts the one-line install on the clipboard; **Not now** hides it until a newer one.
@@ -146,7 +150,7 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - **Keys** (while this layout shows): ⌘T new tab, ⌘W close tab, ⌘⇧N new space, ⌘1-⌘9 a tab,
   ⌘⇧[ / ⌘⇧] or ⌃Tab / ⌃⇧Tab the tab before or after, ⌘⌥↑ / ⌘⌥↓ the space before or after,
   ⌘⌃⇧← / ⌘⌃⇧→ move the tab, ⌘⇧I Needs you, ⌘⇧\ Overview, ⌘B sidebar, ⌃` terminal,
-  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘⇧, Flockbook settings, ⌘/ help. On the Flockbook screen,
+  ⌘= / ⌘- / ⌘0 zoom, ⌘, settings, ⌘⇧, Flockbook settings, ⌘/ help. In the Flockbook settings,
   Tab moves through the choices and Enter or Space picks one.
 
 ## Built from
@@ -156,16 +160,17 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   - `sidebar`: a `column`, 250 px (min 220, max 320), `hidden`, `chrome`, a 1 px divider, holding
     one block `side`.
   - `work`: a `column` holding the `stack` `screen` (active `chat`) with the blocks `chat`,
-    `needs`, `overview`, `settings` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
+    `needs`, `overview` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
     `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
     padding 8).
   - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
 - **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked
-  by `props.view`: `side`, `chat`, `needs`, `overview`, `settings`, `top`; overlays use `termbar` (the terminal
-  window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
+  by `props.view`: `side`, `chat`, `needs`, `overview`, `top`; overlays use `settings` (the Flockbook
+  settings dialog), `termbar` (the terminal window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
   All views are in one folder because a mod cannot import another mod's files.
 - **Shared state** (`shared` / `setShared`): `flockbook.agent` (the agent shown),
-  `flockbook.screen` (the shown screen), `flockbook.sidebar`, `flockbook.sidebar.peek`,
+  `flockbook.screen` (the shown screen; an old `settings` shows the chat), `flockbook.settings` (the
+  open settings dialog), `flockbook.sidebar`, `flockbook.sidebar.peek`,
   `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
   `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
   last update line, and when the mod asked).
