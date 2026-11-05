@@ -4,7 +4,7 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId, calls, lastList } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { ChatView, chipIcon } from "../mods/flockbook/chat.js";
+import { ChatView, chipIcon, oneLine } from "../mods/flockbook/chat.js";
 import { parseAnswer } from "../mods/flockbook/sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "../mods/flockbook/feedstate.js";
 import { wrapLines, markdownHeight, rowHeight, LH } from "../mods/flockbook/estimate.js";
@@ -116,6 +116,44 @@ test("a click on a tool row shows its calls; the row grows", async () => {
   v.render(cx);
   assert.ok(lastList._args.sizes[0] > closed);
   assert.match(textOf(lastList._args.render({ start: 0, end: 1 })[0]), /git status/);
+});
+
+test("a tool call with a multi-line input shows one line, cut with …, and its row is clipped", async () => {
+  const many = { type: "row", id: "a1-t3", k: "tools", ts: 3, chips: [{ symbol: "terminal", text: "Ran 3 commands\nmore",
+    calls: [
+      { name: "Bash", summary: "cd /x; python3 - <<'EOF'\np = 'a'\nprint(p)\nEOF", done: true, error: false },
+      { name: "Bash", summary: "\r\n  \r\necho one\r\necho two", done: true, error: false },
+      { name: "Bash", summary: "git status", done: true, error: false },
+    ] }] };
+  fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 1 }, many, end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  v.render(cx);
+  lastList._h.on_item_click("a1-t3", cx);
+  v.render(cx);
+  const el = lastList._args.render({ start: 0, end: 1 })[0];
+  const text = textOf(el);
+  assert.ok(!/[\r\n]/.test(text), JSON.stringify(text));
+  assert.match(text, /cd \/x; python3 - <<'EOF' …/);
+  assert.match(text, /echo one …/);
+  assert.match(text, /git status(?! …)/);
+  assert.match(text, /Ran 3 commands …/);
+  // Each call row is one line tall and clips what does not fit.
+  const rows = [];
+  const walk = (n) => { if (!n || typeof n !== "object") return; if (n._a?.h === 26) rows.push(n); (n.kids || []).forEach(walk); };
+  walk(el);
+  assert.equal(rows.length, 3);
+  for (const r of rows) assert.ok("overflow_hidden" in r._a, "a call row clips its content");
+  assert.equal(v.height(lastList._args.render ? v.feed().rows[0] : null), rowHeight(many, v.colWidth(), true));
+  assert.equal(rowHeight(many, 760, true), 40 + 3 * 26 + 8);
+});
+
+test("oneLine keeps the first line with text and marks the rest with …", () => {
+  assert.equal(oneLine("a\nb"), "a …");
+  assert.equal(oneLine("\n\n  x  \r\n"), "x");
+  assert.equal(oneLine("one"), "one");
+  assert.equal(oneLine(""), "");
+  assert.equal(oneLine(undefined), "");
+  assert.equal(oneLine("tab\there"), "tab here");
 });
 
 test("scrolling up stops following and fades in the ↓ button; reaching the end follows again", async () => {
