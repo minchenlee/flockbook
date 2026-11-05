@@ -1,6 +1,6 @@
 // Links the owner fills in before launch. null renders a disabled placeholder.
 export const links = {
-	download: 'https://github.com/minchenlee/flockbook/releases/latest', // assets: Flockbook-<version>.dmg / .zip
+	download: 'https://github.com/minchenlee/flockbook/releases/tag/v0.8.0', // the last Mac app release (releases ship the mod only); assets: Flockbook-<version>.dmg / .zip
 	github: 'https://github.com/minchenlee/flockbook'
 };
 
