@@ -420,6 +420,13 @@ pub fn run(args: &[String]) -> i32 {
     if let Err(e) = written {
         return stop(&[format!("STOP: writing into {} failed: {e}", home.display())]);
     }
+    // The phone page runs this helper as a service (Flockbook settings): restart it, or it keeps the old one.
+    if helper.is_some() {
+        let path = bin_dest.canonicalize().unwrap_or_else(|_| bin_dest.clone());
+        if let Some(m) = crate::phone::restart_after_install(&crate::phone::Env::from_process(), &path) {
+            println!("{m}");
+        }
+    }
 
     if !bin_dest.is_file() {
         let me = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "flockbook-modfeed".into());

@@ -39,6 +39,10 @@ export class View {}
 export const TextView = { markdown: (_id, text) => { const e = mk("md"); e._a.text = text; return e; } };
 export const Scrollbar = { vertical: () => mk("sb") };
 export const Textarea = { new: () => mk("ta") };
+export const Input = { new: (state) => { const e = mk("input"); e._a.state = state; return e; } };
+export const InputState = {
+  new: (o = {}) => { let v = ""; const h = {}; return { placeholder: o.placeholder, value: () => v, set_value: (x) => { v = x; }, on: (e, f) => { h[e] = f; return true; }, focus() {}, _h: h }; },
+};
 export const made = { textarea: 0 };
 export const TextareaState = {
   new: () => { made.textarea++; let v = ""; const h = {}; return { value: () => v, set_value: (x) => { v = x; }, replace: (x) => { v += x; }, on: (e, f) => { h[e] = f; return true; }, focus() {}, _h: h }; },

@@ -54,7 +54,7 @@ const press = (el) => el._h.on_click({}, fakeCx());
 
 test("no config.json: every setting is its default, and nothing is written", async () => {
   await loadConfig();
-  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask" });
+  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false });
   for (const [k, v] of Object.entries(DEFAULTS)) assert.equal(setting(k), v, k);
   assert.equal(configBad(), false);
   assert.equal(log.writes.length, 0, "opening Flockbook never creates the file");

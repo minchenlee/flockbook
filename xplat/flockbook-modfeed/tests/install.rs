@@ -444,3 +444,41 @@ fn a_remote_sums_file_naming_a_target_twice_is_refused() {
     assert!(err(&r).contains("twice"), "{}", err(&r));
     assert_eq!(fs::read_dir(&s.app).unwrap().count(), 0);
 }
+
+// The phone page runs the installed helper as a user service (Flockbook settings, `phone on`): an install that
+// replaces the helper restarts it, only when the service file is the settings' own and names this helper.
+#[test]
+fn an_install_restarts_the_phone_page_that_runs_this_helper() {
+    let s = sandbox();
+    let bin = s.root.join("bin");
+    write_exe(&bin.join("systemctl"), &format!("#!/bin/sh\necho \"systemctl $*\" >> \"{}\"\n", s.root.join("calls").display()));
+    write_exe(&bin.join("id"), "#!/bin/sh\necho 501\n");
+    let unit = s.home.join(".config/systemd/user/flockbook-serve.service");
+    fs::create_dir_all(unit.parent().unwrap()).unwrap();
+    let helper = s.app.join("flockbook/bin/flockbook-modfeed");
+    let install = |s: &Sandbox| {
+        Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed"))
+            .args(["install", "--home", s.app_s(), "--helper", s.helper.to_str().unwrap()])
+            .env_clear()
+            .env("PATH", s.path_env())
+            .env("HOME", &s.home)
+            .env("FLOCKBOOK_PHONE_BIN", &bin)
+            .env("FLOCKBOOK_PHONE_SERVICE", "systemd")
+            .output()
+            .unwrap()
+    };
+    // Set up by hand (no marker): left alone.
+    fs::write(&unit, format!("[Service]\nExecStart=\"{}\" \"serve\"\n", helper.display())).unwrap();
+    let r = install(&s);
+    assert_eq!(r.status.code(), Some(0), "{}", both(&r));
+    assert!(!s.calls().iter().any(|c| c.starts_with("systemctl")), "{:?}", s.calls());
+    // The settings' own, for another home's helper: left alone.
+    fs::write(&unit, format!("# {}\n[Service]\nExecStart=\"/elsewhere/flockbook-modfeed\" \"serve\"\n", modfeedkit::phone::MARKER)).unwrap();
+    install(&s);
+    assert!(!s.calls().iter().any(|c| c.starts_with("systemctl")), "{:?}", s.calls());
+    // The settings' own, running this helper: restarted.
+    fs::write(&unit, format!("# {}\n[Service]\nExecStart=\"{}\" \"serve\"\n", modfeedkit::phone::MARKER, helper.display())).unwrap();
+    let r = install(&s);
+    assert!(s.calls().iter().any(|c| c == "systemctl --user try-restart flockbook-serve"), "{:?}", s.calls());
+    assert!(out(&r).contains("the phone page (Flockbook settings): restarted"), "{}", out(&r));
+}

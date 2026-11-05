@@ -10,8 +10,8 @@ export const KEY_CONFIG = "flockbook.config";    // { file, bad, text }: the par
 export const KEY_UPDATE = "flockbook.update";    // the helper's last `update` line
 const KEY_UPDATE_AT = "flockbook.update.at";     // when the mod last asked (ms)
 const KEY_UPDATE_SEEN = "flockbook.update.seen"; // the version whose line was seen in the open sidebar
-export const DEFAULTS = { check_updates: true, status_row: "show", remote_helper: "ask" };
-export const CHOICES = { check_updates: [true, false], status_row: ["show", "hide"], remote_helper: ["ask", "never"] };
+export const DEFAULTS = { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false };
+export const CHOICES = { check_updates: [true, false], status_row: ["show", "hide"], remote_helper: ["ask", "never"], phone_read_only: [false, true] };
 export const configPath = () => `${appHome()}/flockbook/config.json`;
 
 export function parseConfig(text) {

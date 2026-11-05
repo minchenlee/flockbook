@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Herdr app mod: Flockbook settings have a Phone page switch. On runs the phone page in the background as a user service (it keeps running after Herdr app quits), names your Tailscale login, and shows the one `tailscale serve` command, then the address and a QR code. Flockbook never changes Tailscale settings. *(preview)*
+
 ### 🔒 Security
 
 ### 🐛 Bug Fixes

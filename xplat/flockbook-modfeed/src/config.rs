@@ -12,11 +12,17 @@ pub struct Config {
     pub check_updates: bool,
     /// `remote_helper: "never"`: no helper on other machines, and nothing runs there.
     pub remote_never: bool,
+    /// The phone page (`phone on`): the one Tailscale login allowed; empty: the login Tailscale says.
+    pub phone_user: String,
+    /// Its port on 127.0.0.1 (not on the screen; for a port already taken).
+    pub phone_port: u16,
+    /// The page only reads.
+    pub phone_read_only: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { check_updates: true, remote_never: false }
+        Config { check_updates: true, remote_never: false, phone_user: String::new(), phone_port: 8787, phone_read_only: false }
     }
 }
 
@@ -38,6 +44,9 @@ pub fn parse(text: &str) -> Config {
     Config {
         check_updates: m.get("check_updates").and_then(Value::as_bool).unwrap_or(d.check_updates),
         remote_never: m.get("remote_helper").and_then(Value::as_str) == Some("never"),
+        phone_user: m.get("phone_user").and_then(Value::as_str).map(|s| s.trim().to_string()).unwrap_or_default(),
+        phone_port: m.get("phone_port").and_then(Value::as_u64).filter(|p| (1..=65535).contains(p)).map(|p| p as u16).unwrap_or(d.phone_port),
+        phone_read_only: m.get("phone_read_only").and_then(Value::as_bool).unwrap_or(d.phone_read_only),
     }
 }
 
@@ -68,6 +77,11 @@ mod tests {
         assert!(parse(r#"{"remote_helper": "never"}"#).remote_never);
         assert!(!parse(r#"{"remote_helper": "ask"}"#).remote_never);
         assert!(!parse(r#"{"remote_helper": "always"}"#).remote_never, "only ask and never exist; anything else is ask");
+        let c = parse(r#"{"phone_user": " me@x.com ", "phone_port": 9000, "phone_read_only": true}"#);
+        assert_eq!((c.phone_user.as_str(), c.phone_port, c.phone_read_only), ("me@x.com", 9000, true));
+        assert_eq!(parse(r#"{"phone_port": 0}"#).phone_port, 8787);
+        assert_eq!(parse(r#"{"phone_port": 70000}"#).phone_port, 8787);
+        assert_eq!(parse(r#"{"phone_port": "9000"}"#).phone_port, 8787);
     }
 
     #[test]
