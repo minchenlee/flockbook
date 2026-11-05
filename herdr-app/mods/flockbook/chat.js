@@ -11,7 +11,8 @@ import * as sidecar from "./sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
 import { Composer } from "./composer.js";
-import { markdownView } from "./mdblocks.js";
+import { markdownView, codeBlockAt } from "./mdblocks.js";
+import { openMenu } from "./menu.js";
 import { Cards, wanted } from "./cards.js";
 import { startTop, overBar, BAR_H } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
@@ -220,6 +221,21 @@ export class ChatView {
     return div().h(this.height(row)).w_full().px(pad).overflow_hidden().child(this.body(row, t));
   }
 
+  // Right-click on a code box: "Copy code" for that box. Elsewhere no menu. The list gives the press
+  // against the row's box; the row's padding (and the first row's bar) is taken off to get the text's y.
+  codeMenu(key, e) {
+    const rows = this.feed()?.rows ?? [];
+    const i = rows.findIndex((r) => r.id === key);
+    const row = rows[i], y0 = e?.local_position?.y;
+    if (!row || typeof y0 !== "number") return null;
+    const w = this.colWidth();
+    const at = row.k === "assistant" ? { y: y0 - 8, w }
+      : row.k === "user" ? { y: y0 - 18, w: Math.floor(w * 0.78) - 28 } : null;
+    if (!at) return null;
+    const code = codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0));
+    return code === null ? null : openMenu([{ label: "Copy code", act: "copy", args: { text: code } }]);
+  }
+
   click(key, cx) {
     const row = this.feed()?.rows.find((r) => r.id === key);
     if (!row) return;
@@ -277,7 +293,8 @@ export class ChatView {
         for (let i = range.start; i < range.end; i++) out.push(i === 0 ? div().w_full().pt(BAR_H).child(this.item(rows[i], t)) : this.item(rows[i], t));
         record("chat.rows", now() - t0, range.end - range.start);
         return out;
-      }).track_scroll(this.scroll).on_item_click((key, cx) => this.click(key, cx)))
+      }).track_scroll(this.scroll).on_item_click((key, cx) => this.click(key, cx))
+        .on_item_secondary_click((key, e) => this.codeMenu(key, e)))
       .child(Scrollbar.vertical("chat").absolute().inset_0());
     // A round ↓ that fades in while you read older messages and out when you are back at the end.
     if (n) {

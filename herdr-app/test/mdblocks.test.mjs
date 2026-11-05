@@ -103,3 +103,26 @@ test("a code line is guessed as tall as a TextView line at 13 px (21 px), not sh
   const one = markdownHeight("```\nx\n```", 760), three = markdownHeight("```\nx\ny\nz\n```", 760);
   assert.equal(three - one, 2 * 21);
 });
+
+test("codeBlockAt finds the code box under a point: several boxes, a box at the top and at the bottom", async () => {
+  const { codeBlockAt } = await import("../mods/flockbook/mdblocks.js");
+  const W = 700;
+  const before = "Intro line.\n\n";
+  const text = `${before}\`\`\`sh\n  first\n\`\`\`\nMiddle words here.\n\n\`\`\`\nsecond\n\tline\n\`\`\`\nEnd.`;
+  const top1 = markdownHeight(before + "x", W) - markdownHeight("x", W) + 6;   // under the prose, past the margin
+  assert.equal(codeBlockAt(text, W, top1 + 10), "  first");
+  assert.equal(codeBlockAt(text, W, 2), null, "on the prose above");
+  const total = markdownHeight(text, W);
+  // The second box ends above "End." (one line + the end pad).
+  const endH = markdownHeight("End.", W);
+  assert.equal(codeBlockAt(text, W, total - endH - 10), "second\n\tline");
+  assert.equal(codeBlockAt(text, W, total - 5), null, "on the last line");
+  // Between the boxes: the middle paragraph.
+  assert.equal(codeBlockAt(text, W, top1 + 6 + 19 + 21 + 8), null);
+  // A text that is only a box: top edge and bottom edge.
+  const only = "```\na\r\nb\n```";
+  assert.equal(codeBlockAt(only, W, 7), "a\nb");
+  assert.equal(codeBlockAt(only, W, markdownHeight(only, W) - 7), "a\nb");
+  assert.equal(codeBlockAt(only, W, 3), null, "in the margin");
+  assert.equal(codeBlockAt("no code at all", W, 5), null);
+});

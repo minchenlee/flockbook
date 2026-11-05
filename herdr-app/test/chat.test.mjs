@@ -352,3 +352,32 @@ test("no element above a chat reply's text stops the press (Herdr 0.1.13: that m
   assert.ok(lastList, "the chat drew its list");
   assert.deepEqual(stops, [], "an element above the reply text stops the left press");
 });
+
+test("right-click on a code box opens a menu with Copy code; it copies that box as written; elsewhere no menu", async () => {
+  const { MenuView } = await import("../mods/flockbook/menu.js");
+  const { BAR_H } = await import("../mods/flockbook/top.js");
+  const { codeBlockAt } = await import("../mods/flockbook/mdblocks.js");
+  const text = "Run:\n\n```\n  tailscale serve 8787\n```\nThen:\n\n```\necho two\n```";
+  fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 2 }, user("u1", "hi"), asst("a1", text), end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  v.render(cx);
+  const w = v.colWidth();
+  const yOf = (want) => { for (let y = 0; y < 2000; y++) if (codeBlockAt(text, w, y) === want) return y + 3; return -1; };
+  const press = (key, y) => lastList._h.on_item_secondary_click(key, { button: "right", position: { x: 0, y }, local_position: { x: 50, y } }, cx);
+  const n0 = log.overlays.length;
+  press("a1", 8 + yOf("echo two"));
+  const o = log.overlays.at(-1);
+  assert.equal(log.overlays.length, n0 + 1);
+  assert.deepEqual(o.props.items.map((i) => i.label), ["Copy code"]);
+  fake.props = { view: "menu", items: o.props.items, overlay: "o1" };
+  let copied = null;
+  const m = new MenuView(fakeCx()).render(fakeCx());
+  byId(m, "menu-0")._h.on_click({}, { ...fakeCx(), write_to_clipboard: (s) => { copied = s; } });
+  assert.equal(copied, "echo two");
+  press("a1", 8 + yOf("  tailscale serve 8787"));
+  assert.equal(log.overlays.at(-1).props.items[0].args.text, "  tailscale serve 8787");
+  // On the prose, on a user bubble without code, or on an unknown row: no menu.
+  const n1 = log.overlays.length;
+  press("a1", 8 + 4); press("u1", BAR_H + 20); press("gone", 10);
+  assert.equal(log.overlays.length, n1);
+});

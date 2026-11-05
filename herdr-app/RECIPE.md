@@ -53,7 +53,7 @@ Left to right:
        "1 image" or "N images" under it when it had pictures.
      - Agent reply: full-width markdown, 16 px text, 26 px lines (the `TextView` default; a mod
        cannot change it). Code fences are 12 px rounded boxes (`raised`,
-       1 px border, Menlo 13 px, 21 px lines: one selectable `TextView` paragraph, so a drag selects across lines). Tables are 12 px rounded frames: a `raised` header
+       1 px border, Menlo 13 px, 21 px lines: one selectable `TextView` paragraph, so a drag selects across lines; right-click a box: Copy code, the box as written). Tables are 12 px rounded frames: a `raised` header
        row, 1 px lines between rows, columns sized to their content.
      - Tool calls: a row of 28 px round chips ("Ran 3 commands", an icon per kind: terminal, doc,
        search, tool), each with ▾. A spinner while a call runs.
@@ -251,6 +251,11 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
   default that a mod cannot change; wide letters counted as 16 px, the rest 0.5 × 16, one
   letter of width kept free), because `list` cannot be scrolled from code and the chat
   must open at the end. A guess too low cuts a row; guesses lean high.
+- A code box's `TextView` keeps leading spaces only as no-break spaces (markdown drops plain ones), so text
+  selected and copied with ⌘C has no-break spaces in its indent. Copy code (right-click) copies the source.
+- A virtual list row takes no handlers, and `on_item_click` gives no position: a button inside a row cannot
+  be told from a press on the text. `on_item_secondary_click` gives the press against the row; the chat finds
+  the code box under it from the same estimate as the row heights.
 - `TextView.markdown` takes no style and draws code and tables square. Split the text into blocks
   and draw fences and tables yourself. A `TextView` in a flexible cell keeps its one-line width
   and spills out: give table cells a fixed width.

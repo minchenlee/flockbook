@@ -32,7 +32,7 @@ export function act(item) {
     // The chat shows a card that asks before anything is removed.
     case "remove-helper": setShared(KEY_REMOVE, a.machine); return showScreen("chat");
     case "settings": return showSettings();
-    case "copy": return null;   // handled in the view (needs cx)
+    case "copy": return null;   // handled in the view: the clipboard needs cx
   }
   return null;
 }
@@ -79,7 +79,7 @@ export class MenuView {
       if (item.sep) rows.push(div().h(1).mx(6).my(4).bg(t.border));
       rows.push(h_flex().id(`menu-${i}`).h(ROW_H).px(10).items_center().rounded(6).text_size(13)
         .text_color(item.danger ? t.blocked : t.foreground).hover((s) => s.bg(t.hover))
-        .on_click(() => { closeOverlay(p.overlay); act(item); })
+        .on_click((_e, cx) => { closeOverlay(p.overlay); if (item.act === "copy") cx?.write_to_clipboard?.(item.args?.text ?? ""); else act(item); })
         .child(div().truncate().child(item.label)));
     }
     return v_flex().size_full().p(PAD).gap(0).children(rows);

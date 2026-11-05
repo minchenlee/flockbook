@@ -3,7 +3,7 @@
 // TextView markdown. Heights stay as estimate.js guesses them (same line heights).
 import { div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { tableCells, colWidths } from "./estimate.js";
+import { tableCells, colWidths, markdownHeight } from "./estimate.js";
 
 export { tableCells };
 
@@ -59,6 +59,15 @@ export function codeMarkdown(text) {
     const e = l.replace(/\t/g, "    ").replace(/[!-/:-@[-`{-~]/g, "\\$&");
     return e.replace(/^ +/, (s) => NBSP.repeat(s.length)) || NBSP;
   }).join("\\\n");
+}
+
+// The code box under `y` (px from the text's top, at `width`), as written for Copy; null when `y` is not
+// on one. Box places are the estimate's, the same guess the row heights use.
+export function codeBlockAt(text, width, y) {
+  const spans = [];
+  markdownHeight(String(text ?? ""), width, spans);
+  const s = spans.find((b) => y >= b.top && y <= b.bottom);
+  return s ? s.lines.join("\n") : null;
 }
 
 function codeBox(key, b, t) {
