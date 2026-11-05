@@ -29,6 +29,10 @@ Left to right:
    - A "Workspaces" heading (11.5 px, semibold, muted) with a small + on the right.
    - One 34 px row per space: a 22 px monogram square (two letters, 10.5 px), the name, and the
      status marks of its tabs on the right (all up to 5, else the first 3 and "+N").
+     Drag a row up or down to move the workspace (`space.move`): a 2 px `accent` line in the gap
+     shows where it goes, the row dims, and the release moves it there. A move under 4 px is a
+     click. Leaving the list, another mouse button or a press elsewhere cancels. The same in the
+     floating sidebar. The tab drag in the top bar and this one share `drag.js`.
    - At the bottom: the update line when a newer Flockbook is out (a `raised` 8 px box: "Flockbook
      X.Y.Z is out", then **Copy install command** and **Not now**), a **Flockbook** row (the
      Flockbook screen), and **Settings**.
@@ -255,3 +259,5 @@ Status marks: working is a 13 px spinner (`working` color, one turn per 600 ms);
 - ⌃` opens the agent's terminal window; ⌃` again closes it.
 - Dragging a pill onto another pill moves that tab there, also with the bar scrolled; dragging it
   out of the bar and releasing moves nothing.
+- Dragging a workspace row onto another row moves that workspace there, in the docked and the
+  floating sidebar; dragging it out of the list and releasing moves nothing.
