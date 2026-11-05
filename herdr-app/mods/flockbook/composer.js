@@ -79,7 +79,11 @@ export class Composer {
   constructor(_cx) {
     this.input = TextareaState.new({ placeholder: "Reply to the agent", rows: 1 });
     this.input.set_auto_grow?.(1, 8);
-    this.input.on("submit", (_e, cx) => { cx.spawn((cx) => this.submit(cx)); });
+    // Enter sends. Shift+Enter is a new line at the cursor (replace puts the text at the cursor or over the selection).
+    this.input.on("submit", (e, cx) => {
+      if (e?.shift) { this.input.replace("\n"); return; }
+      cx.spawn((cx) => this.submit(cx));
+    });
     this.empty = true;
     this.input.on("change", (_e, cx) => { const e = !this.input.value().trim(); if (e !== this.empty) { this.empty = e; cx.notify(); } });
     this.drafts = new Map();   // address → { text, files } of agents not shown

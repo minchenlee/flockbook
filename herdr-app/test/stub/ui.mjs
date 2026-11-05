@@ -41,7 +41,7 @@ export const Scrollbar = { vertical: () => mk("sb") };
 export const Textarea = { new: () => mk("ta") };
 export const made = { textarea: 0 };
 export const TextareaState = {
-  new: () => { made.textarea++; let v = ""; const h = {}; return { value: () => v, set_value: (x) => { v = x; }, on: (e, f) => { h[e] = f; return true; }, focus() {}, _h: h }; },
+  new: () => { made.textarea++; let v = ""; const h = {}; return { value: () => v, set_value: (x) => { v = x; }, replace: (x) => { v += x; }, on: (e, f) => { h[e] = f; return true; }, focus() {}, _h: h }; },
 };
 export let lastList = null;
 export const v_virtual_list = (id, n, sizes, key, render) => { const e = mk("vl"); e._args = { id, n, sizes, key, render }; lastList = e; return e; };

@@ -144,6 +144,19 @@ test("⌘V with an image and no text on the clipboard attaches the sidecar's PNG
   assert.match(textOf(byId(v.render(cx), "file-0")), /paste-1\.png/);
 });
 
+test("Shift+Enter puts a new line at the cursor and sends nothing; Enter sends", async () => {
+  const cx = fakeCx(); const c = new Composer(cx);
+  const b = c.box(fake.agents[0]);
+  b.input.set_value("first line");
+  b.input._h.submit({ shift: true }, cx); await cx.settle();
+  assert.equal(sent.length, 0, "Shift+Enter does not send");
+  assert.equal(b.input.value(), "first line\n");
+  b.input.replace("second line");
+  b.input._h.submit({}, cx); await cx.settle();
+  assert.equal(sent.length, 1, "Enter sends");
+  assert.equal(sent[0][sent[0].indexOf("--text") + 1], "first line\nsecond line");
+});
+
 test("send names the agent and the log the chat showed, so the sidecar can refuse another one", async () => {
   const cx = fakeCx(); const c = new Composer(cx);
   c.seen = (address) => address === "t1" ? { agent: "claude", path: "/logs/a.jsonl" } : null;
