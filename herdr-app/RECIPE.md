@@ -101,8 +101,9 @@ Left to right:
      and Serve not set, right under it: "One step left: run this once in a terminal.", the one
      `tailscale serve` command with Copy (`--https=8443` when 443 is another service's, with a
      `muted` line that says so), and the status is asked every 3 s until Serve is set. Without
-     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** field (empty:
-     the login found, which the line under it names), **Read-only** Off | On, and once Serve is set
+     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** row (its line names
+     the login in use; on the right a 260 × 30 px field in a `background` frame with a `border` line, 12 px
+     text, placeholder "Default: this machine's Tailscale login"; empty: the login found), **Read-only** Off | On, and once Serve is set
      the address with Copy and a 140 px QR code on a white 8 px box. Linux adds a line on
      `loginctl enable-linger`.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar

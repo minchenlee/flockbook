@@ -217,3 +217,24 @@ test("keyboard: Enter on On turns it on", async () => {
   await settle(); await settle();
   assert.deepEqual(phoneCalls(), ["phone status", "phone on"]);
 });
+
+test("the login field looks like a field: a frame and background, the row line's text size, a plain placeholder", async () => {
+  const { v, el } = await screen();
+  const s = byId(el(), "set-phone");
+  const f = byId(s, "phone-login");
+  assert.ok(f, "a frame around the field");
+  assert.equal(f._a.border, 1);
+  assert.equal(f._a.border_color, "#border");
+  assert.equal(f._a.bg, "#background");
+  assert.equal(typeof f._a.rounded, "number");
+  assert.equal(f._a.text_size, 12, "as the line under a row's title");
+  assert.ok(f.kids.some((k) => k.tag === "input"), "the input inside");
+  assert.equal(v.login.placeholder, "Default: this machine's Tailscale login");
+  const words = textOf(s);
+  assert.doesNotMatch(words, /Empty/);
+  assert.match(words, /Only this account may open the page\. Now: me@example\.com\./);
+  // As the Read-only row: the title and its line on the left, the field on the right.
+  const row = byId(s, "phone-login-row");
+  assert.match(textOf(row.kids[0]), /^Tailscale login Only this account/);
+  assert.equal(row.kids[1], f);
+});

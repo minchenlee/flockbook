@@ -57,7 +57,7 @@ export class SettingsView {
     this.section = "general";
     this.overlay = props()?.overlay ?? null;
     // The Phone page's login: saved on Enter or when the field loses the keys.
-    this.login = InputState.new({ placeholder: "Empty: the login Tailscale says" });
+    this.login = InputState.new({ placeholder: "Default: this machine's Tailscale login" });
     const save = (_e, cx) => {
       const v = this.login.value().trim();
       if (v === phoneUser()) return;
@@ -73,7 +73,7 @@ export class SettingsView {
 
   close(_cx) { settingsClosed(this.overlay); }
 
-  loginInput() { return Input.new(this.login); }
+  loginInput() { return Input.new(this.login).w_full(); }
 
   choose(key, value, cx) { cx.spawn(async (cx) => { await setSetting(key, value); cx.notify(); }); }
 
