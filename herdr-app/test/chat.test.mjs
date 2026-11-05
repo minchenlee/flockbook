@@ -7,7 +7,7 @@ import { agent, space } from "./fixtures.mjs";
 import { ChatView, chipIcon } from "../mods/flockbook/chat.js";
 import { parseAnswer } from "../mods/flockbook/sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "../mods/flockbook/feedstate.js";
-import { wrapLines, markdownHeight, rowHeight } from "../mods/flockbook/estimate.js";
+import { wrapLines, markdownHeight, rowHeight, LH } from "../mods/flockbook/estimate.js";
 
 const jl = (...lines) => ({ code: 0, stdout: lines.map((l) => JSON.stringify(l)).join("\n") + "\n", stderr: "" });
 const header = { type: "header", protocol: 1, sidecar: "0.1.0", command: "feed" };
@@ -71,7 +71,7 @@ test("estimates: code boxes and tables are guessed at their drawn height (no wra
   const both = markdownHeight(`${prose}\n\n${code}\n\n${prose}`, 600);
   assert.ok(Math.abs(both - (2 * markdownHeight(prose, 600) + markdownHeight(code, 600))) <= 1, `${both}`);  // 1 px: rounding
   // Between two paragraphs the blank line stays a 10 px gap.
-  assert.equal(markdownHeight("a\n\nb", 600), Math.ceil(2 * 22 * 1.08 + 10));
+  assert.equal(markdownHeight("a\n\nb", 600), Math.ceil(2 * LH * 1.08 + 10));
 });
 
 test("chipIcon maps SF Symbols names to the mod's icons", () => {

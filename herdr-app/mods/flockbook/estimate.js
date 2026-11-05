@@ -1,12 +1,49 @@
 // Row heights for the virtual list, guessed from the text (the list needs them before layout).
-// Body text: 14 px, 22 px per line. Over-guessing leaves a gap; under-guessing cuts the row, so the
-// guesses lean high: wide Latin letters, and 8% on top of the prose for word wrap. Code boxes and
-// tables get their drawn height, with no 8%: on a long answer full of code the 8% left a big gap.
+// Body text as TextView draws it (measured in the app): 16 px (1rem), 26 px per line (gpui's line
+// height, about 1.618 × the size). Over-guessing leaves a gap; under-guessing cuts the row, so the
+// guesses lean high: prose wraps by unit (a Latin word or an inline code span does not break, closing
+// full-width punctuation stays with the character before it), letters are counted wide, and 8% goes on
+// top of the prose. Code boxes and tables get their drawn height, with no 8%: on a long answer full of
+// code the 8% left a big gap.
 export const READ_W = 760;  // the reading column's width at most
 export const GUTTER = 24;   // each side of the column
 
 const isWide = (c) => c >= 0x1100 && (c <= 0x115f || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
   (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) || (c >= 0xffe0 && c <= 0xffe6));
+
+// Body text size and line height, in px.
+export const FS = 16, LH = 26;
+// Latin letters in prose, in em: measured about 0.47 em (spaces included); a little more.
+const LATIN_EM = 0.5;
+// Inline code: Menlo at 14 px, 0.6 em a character, 4 px padding each side.
+const CODE_CH = 14 * 0.6, CODE_PAD = 8;
+// Full-width punctuation that may not start a line: it goes down with the character before it.
+const NO_START = new Set("，。、；：？！）」』】〉》〕｝％…—～·");
+
+// Lines of prose drawn `width` px wide at `fs` px. Each line keeps one character of slack: line
+// breaking (no-start punctuation, a word moved down) can end a line a character early.
+export function proseLines(text, full, fs = FS) {
+  const width = Math.max(fs, full - fs);
+  const units = String(text).match(/`[^`]+`|[A-Za-z0-9_\-+./:@#%&=?!'"$<>~^*]+|\s+|./gsu) ?? [];
+  const wide = (u) => isWide(u.codePointAt(0));
+  const size = (u) => u[0] === "`" && u.length > 1 ? (u.length - 2) * CODE_CH + CODE_PAD
+    : /^\s+$/.test(u) ? fs * 0.3 * u.length
+      : wide(u) ? fs : u.length * fs * LATIN_EM;
+  let n = 1, w = 0;
+  for (let i = 0; i < units.length; i++) {
+    let u = units[i], uw = size(u);
+    // Keep a run of no-start punctuation with the unit before it.
+    while (i + 1 < units.length && NO_START.has(units[i + 1])) { uw += fs; i++; }
+    if (w > 0 && w + uw > width) {
+      if (/^\s+$/.test(u)) { n++; w = 0; continue; }  // a space at the break is not drawn
+      n++; w = 0;
+    }
+    // Wider than the line (a long word or span): it breaks where it must.
+    while (uw > width) { n++; uw -= width; }
+    w += uw;
+  }
+  return n;
+}
 
 export function wrapLines(text, width, fs = 14) {
   let w = 0, n = 1;
@@ -18,7 +55,7 @@ export function wrapLines(text, width, fs = 14) {
 }
 
 export function markdownHeight(text, width) {
-  const LH = 22, CODE_LH = 19;
+  const CODE_LH = 19;
   let h = 0, p = 0, inCode = false, prevBlank = true;  // h: drawn exactly; p: prose, wraps
   // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
   let gap = 0;
@@ -32,7 +69,7 @@ export function markdownHeight(text, width) {
     if (!line.trim()) { if (!prevBlank) { h += 10; gap = 10; } prevBlank = true; continue; }
     prevBlank = false; gap = 0;
     let m;
-    if ((m = /^(#{1,6})\s/.exec(line))) { const size = [26, 22, 19, 17, 15, 14][m[1].length - 1]; p += wrapLines(line, width, size) * size * 1.4 + 12; continue; }
+    if ((m = /^(#{1,6})\s/.exec(line))) { const size = [30, 25, 22, 20, 17, 16][m[1].length - 1]; p += proseLines(line, width, size) * size * 1.62 + 12; continue; }
     if (/^\s*\|/.test(line) && li + 1 < lines.length && TABLE_SEP.test(lines[li + 1])) {
       // A table as mdblocks.js draws it: 6 px above and below, a 1 px frame; each row 8 px padding top
       // and bottom plus a 1 px line, as tall as its tallest cell at the colWidths widths.
@@ -46,9 +83,9 @@ export function markdownHeight(text, width) {
       li = j - 1; prevBlank = true;
       continue;
     }
-    if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) { p += wrapLines(line, width - 24 - m[1].length * 8) * LH + 6; continue; }
-    if (/^>\s?/.test(line)) { p += wrapLines(line, width - 24) * LH; continue; }
-    p += wrapLines(line, width) * LH;
+    if ((m = /^(\s*)([-*+]|\d+\.)\s/.exec(line))) { p += proseLines(line.slice(m[0].length), width - 24 - m[1].length * 8) * LH + 6; continue; }
+    if (/^>\s?/.test(line)) { p += proseLines(line.replace(/^>\s?/, ""), width - 24) * LH; continue; }
+    p += proseLines(line, width) * LH;
   }
   return Math.ceil(h + p * 1.08);
 }
