@@ -21,6 +21,7 @@ use std::process::{Command, Stdio};
 pub const MARKER: &str = "Made by Flockbook settings: Flockbook settings, Phone page: Off removes this file.";
 const LABEL: &str = "dev.flockbook.serve";
 const UNIT: &str = "flockbook-serve";
+const BOOTSTRAP_TRIES: u32 = 8;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
@@ -59,10 +60,7 @@ impl Env {
     }
 
     fn program(&self, name: &str) -> PathBuf {
-        match &self.bin {
-            Some(b) => b.join(name),
-            None => PathBuf::from(name),
-        }
+        tool(name, self.bin.as_deref(), |p| p.exists())
     }
 
     /// Runs a tool: (exit code, stdout, stderr); None when it cannot start.
@@ -80,9 +78,28 @@ impl Env {
         Some((o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()))
     }
 
-    fn uid(&self) -> String {
-        self.run("id", &["-u"]).map(|(_, out, _)| out.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "0".into())
+    /// The user's id, for `gui/<uid>`; an error, never a guess, when `id -u` fails.
+    fn uid(&self) -> Result<String, (&'static str, String)> {
+        match self.run("id", &["-u"]) {
+            Some((0, out, _)) if out.trim().chars().all(|c| c.is_ascii_digit()) && !out.trim().is_empty() => Ok(out.trim().to_string()),
+            _ => Err(("service", "cannot find the user id (id -u failed)".into())),
+        }
     }
+}
+
+/// Where a tool is: in `bin` (the tests' fakes), else the service tools at their fixed system paths, not by PATH
+/// (a folder early in PATH could hold another `launchctl`). `tailscale` has none: PATH, then the Mac app.
+fn tool(name: &str, bin: Option<&Path>, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    if let Some(b) = bin {
+        return b.join(name);
+    }
+    let fixed: &[&str] = match name {
+        "launchctl" => &["/bin/launchctl"],
+        "id" => &["/usr/bin/id", "/bin/id"],
+        "systemctl" => &["/usr/bin/systemctl", "/bin/systemctl"],
+        _ => &[],
+    };
+    fixed.iter().map(PathBuf::from).find(|p| exists(p)).unwrap_or_else(|| PathBuf::from(name))
 }
 
 /// The Tailscale login and machine name, or why not.
@@ -145,24 +162,28 @@ pub fn qr_svg(text: &str) -> Option<String> {
 }
 
 /// The service file for these settings: `serve --print`, the marker, and the app's herdr-core session.
-pub fn service_file(kind: Kind, program: &str, user_home: &str, user: &str, port: u16, read_only: bool, hc: &[(String, String)]) -> String {
+/// Err: a value that cannot go into the file (a login with spaces or control characters, say).
+pub fn service_file(kind: Kind, program: &str, user_home: &str, user: &str, port: u16, read_only: bool, hc: &[(String, String)]) -> Result<String, String> {
     let mut args = vec!["--user".to_string(), user.to_string(), "--port".into(), port.to_string()];
     if read_only {
         args.push("--read-only".into());
     }
-    let o = serve::parse(&args).expect("valid serve options");
+    let o = serve::parse(&args)?;
+    if let Some((k, _)) = hc.iter().find(|(_, v)| v.chars().any(char::is_control)) {
+        return Err(format!("{k} has a control character"));
+    }
     let xml = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
     match kind {
         Kind::Launchd => {
             let s = serve::service("launchd", program, user_home, &o);
             let env: String = hc.iter().map(|(k, v)| format!("<key>{}</key><string>{}</string>", xml(k), xml(v))).collect();
             let s = if env.is_empty() { s } else { s.replacen("</dict>\n</plist>", &format!("  <key>EnvironmentVariables</key><dict>{env}</dict>\n</dict>\n</plist>"), 1) };
-            s.replacen("<plist version", &format!("<!-- {MARKER} -->\n<plist version"), 1)
+            Ok(s.replacen("<plist version", &format!("<!-- {MARKER} -->\n<plist version"), 1))
         }
         Kind::Systemd => {
             let s = serve::service("systemd", program, user_home, &o);
             let env: String = hc.iter().map(|(k, v)| format!("Environment=\"{}={}\"\n", k, v.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%"))).collect();
-            format!("# {MARKER}\n{}", s.replacen("[Service]\n", &format!("[Service]\n{env}"), 1))
+            Ok(format!("# {MARKER}\n{}", s.replacen("[Service]\n", &format!("[Service]\n{env}"), 1)))
         }
     }
 }
@@ -179,7 +200,9 @@ pub fn service_state(env: &Env) -> Value {
         None => ("off", None),
         Some(t) if !ours(&t) => ("by-hand", Some(format!("Set up by hand in {} (see SERVE.md). Flockbook settings leave it alone.", file.display()))),
         Some(_) => match env.kind {
-            Kind::Launchd => match env.run("launchctl", &["print", &format!("gui/{}/{LABEL}", env.uid())]) {
+            Kind::Launchd => match env.uid().map(|uid| env.run("launchctl", &["print", &format!("gui/{uid}/{LABEL}")])) {
+                Err((_, e)) => ("error", Some(e)),
+                Ok(r) => match r {
                 Some((0, out, _)) if out.contains("state = running") => ("running", None),
                 Some((0, out, _)) => {
                     let code = out.lines().find_map(|l| l.trim().strip_prefix("last exit code = ")).map(str::trim).unwrap_or("0");
@@ -191,6 +214,7 @@ pub fn service_state(env: &Env) -> Value {
                 }
                 Some(_) => ("stopped", Some("The agent is not loaded. Turn it off and on again.".into())),
                 None => ("error", Some("launchctl did not run.".into())),
+                },
             },
             Kind::Systemd => match env.run("systemctl", &["--user", "is-active", UNIT]) {
                 Some((0, _, _)) => ("running", None),
@@ -256,18 +280,35 @@ pub fn on(env: &Env, cfg: &Config) -> Result<(), (&'static str, String)> {
     // No Tailscale, no way to reach the page: not even with a login typed in.
     let (login, _) = tailscale(env).map_err(|e| ("no-tailscale", e))?;
     let user = if cfg.phone_user.is_empty() { login } else { cfg.phone_user.clone() };
-    let program = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).map_err(|e| ("service", format!("cannot find this helper: {e}")))?;
-    let text = service_file(env.kind, &program, &env.user_home.to_string_lossy(), &user, cfg.phone_port, cfg.phone_read_only, &hc_env());
+    // Its real path, as the install compares it (restart_after_install).
+    let program = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| ("service", format!("cannot find this helper: {e}")))?;
+    let text = service_file(env.kind, &program, &env.user_home.to_string_lossy(), &user, cfg.phone_port, cfg.phone_read_only, &hc_env()).map_err(|e| ("bad-value", e))?;
+    let uid = if env.kind == Kind::Launchd { Some(env.uid()?) } else { None };
     std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| ("write", format!("cannot make {}: {e}", file.parent().unwrap().display())))?;
     let tmp = file.with_extension("new");
-    std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, &file)).map_err(|e| ("write", format!("cannot write {}: {e}", file.display())))?;
+    if let Err(e) = std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, &file)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(("write", format!("cannot write {}: {e}", file.display())));
+    }
     let f = file.to_string_lossy().into_owned();
     match env.kind {
         Kind::Launchd => {
-            let uid = env.uid();
-            // Loaded already: out first, so the new file counts.
+            let uid = uid.unwrap_or_default();
+            // Loaded already: out first, so the new file counts. bootout finishes on its own time; until then
+            // bootstrap says 5 (Input/output error) or 37. A few tries, about 2 s in all.
             let _ = env.run("launchctl", &["bootout", &format!("gui/{uid}/{LABEL}")]);
-            check(env.run("launchctl", &["bootstrap", &format!("gui/{uid}"), &f]), "launchctl bootstrap")
+            let mut tries = 0;
+            loop {
+                let r = env.run("launchctl", &["bootstrap", &format!("gui/{uid}"), &f]);
+                tries += 1;
+                match r {
+                    Some((5 | 37, _, _)) if tries < BOOTSTRAP_TRIES => std::thread::sleep(std::time::Duration::from_millis(250)),
+                    r => return check(r, "launchctl bootstrap"),
+                }
+            }
         }
         Kind::Systemd => {
             check(env.run("systemctl", &["--user", "daemon-reload"]), "systemctl --user daemon-reload")?;
@@ -286,7 +327,8 @@ pub fn off(env: &Env) -> Result<(), (&'static str, String)> {
     }
     match env.kind {
         Kind::Launchd => {
-            let _ = env.run("launchctl", &["bootout", &format!("gui/{}/{LABEL}", env.uid())]);
+            // No uid: it cannot be stopped, so the file stays and says it is on.
+            let _ = env.run("launchctl", &["bootout", &format!("gui/{}/{LABEL}", env.uid()?)]);
         }
         Kind::Systemd => {
             let _ = env.run("systemctl", &["--user", "disable", "--now", UNIT]);
@@ -308,7 +350,7 @@ pub fn restart_after_install(env: &Env, helper: &Path) -> Option<String> {
         return None;
     }
     let r = match env.kind {
-        Kind::Launchd => env.run("launchctl", &["kickstart", "-k", &format!("gui/{}/{LABEL}", env.uid())]),
+        Kind::Launchd => env.uid().ok().and_then(|uid| env.run("launchctl", &["kickstart", "-k", &format!("gui/{uid}/{LABEL}")])),
         Kind::Systemd => env.run("systemctl", &["--user", "try-restart", UNIT]),
     };
     Some(match r {
@@ -322,6 +364,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_service_tools_are_found_at_fixed_paths() {
+        let all = |_: &Path| true;
+        assert_eq!(tool("launchctl", None, all), PathBuf::from("/bin/launchctl"));
+        assert_eq!(tool("id", None, all), PathBuf::from("/usr/bin/id"));
+        assert_eq!(tool("systemctl", None, all), PathBuf::from("/usr/bin/systemctl"));
+        assert_eq!(tool("systemctl", None, |p: &Path| p == Path::new("/bin/systemctl")), PathBuf::from("/bin/systemctl"));
+        assert_eq!(tool("tailscale", None, all), PathBuf::from("tailscale"), "tailscale: PATH, then the Mac app");
+        assert_eq!(tool("launchctl", Some(Path::new("/fake")), all), PathBuf::from("/fake/launchctl"));
+    }
+
+    #[test]
+    fn a_session_value_with_a_line_break_is_refused() {
+        let hc = vec![("HC_SESSION".to_string(), "s1\nExecStartPre=/bin/sh".to_string())];
+        assert!(service_file(Kind::Systemd, "/h/bin/fm", "/h/me", "me@x.com", 8787, false, &hc).is_err());
+        assert!(service_file(Kind::Launchd, "/h/bin/fm", "/h/me", "me@x.com", 8787, false, &hc).is_err());
+    }
+
+    #[test]
     fn a_qr_code_is_a_square_of_modules() {
         let s = qr_svg("https://box.tail1.ts.net/").unwrap();
         assert!(s.starts_with("<svg") && s.contains("viewBox=\"0 0 33 33\""), "version 2 (25) plus the margin: {s}");
@@ -330,10 +390,10 @@ mod tests {
     #[test]
     fn the_file_carries_the_marker_and_the_session() {
         let hc = vec![("HC_SESSION".to_string(), "s1".to_string())];
-        let l = service_file(Kind::Launchd, "/h/bin/fm", "/h/me", "me@x.com", 8787, true, &hc);
+        let l = service_file(Kind::Launchd, "/h/bin/fm", "/h/me", "me@x.com", 8787, true, &hc).unwrap();
         assert!(ours(&l) && l.contains("<key>EnvironmentVariables</key><dict><key>HC_SESSION</key><string>s1</string></dict>"), "{l}");
         assert!(l.contains("<string>--read-only</string>") && l.ends_with("</dict>\n</plist>\n"), "{l}");
-        let s = service_file(Kind::Systemd, "/h/bin/fm", "/home/me", "me@x.com", 8787, false, &hc);
+        let s = service_file(Kind::Systemd, "/h/bin/fm", "/home/me", "me@x.com", 8787, false, &hc).unwrap();
         assert!(s.starts_with("# Made by Flockbook settings") && s.contains("[Service]\nEnvironment=\"HC_SESSION=s1\"\nExecStart="), "{s}");
         assert!(!ours(&serve::service("systemd", "/h/bin/fm", "/home/me", &serve::parse(&["--user".into(), "a".into()]).unwrap())));
     }

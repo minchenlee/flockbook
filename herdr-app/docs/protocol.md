@@ -149,7 +149,9 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 | `remote_helper_unsupported` | No helper for that machine's platform (Windows, or another CPU). `message` says which. |
 | `no-tailscale` | `phone on`: Tailscale is not installed, not running or not signed in. Nothing was written. |
 | `by-hand` | `phone on` / `off`: the service file was set up by hand (no Flockbook marker). It was not changed. |
-| `service` | `phone on`: launchctl or systemctl failed; `message` says which and its output. |
+| `service` | `phone on`: launchctl or systemctl failed (bootstrap is tried a few times while launchd is still busy), or `id -u` failed; `message` says which and its output. |
+| `bad-value` | `phone on`: the login (config.json `phone_user`) has spaces or control characters, or HC_SESSION / HC_SOCKET has a control character. Nothing was written. |
+| `write` | `phone on` / `off`: the service file could not be written or removed; `message` says why. No `.new` file is left. |
 | `remote-off` | The person chose Never for the helper on other machines (config.json `remote_helper`). Nothing ran there. |
 | `remote_failed` | hc could not run it there: unknown machine, no answer in 30 s, or too much output. |
 | `checksum` | `helper install`: the file is not the one the user said yes to, or it arrived changed. Nothing was installed. |

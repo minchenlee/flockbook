@@ -21,7 +21,11 @@ const LAUNCHCTL: &str = r#"#!/bin/sh
 echo "launchctl $*" >> "$FAKE/log"
 case "$1" in
   print) [ -f "$FAKE/loaded" ] || exit 113; if [ -f "$FAKE/exit" ]; then echo "state = not running"; echo "last exit code = $(cat "$FAKE/exit")"; else echo "state = running"; fi ;;
-  bootstrap) touch "$FAKE/loaded" ;;
+  bootstrap)
+    # Right after a bootout launchd is still busy: "Bootstrap failed: 5: Input/output error", `busy` times.
+    n=$(cat "$FAKE/busy" 2>/dev/null || echo 0)
+    if [ "$n" -gt 0 ]; then echo $((n - 1)) > "$FAKE/busy"; echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; fi
+    touch "$FAKE/loaded" ;;
   bootout) [ -f "$FAKE/loaded" ] || exit 3; rm -f "$FAKE/loaded" ;;
 esac
 exit 0
@@ -43,7 +47,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 "#;
-const ID: &str = "#!/bin/sh\necho 501\n";
+const ID: &str = "#!/bin/sh\n[ -f \"$FAKE/no-id\" ] && exit 1\necho 501\n";
 
 fn t() -> T {
     let tmp = tempfile::tempdir().unwrap();
@@ -72,7 +76,11 @@ fn signed_in(t: &T) {
 
 impl T {
     fn run(&self, kind: &str, args: &[&str]) -> Vec<Value> {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed"));
+        self.run_as(Path::new(env!("CARGO_BIN_EXE_flockbook-modfeed")), kind, args)
+    }
+    /// Runs the helper by `exe` (a symlink to it, say).
+    fn run_as(&self, exe: &Path, kind: &str, args: &[&str]) -> Vec<Value> {
+        let mut c = Command::new(exe);
         c.arg("phone").args(args).args(["--home", self.home.to_str().unwrap()]).env_clear();
         c.env("PATH", "/usr/bin:/bin").env("HOME", &self.user).env("FAKE", &self.bin);
         c.env("FLOCKBOOK_PHONE_BIN", &self.bin).env("FLOCKBOOK_PHONE_SERVICE", kind).env("HC_SESSION", "fb-test-phone");
@@ -284,4 +292,82 @@ fn once_serve_is_set_the_address_and_a_qr_code() {
     assert_eq!(p["serve"]["set"], false);
     assert_eq!(p["qr"], Value::Null);
     let _ = &t.root;
+}
+
+#[test]
+fn bootstrap_busy_right_after_bootout_is_tried_again() {
+    let t = t();
+    signed_in(&t);
+    fs::write(t.bin.join("busy"), "2").unwrap();
+    let p = t.phone("launchd", &["on"]);
+    assert_eq!(p["service"]["state"], "running", "{p} {}", t.log());
+    assert_eq!(t.log().matches("launchctl bootstrap").count(), 3, "{}", t.log());
+}
+
+#[test]
+fn bootstrap_that_stays_busy_gives_up_with_its_error() {
+    let t = t();
+    signed_in(&t);
+    fs::write(t.bin.join("busy"), "1000").unwrap();
+    let e = t.error("launchd", &["on"]).expect("an error");
+    assert_eq!(e["code"], "service");
+    assert!(e["message"].as_str().unwrap().contains("Input/output error"), "{e}");
+    let tries = t.log().matches("launchctl bootstrap").count();
+    assert!((2..=10).contains(&tries), "a few tries, not forever: {tries}");
+}
+
+#[test]
+fn no_uid_is_an_error_not_gui_0() {
+    let t = t();
+    signed_in(&t);
+    fs::write(t.bin.join("no-id"), "").unwrap();
+    let e = t.error("launchd", &["on"]).expect("an error");
+    assert_eq!(e["code"], "service");
+    assert!(e["message"].as_str().unwrap().contains("id -u"), "{e}");
+    assert!(!t.log().contains("gui/0"), "{}", t.log());
+}
+
+#[test]
+fn a_login_with_a_line_break_or_a_space_is_refused_and_nothing_is_written() {
+    for bad in ["me@example.com\nExecStartPre=/bin/sh -c id", "me @example.com", "me@example.com\u{7}"] {
+        let t = t();
+        signed_in(&t);
+        t.config(json!({"phone_user": bad}));
+        let e = t.error("systemd", &["on"]).unwrap_or_else(|| panic!("an error for {bad:?}"));
+        assert_eq!(e["code"], "bad-value", "{e}");
+        assert!(!t.unit().exists(), "{bad:?}");
+        assert!(!t.log().contains("systemctl"), "{}", t.log());
+    }
+}
+
+#[test]
+fn a_dollar_in_a_login_stays_a_dollar_in_the_unit() {
+    let t = t();
+    signed_in(&t);
+    t.config(json!({"phone_user": "me$HOME@example.com"}));
+    t.phone("systemd", &["on"]);
+    assert!(read(&t.unit()).contains("\"me$$HOME@example.com\""), "{}", read(&t.unit()));
+}
+
+#[test]
+fn a_failed_write_leaves_no_new_file_behind() {
+    let t = t();
+    signed_in(&t);
+    fs::create_dir_all(t.plist()).unwrap(); // the rename onto it fails
+    let e = t.error("launchd", &["on"]).expect("an error");
+    assert_eq!(e["code"], "write", "{e}");
+    let left: Vec<_> = fs::read_dir(t.plist().parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left, vec![std::ffi::OsString::from("dev.flockbook.serve.plist")], "no .new left");
+}
+
+#[test]
+fn the_file_names_the_helper_by_its_real_path() {
+    let t = t();
+    signed_in(&t);
+    let link = t.root.join("fm-link");
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_flockbook-modfeed"), &link).unwrap();
+    t.run_as(&link, "launchd", &["on"]);
+    let real = Path::new(env!("CARGO_BIN_EXE_flockbook-modfeed")).canonicalize().unwrap();
+    let f = read(&t.plist());
+    assert!(f.contains(&format!("<string>{}</string>", real.display())) && !f.contains("fm-link"), "{f}");
 }
