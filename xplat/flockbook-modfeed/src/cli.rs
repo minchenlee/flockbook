@@ -7,7 +7,7 @@
 //!   flockbook-modfeed card   --terminal <addr> [--all] [--cache <file>]   (--all: load every question; sends keys)
 //!   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
 //!   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
-//!   flockbook-modfeed paste-image --dir <folder>   (the clipboard's image as a PNG there; path null when none)
+//!   flockbook-modfeed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
 //!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
 //!   flockbook-modfeed helper remove --machine <m>
@@ -63,9 +63,18 @@ pub fn run(argv: &[String]) -> String {
         }
         "paste-image" => {
             let Some(dir) = opt("--dir") else { return r.fail("usage", "paste-image needs --dir <folder>") };
-            let Some(png) = paste::clipboard_png() else {
-                r.out.emit_value(json!({"type": "image", "path": null}));
-                return r.finish(true);
+            let png = match paste::clipboard() {
+                paste::Clip::Files(paths) => {
+                    // Finder or a file manager: attach these. `image` stays for a mod that reads only that line.
+                    r.out.emit_value(json!({"type": "files", "paths": paths}));
+                    r.out.emit_value(json!({"type": "image", "path": null}));
+                    return r.finish(true);
+                }
+                paste::Clip::Image(png) => png,
+                paste::Clip::Nothing => {
+                    r.out.emit_value(json!({"type": "image", "path": null}));
+                    return r.finish(true);
+                }
             };
             match paste::save(&png, Path::new(&dir), SystemTime::now()) {
                 Ok(p) => {

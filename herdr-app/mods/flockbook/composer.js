@@ -68,10 +68,38 @@ export function withFiles(text, files) {
   return text ? `${text} ${paths}` : paths;
 }
 
-// ⌘V (no other modifier).
-export function pasteKey(e) {
-  const m = e?.modifiers ?? {};
-  return e?.key === "v" && Boolean(m.platform || m.cmd) && !m.shift && !m.alt && !m.control;
+// ⌘V in the box (Ctrl+V on Linux). The box's own paste runs before any key handler and types the clipboard's
+// text, so a file copied in Finder came in as its name. The mod binds the chord under its own key context
+// instead (the keymap is the app's; the context keeps it to this box) and asks the sidecar first.
+export const PASTE_ACTION = "flockbook_paste";
+export const PASTE_CONTEXT = "FlockbookComposer";
+let pasteBound = false;
+function bindPaste(cx) {
+  if (pasteBound || typeof cx?.bind_keys !== "function") return;
+  try {
+    cx.bind_keys([{ keystroke: "secondary-v", action: PASTE_ACTION, context: `${PASTE_CONTEXT} > Input` }]);
+    pasteBound = true;
+  } catch { /* the box's own paste stays, and paste_other still attaches an image */ }
+}
+
+// What `paste-image` found to attach: copied files, else the saved image. Empty: paste the text.
+export function pastedFiles(lines) {
+  const files = lines.find((l) => l.type === "files")?.paths;
+  if (Array.isArray(files) && files.some(Boolean)) return files.filter((p) => typeof p === "string" && p);
+  const image = lines.find((l) => l.type === "image")?.path;
+  return image ? [image] : [];
+}
+
+// Enter in the box puts a new line at the cursor (over a selection) before it reports the submit, so in the
+// middle of the text that line went out. `before` is the text just before the key: when `now` is `before` with
+// one span turned into "\n", the text to send is `before`. Anything else is sent as it is.
+export function withoutEnter(now, before) {
+  if (typeof before !== "string" || now === before) return now;
+  let i = 0;
+  while (i < now.length && i < before.length && now[i] === before[i]) i++;
+  let j = 0;
+  while (j < now.length - i && j < before.length - i && now[now.length - 1 - j] === before[before.length - 1 - j]) j++;
+  return now.slice(i, now.length - j) === "\n" ? before : now;
 }
 
 export class Composer {
@@ -80,6 +108,9 @@ export class Composer {
   constructor(_cx) {
     this.input = TextareaState.new({ placeholder: "Reply to the agent", rows: 1 });
     this.input.set_auto_grow?.(1, 8);
+    bindPaste(_cx);
+    // A paste that found no text, when the binding above is missing: the clipboard's image, if any.
+    this.input.on("paste_other", (_e, cx) => cx.spawn((cx) => this.paste(cx, undefined)));
     // Enter sends. On Shift+Enter the box puts the new line in itself (at the cursor, over a selection);
     // the submit with shift only reports it, so do nothing here. Adding "\n" here gives two new lines.
     this.input.on("submit", (e, cx) => {
@@ -87,7 +118,14 @@ export class Composer {
       cx.spawn((cx) => this.submit(cx));
     });
     this.empty = true;
-    this.input.on("change", (_e, cx) => { const e = !this.input.value().trim(); if (e !== this.empty) { this.empty = e; cx.notify(); } });
+    // The last two texts the box reported, so a submit knows the text before Enter's new line (the box
+    // reports that line's change before or after the submit).
+    this.typed = ["", ""];
+    this.input.on("change", (_e, cx) => {
+      const v = this.input.value();
+      if (v !== this.typed[1]) this.typed = [this.typed[1], v];
+      const e = !v.trim(); if (e !== this.empty) { this.empty = e; cx.notify(); }
+    });
     this.drafts = new Map();   // address → { text, files } of agents not shown
     this.address = null;
     // address → { agent, path } the chat showed last (set by the chat); send is bound to it.
@@ -100,6 +138,9 @@ export class Composer {
     this.statusBusy = false;
   }
 
+  // Sets the box's text from here (no change report counts on it).
+  setText(v) { this.input.set_value(v); this.typed = [v, v]; }
+
   // Shows `agent`'s draft in the box. Safe while drawing: it only sets values.
   box(agent) {
     const a = agent?.address ?? null;
@@ -107,7 +148,7 @@ export class Composer {
       if (this.address) this.drafts.set(this.address, { text: this.input.value(), files: this.files });
       const d = (a && this.drafts.get(a)) || { text: "", files: [] };
       this.drafts.delete(a);
-      this.input.set_value(d.text); this.files = d.files; this.empty = !d.text.trim();
+      this.setText(d.text); this.files = d.files; this.empty = !d.text.trim();
       this.address = a; this.note = null; this.statusAt = 0;
     }
     return a ? this : null;
@@ -132,13 +173,18 @@ export class Composer {
     this.files = this.files.concat(add); this.note = null; cx.notify();
   }
 
-  // ⌘V with no text on the clipboard: the sidecar saves the clipboard's image as a PNG, attached
-  // like a picked file. Text pastes stay the box's own.
-  async pasteImage(cx) {
+  // ⌘V: copied files (Finder) are attached like picked files; plain text is typed at the cursor, also with a
+  // picture beside it (spreadsheet cells); an image alone (a screenshot, a browser's Copy Image) is attached.
+  // The sidecar decides (paste-image). `text` is the clipboard's text when the key was pressed. A broken
+  // sidecar still lets text paste.
+  async paste(cx, text) {
+    const a = this.address;
     const r = await sidecar.pasteImage();
-    const path = r.error ? null : r.lines.find((l) => l.type === "image")?.path;
-    if (r.error) this.note = { text: r.error.message, bad: true };
-    if (path) this.addFiles([path], cx);
+    if (this.address !== a) return;
+    const files = r.error ? [] : pastedFiles(r.lines);
+    if (files.length) return this.addFiles(files, cx);
+    if (text) { this.input.replace(text); const v = this.input.value(); this.typed = [v, v]; this.empty = !v.trim(); }
+    else if (r.error) this.note = { text: r.error.message, bad: true };
     cx.notify();
   }
 
@@ -152,11 +198,12 @@ export class Composer {
   async submit(cx) {
     const a = this.address, b = this;
     if (this.sending || !a) return;
-    const text = b.input.value().replace(/\s+$/, "");
-    if (!text.trim() && !b.files.length) { b.input.set_value(""); return; }
+    const now = b.input.value();
+    const text = withoutEnter(now, now === this.typed[1] ? this.typed[0] : this.typed[1]).replace(/\s+$/, "");
+    if (!text.trim() && !b.files.length) { b.setText(""); return; }
     const files = b.files;
     this.sending = true; this.note = null;
-    b.input.set_value(""); b.files = [];
+    b.setText(""); b.files = [];
     cx.notify();
     try {
       const r = await sidecar.send(a, withFiles(text, files), files, this.seen?.(a) ?? null);
@@ -165,7 +212,7 @@ export class Composer {
       // Only "sent" and "unconfirmed" (it may still arrive) mean the text went out; any other result did not send.
       if (r.error || !done || (done.result !== "sent" && done.result !== "unconfirmed")) {
         // Put the text back, unless the box moved to another agent or something new was typed.
-        if (this.address === a && !b.input.value()) { b.input.set_value(text); b.files = files; }
+        if (this.address === a && !b.input.value()) { b.setText(text); b.files = files; }
         else if (this.address !== a) this.drafts.set(a, { text, files });
         this.note = { text: moved ? sidecar.AGENT_CHANGED : (r.error?.message ?? done?.message) || "The message was not sent.", bad: true };
       } else if (done.result === "unconfirmed") {
@@ -190,7 +237,8 @@ export class Composer {
       .child(div().id(`file-x-${i}`).size(16).flex().items_center().justify_center().rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => { this.files = this.files.filter((f) => f !== p); cx.notify(); }).child("×"));
     return v_flex().id("composer").w_full().px(16).pb(14).pt(6).gap(6).items_center()
-      .on_key_down((e, cx) => { if (pasteKey(e) && cx.read_from_clipboard?.() === undefined) cx.spawn((cx) => this.pasteImage(cx)); })
+      .key_context(PASTE_CONTEXT)
+      .on_action(PASTE_ACTION, (_e, cx) => { const text = cx.read_from_clipboard?.(); cx.spawn((cx) => this.paste(cx, text)); })
       .when(setting("status_row") !== "hide", (el) => el.child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag))))
       .child(v_flex().id("box").w_full().max_w(800).rounded(16).bg(t.raised).border(1).border_color(t.border).shadow_sm().px(12).pt(10).pb(8).gap(6)
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))
