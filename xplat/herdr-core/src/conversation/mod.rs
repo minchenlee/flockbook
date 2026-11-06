@@ -760,7 +760,8 @@ pub fn command_text(name: &str, input: &Obj) -> String {
 
 /// Tags whose text is the user's own. Claude Code wraps pasted text in `<pasted_content id="…">`. Any other text
 /// that starts with a tag (`<system-reminder>`, `<command-name>`, `<task-notification>`, …) is injected context.
-pub const VISIBLE_TAGS: [&str; 1] = ["pasted_content"];
+/// `hc`: a note another agent sent with `hc send` (see `hc_note`).
+pub const VISIBLE_TAGS: [&str; 2] = ["pasted_content", "hc"];
 
 fn tag_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
@@ -770,6 +771,29 @@ fn tag_re() -> &'static Regex {
 fn pasted_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r#"<pasted_content(?: id="([^"]*)")?>"#).unwrap())
+}
+
+fn hc_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?s)^<hc(\s[^>]*)?>(.*)</hc>$").unwrap())
+}
+
+fn hc_from_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r#"\sfrom="([^"]*)""#).unwrap())
+}
+
+/// A note from another agent, as herdr-core's `hc send` types it: the whole message is one
+/// `<hc from="t2 name" …>text</hc>`. Returns the sender as written ("t2 name", or "" without `from`) and the text.
+pub fn hc_note(t: &str) -> Option<(String, String)> {
+    let m = hc_re().captures(text::trim(t))?;
+    let body = m.get(2).map_or("", |b| b.as_str());
+    if body.contains("</hc>") {
+        return None;
+    }
+    let attrs = m.get(1).map_or("", |a| a.as_str());
+    let from = hc_from_re().captures(attrs).map_or("", |f| f.get(1).map_or("", |x| x.as_str()));
+    Some((from.to_string(), text::trim(body).to_string()))
 }
 
 /// The text to show for a user message, or nil when it is injected context. Pasted blocks lose their wrapper

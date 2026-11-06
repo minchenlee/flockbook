@@ -29,6 +29,7 @@ One short line: what this release is about.
 
 ### ⚙️ Changes
 
+- Herdr app mod: a note another agent sends with `hc send` shows as one line, "↳ docs-worker: first line", that opens to the whole note on a click. Before, it was a full message bubble with its `<hc>` tag, or it did not show at all (in Codex chats, and short ones in Claude Code chats).
 - Phone page: opening an agent is a clear morph that runs to its end. Its row becomes the name at the top, a round back button comes in beside it, and the conversation rises in, also when it arrives a moment after the tap. Before, the animation was often cut short and stalled on long conversations. The top bar is now two pieces: the back button (arrow only) and the agent's name.
 - Herdr app mod: the Phone page settings walk you through the setup in four steps (Tailscale on this computer, the phone page on, Tailscale Serve, your phone), each done, to do now, or later, with the address and QR code as the last step.
 

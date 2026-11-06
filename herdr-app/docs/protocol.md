@@ -286,6 +286,7 @@ heights by it.
 |---|---|---|
 | `user` | `text`, `ts`, `images` (count, when any) | A right-aligned bubble. |
 | | `pics` (with `--pictures` only) | Where the pictures are in the log, for `serve`. |
+| | `from` (a note from another agent) | One line, "↳ docs-worker: first line", that opens to the whole note. |
 | `assistant` | `text` (markdown), `ts` | Full-width markdown. |
 | `tools` | `chips`, `ts` | A chip: "Ran 3 commands", expands to the calls. |
 | `perm` | `perm`, `text` (the title), `ts` | The approval card (when `perm.state` is `pending`). |
@@ -294,8 +295,13 @@ heights by it.
 | `sep` | `text` ("14:05", "Yesterday 09:12", "Mon 2 Nov 18:30") | A time separator. |
 | `footer` | `text` ("01:41 · Worked 36s · 3 tools") | The turn footer, under the turn's last row. |
 
+A note from another agent is a message that is one `<hc from="t2 docs-worker">…</hc>`, as herdr-core's `hc send`
+types it. Its `user` row has `from` (the sender as hc wrote it: the terminal, then the name when it has one; `""`
+without one) and `text` without the tag. A mod that does not know `from` shows the text as a bubble.
+
 ```json
 {"id":"u1","k":"user","text":"Fix the login bug","ts":1793670000000,"type":"row"}
+{"from":"t2 docs-worker","id":"u2","k":"user","text":"Done: notes updated.","ts":1793670001000,"type":"row"}
 {"id":"a1","k":"assistant","text":"Looking at it now.","ts":1793670005000,"type":"row"}
 {"chips":[{"calls":[{"done":true,"error":false,"name":"Bash","output":"ok","summary":"swift test"}],"symbol":"terminal","text":"Ran a command"}],"id":"a1-t3","k":"tools","ts":1793670006000,"type":"row"}
 {"id":"f-a2","k":"footer","text":"01:40 · Worked 36s · 1 tool","type":"row"}
