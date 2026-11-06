@@ -104,7 +104,7 @@ test("On, Serve not set: the step is right under Running, above the login and Re
   const s = byId(el(), "set-phone");
   const text = textOf(s);
   const at = (re) => text.search(re);
-  assert.ok(at(/Running/) >= 0 && at(/One step left: run this once in a terminal/) > at(/Running/), text);
+  assert.ok(at(/Running/) >= 0 && at(/Run this once in a terminal on this computer/) > at(/Running/), text);
   assert.ok(at(/tailscale serve --bg 8787/) < at(/Tailscale login/), "the command before the login field");
   assert.ok(at(/tailscale serve --bg 8787/) < at(/Read-only/), "and before Read-only");
   assert.ok(byId(s, "phone-serve-copy"));
@@ -174,7 +174,8 @@ test("Off stops it; an error says what failed and where to look", async () => {
   click(el(), "set-phone-off");
   await settle(); await settle();
   assert.deepEqual(phoneCalls(), ["phone status", "phone off"]);
-  assert.match(textOf(byId(el(), "phone-state")), /Not running|Off/);
+  assert.equal(byId(el(), "phone-state"), null, "Off: no state line, the switch and step 2 say it");
+  assert.ok(byId(el(), "phone-step-2-now"));
   fail = "systemctl --user restart failed (1): no bus";
   click(el(), "set-phone-on");
   await settle(); await settle();
@@ -246,4 +247,76 @@ test("the login field looks like a field: a frame and background, the row line's
   const row = byId(s, "phone-login-row");
   assert.match(textOf(row.kids[0]), /^Tailscale login Only this account/);
   assert.equal(row.kids[1], f);
+});
+
+// The setup guide: four steps, each done, the one to do now, or later (dim), under SET UP; the options after.
+const stepState = (s, n) => ["done", "now", "later"].find((k) => byId(s, `phone-step-${n}-${k}`));
+const steps = (s) => [1, 2, 3, 4].map((n) => stepState(s, n));
+const order = (s, ...res) => { const t = textOf(s); return res.map((r) => t.search(r)); };
+
+test("guide, Off: Tailscale done with the login; turning the page on is the step now; Serve and the phone later", async () => {
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  assert.deepEqual(steps(s), ["done", "now", "later", "later"]);
+  assert.match(textOf(byId(s, "phone-step-1")), /Tailscale on this computer.*Signed in as me@example\.com\./);
+  assert.match(textOf(byId(s, "phone-step-2")), /Phone page on.*Turn it on with the switch above\./);
+  assert.equal(byId(s, "phone-serve-command"), null, "a later step shows no command");
+  const [setUp, options, login] = order(s, /SET UP/, /OPTIONS/, /Tailscale login/);
+  assert.ok(setUp >= 0 && setUp < options && options < login, "SET UP, then OPTIONS with the login");
+  assert.match(textOf(s), /Read your agents on your phone, through Tailscale\./);
+});
+
+test("guide, no Tailscale: step 1 says why, links Get Tailscale and the full guide address; no options", async () => {
+  ts = null;
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  assert.deepEqual(steps(s), ["now", "later", "later", "later"]);
+  const one = byId(s, "phone-step-1");
+  assert.match(textOf(one), /Tailscale is not installed\./);
+  let opened = null;
+  byId(one, "phone-get-tailscale")._h.on_click({}, { ...fakeCx(), open_url: (u) => { opened = u; } });
+  assert.equal(opened, "https://tailscale.com/download");
+  assert.equal(textOf(byId(one, "phone-guide")), "https://github.com/minchenlee/flockbook/blob/main/xplat/flockbook-modfeed/SERVE.md");
+  assert.ok(byId(one, "phone-guide-copy"));
+  assert.doesNotMatch(textOf(s), /Guide: SERVE\.md/, "not a bare file name");
+  assert.equal(byId(s, "phone-login-row"), null);
+  assert.doesNotMatch(textOf(s), /OPTIONS/);
+});
+
+test("guide, On and Serve missing: steps 1 and 2 done; step 3 is the command to run, with Copy", async () => {
+  state = "running";
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  assert.deepEqual(steps(s), ["done", "done", "now", "later"]);
+  const three = byId(s, "phone-step-3");
+  assert.match(textOf(three), /Tailscale Serve set.*Run this once in a terminal on this computer:/);
+  assert.ok(byId(three, "phone-serve-command") && byId(three, "phone-serve-copy"));
+  assert.match(textOf(three), /This step is done by itself once Serve is set\./);
+  assert.match(textOf(byId(s, "phone-step-2")), /also after Herdr quits/);
+});
+
+test("guide, set up: steps 1 to 3 done; step 4 is the phone: sign in as the login, the QR and the address, help", async () => {
+  state = "running"; url = "https://box.tail1.ts.net/";
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  assert.deepEqual(steps(s), ["done", "done", "done", "now"]);
+  const four = byId(s, "phone-step-4");
+  assert.match(textOf(four), /On your phone: install Tailscale and sign in as me@example\.com\. Then scan this code or open the address\./);
+  assert.ok(byId(four, "phone-qr") && byId(four, "phone-url") && byId(four, "phone-url-copy"));
+  assert.match(textOf(four), /Can't open it\? Turn Tailscale on in the phone, and check that it is signed in as me@example\.com\./);
+  const [qr, options] = order(s, /On your phone/, /OPTIONS/);
+  assert.ok(qr < options, "the goal comes before the options");
+});
+
+test("guide, stopped with an error: the red line is at the top; step 2 is the step now and says how to try again", async () => {
+  state = "error";
+  const { el } = await screen();
+  const s = byId(el(), "set-phone");
+  const st = byId(s, "phone-state");
+  assert.match(textOf(st), /journalctl --user -u flockbook-serve/);
+  assert.equal(st.kids[0]._a.bg, "#blocked", "a red dot");
+  const [top, setUp] = order(s, /journalctl/, /SET UP/);
+  assert.ok(top < setUp, "above the steps");
+  assert.deepEqual(steps(s), ["done", "now", "later", "later"]);
+  assert.match(textOf(byId(s, "phone-step-2")), /Not running\. To try again, turn it Off, then On\./);
 });

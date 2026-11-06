@@ -28,4 +28,6 @@ One short line: what this release is about.
 
 ### ⚙️ Changes
 
+- Herdr app mod: the Phone page settings walk you through the setup in four steps (Tailscale on this computer, the phone page on, Tailscale Serve, your phone), each done, to do now, or later, with the address and QR code as the last step.
+
 - Herdr app mod: Flockbook settings are laid out as Herdr's own Settings: General, Phone page and Updates in a sidebar on the left, each setting with its line on the left and its switch on the right.
