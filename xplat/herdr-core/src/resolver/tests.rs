@@ -689,3 +689,34 @@ fn claude_pid_file_with_linux_tick_proc_start() {
     let reused = file(ticks + 1_000_000); // pid reused: another start
     assert_eq!(claude_session_source_with(&[pid], &procs, |_| Some(reused.clone().into_bytes())), None);
 }
+
+/// Codex writes a rollout for each subagent it starts (the approvals reviewer "guardian", `spawn_agent` helpers)
+/// in the same cwd, with `source: {"subagent": ...}`. They are not a pane's conversation.
+#[test]
+fn codex_subagent_rollouts_are_not_candidates() {
+    let (_t, root) = tmp();
+    let start = Utc::now() - Duration::seconds(120);
+    let day = day_folder(&root, local_naive(start).date());
+    fs::create_dir_all(&day).unwrap();
+    let write = |dt: i64, id: &str, source: &str| {
+        let t = start + Duration::seconds(dt);
+        let p = format!("{day}/{}", rollout_name(t, id));
+        let meta = format!(
+            r#"{{"timestamp":"x","type":"session_meta","payload":{{"id":"{id}","timestamp":"{}","cwd":"/w/lead","source":{source}}}}}"#,
+            iso(t)
+        ) + "\n";
+        fs::write(&p, meta).unwrap();
+        p
+    };
+    let lead = write(2, "lead", r#""cli""#);
+    let guardian = write(40, "guardian", r#"{"subagent":{"other":"guardian"}}"#);
+    assert_eq!(codex_meta(&guardian), None, "a subagent rollout has no pane meta");
+    assert_eq!(codex_meta(&lead).map(|m| m.0), Some("/w/lead".into()), "a cli rollout still reads");
+    assert_eq!(codex_candidates(&root, "/w/lead", start, Utc::now()), vec![lead.clone()], "the subagent rollout is skipped");
+
+    let procs = vec![proc_(900_002, 1, start, "node /opt/bin/codex HC_TERMINAL_ID=t4")];
+    let need = Need::new("hc:t4", "codex", "/w/lead", vec![900_002]);
+    let mut r = resolver(|r| r.codex_dir = root.clone());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t4").cloned();
+    assert_eq!(got, Some(lead), "the lead's rollout resolves although its guardian wrote one in the same cwd");
+}
