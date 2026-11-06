@@ -385,6 +385,10 @@ main.split.side-shown { --side: calc(320px + env(safe-area-inset-left)); --gl: 1
 ::view-transition-new(fb-back) { animation: fb-pop .3s var(--spring) .12s both; }
 ::view-transition-old(fb-back) { animation: fb-out .12s ease-in both; }
 ::view-transition-new(fb-body) { animation: fb-rise .34s cubic-bezier(.3, .7, .2, 1) .06s both; }
+/* The bar's pieces above the rows (the groups otherwise stack in page order, the rows last). A snapshot has no
+   backdrop blur, so the glass capsule would show the rows through it: a solid backing while it moves. */
+::view-transition-group(fb-sheet), ::view-transition-group(fb-dot), ::view-transition-group(fb-title), ::view-transition-group(fb-back) { z-index: 2; }
+::view-transition-new(fb-sheet) { background: var(--solid-bar); border-radius: 22px; }
 @keyframes fb-pop { from { opacity: 0; transform: scale(.6); } }
 @keyframes fb-out { to { opacity: 0; transform: scale(.6); } }
 @keyframes fb-rise { from { opacity: 0; transform: translateY(24px); } }

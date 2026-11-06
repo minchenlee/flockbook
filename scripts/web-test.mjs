@@ -1826,6 +1826,29 @@ async function morph() {
     check(ran(e), `morph: answer 400 ms late -> not cut when the rows come during the morph (${says(e)})`);
     timing(fast(e) && e.wait < 250, `morph: answer 400 ms late, starts after the 150 ms wait, no frame of 60 ms or more (wait ${e?.wait}, worst ${e?.worst})`);
     check(await p.until(`${rows} >= 100`, 8000) === true, `morph: and then the rows are all in (${await p.eval(rows)})`);
+    // Mid-morph the rows (fb-body) stacked above the capsule, and its glass (no backdrop blur in a snapshot) showed
+    // them through: the name was hidden until the end. Paused at 300 ms: the bar's pieces above the rows, a solid
+    // backing under the capsule; once ended, the name is what is on top at its place.
+    await go(0, false);
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await p.eval(`(() => { const svt = document.startViewTransition; document.startViewTransition = function (cb) {
+      document.startViewTransition = svt; const t = svt.call(this, cb);
+      t.ready.then(() => { for (const a of document.getAnimations().filter((a) => a.effect?.pseudoElement)) { a.pause(); a.currentTime = 300; } window.__paused = true; });
+      return t; }; window.__paused = false; return true; })()`);
+    await p.eval(`document.querySelector(".row[data-pane='w2:p2']").click()`);
+    await p.until("window.__paused", 4000);
+    const stack = await p.eval(`(() => { const css = (pe) => getComputedStyle(document.documentElement, pe);
+      const z = (n) => parseInt(css('::view-transition-group(' + n + ')').zIndex) || 0;
+      const bg = css('::view-transition-new(fb-sheet)').backgroundColor, alpha = /rgba/.test(bg) ? parseFloat(bg.split(',')[3]) : bg.startsWith('rgb') ? 1 : 0;
+      return { body: z('fb-body'), sheet: z('fb-sheet'), dot: z('fb-dot'), title: z('fb-title'), back: z('fb-back'), bg, alpha }; })()`);
+    await p.eval("document.getAnimations().forEach((a) => a.finish()); true");
+    await new Promise((r) => setTimeout(r, 300));
+    const seen = await p.eval(`(() => { const n = document.querySelector('section.conversation > .top .bar-name'); if (!n) return null;
+      const r = n.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { name: n.textContent, on: !!at && n.contains(at), w: Math.round(r.width) }; })()`);
+    check(!!stack && Math.min(stack.sheet, stack.dot, stack.title, stack.back) > stack.body && stack.alpha === 1,
+      `morph: mid-morph the capsule and the back button are above the rows, the capsule on a solid backing (${says(stack)})`);
+    check(!!seen && seen.on && seen.w > 0 && seen.name.includes("Notes"), `morph: after the morph the name is on top in its capsule (${says(seen)})`);
   } finally {
     await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
     hub.stdin.write("session w2:p2 s4\n");   // the pane's own session again, for the other sections
