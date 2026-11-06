@@ -136,6 +136,15 @@ jobs:
       - name: HerdrKitChecks
         run: swift run HerdrKitChecks
 
+      # The phone page's open/close morph in a headless browser (Chrome's own headless mode, no window), against the fake
+      # hub: the first page held as a phone's round trip, CPU 4x slower (scripts/web-test.mjs --only morph).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Phone page morph (headless browser)
+        timeout-minutes: 5
+        run: node scripts/web-test.mjs --only morph
+
       # Parity: the Swift and the Rust flockbook-modfeed on the same synthetic fixtures and a fake herdr-core
       # (scripts/modfeed-parity). Every command's output and the keys and text it sent must match, and some steps
       # have a fixed expected result. In this job, so the run keeps 5 macOS jobs at most; only when a sidecar file
