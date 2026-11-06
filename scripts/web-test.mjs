@@ -11,6 +11,7 @@ import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { inflateSync } from "node:zlib";
 
 const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt > 0 ? process.argv[onlyAt + 1] : null;
@@ -1728,6 +1729,34 @@ function morphProbe() { return `(() => {
  *  ms here) on a CPU 4x slower: the transition is not cut short (its named nodes stay in the page), it lasts its 420 ms,
  *  and (WEB_MORPH_STRICT=1) from the tap to its end no frame takes 60 ms or more. Before, an answer after the transition's start made the bar anew and Chrome ended
  *  the morph at 170-290 ms, and 100 rows in the update took one frame of 100-150 ms. WEB_MORPH_DEBUG=1: each frame. */
+/** RGBA pixels of a PNG from Chrome (8-bit RGB or RGBA, no interlace): { w, h, px }. */
+function pngPixels(buf) {
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20), type = buf[25], bpp = type === 6 ? 4 : 3;
+  const idat = [];
+  for (let i = 8; i < buf.length;) { const n = buf.readUInt32BE(i), t = buf.toString("latin1", i + 4, i + 8); if (t === "IDAT") idat.push(buf.subarray(i + 8, i + 8 + n)); i += 12 + n; }
+  const raw = inflateSync(Buffer.concat(idat)), stride = w * bpp, px = Buffer.alloc(w * h * 4);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? line[x - bpp] : 0, b = prev[x], c = x >= bpp ? prev[x - bpp] : 0;
+      const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+      line[x] = (line[x] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255;
+    }
+    for (let x = 0; x < w; x++) for (let k = 0; k < 4; k++) px[(y * w + x) * 4 + k] = k < bpp ? line[x * bpp + k] : 255;
+    prev = line;
+  }
+  return { w, h, px };
+}
+/** The share of pixels that differ (any channel by more than 24) between two same-size PNGs. */
+function pngDiff(a, b) {
+  const A = pngPixels(a), B = pngPixels(b);
+  if (A.w !== B.w || A.h !== B.h) return 1;
+  let n = 0;
+  for (let i = 0; i < A.px.length; i += 4) if ([0, 1, 2].some((k) => Math.abs(A.px[i + k] - B.px[i + k]) > 24)) n++;
+  return n / (A.w * A.h);
+}
+
 async function morph() {
   phase("morph");
   const p = await page(await context(), true);
@@ -1841,7 +1870,7 @@ async function morph() {
       const z = (n) => parseInt(css('::view-transition-group(' + n + ')').zIndex) || 0;
       const bg = css('::view-transition-new(fb-sheet)').backgroundColor, alpha = /rgba/.test(bg) ? parseFloat(bg.split(',')[3]) : bg.startsWith('rgb') ? 1 : 0;
       return { body: z('fb-body'), sheet: z('fb-sheet'), dot: z('fb-dot'), title: z('fb-title'), back: z('fb-back'), bg, alpha }; })()`);
-    await p.eval("document.getAnimations().forEach((a) => a.finish()); true");
+    await p.eval("document.getAnimations().filter((a) => a.effect?.pseudoElement).forEach((a) => a.finish()); true");
     await new Promise((r) => setTimeout(r, 300));
     const seen = await p.eval(`(() => { const n = document.querySelector('section.conversation > .top .bar-name'); if (!n) return null;
       const r = n.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -1849,6 +1878,39 @@ async function morph() {
     check(!!stack && Math.min(stack.sheet, stack.dot, stack.title, stack.back) > stack.body && stack.alpha === 1,
       `morph: mid-morph the capsule and the back button are above the rows, the capsule on a solid backing (${says(stack)})`);
     check(!!seen && seen.on && seen.w > 0 && seen.name.includes("Notes"), `morph: after the morph the name is on top in its capsule (${says(seen)})`);
+    // Back to the list, paused at 300 ms. The back button's glass (backdrop-filter) stayed on its group for the whole
+    // morph, a blurred square over the list's title; and the tap scrolled the conversation to its top (the empty
+    // fragment) before the old picture was taken, so the close started from the wrong place.
+    await p.until(`${rows} >= 100`, 8000);
+    await p.eval("window.scrollTo(0, document.documentElement.scrollHeight - innerHeight - 300); true");
+    await new Promise((r) => setTimeout(r, 300));
+    const was = await p.eval("Math.round(scrollY)");
+    await p.eval(`(() => { const svt = document.startViewTransition; window.__close = { start: -1, paused: false }; document.startViewTransition = function (cb) {
+      document.startViewTransition = svt; window.__close.start = Math.round(scrollY); const t = svt.call(this, cb);
+      t.ready.then(() => { for (const a of document.getAnimations().filter((a) => a.effect?.pseudoElement)) { a.pause(); a.currentTime = 300; } window.__close.paused = true; });
+      return t; }; return true; })()`);
+    await p.eval("document.querySelector('section.conversation .top .back').click(); true");
+    await p.until("window.__close.paused", 4000);
+    await new Promise((r) => setTimeout(r, 200));
+    const clip = await p.eval(`(() => { const t = document.querySelector('header h1, .top h1') ?? document.querySelector('h1'); const r = t?.getBoundingClientRect();
+      return r ? { x: 0, y: 0, width: Math.ceil(r.right + 8), height: Math.ceil(r.bottom + 8), scale: 1 } : null; })()`);
+    const shoot = async () => clip ? Buffer.from((await p.cdp("Page.captureScreenshot", { format: "png", clip })).data, "base64") : null;
+    const mid = await shoot();
+    const start = await p.eval("window.__close.start");
+    await p.eval("document.getAnimations().filter((a) => a.effect?.pseudoElement).forEach((a) => a.finish()); true");
+    await new Promise((r) => setTimeout(r, 400));
+    const end = await shoot();
+    const diff = mid && end ? Math.round(pngDiff(mid, end) * 1000) / 10 : 100;
+    check(!!clip && diff < 2, `morph: back to the list, at 300 ms nothing covers the list's title (pixels differing from the end: ${diff}%, ${says(clip)})`);
+    check(start === was, `morph: back to the list starts from where the conversation was read (scrollY ${was} at the tap, ${start} at the start)`);
+    // The back button steps back in history (no entry of its own): the phone's Back after it does not open the agent
+    // again. (The entry before may be another page load: the page is read again once it settles.)
+    const listAt = await p.eval("location.hash");
+    await p.eval("history.back(); true");
+    await new Promise((r) => setTimeout(r, 1200));
+    await p.until("document.readyState === 'complete'", 6000);
+    const after = await p.eval("location.hash + ' ' + !!document.querySelector(\"section.conversation[data-pane='w2:p2']\")").catch((e) => String(e));
+    check(listAt === "" && !/w2(%3A|:)p2|true$/.test(after), `morph: after Back to the list, the phone's Back does not open the agent again (list at '${listAt}', then '${after}')`);
   } finally {
     await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
     hub.stdin.write("session w2:p2 s4\n");   // the pane's own session again, for the other sections

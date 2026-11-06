@@ -363,6 +363,9 @@ async function follow()                {
   if (want === state.watching) { render(); return; }
   if (state.watching) request({ type: "unwatch", pane: state.watching });
   const from = state.watching;
+  if (!from && want) listY = window.scrollY;
+  if (want && fromList) history.replaceState({ fbList: true }, "");
+  fromList = false;
   state.watching = want;
   cancelRound();
   following = true;   // an agent opens at its newest message
@@ -391,13 +394,19 @@ async function follow()                {
     if (gen !== follows) return;
     opening = false;
   }
-  navigate(from, want, draw);
+  navigate(from, want, want ? draw : () => { draw(); window.scrollTo(0, listY); });
   if (asked) await asked;
 }
 /** Each `follow`, and the open waiting for its first page. */
 let follows = 0, opening = false;
 let firstPage                                               = null;
 const FIRST_PAGE_MS = 150;
+/** The list's place, kept while an agent is open: the page puts it back (the browser does not, see below). `fromList`:
+ *  the next `follow` opens an agent from the list's row. */
+let listY = 0, fromList = false;
+// History steps do not move the page: closing morphs from where the conversation was read, and the list goes back to
+// `listY` by itself.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 addEventListener("hashchange", follow);
 
 // --- The newest message. An open conversation stays at the bottom while rows arrive and lay out (markdown, images),
@@ -547,7 +556,15 @@ window.visualViewport?.addEventListener("resize", toBottom);
 new ResizeObserver(toBottom).observe(document.body);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") toBottom(); });
 addEventListener("pageshow", toBottom);
-function open(pane        )       { location.hash = `pane=${encodeURIComponent(pane)}`; }
+function open(pane        )       { fromList = true; location.hash = `pane=${encodeURIComponent(pane)}`; }
+/** Back to the list. Opened from the list: the history entry before is the list, so back to it (the phone's Back then
+ *  does not come here again). Opened from its address: this entry becomes the list. No fragment navigation (an empty
+ *  fragment scrolls the page to its top before the morph takes its picture). */
+function toList()       {
+  if ((history.state                               )?.fbList) { history.back(); return; }
+  history.replaceState(null, "", location.pathname + location.search);
+  void follow();
+}
 
 // --- Helpers.
 const order                         = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 };
@@ -738,8 +755,9 @@ function moreRows(pane        )       {
 /** Runs `update` (the render that changes screens), morphing from the row of the agent opened or closed. */
 function navigate(from               , to               , update            )       {
   const pane = to ?? from;
-  // Closing, the rows go with the page's cross-fade: a picture of all of them (the whole list) costs a long frame.
-  const before = pane && !still.matches && !split() && state.token && state.welcomed ? (to ? rowParts(pane) : barParts().slice(0, 4)) : [];
+  // Closing, the rows go with the page's cross-fade: a picture of all of them (the whole list) costs a long frame. So
+  // does the back button: named, its glass (backdrop-filter) stays on its group to the end, a blurred square.
+  const before = pane && !still.matches && !split() && state.token && state.welcomed ? (to ? rowParts(pane) : barParts().slice(0, 3)) : [];
   if (!pane || !before.length || !before[0]) { update(); return; }
   const after = ()                     => (to ? barParts() : rowParts(pane));
   const doc = document                 ;
@@ -1268,7 +1286,7 @@ function conversationScreen(pane        )              {
     wide
       ? h("button", { id: "side-toggle", class: "back side-toggle", type: "button", "aria-controls": "agents", "aria-expanded": shown ? "true" : "false",
           "aria-label": shown ? "Hide agents" : "Show agents", title: shown ? "Hide agents" : "Show agents", onclick: toggleSide }, sidebarGlyph())
-      : h("button", { class: "back round glass-bar", type: "button", "aria-label": "Agents", title: "Agents", onclick: () => { location.hash = ""; } }, backGlyph()),
+      : h("button", { class: "back round glass-bar", type: "button", "aria-label": "Agents", title: "Agents", onclick: toList }, backGlyph()),
     h("span", { class: wide ? "bar-title" : "bar-title glass-bar" }, dot(status), team === "lastLead"
       ? h("span", { class: "bar-name bar-stack" }, h("span", {}, title), h("span", { class: "team-line" }, "Agent team: showing the lead's last known session."))
       : h("span", { class: "bar-name" }, title)));
