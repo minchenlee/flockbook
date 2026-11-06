@@ -527,7 +527,11 @@ impl SessionResolver {
             return if is_claimed(&sid, claimed) { (None, Some(pid)) } else { (Some(sid), Some(pid)) };
         }
         let tree = subtree(agent.pid, procs);
-        let open = (self.open_files)(&tree);
+        let mut open = (self.open_files)(&tree);
+        if n.kind == "codex" {
+            // Codex also keeps its subagents' rollouts open: only the pane's own one counts.
+            open.retain(|p| !(last_path_component(p).starts_with("rollout-") && codex_subagent_rollout(p)));
+        }
         if n.kind == "agy" {
             // agy keeps no log open: its presence lock names the conversation
             return match agy_log_path(&open, &self.agy_dir) {
@@ -1125,9 +1129,25 @@ pub fn codex_meta_data(data: &[u8]) -> Option<(String, Date)> {
         return None;
     }
     let p = o.get("payload")?.as_object()?;
+    if is_subagent_source(p) {
+        return None;
+    }
     let cwd = p.get("cwd")?.as_str()?;
     let ts = p.get("timestamp").and_then(|v| v.as_str()).or_else(|| o.get("timestamp").and_then(|v| v.as_str()))?;
     Some((cwd.to_string(), parse_iso(ts)?))
+}
+
+/// A subagent's rollout (the approvals reviewer "guardian", `spawn_agent` helpers): `source` is `{"subagent": ...}`.
+fn is_subagent_source(payload: &serde_json::Map<String, Value>) -> bool {
+    payload.get("source").and_then(|s| s.as_object()).is_some_and(|s| s.contains_key("subagent"))
+}
+
+/// Whether the rollout at `path` belongs to a subagent of the Codex that keeps it open, not to the pane.
+fn codex_subagent_rollout(path: &str) -> bool {
+    let Some(data) = read_prefix(path, 1 << 20) else { return false };
+    let nl = data.iter().position(|b| *b == b'\n').unwrap_or(data.len());
+    let Ok(Value::Object(o)) = serde_json::from_slice::<Value>(&data[..nl]) else { return false };
+    o.get("payload").and_then(|p| p.as_object()).is_some_and(is_subagent_source)
 }
 
 /// The day folders (`<dir>/YYYY/MM/DD`, local time) a rollout started at or after `after` can be in, up to `now`

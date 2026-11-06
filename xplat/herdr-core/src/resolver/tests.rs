@@ -711,6 +711,7 @@ fn codex_subagent_rollouts_are_not_candidates() {
     let lead = write(2, "lead", r#""cli""#);
     let guardian = write(40, "guardian", r#"{"subagent":{"other":"guardian"}}"#);
     assert_eq!(codex_meta(&guardian), None, "a subagent rollout has no pane meta");
+    assert!(codex_subagent_rollout(&guardian) && !codex_subagent_rollout(&lead), "the open-file filter tells them apart");
     assert_eq!(codex_meta(&lead).map(|m| m.0), Some("/w/lead".into()), "a cli rollout still reads");
     assert_eq!(codex_candidates(&root, "/w/lead", start, Utc::now()), vec![lead.clone()], "the subagent rollout is skipped");
 

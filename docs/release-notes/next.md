@@ -18,6 +18,7 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 
+- Herdr app mod: a Codex chat stays filled once the agent runs a command under automatic approval review or starts a subagent. Codex writes a session file for each of its subagents in the same folder, and the helper took it for a second conversation and showed none.
 - Herdr app mod on Linux: Claude Code chats show their messages. The helper did not read Claude Code's session file there (its start time is in another form on Linux), so the chat stayed empty while sending still worked.
 - Herdr app mod: the QR code on the Phone page was blank (a white box). It shows now, and a new address gets a new code.
 - Herdr app mod: with the Phone page On, the one `tailscale serve` command shows right under Running, and the address and QR code appear once it has run, without reopening settings. When port 443 already goes to another service, the command uses 8443 instead of replacing it, and says so.
