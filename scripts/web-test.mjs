@@ -1823,11 +1823,20 @@ async function morph() {
   await p.goto(origin + "/");
   await p.eval("localStorage.setItem('flockbook.token', 'input-token')");
   hub.stdin.write("session w2:p2 morph 0\nrich morph 100\n");
+  // Every wait below is for a state (a morph's end, two frames drawn), with a long limit: on a shared CI runner one
+  // morph took up to 3 s at CPU 4x, and fixed waits came out too short. The CPU is slowed 4x only with
+  // WEB_MORPH_STRICT=1 (a quiet machine, where frame times are checked too); else 2x (WEB_MORPH_CPU to change it).
+  const strict = process.env.WEB_MORPH_STRICT === "1";
+  const CPU = strict ? 4 : Number(process.env.WEB_MORPH_CPU ?? 2);
+  const LIMIT = 30000;
+  const settled = "window.__m.vt.every((v) => v.end > 0)";
+  const frames = () => p.eval("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))");
   const listed = async () => {
     await p.eval("history.replaceState(null, '', '/')");
     await p.reload();
-    if (!await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\") && !!window.__m", 8000)) throw new Error("morph: the list did not load");
-    await new Promise((r) => setTimeout(r, 300));
+    if (!await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\") && !!window.__m", LIMIT)) throw new Error("morph: the list did not load");
+    await p.until(`document.readyState === 'complete' && ${settled}`, LIMIT);
+    await frames();
   };
   await listed();
   const rows = "document.querySelectorAll('section.conversation .items > [data-id]').length";
@@ -1839,11 +1848,13 @@ async function morph() {
     const tap = await p.eval(`(() => { const e = document.querySelector(${JSON.stringify(open ? ".row[data-pane='w2:p2']" : "section.conversation .top .back")});
       if (!e) return 0; const t = performance.now(); e.click(); return t; })()`);
     if (!tap) return null;
-    if (!await p.until(`window.__m.vt[${n}]?.end > 0`, 6000)) {
+    // Not ended within the limit: why, as the result (it has no rows: the checks print it whole).
+    if (!await p.until(`window.__m.vt[${n}]?.end > 0`, LIMIT)) {
       return p.eval(`({ started: window.__m.vt.length > ${n}, visible: document.visibilityState, transitions: !!document.startViewTransition,
         still: matchMedia('(prefers-reduced-motion: reduce)').matches, wide: innerWidth })`);
     }
-    await new Promise((r) => setTimeout(r, 100));
+    // The frames up to 20 ms after the end are counted: wait for one drawn after that.
+    await p.until(`window.__m.frames.some(([t]) => t > window.__m.vt[${n}].end + 20)`, LIMIT);
     return p.eval(`(() => { const r = window.__m.vt[${n}];
       const f = window.__m.frames.filter(([t]) => t > ${tap} && t <= r.end + 20).map(([, d]) => d);
       return { wait: Math.round(r.start - ${tap}), ms: Math.round(r.end - r.start), rows: r.rows, kept: r.kept, named: r.named.length, worst: Math.round(Math.max(0, ...f)), f: ${!!process.env.WEB_MORPH_DEBUG} ? window.__m.frames.filter(([t]) => t > ${tap} - 50 && t <= r.end + 20).map(([t, d]) => Math.round(t - ${tap}) + ":" + Math.round(d)).join(" ") : undefined, msgs: ${!!process.env.WEB_MORPH_DEBUG} ? (window.__m.msgs ?? []).filter(([t]) => t > ${tap} - 50).map(([t, d, n]) => Math.round(t - ${tap}) + ":" + Math.round(d) + "ms/" + n).join(" ") : undefined }; })()`);
@@ -1854,9 +1865,8 @@ async function morph() {
   const fast = (r) => !!r && r.worst < 60;
   // Frame times and waits are checked only with WEB_MORPH_STRICT=1 (a quiet machine): on a shared CI runner they vary
   // (100-333 ms frames seen), so there they are printed, and the morph running to its end is what fails.
-  const strict = process.env.WEB_MORPH_STRICT === "1";
   const timing = (ok, name) => { if (strict) check(ok, name); else console.log(`info ${name}: ${ok ? "within" : "over"} the strict budget`); };
-  await p.cdp("Emulation.setCPUThrottlingRate", { rate: 4 });
+  await p.cdp("Emulation.setCPUThrottlingRate", { rate: CPU });
   try {
     // First open after the page loads, the answer before the wait's end (60 ms): the transition starts with the rows
     // (about a screen of them). The page's first conversation costs one longer frame once (styles, fonts: 49-51 ms
@@ -1864,10 +1874,10 @@ async function morph() {
     let a = await go(60, true);
     // That one frame varies with the machine (twice in 30 runs here it was 99-134 ms): a second page load once.
     if (strict && a && a.worst >= 80) { await listed(); a = await go(60, true); }
-    check(ran(a), `morph: first open, answer 60 ms late (CPU 4x) -> the morph runs to its end, its nodes kept (${says(a)})`);
-    check(!!a && a.rows >= 1 && a.rows <= 15, `morph: the first page is in the new picture, about a screen of rows only (${a?.rows})`);
+    check(ran(a), `morph: first open, answer 60 ms late (CPU ${CPU}x) -> the morph runs to its end, its nodes kept (${says(a)})`);
+    check(!!a && a.rows >= 1 && a.rows <= 15, `morph: the first page is in the new picture, about a screen of rows only (${a?.rows ?? says(a)})`);
     timing(!!a && a.worst < 80, `morph: the page's first open, no frame of 80 ms or more (worst ${a?.worst})`);
-    check(await p.until(`${rows} >= 100`, 8000) === true && await p.until(atEnd, 2000) === true,
+    check(await p.until(`${rows} >= 100`, LIMIT) === true && await p.until(atEnd, LIMIT) === true,
       `morph: after the morph the other rows go in, the page at the newest (${await p.eval(rows)})`);
     // The bar the morph ends in: a round back button with the arrow only, and the name capsule beside it.
     const bar = await p.eval(`(() => { const b = document.querySelector('section.conversation > .top > .back'), c = document.querySelector('section.conversation > .top > .bar-title');
@@ -1880,7 +1890,7 @@ async function morph() {
     check(!!bar && bar.gap >= 4 && bar.ch >= 44 && bar.title.includes("Notes") && bar.glass && bar.bar === "rgba(0, 0, 0, 0)",
       `morph: beside it a capsule of its own with the glyph and the name, both glass, no bar behind them (${says(bar)})`);
     const b1 = await go(150, false);
-    check(ran(b1), `morph: close (CPU 4x) -> runs to its end (${says(b1)})`);
+    check(ran(b1), `morph: close (CPU ${CPU}x) -> runs to its end (${says(b1)})`);
     timing(fast(b1), `morph: close, no frame of 60 ms or more (worst ${b1?.worst})`);
     // Again: rows known, the answer 150 ms late comes during the morph and does not cut it.
     const c = await go(150, true);
@@ -1894,16 +1904,15 @@ async function morph() {
     await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
     // Each change of screen waits for its morph's end: a tap during one changes the screen with no morph (by design),
     // and on a slow runner the close took over 600 ms.
-    const settled = "window.__m.vt.every((v) => v.end > 0)";
     await p.eval("location.hash = '#pane=w1%3Ap1'");
-    await p.until("!!document.querySelector('section.conversation .items > [data-id]')", 8000);
-    await p.until(settled, 8000);
-    await new Promise((r) => setTimeout(r, 300));
+    await p.until("!!document.querySelector('section.conversation .items > [data-id]')", LIMIT);
+    await p.until(settled, LIMIT);
+    await frames();
     await p.eval("location.hash = ''");
-    await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\")", 8000);
-    await p.until(settled, 8000);
-    await new Promise((r) => setTimeout(r, 300));
-    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 4 });
+    await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\")", LIMIT);
+    await p.until(settled, LIMIT);
+    await frames();
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: CPU });
     const w = await go(60, true);
     check(ran(w) && w.rows >= 1 && w.rows <= 15, `morph: first open of an agent after another, answer 60 ms late -> runs to its end, a screen of rows (${says(w)})`);
     timing(fast(w), `morph: first open of an agent after another, no frame of 60 ms or more (worst ${w?.worst})`);
@@ -1914,7 +1923,7 @@ async function morph() {
     const e = await go(400, true);
     check(ran(e), `morph: answer 400 ms late -> not cut when the rows come during the morph (${says(e)})`);
     timing(fast(e) && e.wait < 250, `morph: answer 400 ms late, starts after the 150 ms wait, no frame of 60 ms or more (wait ${e?.wait}, worst ${e?.worst})`);
-    check(await p.until(`${rows} >= 100`, 8000) === true, `morph: and then the rows are all in (${await p.eval(rows)})`);
+    check(await p.until(`${rows} >= 100`, LIMIT) === true, `morph: and then the rows are all in (${await p.eval(rows)})`);
     // Mid-morph the rows (fb-body) stacked above the capsule, and its glass (no backdrop blur in a snapshot) showed
     // them through: the name was hidden until the end. Paused at 300 ms: the bar's pieces above the rows, a solid
     // backing under the capsule; once ended, the name is what is on top at its place.
@@ -1925,13 +1934,14 @@ async function morph() {
       t.ready.then(() => { for (const a of document.getAnimations().filter((a) => a.effect?.pseudoElement)) { a.pause(); a.currentTime = 300; } window.__paused = true; });
       return t; }; window.__paused = false; return true; })()`);
     await p.eval(`document.querySelector(".row[data-pane='w2:p2']").click()`);
-    await p.until("window.__paused", 4000);
+    await p.until("window.__paused", LIMIT);
     const stack = await p.eval(`(() => { const css = (pe) => getComputedStyle(document.documentElement, pe);
       const z = (n) => parseInt(css('::view-transition-group(' + n + ')').zIndex) || 0;
       const bg = css('::view-transition-new(fb-sheet)').backgroundColor, alpha = /rgba/.test(bg) ? parseFloat(bg.split(',')[3]) : bg.startsWith('rgb') ? 1 : 0;
       return { body: z('fb-body'), sheet: z('fb-sheet'), dot: z('fb-dot'), title: z('fb-title'), back: z('fb-back'), bg, alpha }; })()`);
     await p.eval("document.getAnimations().filter((a) => a.effect?.pseudoElement).forEach((a) => a.finish()); true");
-    await new Promise((r) => setTimeout(r, 300));
+    await p.until(settled, LIMIT);
+    await frames();
     const seen = await p.eval(`(() => { const n = document.querySelector('section.conversation > .top .bar-name'); if (!n) return null;
       const r = n.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { name: n.textContent, on: !!at && n.contains(at), w: Math.round(r.width) }; })()`);
@@ -1941,24 +1951,25 @@ async function morph() {
     // Back to the list, paused at 300 ms. The back button's glass (backdrop-filter) stayed on its group for the whole
     // morph, a blurred square over the list's title; and the tap scrolled the conversation to its top (the empty
     // fragment) before the old picture was taken, so the close started from the wrong place.
-    await p.until(`${rows} >= 100`, 8000);
+    await p.until(`${rows} >= 100`, LIMIT);
     await p.eval("window.scrollTo(0, document.documentElement.scrollHeight - innerHeight - 300); true");
-    await new Promise((r) => setTimeout(r, 300));
+    await frames();
     const was = await p.eval("Math.round(scrollY)");
     await p.eval(`(() => { const svt = document.startViewTransition; window.__close = { start: -1, paused: false }; document.startViewTransition = function (cb) {
       document.startViewTransition = svt; window.__close.start = Math.round(scrollY); const t = svt.call(this, cb);
       t.ready.then(() => { for (const a of document.getAnimations().filter((a) => a.effect?.pseudoElement)) { a.pause(); a.currentTime = 300; } window.__close.paused = true; });
       return t; }; return true; })()`);
     await p.eval("document.querySelector('section.conversation .top .back').click(); true");
-    await p.until("window.__close.paused", 4000);
-    await new Promise((r) => setTimeout(r, 200));
+    await p.until("window.__close.paused", LIMIT);
+    await frames();
     const clip = await p.eval(`(() => { const t = document.querySelector('header h1, .top h1') ?? document.querySelector('h1'); const r = t?.getBoundingClientRect();
       return r ? { x: 0, y: 0, width: Math.ceil(r.right + 8), height: Math.ceil(r.bottom + 8), scale: 1 } : null; })()`);
     const shoot = async () => clip ? Buffer.from((await p.cdp("Page.captureScreenshot", { format: "png", clip })).data, "base64") : null;
     const mid = await shoot();
     const start = await p.eval("window.__close.start");
     await p.eval("document.getAnimations().filter((a) => a.effect?.pseudoElement).forEach((a) => a.finish()); true");
-    await new Promise((r) => setTimeout(r, 400));
+    await p.until(settled, LIMIT);
+    await frames();
     const end = await shoot();
     const diff = mid && end ? Math.round(pngDiff(mid, end) * 1000) / 10 : 100;
     check(!!clip && diff < 2, `morph: back to the list, at 300 ms nothing covers the list's title (pixels differing from the end: ${diff}%, ${says(clip)})`);
@@ -1966,9 +1977,11 @@ async function morph() {
     // The back button steps back in history (no entry of its own): the phone's Back after it does not open the agent
     // again. (The entry before may be another page load: the page is read again once it settles.)
     const listAt = await p.eval("location.hash");
-    await p.eval("history.back(); true");
-    await new Promise((r) => setTimeout(r, 1200));
-    await p.until("document.readyState === 'complete'", 6000);
+    await p.eval("window.__moved = false; addEventListener('popstate', () => { window.__moved = true; }, { once: true }); history.back(); true");
+    // Settled: the history moved (popstate, or another document: no __moved), the page complete and two frames drawn.
+    await p.until("window.__moved !== false", LIMIT);
+    await p.until(`document.readyState === 'complete' && !!window.__m && ${settled}`, LIMIT);
+    await frames().catch(() => {});
     const after = await p.eval("location.hash + ' ' + !!document.querySelector(\"section.conversation[data-pane='w2:p2']\")").catch((e) => String(e));
     check(listAt === "" && !/w2(%3A|:)p2|true$/.test(after), `morph: after Back to the list, the phone's Back does not open the agent again (list at '${listAt}', then '${after}')`);
   } finally {
