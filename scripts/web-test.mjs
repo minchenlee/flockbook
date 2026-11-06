@@ -15,7 +15,7 @@ import { inflateSync } from "node:zlib";
 
 const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt > 0 ? process.argv[onlyAt + 1] : null;
-if (onlyAt > 0 && !["transport", "earlier-held", "morph"].includes(only)) throw new Error(`unknown web-test section: ${only}`);
+if (onlyAt > 0 && !["transport", "earlier-held", "morph", "composer"].includes(only)) throw new Error(`unknown web-test section: ${only}`);
 const phase = (name) => console.log(`web-test: phase ${name}`);
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const shotsAt = process.argv.indexOf("--shots");
@@ -173,6 +173,7 @@ try {
   if (only === "transport") await transportRun();
   else if (only === "earlier-held") await heldEarlierRun();
   else if (only === "morph") await morph();
+  else if (only === "composer") await composerPin();
   else if (live) await liveRun();
   else await fakeRun();
 } catch (e) {
@@ -278,6 +279,7 @@ async function liveRun() {
 /** The fake hub: every screen and every action. */
 async function fakeRun() {
   await morph();   // first: its frame times, with no other page open in the browser
+  await composerPin();
   phase("pairing and page assets");
   // The page and the socket on one origin, scripts under the CSP.
   const fresh = await page(await context());
@@ -1755,6 +1757,56 @@ function pngDiff(a, b) {
   let n = 0;
   for (let i = 0; i < A.px.length; i += 4) if ([0, 1, 2].some((k) => Math.abs(A.px[i + k] - B.px[i + k]) > 24)) n++;
   return n / (A.w * A.h);
+}
+
+/** The composer sits at the bottom from the first frame an agent opens: a short conversation, or one still loading,
+ *  does not leave it half-way up the screen until the rows fill it. Where it sits is where a long conversation at its
+ *  newest has it: the window's bottom less the page's bottom padding (safe area included). */
+async function composerPin() {
+  phase("composer pin");
+  const p = await page(await context(), true);
+  pages.push(p);
+  await p.cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await p.onEveryLoad(morphProbe());
+  await p.cdp("Page.bringToFront");
+  await p.goto(origin + "/");
+  await p.eval("localStorage.setItem('flockbook.token', 'input-token')");
+  /** Opens w2:p2 (session `session`, `rows` rows, each `conversation` held `late` ms); every frame from the tap for
+   *  1.8 s: how far the composer's bottom is from its place. */
+  const open = async (session, rows, late, rich = 0) => {
+    hub.stdin.write(`session w2:p2 ${session} ${rows}\n` + (rich ? `rich ${session} ${rich}\n` : ""));
+    await p.eval("history.replaceState(null, '', '/')");
+    await p.reload();
+    if (!await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\") && !!window.__m", 8000)) throw new Error("composer: the list did not load");
+    await new Promise((r) => setTimeout(r, 300));
+    await p.eval(`window.__m.late = ${late}; window.__pin = []; true`);
+    await p.eval(`(() => { const t0 = performance.now(); const main = document.querySelector('main');
+      const tick = () => { const c = document.querySelector('section.conversation .composer');
+        if (c) { const r = c.getBoundingClientRect(); window.__pin.push([Math.round(performance.now() - t0), Math.round(r.bottom), Math.round(innerHeight - parseFloat(getComputedStyle(main).paddingBottom)), document.querySelectorAll('section.conversation .items > [data-id]').length]); }
+        if (performance.now() - t0 < 1800) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick); document.querySelector(".row[data-pane='w2:p2']").click(); return true; })()`);
+    await new Promise((r) => setTimeout(r, 2000));
+    return p.eval(`(() => { const f = window.__pin; const off = f.map(([t, b, want]) => b - want);
+      const bad = f.filter(([t, b, want]) => Math.abs(b - want) > 2);
+      return { frames: f.length, worst: Math.max(0, ...off.map(Math.abs)), first: f[0] ?? null, last: f.at(-1) ?? null, bad: bad.slice(0, 3) }; })()`);
+  };
+  const ok = (r) => !!r && r.frames >= 10 && r.worst <= 2;
+  const says = (r) => JSON.stringify(r);
+  try {
+    const long = await open("pinlong", 0, 0, 60);
+    check(!!long?.last && Math.abs(long.last[1] - long.last[2]) <= 2, `composer: a long conversation at its newest, the composer at the bottom (the place the others are held to) (${says(long?.last)})`);
+    const two = await open("pin2", 2, 0);
+    check(ok(two), `composer: two messages -> at the bottom from the first frame to the end (${says(two)})`);
+    const one = await open("pin1", 1, 0);
+    check(ok(one), `composer: one message -> at the bottom from the first frame to the end (${says(one)})`);
+    const late = await open("pinlate", 40, 400);
+    check(ok(late), `composer: rows 400 ms late (loading, then filled) -> at the bottom all along (${says(late)})`);
+  } finally {
+    hub.stdin.write("session w2:p2 s4\n");
+  }
+  await p.close();
+  pages.splice(pages.indexOf(p), 1);
+  check(p.errors.length === 0, `composer: no errors (${p.errors.join(" | ")})`);
 }
 
 async function morph() {
