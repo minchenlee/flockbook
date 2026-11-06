@@ -94,8 +94,10 @@ cdp.addEventListener("message", (event) => {
 function send(method, params = {}, sessionId) { return commands.send(method, params, sessionId); }
 
 /** A fresh page (own storage when `context` is new). */
-async function page(context) {
-  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: context });
+async function page(context, own = false) {
+  // `own`: in a window of its own, so it is the window's shown page (Chrome's full headless mode keeps a page opened
+  // beside another one in the background: hidden, no View Transitions).
+  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: context, ...(own ? { newWindow: true } : {}) });
   const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
   const errors = [];
   listeners.push((m) => {
@@ -1728,7 +1730,7 @@ function morphProbe() { return `(() => {
  *  the morph at 170-290 ms, and 100 rows in the update took one frame of 100-150 ms. WEB_MORPH_DEBUG=1: each frame. */
 async function morph() {
   phase("morph");
-  const p = await page(await context());
+  const p = await page(await context(), true);
   pages.push(p);
   await p.onEveryLoad(morphProbe());
   await p.cdp("Page.bringToFront");
@@ -1751,7 +1753,9 @@ async function morph() {
     const tap = await p.eval(`(() => { const e = document.querySelector(${JSON.stringify(open ? ".row[data-pane='w2:p2']" : "section.conversation .top .back")});
       if (!e) return 0; const t = performance.now(); e.click(); return t; })()`);
     if (!tap) return null;
-    if (!await p.until(`window.__m.vt[${n}]?.end > 0`, 6000)) return { started: await p.eval(`window.__m.vt.length > ${n}`) };
+    if (!await p.until(`window.__m.vt[${n}]?.end > 0`, 6000)) {
+      return p.eval(`({ started: window.__m.vt.length > ${n}, visible: document.visibilityState, transitions: !!document.startViewTransition })`);
+    }
     await new Promise((r) => setTimeout(r, 100));
     return p.eval(`(() => { const r = window.__m.vt[${n}];
       const f = window.__m.frames.filter(([t]) => t > ${tap} && t <= r.end + 20).map(([, d]) => d);
