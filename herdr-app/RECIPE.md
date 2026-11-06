@@ -97,15 +97,20 @@ Left to right:
      **Phone page** Off | On. **Updates**: UPDATES, **Check for updates** On | Off, and the update line with
      the command written out (Menlo 11.5 px) when one is out. It opens on General. A box with a `blocked`
      border above any section when config.json is not JSON.
-     Under Phone page: a status dot and line (Running in `done`, a problem in `blocked`). While on
-     and Serve not set, right under it: "One step left: run this once in a terminal.", the one
-     `tailscale serve` command with Copy (`--https=8443` when 443 is another service's, with a
-     `muted` line that says so), and the status is asked every 3 s until Serve is set. Without
-     Tailscale, why and the SERVE.md link with Copy link; else a **Tailscale login** row (its line names
-     the login in use; on the right a 260 × 30 px field in a `background` frame with a `border` line, 12 px
-     text, placeholder "Default: this machine's Tailscale login"; empty: the login found), **Read-only** Off | On, and once Serve is set
-     the address with Copy and a 140 px QR code on a white 8 px box. Linux adds a line on
-     `loginctl enable-linger`.
+     Phone page: the row "Read your agents on your phone, through Tailscale." with Off | On, then a status
+     dot and line when there is something to say (Running in `done`, a problem in `blocked`; nothing when
+     Off). SET UP: four steps, each a 20 px round mark (a `done` check when done; its number in `accent`
+     for the step to do now; `dim` and no text for a later one): 1 **Tailscale on this computer** (done:
+     "Signed in as <login>."; not: the helper's reason, Get Tailscale, which opens tailscale.com/download,
+     and the SERVE.md address with Copy link), 2 **Phone page on** (off: turn it on with the switch above;
+     stopped or failed: turn it Off, then On; by hand: the helper's line; Linux adds `loginctl
+     enable-linger`), 3 **Tailscale Serve set** (the one `tailscale serve` command with Copy,
+     `--https=8443` when 443 is another service's with a `muted` line that says so; the status is asked
+     every 3 s until Serve is set), 4 **Open it on your phone** (install Tailscale and sign in as the
+     login; a 140 px QR code on a white 8 px box beside the address with Copy; "Can't open it?" help).
+     OPTIONS, with Tailscale: a **Tailscale login** row (its line names the login in use; on the right a
+     260 × 30 px field in a `background` frame with a `border` line, 12 px text, placeholder "Default: this
+     machine's Tailscale login"; empty: the login found) and **Read-only** Off | On.
    - **Tab panes**: a split tab, or a tab with a shell, shows its own panes (a 56 px top bar
      above them, 8 px padding, 6 px gaps, 8 px corners, 1 px border, `muted` border on focus).
 

@@ -11,8 +11,7 @@ import { setting, setSetting, loadConfig, configBad, configPath, updateShown, di
 import { icon, settingsClosed } from "./state.js";
 import { pollPhone, phoneTick, PHONE_TICK_MS, phoneOn, phoneBlocked, phoneChoose, phoneUser, phoneBody, setPhoneOption } from "./phone.js";
 
-const PHONE = { title: "Phone page",
-  about: "The Flockbook page on your phone, through Tailscale. On: it runs in the background, also after Herdr app quits, and starts again at login." };
+const PHONE = { title: "Phone page", about: "Read your agents on your phone, through Tailscale." };
 
 export const SETTINGS = [
   { key: "check_updates", title: "Check for updates", choices: [[true, "On", "on"], [false, "Off", "off"]],
@@ -150,7 +149,7 @@ export class SettingsView {
           .child(h_flex().w_full().gap(24).items_center()
             .child(about(PHONE.title, PHONE.about))
             .child(seg("phone", [[false, "Off", "off"], [true, "On", "on"]], (v, cx) => phoneChoose(v, cx), phoneOn(), phoneBlocked())))
-          .child(phoneBody(t, this, { seg, small: smallButton(t) })));
+          .child(phoneBody(t, this, { seg, small: smallButton(t), heading })));
     }
     if (sec.id === "updates" && updateShown()) body.child(div().pt(16).child(updateLine(t, this, true)));
     return v_flex().id("settings-root").size_full().overflow_y_scrollbar().px(32).pb(24).child(body);
