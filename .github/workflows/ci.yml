@@ -6,11 +6,12 @@ on:
   pull_request:
     branches: [main]
   # Manual run: the offline checks and the two checks with a real window.
-  # only: check names (spaces or commas) for both OSes; macos15_only: skip the macos-26 jobs.
+  # only: check names (spaces or commas) for both OSes; the phone page's (morph, composer, transport, earlier-held)
+  # run in the build job, with no app UI check job; macos15_only: skip the macos-26 jobs.
   workflow_dispatch:
     inputs:
       only:
-        description: 'Run only these UI checks (e.g. "question busy-tab"); empty = all'
+        description: 'Run only these UI checks (e.g. "question busy-tab", or a phone page check: "morph"); empty = all'
         type: string
         default: ''
       macos15_only:
@@ -39,6 +40,9 @@ jobs:
       skip: ${{ steps.check.outputs.skip }}
       sidecar: ${{ steps.paths.outputs.sidecar }}
       app: ${{ steps.paths.outputs.app }}
+      native: ${{ steps.only.outputs.native }}
+      native_run: ${{ steps.only.outputs.native_run }}
+      web: ${{ steps.only.outputs.web }}
     steps:
       - id: check
         env:
@@ -92,6 +96,25 @@ jobs:
           echo "sidecar=$sidecar" >> "$GITHUB_OUTPUT"
           echo "app=$app" >> "$GITHUB_OUTPUT"
 
+      # `only` split in two: the phone page's checks (scripts/web-test.mjs sections, in the build job) and the app's
+      # (scripts/ui-checks.sh). Only web checks named: the app's UI check jobs (26 and macOS 15) are skipped.
+      - id: only
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          native=; web=
+          for want in ${ONLY//,/ }; do
+            case " transport earlier-held morph composer " in
+              *" $want "*) web="$web $want" ;;
+              *) native="$native $want" ;;
+            esac
+          done
+          native_run=1
+          if [ -n "$ONLY" ] && [ -z "$native" ]; then native_run=0; echo "::notice title=App UI checks skipped::only web checks named ($ONLY)"; fi
+          echo "native=${native# }" >> "$GITHUB_OUTPUT"
+          echo "native_run=$native_run" >> "$GITHUB_OUTPUT"
+          echo "web=${web# }" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build + checks
     needs: gate
@@ -136,14 +159,23 @@ jobs:
       - name: HerdrKitChecks
         run: swift run HerdrKitChecks
 
-      # The phone page's open/close morph in a headless browser (Chrome's own headless mode, no window), against the fake
-      # hub: the first page held as a phone's round trip, CPU 4x slower (scripts/web-test.mjs --only morph).
+      # The phone page in a headless browser (Chrome's own headless mode, no window), against the fake hub, CPU 2x
+      # slower, every wait on a state: the open/close morph (the first page held as a phone's round trip) and the
+      # composer at the bottom from the first frame. `only` with web checks: those sections only. Each section runs;
+      # the step fails if any failed.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Phone page morph (headless browser)
-        timeout-minutes: 5
-        run: node scripts/web-test.mjs --only morph
+      - name: Phone page morph and composer (headless browser)
+        timeout-minutes: 10
+        env:
+          WEB: ${{ needs.gate.outputs.web }}
+        run: |
+          failed=
+          for section in ${WEB:-morph composer}; do
+            node scripts/web-test.mjs --only "$section" || failed="$failed $section"
+          done
+          if [ -n "$failed" ]; then echo "::error title=Phone page checks failed::$failed"; exit 1; fi
 
       # Parity: the Swift and the Rust flockbook-modfeed on the same synthetic fixtures and a fake herdr-core
       # (scripts/modfeed-parity). Every command's output and the keys and text it sent must match, and some steps
@@ -196,7 +228,8 @@ jobs:
   # 3 groups here and 2 on macOS 15: 5 macOS jobs, the most that run at the same time.
   ui:
     name: UI checks (${{ matrix.shard }})
-    needs: build
+    needs: [gate, build]
+    if: ${{ needs.gate.outputs.native_run == '1' }}
     runs-on: macos-26
     timeout-minutes: 30
     strategy:
@@ -220,7 +253,7 @@ jobs:
         timeout-minutes: 20
         env:
           UI_CHECK_TIMEOUT: '180'
-          ONLY: ${{ inputs.only }}
+          ONLY: ${{ needs.gate.outputs.native }}
           SHARD: ${{ !inputs.only && format('{0}/3', matrix.shard) || '' }}
         run: scripts/ui-checks.sh offline build/ui-checks
 
@@ -232,7 +265,7 @@ jobs:
         env:
           FLOCKBOOK_VISIBLE_OK: '1'
           UI_CHECK_TIMEOUT: '60'
-          ONLY: ${{ inputs.only }}
+          ONLY: ${{ needs.gate.outputs.native }}
         run: scripts/ui-checks.sh real build/ui-checks-real
 
       - name: Upload screenshots
@@ -299,7 +332,8 @@ jobs:
   bundle-macos15:
     name: Bundle for macOS 15
     needs: gate
-    if: ${{ needs.gate.outputs.skip != '1' && needs.gate.outputs.app != '0' }}
+    # Only for the UI checks on macOS 15 (test-macos15): skipped with them.
+    if: ${{ needs.gate.outputs.skip != '1' && needs.gate.outputs.app != '0' && needs.gate.outputs.native_run == '1' }}
     runs-on: macos-26
     timeout-minutes: 45
     env:
@@ -359,7 +393,7 @@ jobs:
   # in 2 groups (see the ui job).
   test-macos15:
     name: Run on macOS 15 (${{ matrix.shard }})
-    needs: bundle-macos15
+    needs: [gate, bundle-macos15]
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
@@ -381,7 +415,7 @@ jobs:
         timeout-minutes: 20
         env:
           UI_CHECK_TIMEOUT: '180'
-          ONLY: ${{ inputs.only }}
+          ONLY: ${{ needs.gate.outputs.native }}
           SHARD: ${{ !inputs.only && format('{0}/2', matrix.shard) || '' }}
           BIN: build/Flockbook.app/Contents/MacOS/HerdrDesk
         run: |

@@ -17,6 +17,15 @@ const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt > 0 ? process.argv[onlyAt + 1] : null;
 if (onlyAt > 0 && !["transport", "earlier-held", "morph", "composer"].includes(only)) throw new Error(`unknown web-test section: ${only}`);
 const phase = (name) => console.log(`web-test: phase ${name}`);
+// The phone page's morph and composer sections. Every wait is for a state (a morph's end, frames drawn), with a long
+// limit: on a shared CI runner one morph took up to 3 s at CPU 4x, and fixed waits came out too short. The CPU is
+// slowed 4x only with WEB_MORPH_STRICT=1 (a quiet machine, where frame times are checked too); else 2x
+// (WEB_MORPH_CPU to change it).
+const webStrict = process.env.WEB_MORPH_STRICT === "1";
+const webCPU = webStrict ? 4 : Number(process.env.WEB_MORPH_CPU ?? 2);
+const webLimit = 30000;
+const webSettled = "window.__m.vt.every((v) => v.end > 0)";
+const twoFrames = (p) => p.eval("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))");
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const shotsAt = process.argv.indexOf("--shots");
 const shots = shotsAt > 0 ? process.argv[shotsAt + 1] : null;
@@ -1774,27 +1783,35 @@ async function composerPin() {
   await p.cdp("Page.bringToFront");
   await p.goto(origin + "/");
   await p.eval("localStorage.setItem('flockbook.token', 'input-token')");
-  /** Opens w2:p2 (session `session`, `rows` rows, each `conversation` held `late` ms); every frame from the tap for
-   *  1.8 s: how far the composer's bottom is from its place. */
+  /** Opens w2:p2 (session `session`, `rows` rows, each `conversation` held `late` ms); every frame from the tap until
+   *  the page is settled (the morph ended, the rows the same for 30 frames): how far the composer's bottom is from its
+   *  place. */
   const open = async (session, rows, late, rich = 0) => {
     hub.stdin.write(`session w2:p2 ${session} ${rows}\n` + (rich ? `rich ${session} ${rich}\n` : ""));
     await p.eval("history.replaceState(null, '', '/')");
     await p.reload();
-    if (!await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\") && !!window.__m", 8000)) throw new Error("composer: the list did not load");
-    await new Promise((r) => setTimeout(r, 300));
-    await p.eval(`window.__m.late = ${late}; window.__pin = []; true`);
-    await p.eval(`(() => { const t0 = performance.now(); const main = document.querySelector('main');
+    if (!await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\") && !!window.__m", webLimit)) throw new Error("composer: the list did not load");
+    await p.until(`document.readyState === 'complete' && ${webSettled}`, webLimit);
+    await twoFrames(p);
+    await p.eval(`window.__m.late = ${late}; window.__pin = []; window.__pinDone = false; true`);
+    await p.eval(`(() => { const t0 = performance.now(), n0 = window.__m.vt.length; const main = document.querySelector('main');
+      let same = 0, last = -1;
       const tick = () => { const c = document.querySelector('section.conversation .composer');
-        if (c) { const r = c.getBoundingClientRect(); window.__pin.push([Math.round(performance.now() - t0), Math.round(r.bottom), Math.round(innerHeight - parseFloat(getComputedStyle(main).paddingBottom)), document.querySelectorAll('section.conversation .items > [data-id]').length]); }
-        if (performance.now() - t0 < 1800) requestAnimationFrame(tick); };
+        const n = document.querySelectorAll('section.conversation .items > [data-id]').length;
+        if (c) { const r = c.getBoundingClientRect(); window.__pin.push([Math.round(performance.now() - t0), Math.round(r.bottom), Math.round(innerHeight - parseFloat(getComputedStyle(main).paddingBottom)), n]); }
+        same = c && n === last ? same + 1 : 0; last = n;
+        const ended = window.__m.vt.length > n0 && window.__m.vt.every((v) => v.end > 0);
+        if ((ended && same >= 30) || performance.now() - t0 > ${webLimit}) { window.__pinDone = true; return; }
+        requestAnimationFrame(tick); };
       requestAnimationFrame(tick); document.querySelector(".row[data-pane='w2:p2']").click(); return true; })()`);
-    await new Promise((r) => setTimeout(r, 2000));
+    await p.until("window.__pinDone", webLimit + 5000);
     return p.eval(`(() => { const f = window.__pin; const off = f.map(([t, b, want]) => b - want);
       const bad = f.filter(([t, b, want]) => Math.abs(b - want) > 2);
       return { frames: f.length, worst: Math.max(0, ...off.map(Math.abs)), first: f[0] ?? null, last: f.at(-1) ?? null, bad: bad.slice(0, 3) }; })()`);
   };
   const ok = (r) => !!r && r.frames >= 10 && r.worst <= 2;
   const says = (r) => JSON.stringify(r);
+  await p.cdp("Emulation.setCPUThrottlingRate", { rate: webCPU });
   try {
     const long = await open("pinlong", 0, 0, 60);
     check(!!long?.last && Math.abs(long.last[1] - long.last[2]) <= 2, `composer: a long conversation at its newest, the composer at the bottom (the place the others are held to) (${says(long?.last)})`);
@@ -1805,6 +1822,7 @@ async function composerPin() {
     const late = await open("pinlate", 40, 400);
     check(ok(late), `composer: rows 400 ms late (loading, then filled) -> at the bottom all along (${says(late)})`);
   } finally {
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
     hub.stdin.write("session w2:p2 s4\n");
   }
   await p.close();
@@ -1823,14 +1841,9 @@ async function morph() {
   await p.goto(origin + "/");
   await p.eval("localStorage.setItem('flockbook.token', 'input-token')");
   hub.stdin.write("session w2:p2 morph 0\nrich morph 100\n");
-  // Every wait below is for a state (a morph's end, two frames drawn), with a long limit: on a shared CI runner one
-  // morph took up to 3 s at CPU 4x, and fixed waits came out too short. The CPU is slowed 4x only with
-  // WEB_MORPH_STRICT=1 (a quiet machine, where frame times are checked too); else 2x (WEB_MORPH_CPU to change it).
-  const strict = process.env.WEB_MORPH_STRICT === "1";
-  const CPU = strict ? 4 : Number(process.env.WEB_MORPH_CPU ?? 2);
-  const LIMIT = 30000;
-  const settled = "window.__m.vt.every((v) => v.end > 0)";
-  const frames = () => p.eval("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))");
+  // Waits on states (see webLimit): the CPU slowed webCPU times.
+  const strict = webStrict, CPU = webCPU, LIMIT = webLimit, settled = webSettled;
+  const frames = () => twoFrames(p);
   const listed = async () => {
     await p.eval("history.replaceState(null, '', '/')");
     await p.reload();
