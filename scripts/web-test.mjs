@@ -187,9 +187,9 @@ try {
   hub.stdin.end();
   await new Promise((r) => hub.once("exit", r));
   // Chrome's helpers may still write to the profile after the browser exits (ENOTEMPTY on a CI runner): a few tries,
-  // and a leftover temporary folder is not a failed run.
+  // then a warning. The checks alone decide the result.
   try { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
-  catch (e) { console.log(`web-test: the browser profile was not removed (${e.code ?? e})`); }
+  catch (e) { console.log(`web-test: warning: the browser profile was not removed (${e.code ?? e})`); }
 }
 console.log(failures ? `web-test: ${failures} of ${total} FAILED` : `web-test: OK ${total} checks passed`);
 process.exit(failures ? 1 : 0);
