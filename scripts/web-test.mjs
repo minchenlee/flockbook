@@ -1732,6 +1732,8 @@ async function morph() {
   phase("morph");
   const p = await page(await context(), true);
   pages.push(p);
+  // A CI runner's macOS may have Reduce Motion on: the page then changes screens with no morph, as it should.
+  await p.cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
   await p.onEveryLoad(morphProbe());
   await p.cdp("Page.bringToFront");
   await p.goto(origin + "/");
@@ -1754,7 +1756,8 @@ async function morph() {
       if (!e) return 0; const t = performance.now(); e.click(); return t; })()`);
     if (!tap) return null;
     if (!await p.until(`window.__m.vt[${n}]?.end > 0`, 6000)) {
-      return p.eval(`({ started: window.__m.vt.length > ${n}, visible: document.visibilityState, transitions: !!document.startViewTransition })`);
+      return p.eval(`({ started: window.__m.vt.length > ${n}, visible: document.visibilityState, transitions: !!document.startViewTransition,
+        still: matchMedia('(prefers-reduced-motion: reduce)').matches, wide: innerWidth })`);
     }
     await new Promise((r) => setTimeout(r, 100));
     return p.eval(`(() => { const r = window.__m.vt[${n}];
