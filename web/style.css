@@ -130,6 +130,11 @@ main:not(.split) .top > .back, main:not(.split) .top > .bar-title { background: 
 .back.round { flex: none; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
 .back.round svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 main:not(.split) .top > .bar-title { flex: 0 1 auto; min-height: 44px; padding: 4px 18px 4px 14px; border-radius: 22px; }
+/* A phone's conversation fills the screen: short or still loading, the rows take the room and the composer sits where a
+   long one has it (the page's bottom padding under it), not right under the last row. */
+main:not(.split) > section.conversation { display: flex; flex-direction: column; min-height: calc(100vh - 16px - env(safe-area-inset-bottom));
+  min-height: calc(100dvh - 16px - env(safe-area-inset-bottom)); }
+main:not(.split) > section.conversation > .items { flex: 1 0 auto; }
 main:not(.split) .conversation::before { content: ""; position: sticky; top: 0; z-index: 2; display: block; pointer-events: none;
   height: calc(env(safe-area-inset-top) + 6px); margin: 0 -16px calc(-6px - env(safe-area-inset-top)); background: linear-gradient(var(--bg) 55%, transparent); }
 .top h1 { margin: 0; font: var(--large-title); }
