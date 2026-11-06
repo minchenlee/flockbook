@@ -5,31 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
-- Herdr app mod: Flockbook settings have a Phone page switch. On runs the phone page in the background as a user service (it keeps running after Herdr app quits), names your Tailscale login, and shows the one `tailscale serve` command, then the address and a QR code. Flockbook never changes Tailscale settings. *(preview)*
-
-- Phone page on the Rust helper (`flockbook-modfeed serve`): scroll up for older messages, as on the Mac hub. New rows still come while you read them.
-- Phone page on the Rust helper: spaces and tabs as the Herdr app shows them, also tabs on other machines. Before, every terminal was in one tab. Reading, approving and sending on another machine go through the helper there.
-- Phone page on the Rust helper: messages you typed while the agent works show at the end of the conversation, and Claude Code's can be pulled back to edit, as on the Mac hub.
-- Phone page on the Rust helper: images you add in the composer go out with your message. PNG, JPEG and WebP up to 10 MB, without their metadata (a photo's location is removed); HEIC is refused with a plain message.
-- Phone page on the Rust helper: notifications when an agent needs you or is done, with the page closed too. They hold no conversation text and are encrypted for your phone.
-- Phone page on the Rust helper: pictures in the conversation show, on this machine's terminals. PNG, JPEG and WebP up to 10 MB are sent as they are in the log.
-
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
 
-- Herdr app mod on Linux: Claude Code chats show their messages. The helper did not read Claude Code's session file there (its start time is in another form on Linux), so the chat stayed empty while sending still worked.
-- Herdr app mod: the QR code on the Phone page was blank (a white box). It shows now, and a new address gets a new code.
-- Herdr app mod: with the Phone page On, the one `tailscale serve` command shows right under Running, and the address and QR code appear once it has run, without reopening settings. When port 443 already goes to another service, the command uses 8443 instead of replacing it, and says so.
-- Herdr app mod: a chat whose newest part is mostly long tool output (screenshots) loads earlier messages by itself until the screen is full. Before, it showed only the last reply and scrolling up loaded nothing.
-- Herdr app mod: a chat reply that mixes Chinese with English words or numbers (often in a list) no longer loses its last line under the next row.
-- Herdr app mod: an expanded "Ran N commands" shows a multi-line command (a heredoc) as its first line with "…", instead of drawing every line over the rows around it.
-- Herdr app mod: text in a code block can be selected and copied with ⌘C, also across lines, like the rest of a reply. Right-click a code block for Copy code, which copies the whole block.
-- Phone page: the message box sits at the bottom of the screen from the moment an agent opens. In a short conversation, or while one is loading, it stayed half-way up until the messages filled the screen.
-
 ### ⚙️ Changes
-
-- Phone page: opening an agent is a clear morph that runs to its end. Its row becomes the name at the top, a round back button comes in beside it, and the conversation rises in, also when it arrives a moment after the tap. Before, the animation was often cut short and stalled on long conversations. The top bar is now two pieces: the back button (arrow only) and the agent's name.
-- Herdr app mod: the Phone page settings walk you through the setup in four steps (Tailscale on this computer, the phone page on, Tailscale Serve, your phone), each done, to do now, or later, with the address and QR code as the last step.
-
-- Herdr app mod: Flockbook settings are laid out as Herdr's own Settings: General, Phone page and Updates in a sidebar on the left, each setting with its line on the left and its switch on the right.

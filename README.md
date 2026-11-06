@@ -92,6 +92,29 @@ I'm disclosing this because it's true and because the code should stand on its o
 
 Pull requests are welcome, including ones written with AI tools. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it tells you how to build, test, and send a change. Ask questions and suggest features in [Discussions](https://github.com/minchenlee/flockbook/discussions). Report security problems as [SECURITY.md](SECURITY.md) says.
 
+## Contributors
+
+Thanks to everyone who has contributed to Flockbook:
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/minchenlee"><img src="https://github.com/minchenlee.png?s=100" width="100px;" alt="Min-Chen Lee"/><br /><sub><b>Min-Chen Lee</b></sub></a><br /><a href="#code-minchenlee" title="Code">💻</a> <a href="#doc-minchenlee" title="Documentation">📖</a> <a href="#design-minchenlee" title="Design">🎨</a> <a href="#infra-minchenlee" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AgustinRamiroDiaz"><img src="https://github.com/AgustinRamiroDiaz.png?s=100" width="100px;" alt="Agustín Díaz"/><br /><sub><b>Agustín Díaz</b></sub></a><br /><a href="https://github.com/minchenlee/flockbook/commits?author=AgustinRamiroDiaz" title="Code">💻</a> <a href="#platform-AgustinRamiroDiaz" title="Packaging/porting to new platform">📦</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full list and what each person did.
+
 ## License
 
 MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

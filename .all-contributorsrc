@@ -1,0 +1,38 @@
+{
+  "projectName": "flockbook",
+  "projectOwner": "minchenlee",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitConvention": "none",
+  "contributors": [
+    {
+      "login": "minchenlee",
+      "name": "Min-Chen Lee",
+      "avatar_url": "https://github.com/minchenlee.png",
+      "profile": "https://github.com/minchenlee",
+      "contributions": [
+        "code",
+        "doc",
+        "design",
+        "infra"
+      ]
+    },
+    {
+      "login": "AgustinRamiroDiaz",
+      "name": "Agustín Díaz",
+      "avatar_url": "https://github.com/AgustinRamiroDiaz.png",
+      "profile": "https://github.com/AgustinRamiroDiaz",
+      "contributions": [
+        "code",
+        "platform"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "linkToUsage": false
+}
