@@ -231,6 +231,7 @@ function receive(m            )       {
       break;
     case "conversation": {
       const v = view(m.pane);
+      if (firstPage?.pane === m.pane) firstPage.arrived();
       // The pane shows another session (a new agent there): it opens at its newest message, like a switch.
       if (m.pane === state.watching && v.session !== undefined && v.session !== m.session) { cancelRound(); following = true; }
       if (v.session !== m.session) v.waiting = undefined;
@@ -362,13 +363,50 @@ async function follow()                {
   if (want === state.watching) { render(); return; }
   if (state.watching) request({ type: "unwatch", pane: state.watching });
   const from = state.watching;
+  if (!from && want) listY = window.scrollY;
+  if (want && fromList) history.replaceState({ fbList: true }, "");
+  fromList = false;
   state.watching = want;
   cancelRound();
   following = true;   // an agent opens at its newest message
   if (state.banner && state.banner.pane === want) state.banner = null;
-  navigate(from, want, render);
-  if (want) await request({ type: "watch", pane: want });
+  const gen = ++follows;
+  opening = false;
+  const asked = want ? request({ type: "watch", pane: want }) : null;
+  // Opening an agent whose rows are not here yet: the morph waits for its first page (one round trip), at most
+  // FIRST_PAGE_MS, so the conversation it ends in is not an empty sheet. Renders meanwhile wait too (`render`).
+  if (want && !view(want).items.length && morphs(from, want)) {
+    opening = true;
+    let mine                   = null;
+    await new Promise      ((done) => {
+      const t = setTimeout(done, FIRST_PAGE_MS);
+      firstPage = mine = { pane: want, arrived: () => { clearTimeout(t); done(); } };
+    });
+    if (firstPage === mine) firstPage = null;
+    if (gen !== follows) return;   // another tap meanwhile: that one changes the screen
+    opening = false;
+    // The rows the morph shows are built now, and the morph starts in the next frame: the answer's own work (reading
+    // the page of rows) and the morph's update in one frame were one long frame.
+    const items = view(want).items;
+    if (items.length) rowsFor(want, items.slice(-screenOf(items)));
+    opening = true;
+    await new Promise      ((done) => { requestAnimationFrame(() => done()); setTimeout(done, 50); });   // no frames while hidden
+    if (gen !== follows) return;
+    opening = false;
+  }
+  navigate(from, want, want ? draw : () => { draw(); window.scrollTo(0, listY); });
+  if (asked) await asked;
 }
+/** Each `follow`, and the open waiting for its first page. */
+let follows = 0, opening = false;
+let firstPage                                               = null;
+const FIRST_PAGE_MS = 150;
+/** The list's place, kept while an agent is open: the page puts it back (the browser does not, see below). `fromList`:
+ *  the next `follow` opens an agent from the list's row. */
+let listY = 0, fromList = false;
+// History steps do not move the page: closing morphs from where the conversation was read, and the list goes back to
+// `listY` by itself.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 addEventListener("hashchange", follow);
 
 // --- The newest message. An open conversation stays at the bottom while rows arrive and lay out (markdown, images),
@@ -518,7 +556,15 @@ window.visualViewport?.addEventListener("resize", toBottom);
 new ResizeObserver(toBottom).observe(document.body);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") toBottom(); });
 addEventListener("pageshow", toBottom);
-function open(pane        )       { location.hash = `pane=${encodeURIComponent(pane)}`; }
+function open(pane        )       { fromList = true; location.hash = `pane=${encodeURIComponent(pane)}`; }
+/** Back to the list. Opened from the list: the history entry before is the list, so back to it (the phone's Back then
+ *  does not come here again). Opened from its address: this entry becomes the list. No fragment navigation (an empty
+ *  fragment scrolls the page to its top before the morph takes its picture). */
+function toList()       {
+  if ((history.state                               )?.fbList) { history.back(); return; }
+  history.replaceState(null, "", location.pathname + location.search);
+  void follow();
+}
 
 // --- Helpers.
 const order                         = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 };
@@ -581,7 +627,16 @@ const side = h("aside", { id: "agents", class: "side", "aria-label": "Agents", "
 let sideScroll = 0;
 side.addEventListener("scroll", () => { if (side.isConnected) sideScroll = side.scrollTop; }, { passive: true });
 
+/** A render asked for while an open waits for its first page, before a morph's update (the old picture is not taken
+ *  yet), or while the list morphs back in (its rows, the morph's end, are made anew on each render): it happens at the
+ *  morph's start or end. */
+let held = false;
 function render()       {
+  if (opening || (morphing && (!state.watching || !morphed))) { held = true; return; }
+  draw();
+}
+function draw()       {
+  held = false;
   const anchor = keepTopRow ? topRow() : null;
   keepTopRow = false;
   const focused = document.activeElement?.id;   // read first: the list's rows are made anew below
@@ -649,41 +704,79 @@ function render()       {
   cardIn();
 }
 
-// --- Morphs. Opening an agent, its row turns into the bar and its glyph and title fly into it (View Transitions);
-// without them (Safari before 18) the conversation opens out of the row's box. A status glyph that changes pops into
-// its new shape; a new prompt card rises in. Reduce Motion: none of it, the screen just changes.
+// --- Morphs. Opening an agent, its row turns into the name capsule of the bar and its glyph and title fly into it, the
+// round back button comes in beside it and the rows rise in (View Transitions); without them (Safari before 18) the
+// conversation opens out of the row's box. A status glyph that changes pops into its new shape; a new prompt card rises
+// in. Reduce Motion: none of it, the screen just changes. A running View Transition ends at once when one of its named
+// nodes leaves the page: the bar is kept across renders (`keepBar`) and the list waits for the morph's end (`render`).
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const EASE = "cubic-bezier(.2, .85, .2, 1)", SPRING = "cubic-bezier(.34, 1.4, .64, 1)";
                                                                                                        
-let morphing = false;   // one transition at a time: a render during one just happens
+let morphing = false;   // one transition at a time: a render during one just happens (the list's waits)
+let morphed = false;    // the running transition's update ran
                                                                                              
 function rowParts(pane        )                     {
   const r = document.getElementById(`row-${pane}`);
   return r ? [r, r.querySelector(":scope > .dot"), r.querySelector(".row-title")] : [];
 }
+/** The bar's pieces: the name capsule (the row's sheet), its glyph and title, the back button, and the rows. */
 function barParts()                     {
-  const b = app.querySelector(":scope > section.conversation > .top");
-  return b ? [b, b.querySelector(".bar-title > .dot"), b.querySelector(".bar-title > span:last-child")] : [];
+  const s = app.querySelector(":scope > section.conversation"), c = s?.querySelector(":scope > .top > .bar-title");
+  return c ? [c, c.querySelector(":scope > .dot"), c.querySelector(":scope > .bar-name"), s .querySelector(":scope > .top > .back"), s .querySelector(":scope > .items")] : [];
 }
 function named(parts                    , on         )       {
-  ["fb-sheet", "fb-dot", "fb-title"].forEach((n, i) => (parts[i]                      )?.style.setProperty("view-transition-name", on ? n : ""));
+  ["fb-sheet", "fb-dot", "fb-title", "fb-back", "fb-body"].forEach((n, i) => (parts[i]                      )?.style.setProperty("view-transition-name", on ? n : ""));
+}
+/** Whether going from `from` to `to` morphs (a phone's one column, the row or bar there to start from). */
+function morphs(from               , to               )          {
+  const pane = to ?? from;
+  return !!pane && !still.matches && !split() && !!state.token && state.welcomed && !morphing && document.visibilityState === "visible"
+    && !!(to ? rowParts(pane) : barParts())[0];
+}
+/** While an agent opens, its conversation has about a screen of rows (the newest), so the update stays one short frame;
+ *  the others go in above after the morph, a few per frame (`moreRows`). Building a row (its markdown) is most of the
+ *  update's cost: about a screen is the newest rows up to MORPH_TEXT characters of their data, 1 to MORPH_ROWS of them.
+ *  `n` 0: not counted yet (no rows here). */
+const MORPH_ROWS = 15, MORPH_TEXT = 2400;
+let fewRows                                     = null;
+function screenOf(items        )         {
+  let n = 0, text = 0;
+  while (n < items.length && n < MORPH_ROWS && text < MORPH_TEXT) text += JSON.stringify(items[items.length - ++n]).length;
+  return n;
+}
+function moreRows(pane        )       {
+  if (fewRows?.pane !== pane) return;
+  fewRows.n += EARLIER_BATCH;
+  if (state.watching !== pane || fewRows.n >= view(pane).items.length) fewRows = null;
+  keepTopRow = state.watching === pane;
+  render();
+  if (fewRows) setTimeout(() => moreRows(pane), 16);
 }
 /** Runs `update` (the render that changes screens), morphing from the row of the agent opened or closed. */
 function navigate(from               , to               , update            )       {
   const pane = to ?? from;
-  const before = pane && !still.matches && !split() && state.token && state.welcomed ? (to ? rowParts(pane) : barParts()) : [];
+  // Closing, the rows go with the page's cross-fade: a picture of all of them (the whole list) costs a long frame. So
+  // does the back button: named, its glass (backdrop-filter) stays on its group to the end, a blurred square.
+  const before = pane && !still.matches && !split() && state.token && state.welcomed ? (to ? rowParts(pane) : barParts().slice(0, 3)) : [];
   if (!pane || !before.length || !before[0]) { update(); return; }
   const after = ()                     => (to ? barParts() : rowParts(pane));
   const doc = document                 ;
   if (doc.startViewTransition) {
     if (document.visibilityState !== "visible" || morphing) { update(); return; }
     morphing = true;
+    morphed = false;
+    if (to) fewRows = { pane: to, n: 0 };
     named(before, true);
-    const t = doc.startViewTransition(() => { named(before, false); update(); named(after(), true); });
+    const t = doc.startViewTransition(() => { named(before, false); update(); morphed = true; named(after(), true); });
     // A skipped or timed-out transition still ran (or runs) the update; only the animation is lost.
     t.ready.catch(() => {});
     t.updateCallbackDone.catch(() => {});
-    t.finished.catch(() => {}).then(() => { morphing = false; named(after(), false); });
+    t.finished.catch(() => {}).then(() => {
+      morphing = false;
+      named(after(), false);
+      if (held) render();
+      if (to) moreRows(to);
+    });
     return;
   }
   const box = before[0].getBoundingClientRect();
@@ -1048,6 +1141,8 @@ function keepScreen(nodes                   )                               {
   const newSection = nodes.find((n)                   => n instanceof HTMLElement && n.matches("section.conversation"));
   if (!oldSection || !newSection || oldSection.dataset.pane !== newSection.dataset.pane) return null;
   const swap = new Map            ([[newSection, oldSection]]);
+  const oldTop = oldSection.querySelector             (":scope > .top"), newTop = newSection.querySelector             (":scope > .top");
+  if (oldTop && newTop && keepBar(oldTop, newTop)) swap.set(newTop, oldTop);
   const oldItems = oldSection.querySelector(":scope > .items"), newItems = newSection.querySelector(":scope > .items");
   if (oldItems && newItems) { syncChildren(oldItems, rowsIn(newItems)); swap.set(newItems, oldItems); }
   else fillItems([newSection]);
@@ -1059,6 +1154,26 @@ function keepScreen(nodes                   )                               {
   syncChildren(oldSection, [...newSection.childNodes].map((n) => swap.get(n) ?? n));
   syncChildren(app, nodes.map((n) => (typeof n === "string" ? n : swap.get(n) ?? n)));
   return { composer: !!form };
+}
+
+/** The bar stays in the page while its shape is the same: the morph ends in it, and a running View Transition ends at
+ *  once when a named node leaves the page (a status tick or the first page during the morph cut it short). Its texts,
+ *  attributes and glyphs are brought up to date in place; its `style` (the morph's names) stays. Its buttons do the same
+ *  on every render (Back, Show or Hide agents), so their old listeners stay. False: another shape, the new bar goes in. */
+function keepBar(old             , fresh             )          {
+  const glyph = (n      )          => n instanceof Element && n.classList.contains("dot");
+  const same = (a      , b      )          => a.nodeName === b.nodeName && (glyph(a) ||
+    (a.childNodes.length === b.childNodes.length && [...a.childNodes].every((c, i) => same(c, b.childNodes[i]))));
+  const patch = (a      , b      )       => {
+    if (!(a instanceof Element) || !(b instanceof Element)) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+    for (const n of a.getAttributeNames()) if (n !== "style" && !b.hasAttribute(n)) a.removeAttribute(n);
+    for (const n of b.getAttributeNames()) if (n !== "style" && a.getAttribute(n) !== b.getAttribute(n)) a.setAttribute(n, b.getAttribute(n) );
+    if (glyph(a)) { if (a.innerHTML !== b.innerHTML) a.innerHTML = b.innerHTML; return; }   // fixed markup, no data
+    a.childNodes.forEach((c, i) => patch(c, b.childNodes[i]));
+  };
+  if (!same(old, fresh)) return false;
+  patch(old, fresh);
+  return true;
 }
 
 /** The hub sends news every tick (a compacting or working agent's screen changes each time). The same pane's composer
@@ -1165,23 +1280,28 @@ function conversationScreen(pane        )              {
   // An agent team took the pane's log (the Mac's words): the lead's last known log says so under the title; with no
   // lead log known the pane waits for it and shows no rows (they would be another session's).
   const team = where?.p.agent?.team;
-  const head = h("header", { class: "top bar glass-bar" },
-    split()
+  // Narrow: two pieces of glass, a round back button (the arrow only) and a capsule with the glyph and the name.
+  const wide = split();
+  const head = h("header", { class: wide ? "top bar glass-bar" : "top bar" },
+    wide
       ? h("button", { id: "side-toggle", class: "back side-toggle", type: "button", "aria-controls": "agents", "aria-expanded": shown ? "true" : "false",
           "aria-label": shown ? "Hide agents" : "Show agents", title: shown ? "Hide agents" : "Show agents", onclick: toggleSide }, sidebarGlyph())
-      : h("button", { class: "back", onclick: () => { location.hash = ""; } }, "‹ Agents"),
-    h("span", { class: "bar-title" }, dot(status), team === "lastLead"
-      ? h("span", { class: "bar-stack" }, h("span", {}, title), h("span", { class: "team-line" }, "Agent team: showing the lead's last known session."))
-      : h("span", {}, title)));
+      : h("button", { class: "back round glass-bar", type: "button", "aria-label": "Agents", title: "Agents", onclick: toList }, backGlyph()),
+    h("span", { class: wide ? "bar-title" : "bar-title glass-bar" }, dot(status), team === "lastLead"
+      ? h("span", { class: "bar-name bar-stack" }, h("span", {}, title), h("span", { class: "team-line" }, "Agent team: showing the lead's last known session."))
+      : h("span", { class: "bar-name" }, title)));
   // Older rows on the way: a notice under the bar, over the rows (it moves none of them).
   const notice = earlierOf(pane);
   const noticed = !!v.waiting || !!(notice && (notice.busy || (!notice.failed && performance.now() < notice.noticeUntil)));
   const items          = [];
-  const rows = team === "waitingForLead" ? [] : v.items;
+  const all = team === "waitingForLead" ? [] : v.items;
+  if (fewRows?.pane === pane && !fewRows.n && all.length) fewRows.n = screenOf(all);
+  const few = fewRows?.pane === pane && !!fewRows.n && fewRows.n < all.length;
+  const rows = few ? all.slice(-fewRows .n) : all;
   if (team === "waitingForLead") {
     items.push(h("div", { class: "team-wait center", role: "status" }, h("h2", {}, "Waiting for the lead's log"),
       h("p", { class: "muted" }, "Herdr points this pane at an agent-team teammate. The lead's conversation shows here once Herdr reports it. The terminal shows what it is doing.")));
-  } else if (v.hasEarlier && v.session) {
+  } else if (v.hasEarlier && v.session && !few) {
     const mine = notice;
     if (mine?.failed) items.push(h("p", { class: "center muted", role: "status" }, "Could not load earlier messages."));
     // While the notice shows the button keeps its words and its room but is not seen (one "Loading earlier", not two).
@@ -1189,8 +1309,8 @@ function conversationScreen(pane        )              {
       mine?.failed && !mine.busy ? "Try again" : "Load earlier"));
   }
   items.push(...rowsFor(pane, rows));
-  if (!rows.length && !v.screen && team !== "waitingForLead") items.push(h("p", { class: "center muted" }, where ? "Loading…" : "This agent is gone."));
-  if (v.screen) items.push(screenView(pane, v.screen, !rows.length || where?.p.agent === undefined));
+  if (!all.length && !v.screen && team !== "waitingForLead") items.push(h("p", { class: "center muted" }, where ? "Loading…" : "This agent is gone."));
+  if (v.screen) items.push(screenView(pane, v.screen, !all.length || where?.p.agent === undefined));
   if (v.queue && status === "working") items.push(queueView(pane, v.queue));
 
   const card = v.approval ? approvalCard(pane, v.approval) : v.question ? questionCard(pane, v.question, v.items) : null;
@@ -1292,6 +1412,17 @@ function runView(r           )              {
 }
 
 /** A window with a column on its left (the sidebar symbol). */
+/** The back button's arrow (a chevron, as the system's). */
+function backGlyph()                {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M12.5 3.5 6 10l6.5 6.5");
+  svg.append(path);
+  return svg;
+}
 function sidebarGlyph()                {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");

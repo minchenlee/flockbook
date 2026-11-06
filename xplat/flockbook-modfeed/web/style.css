@@ -123,9 +123,13 @@ button:disabled { opacity: .35; cursor: default; }
 /* The conversation's bar: sticky frosted glass across the full width (the toolbar row). */
 .top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: 0 -16px; padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; border-bottom: .5px solid var(--sep); }
-/* A phone: the bar floats as a capsule under the status bar; a fade keeps the clock readable over the rows. */
-main:not(.split) .top { top: calc(env(safe-area-inset-top) + 6px); margin: 6px -6px 0; padding: 6px 14px 6px 6px; border: 0; border-radius: 26px;
-  box-shadow: var(--edge), var(--shadow-float); }
+/* A phone: two pieces of glass float under the status bar, a round back button and the name capsule (the morph's end);
+   a fade keeps the clock readable over the rows. */
+main:not(.split) .top { top: calc(env(safe-area-inset-top) + 6px); margin: 6px -6px 0; padding: 0; border: 0; gap: 8px; }
+main:not(.split) .top > .back, main:not(.split) .top > .bar-title { background: var(--glass-bar); box-shadow: var(--edge), var(--shadow-float); }
+.back.round { flex: none; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
+.back.round svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+main:not(.split) .top > .bar-title { flex: 0 1 auto; min-height: 44px; padding: 4px 18px 4px 14px; border-radius: 22px; }
 main:not(.split) .conversation::before { content: ""; position: sticky; top: 0; z-index: 2; display: block; pointer-events: none;
   height: calc(env(safe-area-inset-top) + 6px); margin: 0 -16px calc(-6px - env(safe-area-inset-top)); background: linear-gradient(var(--bg) 55%, transparent); }
 .top h1 { margin: 0; font: var(--large-title); }
@@ -161,7 +165,7 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
 .bar { justify-content: flex-start; }
 .back { border: none; background: none; color: var(--label); border-radius: 99px; padding: 6px 4px; min-height: 36px; cursor: pointer; flex: none; font: var(--body); }
 .bar-title { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--headline); }
-.bar-title span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-stack { display: flex; flex-direction: column; min-width: 0; }
 .bar-stack > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-title .bar-stack > .team-line { font: var(--caption); color: var(--label-2); white-space: normal; }
@@ -368,10 +372,22 @@ main.split.side-shown { --side: calc(320px + env(safe-area-inset-left)); --gl: 1
   padding: 8px 16px; min-height: 36px; font: var(--headline); color: var(--label); background: var(--glass-float); box-shadow: var(--shadow-float); cursor: pointer; }
 .viewer-status { position: fixed; top: 50%; left: 0; right: 0; text-align: center; margin: 0; color: var(--label-2); font: var(--callout); }
 
-/* Morphs (app.ts `navigate`, `morphGlyphs`, `cardIn`). Opening an agent: its row becomes the bar, its glyph and title fly
-   into the bar (View Transitions, iOS 18); the rest cross-fades. Without View Transitions the conversation opens out of
-   the row's box (clip-path). Reduce Motion: none of it. */
-::view-transition-group(*) { animation-duration: .46s; animation-timing-function: var(--ease); }
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: .26s; }
+/* Morphs (app.ts `navigate`, `morphGlyphs`, `cardIn`). Opening an agent: its row becomes the name capsule, its glyph and
+   title fly into it at their own size (not stretched to the box), the round back button pops in beside it a moment
+   later and the rows rise in under it; closing runs it back, the button going first and the rows with the cross-fade (View Transitions,
+   iOS 18). The rest cross-fades. Without View Transitions the conversation opens out of the row's box (clip-path).
+   Reduce Motion: none of it. */
+::view-transition-group(*) { animation-duration: .42s; animation-timing-function: cubic-bezier(.3, .7, .2, 1); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .2s; }
 ::view-transition-old(fb-sheet), ::view-transition-new(fb-sheet) { height: 100%; }
+::view-transition-old(fb-sheet) { animation-duration: .16s; }
+::view-transition-old(fb-title), ::view-transition-new(fb-title) { width: auto; height: 100%; }
+::view-transition-new(fb-back) { animation: fb-pop .3s var(--spring) .12s both; }
+::view-transition-new(fb-body) { animation: fb-rise .34s cubic-bezier(.3, .7, .2, 1) .06s both; }
+/* The bar's pieces above the rows (the groups otherwise stack in page order, the rows last). A snapshot has no
+   backdrop blur, so the glass capsule would show the rows through it: a solid backing while it moves. */
+::view-transition-group(fb-sheet), ::view-transition-group(fb-dot), ::view-transition-group(fb-title), ::view-transition-group(fb-back) { z-index: 2; }
+::view-transition-new(fb-sheet) { background: var(--solid-bar); border-radius: 22px; }
+@keyframes fb-pop { from { opacity: 0; transform: scale(.6); } }
+@keyframes fb-rise { from { opacity: 0; transform: translateY(24px); } }
 @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }

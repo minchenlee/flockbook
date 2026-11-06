@@ -11,10 +11,11 @@ import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { inflateSync } from "node:zlib";
 
 const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt > 0 ? process.argv[onlyAt + 1] : null;
-if (onlyAt > 0 && !["transport", "earlier-held"].includes(only)) throw new Error(`unknown web-test section: ${only}`);
+if (onlyAt > 0 && !["transport", "earlier-held", "morph"].includes(only)) throw new Error(`unknown web-test section: ${only}`);
 const phase = (name) => console.log(`web-test: phase ${name}`);
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const shotsAt = process.argv.indexOf("--shots");
@@ -31,7 +32,10 @@ function findChrome() {
       if (existsSync(p)) return p;
     }
   }
-  throw new Error("no chrome-headless-shell found; pass its path");
+  // A CI runner has Google Chrome (its own headless mode).
+  const app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (existsSync(app)) return app;
+  throw new Error("no chrome-headless-shell or Google Chrome found; pass its path");
 }
 
 let failures = 0, total = 0;
@@ -91,8 +95,10 @@ cdp.addEventListener("message", (event) => {
 function send(method, params = {}, sessionId) { return commands.send(method, params, sessionId); }
 
 /** A fresh page (own storage when `context` is new). */
-async function page(context) {
-  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: context });
+async function page(context, own = false) {
+  // `own`: in a window of its own, so it is the window's shown page (Chrome's full headless mode keeps a page opened
+  // beside another one in the background: hidden, no View Transitions).
+  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId: context, ...(own ? { newWindow: true } : {}) });
   const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
   const errors = [];
   listeners.push((m) => {
@@ -166,6 +172,7 @@ const pages = [];
 try {
   if (only === "transport") await transportRun();
   else if (only === "earlier-held") await heldEarlierRun();
+  else if (only === "morph") await morph();
   else if (live) await liveRun();
   else await fakeRun();
 } catch (e) {
@@ -270,6 +277,7 @@ async function liveRun() {
 
 /** The fake hub: every screen and every action. */
 async function fakeRun() {
+  await morph();   // first: its frame times, with no other page open in the browser
   phase("pairing and page assets");
   // The page and the socket on one origin, scripts under the CSP.
   const fresh = await page(await context());
@@ -715,7 +723,8 @@ async function fakeRun() {
   const glass = (sel) => `(() => { const c = getComputedStyle(document.querySelector(${JSON.stringify(sel)}));
     const f = c.backdropFilter || c.webkitBackdropFilter || ""; const a = /rgba\\([^)]*,\\s*([0-9.]+)\\)/.exec(c.backgroundColor);
     return f.includes("blur") && !!a && Number(a[1]) < 1; })()`;
-  check(await p.eval(glass(".top")) === true && await p.eval(glass(".composer")) === true, "look: bar and composer are frosted glass");
+  check(await p.eval(glass(".top > .back")) === true && await p.eval(glass(".top > .bar-title")) === true && await p.eval(glass(".composer")) === true,
+    "look: the back button, the name capsule and the composer are frosted glass");
   // Stills with text under the glass (page-only filler, gone on the next render), at pixel ratio 1: see `scale`.
   if (shots) {
     await p.scale(1);
@@ -1220,12 +1229,15 @@ async function fakeRun() {
   // still down), then A: A's lift goes to its old node only, out of the page. The rows go in at A's lift. The browser
   // lifts every point of the protocol's touchEnd at once, so the two lifts are sent from the page, each to its node.
   const two = await heldAtTop(), twoN = await p.eval(rowCount);
-  await p.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 1, x: 195, y: 420 }] });
-  const twoSwapped = await p.eval(`(() => { const e = document.elementFromPoint(195, 420); if (!e || !e.closest('.items')) return false;
+  // A goes down on a node inside a row, not on a row itself: the page keeps each row's node and puts it back.
+  const ay = await p.eval(`(() => { for (let y = 420; y < 700; y += 4) { const e = document.elementFromPoint(195, y);
+    if (e && e.closest('.items') && !e.matches('.items > *')) return y; } return 420; })()`);
+  await p.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 1, x: 195, y: ay }] });
+  const twoSwapped = await p.eval(`(() => { const e = document.elementFromPoint(195, ${ay}); if (!e || !e.closest('.items')) return false;
     window.__a = e; e.replaceWith(e.cloneNode(true)); return true; })()`);
-  const twoB = await p.eval(`(() => { const a = document.elementFromPoint(195, 420); for (let y = 120; y < 700; y += 20) {
+  const twoB = await p.eval(`(() => { const a = document.elementFromPoint(195, ${ay}); for (let y = 120; y < 700; y += 20) {
     const b = document.elementFromPoint(195, y); if (b && b.closest('.items') && !b.contains(a) && !a.contains(b) && b.closest('.msg, .logged, .tools') !== a.closest('.msg, .logged, .tools')) return y; } return 0; })()`);
-  await p.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 1, x: 195, y: 420 }, { id: 2, x: 195, y: twoB || 250 }] });
+  await p.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 1, x: 195, y: ay }, { id: 2, x: 195, y: twoB || 250 }] });
   await p.eval("window.__parked()");
   await new Promise((r) => setTimeout(r, 300));
   const lift = (at, id, down) => `(() => { const at = ${at}, t = (n, e) => new Touch({ identifier: n, target: e, clientX: 195, clientY: 420 });
@@ -1680,6 +1692,234 @@ async function fakeRun() {
   for (const x of pages) check(x.errors.length === 0, `page: no errors or CSP violations (${x.errors.join(" | ")})`);
 }
 
+/** In each page before its own scripts: each View Transition (when it started, the rows and the named nodes right after
+ *  the update, when it finished), every frame's length, and `__m.late`: each `conversation` message held that many ms
+ *  (the phone's round trip over Tailscale). */
+function morphProbe() { return `(() => {
+  const T = window.__m = { late: 0, vt: [], frames: [] };
+  const svt = Document.prototype.startViewTransition;
+  if (svt) Document.prototype.startViewTransition = function (cb) {
+    const r = { start: performance.now(), end: 0, rows: -1, named: [], kept: false };
+    T.vt.push(r);
+    const t = svt.call(this, () => { cb(); r.rows = document.querySelectorAll('.items > [data-id]').length;
+      r.named = [...document.querySelectorAll('[style*="view-transition-name"]')]; });
+    t.finished.then(() => {}, () => {}).then(() => { r.end = performance.now(); r.kept = r.named.length > 0 && r.named.every((e) => e.isConnected); });
+    return t;
+  };
+  const W = window.WebSocket;
+  window.WebSocket = function (...a) {
+    const s = new W(...a), add = s.addEventListener.bind(s);
+    s.addEventListener = (type, f, o) => add(type, type !== 'message' ? f : (e) => {
+      let conv = false; try { conv = JSON.parse(e.data).type === 'conversation'; } catch {}
+      const run = () => { const t0 = performance.now(); f(e); if (conv) (T.msgs ??= []).push([t0, performance.now() - t0, e.data.length]); };
+      if (conv && T.late) { setTimeout(run, T.late); return; }
+      run();
+    }, o);
+    return s;
+  };
+  window.WebSocket.prototype = W.prototype;
+  Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+  let last = 0;
+  const tick = (n) => { if (last) T.frames.push([n, n - last]); last = n; requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+})()`; }
+
+/** Opening and closing an agent on a phone is a morph that runs to its end: the row turns into the name capsule and the
+ *  round back button comes in. The conversation's first page comes one round trip after the tap (held 60, 150 or 400
+ *  ms here) on a CPU 4x slower: the transition is not cut short (its named nodes stay in the page), it lasts its 420 ms,
+ *  and (WEB_MORPH_STRICT=1) from the tap to its end no frame takes 60 ms or more. Before, an answer after the transition's start made the bar anew and Chrome ended
+ *  the morph at 170-290 ms, and 100 rows in the update took one frame of 100-150 ms. WEB_MORPH_DEBUG=1: each frame. */
+/** RGBA pixels of a PNG from Chrome (8-bit RGB or RGBA, no interlace): { w, h, px }. */
+function pngPixels(buf) {
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20), type = buf[25], bpp = type === 6 ? 4 : 3;
+  const idat = [];
+  for (let i = 8; i < buf.length;) { const n = buf.readUInt32BE(i), t = buf.toString("latin1", i + 4, i + 8); if (t === "IDAT") idat.push(buf.subarray(i + 8, i + 8 + n)); i += 12 + n; }
+  const raw = inflateSync(Buffer.concat(idat)), stride = w * bpp, px = Buffer.alloc(w * h * 4);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? line[x - bpp] : 0, b = prev[x], c = x >= bpp ? prev[x - bpp] : 0;
+      const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+      line[x] = (line[x] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255;
+    }
+    for (let x = 0; x < w; x++) for (let k = 0; k < 4; k++) px[(y * w + x) * 4 + k] = k < bpp ? line[x * bpp + k] : 255;
+    prev = line;
+  }
+  return { w, h, px };
+}
+/** The share of pixels that differ (any channel by more than 24) between two same-size PNGs. */
+function pngDiff(a, b) {
+  const A = pngPixels(a), B = pngPixels(b);
+  if (A.w !== B.w || A.h !== B.h) return 1;
+  let n = 0;
+  for (let i = 0; i < A.px.length; i += 4) if ([0, 1, 2].some((k) => Math.abs(A.px[i + k] - B.px[i + k]) > 24)) n++;
+  return n / (A.w * A.h);
+}
+
+async function morph() {
+  phase("morph");
+  const p = await page(await context(), true);
+  pages.push(p);
+  // A CI runner's macOS may have Reduce Motion on: the page then changes screens with no morph, as it should.
+  await p.cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await p.onEveryLoad(morphProbe());
+  await p.cdp("Page.bringToFront");
+  await p.goto(origin + "/");
+  await p.eval("localStorage.setItem('flockbook.token', 'input-token')");
+  hub.stdin.write("session w2:p2 morph 0\nrich morph 100\n");
+  const listed = async () => {
+    await p.eval("history.replaceState(null, '', '/')");
+    await p.reload();
+    if (!await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\") && !!window.__m", 8000)) throw new Error("morph: the list did not load");
+    await new Promise((r) => setTimeout(r, 300));
+  };
+  await listed();
+  const rows = "document.querySelectorAll('section.conversation .items > [data-id]').length";
+  const atEnd = "Math.abs(document.documentElement.scrollHeight - window.innerHeight - window.scrollY) <= 4";
+  /** Taps the row (or Back) with each `conversation` held `late` ms; the transition's numbers once it ended. */
+  const go = async (late, open) => {
+    await p.eval(`window.__m.late = ${late}`);
+    const n = await p.eval("window.__m.vt.length");
+    const tap = await p.eval(`(() => { const e = document.querySelector(${JSON.stringify(open ? ".row[data-pane='w2:p2']" : "section.conversation .top .back")});
+      if (!e) return 0; const t = performance.now(); e.click(); return t; })()`);
+    if (!tap) return null;
+    if (!await p.until(`window.__m.vt[${n}]?.end > 0`, 6000)) {
+      return p.eval(`({ started: window.__m.vt.length > ${n}, visible: document.visibilityState, transitions: !!document.startViewTransition,
+        still: matchMedia('(prefers-reduced-motion: reduce)').matches, wide: innerWidth })`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    return p.eval(`(() => { const r = window.__m.vt[${n}];
+      const f = window.__m.frames.filter(([t]) => t > ${tap} && t <= r.end + 20).map(([, d]) => d);
+      return { wait: Math.round(r.start - ${tap}), ms: Math.round(r.end - r.start), rows: r.rows, kept: r.kept, named: r.named.length, worst: Math.round(Math.max(0, ...f)), f: ${!!process.env.WEB_MORPH_DEBUG} ? window.__m.frames.filter(([t]) => t > ${tap} - 50 && t <= r.end + 20).map(([t, d]) => Math.round(t - ${tap}) + ":" + Math.round(d)).join(" ") : undefined, msgs: ${!!process.env.WEB_MORPH_DEBUG} ? (window.__m.msgs ?? []).filter(([t]) => t > ${tap} - 50).map(([t, d, n]) => Math.round(t - ${tap}) + ":" + Math.round(d) + "ms/" + n).join(" ") : undefined }; })()`);
+  };
+  const says = (r) => JSON.stringify(r);
+  const ran = (r) => !!r && r.ms >= 400 && r.kept;
+  // At most two frames missed in a row (50 ms) while the page is loaded; 60 sits above that.
+  const fast = (r) => !!r && r.worst < 60;
+  // Frame times and waits are checked only with WEB_MORPH_STRICT=1 (a quiet machine): on a shared CI runner they vary
+  // (100-333 ms frames seen), so there they are printed, and the morph running to its end is what fails.
+  const strict = process.env.WEB_MORPH_STRICT === "1";
+  const timing = (ok, name) => { if (strict) check(ok, name); else console.log(`info ${name}: ${ok ? "within" : "over"} the strict budget`); };
+  await p.cdp("Emulation.setCPUThrottlingRate", { rate: 4 });
+  try {
+    // First open after the page loads, the answer before the wait's end (60 ms): the transition starts with the rows
+    // (about a screen of them). The page's first conversation costs one longer frame once (styles, fonts: 49-51 ms
+    // here; an open after another agent was opened once, 18-33 ms); 100 rows in the update took 101-152 ms.
+    let a = await go(60, true);
+    // That one frame varies with the machine (twice in 30 runs here it was 99-134 ms): a second page load once.
+    if (strict && a && a.worst >= 80) { await listed(); a = await go(60, true); }
+    check(ran(a), `morph: first open, answer 60 ms late (CPU 4x) -> the morph runs to its end, its nodes kept (${says(a)})`);
+    check(!!a && a.rows >= 1 && a.rows <= 15, `morph: the first page is in the new picture, about a screen of rows only (${a?.rows})`);
+    timing(!!a && a.worst < 80, `morph: the page's first open, no frame of 80 ms or more (worst ${a?.worst})`);
+    check(await p.until(`${rows} >= 100`, 8000) === true && await p.until(atEnd, 2000) === true,
+      `morph: after the morph the other rows go in, the page at the newest (${await p.eval(rows)})`);
+    // The bar the morph ends in: a round back button with the arrow only, and the name capsule beside it.
+    const bar = await p.eval(`(() => { const b = document.querySelector('section.conversation > .top > .back'), c = document.querySelector('section.conversation > .top > .bar-title');
+      if (!b || !c) return null; const rb = b.getBoundingClientRect(), rc = c.getBoundingClientRect(), sb = getComputedStyle(b), sc = getComputedStyle(c);
+      return { label: b.getAttribute('aria-label'), text: b.textContent.trim(), svg: !!b.querySelector('svg'), bw: rb.width, bh: rb.height, round: parseFloat(sb.borderRadius) >= rb.height / 2 - 1,
+        gap: rc.left - rb.right, ch: rc.height, title: c.textContent, glass: sb.backgroundColor !== 'rgba(0, 0, 0, 0)' && sc.backgroundColor !== 'rgba(0, 0, 0, 0)',
+        bar: getComputedStyle(b.parentElement).backgroundColor }; })()`);
+    check(!!bar && bar.label === "Agents" && bar.text === "" && bar.svg && bar.bw >= 44 && bar.bh >= 44 && bar.round,
+      `morph: the back button is round, the arrow only, 44 pt at least, named Agents (${says(bar)})`);
+    check(!!bar && bar.gap >= 4 && bar.ch >= 44 && bar.title.includes("Notes") && bar.glass && bar.bar === "rgba(0, 0, 0, 0)",
+      `morph: beside it a capsule of its own with the glyph and the name, both glass, no bar behind them (${says(bar)})`);
+    const b1 = await go(150, false);
+    check(ran(b1), `morph: close (CPU 4x) -> runs to its end (${says(b1)})`);
+    timing(fast(b1), `morph: close, no frame of 60 ms or more (worst ${b1?.worst})`);
+    // Again: rows known, the answer 150 ms late comes during the morph and does not cut it.
+    const c = await go(150, true);
+    check(ran(c), `morph: second open, answer 150 ms late -> runs to its end, not cut by the answer (${says(c)})`);
+    timing(fast(c) && c.wait < 60, `morph: second open, starts at once, no frame of 60 ms or more (wait ${c?.wait}, worst ${c?.worst})`);
+    const d = await go(150, false);
+    check(ran(d), `morph: second close (${says(d)})`);
+    timing(fast(d), `morph: second close, no frame of 60 ms or more (worst ${d?.worst})`);
+    // A new page, another agent opened once: then this one's first open (its rows built now) has no long frame.
+    await listed();
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await p.eval("location.hash = '#pane=w1%3Ap1'");
+    await p.until("!!document.querySelector('section.conversation .items > [data-id]')", 8000);
+    await new Promise((r) => setTimeout(r, 600));
+    await p.eval("location.hash = ''");
+    await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\")", 8000);
+    await new Promise((r) => setTimeout(r, 600));
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 4 });
+    const w = await go(60, true);
+    check(ran(w) && w.rows >= 1 && w.rows <= 15, `morph: first open of an agent after another, answer 60 ms late -> runs to its end, a screen of rows (${says(w)})`);
+    timing(fast(w), `morph: first open of an agent after another, no frame of 60 ms or more (worst ${w?.worst})`);
+    await go(0, false);
+    // First open again, the answer after the wait (400 ms late): the morph starts after at most 150 ms, from the empty
+    // sheet, and the rows coming in during it leave its nodes in place.
+    await listed();
+    const e = await go(400, true);
+    check(ran(e), `morph: answer 400 ms late -> not cut when the rows come during the morph (${says(e)})`);
+    timing(fast(e) && e.wait < 250, `morph: answer 400 ms late, starts after the 150 ms wait, no frame of 60 ms or more (wait ${e?.wait}, worst ${e?.worst})`);
+    check(await p.until(`${rows} >= 100`, 8000) === true, `morph: and then the rows are all in (${await p.eval(rows)})`);
+    // Mid-morph the rows (fb-body) stacked above the capsule, and its glass (no backdrop blur in a snapshot) showed
+    // them through: the name was hidden until the end. Paused at 300 ms: the bar's pieces above the rows, a solid
+    // backing under the capsule; once ended, the name is what is on top at its place.
+    await go(0, false);
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await p.eval(`(() => { const svt = document.startViewTransition; document.startViewTransition = function (cb) {
+      document.startViewTransition = svt; const t = svt.call(this, cb);
+      t.ready.then(() => { for (const a of document.getAnimations().filter((a) => a.effect?.pseudoElement)) { a.pause(); a.currentTime = 300; } window.__paused = true; });
+      return t; }; window.__paused = false; return true; })()`);
+    await p.eval(`document.querySelector(".row[data-pane='w2:p2']").click()`);
+    await p.until("window.__paused", 4000);
+    const stack = await p.eval(`(() => { const css = (pe) => getComputedStyle(document.documentElement, pe);
+      const z = (n) => parseInt(css('::view-transition-group(' + n + ')').zIndex) || 0;
+      const bg = css('::view-transition-new(fb-sheet)').backgroundColor, alpha = /rgba/.test(bg) ? parseFloat(bg.split(',')[3]) : bg.startsWith('rgb') ? 1 : 0;
+      return { body: z('fb-body'), sheet: z('fb-sheet'), dot: z('fb-dot'), title: z('fb-title'), back: z('fb-back'), bg, alpha }; })()`);
+    await p.eval("document.getAnimations().filter((a) => a.effect?.pseudoElement).forEach((a) => a.finish()); true");
+    await new Promise((r) => setTimeout(r, 300));
+    const seen = await p.eval(`(() => { const n = document.querySelector('section.conversation > .top .bar-name'); if (!n) return null;
+      const r = n.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { name: n.textContent, on: !!at && n.contains(at), w: Math.round(r.width) }; })()`);
+    check(!!stack && Math.min(stack.sheet, stack.dot, stack.title, stack.back) > stack.body && stack.alpha === 1,
+      `morph: mid-morph the capsule and the back button are above the rows, the capsule on a solid backing (${says(stack)})`);
+    check(!!seen && seen.on && seen.w > 0 && seen.name.includes("Notes"), `morph: after the morph the name is on top in its capsule (${says(seen)})`);
+    // Back to the list, paused at 300 ms. The back button's glass (backdrop-filter) stayed on its group for the whole
+    // morph, a blurred square over the list's title; and the tap scrolled the conversation to its top (the empty
+    // fragment) before the old picture was taken, so the close started from the wrong place.
+    await p.until(`${rows} >= 100`, 8000);
+    await p.eval("window.scrollTo(0, document.documentElement.scrollHeight - innerHeight - 300); true");
+    await new Promise((r) => setTimeout(r, 300));
+    const was = await p.eval("Math.round(scrollY)");
+    await p.eval(`(() => { const svt = document.startViewTransition; window.__close = { start: -1, paused: false }; document.startViewTransition = function (cb) {
+      document.startViewTransition = svt; window.__close.start = Math.round(scrollY); const t = svt.call(this, cb);
+      t.ready.then(() => { for (const a of document.getAnimations().filter((a) => a.effect?.pseudoElement)) { a.pause(); a.currentTime = 300; } window.__close.paused = true; });
+      return t; }; return true; })()`);
+    await p.eval("document.querySelector('section.conversation .top .back').click(); true");
+    await p.until("window.__close.paused", 4000);
+    await new Promise((r) => setTimeout(r, 200));
+    const clip = await p.eval(`(() => { const t = document.querySelector('header h1, .top h1') ?? document.querySelector('h1'); const r = t?.getBoundingClientRect();
+      return r ? { x: 0, y: 0, width: Math.ceil(r.right + 8), height: Math.ceil(r.bottom + 8), scale: 1 } : null; })()`);
+    const shoot = async () => clip ? Buffer.from((await p.cdp("Page.captureScreenshot", { format: "png", clip })).data, "base64") : null;
+    const mid = await shoot();
+    const start = await p.eval("window.__close.start");
+    await p.eval("document.getAnimations().filter((a) => a.effect?.pseudoElement).forEach((a) => a.finish()); true");
+    await new Promise((r) => setTimeout(r, 400));
+    const end = await shoot();
+    const diff = mid && end ? Math.round(pngDiff(mid, end) * 1000) / 10 : 100;
+    check(!!clip && diff < 2, `morph: back to the list, at 300 ms nothing covers the list's title (pixels differing from the end: ${diff}%, ${says(clip)})`);
+    check(start === was, `morph: back to the list starts from where the conversation was read (scrollY ${was} at the tap, ${start} at the start)`);
+    // The back button steps back in history (no entry of its own): the phone's Back after it does not open the agent
+    // again. (The entry before may be another page load: the page is read again once it settles.)
+    const listAt = await p.eval("location.hash");
+    await p.eval("history.back(); true");
+    await new Promise((r) => setTimeout(r, 1200));
+    await p.until("document.readyState === 'complete'", 6000);
+    const after = await p.eval("location.hash + ' ' + !!document.querySelector(\"section.conversation[data-pane='w2:p2']\")").catch((e) => String(e));
+    check(listAt === "" && !/w2(%3A|:)p2|true$/.test(after), `morph: after Back to the list, the phone's Back does not open the agent again (list at '${listAt}', then '${after}')`);
+  } finally {
+    await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
+    hub.stdin.write("session w2:p2 s4\n");   // the pane's own session again, for the other sections
+  }
+  await p.close();
+  pages.splice(pages.indexOf(p), 1);
+  check(p.errors.length === 0, `morph: no errors or CSP violations (${p.errors.join(" | ")})`);
+}
+
 /** iPad and other wide screens (768 pt and up): the agents on the left (320 pt, can be hidden), the conversation on the
  *  right under its own bar, its text and composer at most 760 pt wide in the middle. Narrower (a phone, Split View at a
  *  third): the phone's one column. */
@@ -1818,7 +2058,7 @@ async function twoColumns() {
     check(await p.until("!document.querySelector('.side') && !!document.querySelector('section.conversation')") === true, `narrow ${w}x${ht}: one column, the conversation only`);
     const main = await p.eval(box("main"));
     check(main.w === Math.min(w, 760), `narrow ${w}: the phone's column (${main.w})`);
-    check(await p.eval("document.querySelector('.back')?.textContent") === "‹ Agents", `narrow ${w}: Back to the agents`);
+    check(await p.eval("document.querySelector('.back')?.getAttribute('aria-label')") === "Agents", `narrow ${w}: Back to the agents`);
     check(await p.eval(noScroll), `narrow ${w}: no sideways scroll`);
   }
   await p.eval("location.hash = ''");
