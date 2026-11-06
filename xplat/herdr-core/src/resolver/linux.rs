@@ -64,6 +64,12 @@ fn ticks_per_sec() -> u64 {
     100
 }
 
+/// Clock ticks after boot as a whole-second time, as [`LinuxProcSource::processes`] dates a process.
+pub(crate) fn ticks_to_date(ticks: u64) -> Option<DateTime<Utc>> {
+    let btime = LinuxProcSource::new().boot_time()?;
+    DateTime::<Utc>::from_timestamp(btime + (ticks / ticks_per_sec()) as i64, 0)
+}
+
 /// `ps -x`: this user's processes only. Off unix every entry counts (the tree is synthetic there).
 #[cfg(unix)]
 fn mine(e: &std::fs::DirEntry) -> bool {

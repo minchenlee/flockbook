@@ -674,3 +674,18 @@ fn proc_fs_lists_this_process() {
     assert!(open_files(&[]).is_empty());
     assert_eq!(linux::parse_stat("12 (a) b) S 7 12 12 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 4242 0"), Some((7, 4242, "a) b".into())));
 }
+
+/// Claude Code on Linux writes `procStart` as `/proc/<pid>/stat` starttime (clock ticks after boot), not `ps lstart`.
+#[cfg(target_os = "linux")]
+#[test]
+fn claude_pid_file_with_linux_tick_proc_start() {
+    let pid = std::process::id() as i32;
+    let stat = fs::read_to_string("/proc/self/stat").unwrap();
+    let (_, ticks) = linux::parse_linux_stat(&stat).unwrap();
+    let procs = linux::LinuxProcSource::new().processes();
+    let file = |start: u64| serde_json::json!({"pid": pid, "sessionId": "sid-linux", "procStart": start.to_string()}).to_string();
+    let ok = file(ticks);
+    assert_eq!(claude_session_source_with(&[pid], &procs, |_| Some(ok.clone().into_bytes())), Some(("sid-linux".to_string(), pid)));
+    let reused = file(ticks + 1_000_000); // pid reused: another start
+    assert_eq!(claude_session_source_with(&[pid], &procs, |_| Some(reused.clone().into_bytes())), None);
+}
