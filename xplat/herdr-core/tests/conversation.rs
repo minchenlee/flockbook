@@ -77,6 +77,32 @@ fn pasted_text() {
 }
 
 #[test]
+fn hc_notes_are_shown() {
+    // What `hc send` types into a lead agent: one `<hc from="<terminal> [name]">…</hc>` envelope. It is the
+    // conversation, not injected context, so it stays visible with its tag (the row decides how to draw it).
+    let note = r#"<hc from="t2 docs-worker">Done: notes updated.\nSee notes.md</hc>"#;
+    let shown = note.replace("\\n", "\n");
+    assert_eq!(user_visible(&shown).as_deref(), Some(shown.as_str()), "hc: a note is visible");
+    let lines = [
+        format!(
+            r#"{{"timestamp":"2026-10-10T01:00:00.000Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"{}"}}]}}}}"#,
+            note.replace('"', "\\\"")
+        ),
+        r#"{"type":"user","uuid":"u1","timestamp":"2026-10-10T01:00:01.000Z","message":{"role":"user","content":"<pasted_content id=\"a1\">\n<hc from=\"t3\">Short note</hc>\n</pasted_content id=\"a1\">"}}"#.to_string(),
+        r#"{"type":"user","uuid":"u2","timestamp":"2026-10-10T01:00:02.000Z","message":{"role":"user","content":"<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>"}}"#.to_string(),
+    ];
+    assert_eq!(
+        describe(&parse(&lines)),
+        [
+            format!("user:{shown}"),
+            "user:<hc from=\"t3\">Short note</hc>".to_string(),
+            "user:<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>".to_string(),
+        ],
+        "hc: Codex and Claude Code notes, pasted or not, are user items"
+    );
+}
+
+#[test]
 fn codex_rollout() {
     let cx = fixture_lines("codex.jsonl");
     assert_eq!(

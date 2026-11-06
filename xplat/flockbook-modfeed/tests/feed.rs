@@ -59,6 +59,24 @@ fn rows_footer_separator() {
 }
 
 #[test]
+fn hc_note_rows_carry_the_sender() {
+    let item = |id: &str, t: &str| ConversationItem::new(id, ItemKind::UserText(t.into()), Some(1_793_670_000.0));
+    let json = |it: &ConversationItem| serde_json::to_value(rows::row(it)).unwrap();
+    let note = json(&item("u1", "<hc from=\"t2 docs-worker\">Done: notes updated.\nSee notes.md</hc>"));
+    assert_eq!(note["k"], "user", "hc note: still a user row (older mods draw it as a bubble)");
+    assert_eq!(note["from"], "t2 docs-worker", "hc note: the sender as hc wrote it");
+    assert_eq!(note["text"], "Done: notes updated.\nSee notes.md", "hc note: the text without its tag");
+    let reach = json(&item("u2", "<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>"));
+    assert_eq!((reach["from"].as_str(), reach["text"].as_str()), (Some("t4 review"), Some("Review x.rs")), "hc note: other attributes");
+    let bare = json(&item("u3", "<hc>A note</hc>"));
+    assert_eq!((bare["from"].as_str(), bare["text"].as_str()), (Some(""), Some("A note")), "hc note: no sender");
+    for typed in ["Fix it", "<hc from=\"t2\">a</hc> and more I typed", "see <hc from=\"t2\">a</hc>", "<hcx>a</hcx>"] {
+        let r = json(&item("u4", typed));
+        assert!(r.get("from").is_none() && r["text"] == typed, "hc note: typed text stays as it is: {typed}");
+    }
+}
+
+#[test]
 fn tail_older_paste() {
     let dir = tempfile::tempdir().unwrap();
     let t = turn();
