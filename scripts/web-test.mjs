@@ -1840,12 +1840,17 @@ async function morph() {
     // A new page, another agent opened once: then this one's first open (its rows built now) has no long frame.
     await listed();
     await p.cdp("Emulation.setCPUThrottlingRate", { rate: 1 });
+    // Each change of screen waits for its morph's end: a tap during one changes the screen with no morph (by design),
+    // and on a slow runner the close took over 600 ms.
+    const settled = "window.__m.vt.every((v) => v.end > 0)";
     await p.eval("location.hash = '#pane=w1%3Ap1'");
     await p.until("!!document.querySelector('section.conversation .items > [data-id]')", 8000);
-    await new Promise((r) => setTimeout(r, 600));
+    await p.until(settled, 8000);
+    await new Promise((r) => setTimeout(r, 300));
     await p.eval("location.hash = ''");
     await p.until("!!document.querySelector(\".row[data-pane='w2:p2']\")", 8000);
-    await new Promise((r) => setTimeout(r, 600));
+    await p.until(settled, 8000);
+    await new Promise((r) => setTimeout(r, 300));
     await p.cdp("Emulation.setCPUThrottlingRate", { rate: 4 });
     const w = await go(60, true);
     check(ran(w) && w.rows >= 1 && w.rows <= 15, `morph: first open of an agent after another, answer 60 ms late -> runs to its end, a screen of rows (${says(w)})`);
