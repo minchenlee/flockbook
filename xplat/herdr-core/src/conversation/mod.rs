@@ -775,7 +775,7 @@ fn pasted_re() -> &'static Regex {
 
 fn hc_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?s)^<hc(\s[^>]*)?>(.*)</hc>$").unwrap())
+    R.get_or_init(|| Regex::new(r#"(?s)^<hc((?:\s+[\w-]+="[^"]*")*)\s*>(.*)</hc>$"#).unwrap())
 }
 
 fn hc_from_re() -> &'static Regex {

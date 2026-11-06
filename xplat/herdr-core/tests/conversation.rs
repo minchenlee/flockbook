@@ -100,6 +100,13 @@ fn hc_notes_are_shown() {
         ],
         "hc: Codex and Claude Code notes, pasted or not, are user items"
     );
+    use herdr_core::conversation::hc_note;
+    assert_eq!(
+        hc_note(r#"<hc from="t2" reach="a > b">body</hc>"#),
+        Some(("t2".to_string(), "body".to_string())),
+        "hc: a '>' inside a quoted attribute stays out of the body"
+    );
+    assert_eq!(hc_note("see <hc from=\"t2\">a</hc>"), None, "hc: typed text around a tag is not a note");
 }
 
 #[test]
