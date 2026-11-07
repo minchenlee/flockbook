@@ -450,11 +450,17 @@ struct SettingsFocus: NSViewRepresentable {
         c.watch?.invalidate(); c.watch = nil
         if let saved = c.saved {
             c.saved = nil
-            // After this update: the screen under Settings is enabled again first.
-            DispatchQueue.main.async { [weak win, weak saved] in
-                guard let win, let saved, (saved as? NSView)?.window === win else { return }
-                win.makeFirstResponder(saved)
+            // After this update: the screen under Settings is enabled again first. SwiftUI can apply that screen's last
+            // update later and drop the focus to the window: while the page stays closed, give it back for a short
+            // while, but only when nothing has the focus (a click elsewhere keeps its view).
+            func give(_ step: Int) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (step == 0 ? 0 : 0.1)) { [weak win, weak saved] in
+                    guard let win, let saved, !c.open, (saved as? NSView)?.window === win else { return }
+                    if step == 0 || win.firstResponder === win { win.makeFirstResponder(saved) }
+                    if step < 5 { give(step + 1) }
+                }
             }
+            give(0)
         }
     }
 }
