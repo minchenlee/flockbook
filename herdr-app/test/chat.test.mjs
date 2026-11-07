@@ -147,6 +147,29 @@ test("a tool call with a multi-line input shows one line, cut with …, and its 
   assert.equal(rowHeight(many, 760, true), 40 + 3 * 26 + 8);
 });
 
+test("a note from another agent (hc) is one short line with its sender; a click shows the whole note", async () => {
+  const note = { type: "row", id: "n1", k: "user", from: "t2 docs-worker", text: "Done: notes updated.\n\nSee notes.md for the list.", ts: 2 };
+  const bare = { type: "row", id: "n2", k: "user", from: "t3", text: "Short note", ts: 3 };
+  fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 3 }, user("u1", "Fix it"), note, bare, end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  v.render(cx);
+  const closed = lastList._args.sizes[1];
+  let rendered = lastList._args.render({ start: 0, end: 3 });
+  assert.match(textOf(rendered[0]), /Fix it/, "the owner's message stays a bubble");
+  assert.match(textOf(rendered[1]), /↳ docs-worker: Done: notes updated\. …/, "the sender's name and the first line");
+  assert.doesNotMatch(textOf(rendered[1]), /See notes\.md/);
+  assert.match(textOf(rendered[2]), /↳ t3: Short note/, "no name: the terminal");
+  assert.ok(closed < rowHeight({ k: "user", text: note.text }, v.colWidth()), "shorter than a bubble");
+  lastList._h.on_item_click("n1", cx);
+  v.render(cx);
+  assert.ok(lastList._args.sizes[1] > closed, "open, the row grows");
+  rendered = lastList._args.render({ start: 0, end: 3 });
+  assert.match(textOf(rendered[1]), /See notes\.md for the list\./);
+  assert.equal(v.height(v.feed().rows[1]), rowHeight(note, v.colWidth(), true));
+  lastList._h.on_item_click("u1", cx);
+  assert.ok(!v.open.has("u1"), "a click on the owner's message opens nothing");
+});
+
 test("oneLine keeps the first line with text and marks the rest with …", () => {
   assert.equal(oneLine("a\nb"), "a …");
   assert.equal(oneLine("\n\n  x  \r\n"), "x");

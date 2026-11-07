@@ -48,6 +48,12 @@ export function oneLine(text) {
   return lines.slice(i + 1).some(Boolean) ? `${lines[i]} …` : lines[i];
 }
 
+// Who sent a note (a user row with `from`, hc's "t2 docs-worker"): its name, else its terminal.
+export function noteSender(from) {
+  const [id, ...name] = String(from ?? "").trim().split(/\s+/);
+  return name.join(" ") || id || "agent";
+}
+
 export class ChatView {
   constructor(cx) {
     this.scroll = VirtualListScrollHandle.new();
@@ -158,6 +164,7 @@ export class ChatView {
     const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w);
     switch (row.k) {
       case "user":
+        if (row.from != null) return this.agentNote(row, t, md);
         return h_flex().w_full().justify_end().py(8)
           .child(v_flex().max_w(Math.floor(this.colWidth() * 0.78)).px(14).py(10).gap(4).rounded(16).bg(t.raised).text_color(t.foreground)
             .child(md(row.text, Math.floor(this.colWidth() * 0.78) - 28))
@@ -190,6 +197,18 @@ export class ChatView {
   note(t, text) {
     return h_flex().w_full().h(44).items_center().child(div().px(12).py(6).rounded(10).border(1).border_color(t.border)
       .text_size(12.5).text_color(t.muted).truncate().child(oneLine(text)));
+  }
+
+  // A note from another agent: one line, "↳ name: first line", like a tool chip; open, the whole note under it.
+  agentNote(row, t, md) {
+    const open = this.open.has(row.id);
+    const box = v_flex().w_full().py(6).gap(4)
+      .child(h_flex().child(h_flex().h(28).px(10).gap(6).items_center().rounded(14).bg(t.chrome).border(1).border_color(t.border)
+        .text_size(12.5).text_color(t.muted)
+        .child(div().max_w(this.colWidth() - 40).truncate().child(`↳ ${noteSender(row.from)}: ${oneLine(row.text)}`))
+        .child(div().flex_none().text_color(t.dim).child(open ? "▴" : "▾"))));
+    if (!open) return box;
+    return box.child(div().pl(12).text_color(t.muted).child(md(row.text, this.colWidth() - 12)));
   }
 
   tools(row, t) {
@@ -230,7 +249,7 @@ export class ChatView {
     if (!row || typeof y0 !== "number") return null;
     const w = this.colWidth();
     const at = row.k === "assistant" ? { y: y0 - 8, w }
-      : row.k === "user" ? { y: y0 - 18, w: Math.floor(w * 0.78) - 28 } : null;
+      : row.k === "user" && row.from == null ? { y: y0 - 18, w: Math.floor(w * 0.78) - 28 } : null;
     if (!at) return null;
     const code = codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0));
     return code === null ? null : openMenu([{ label: "Copy code", act: "copy", args: { text: code } }]);
@@ -239,7 +258,7 @@ export class ChatView {
   click(key, cx) {
     const row = this.feed()?.rows.find((r) => r.id === key);
     if (!row) return;
-    if (row.k === "tools") {
+    if (row.k === "tools" || (row.k === "user" && row.from != null)) {
       if (this.open.has(row.id)) this.open.delete(row.id); else this.open.add(row.id);
       cx.notify();
     }

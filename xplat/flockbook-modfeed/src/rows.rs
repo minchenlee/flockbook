@@ -18,6 +18,10 @@ pub struct FeedRow {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// A user row that is a note from another agent (`hc send`): its sender as hc wrote it ("t2 docs-worker"), and
+    /// `text` without the `<hc>` tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
     /// Milliseconds since 1970 (Swift encodes a whole Double without a fraction).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<i64>,
@@ -37,7 +41,7 @@ pub struct FeedRow {
 
 impl FeedRow {
     pub fn new(k: &str, id: &str, text: Option<String>, ts: Option<i64>) -> FeedRow {
-        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, ts, images: None, pics: None, chips: None, perm: None, question: None }
+        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, images: None, pics: None, chips: None, perm: None, question: None }
     }
 }
 
@@ -225,7 +229,13 @@ pub fn row(it: &ConversationItem) -> FeedRow {
     match &it.kind {
         ItemKind::UserText(s) => {
             r.k = "user".into();
-            r.text = Some(cut(s, TEXT_CAP));
+            match herdr_core::conversation::hc_note(s) {
+                Some((from, note)) => {
+                    r.text = Some(cut(&note, TEXT_CAP));
+                    r.from = Some(from);
+                }
+                None => r.text = Some(cut(s, TEXT_CAP)),
+            }
             if !it.images.is_empty() {
                 r.images = Some(it.images.len());
             }

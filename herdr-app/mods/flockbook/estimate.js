@@ -204,10 +204,12 @@ export function colWidths(width, rows, n) {
 
 export const columnWidth = (paneWidth) => Math.max(240, Math.min(READ_W, (paneWidth || 800) - GUTTER * 2));
 
-// The height of a row. `open`: its tool chip shows the calls.
+// The height of a row. `open`: its tool chip shows the calls, or its note from another agent the whole text.
 export function rowHeight(row, width, open = false) {
   switch (row.k) {
-    case "user": return markdownHeight(row.text || "", Math.floor(width * 0.78) - 28) + 20 + 16;
+    case "user":
+      if (row.from != null) return 40 + (open ? markdownHeight(row.text || "", width - 12) + 4 : 0);
+      return markdownHeight(row.text || "", Math.floor(width * 0.78) - 28) + 20 + 16;
     case "assistant": return markdownHeight(row.text || "", width) + 16;
     case "tools": {
       const calls = (row.chips || []).reduce((n, c) => n + (c.calls || []).length, 0);
