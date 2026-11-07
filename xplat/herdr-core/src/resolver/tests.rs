@@ -721,3 +721,36 @@ fn codex_subagent_rollouts_are_not_candidates() {
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t4").cloned();
     assert_eq!(got, Some(lead), "the lead's rollout resolves although its guardian wrote one in the same cwd");
 }
+
+/// The open-file route: Codex keeps its subagents' rollouts open too (the guardian's, in the same cwd). The pane
+/// resolves to the lead's rollout from its open files alone (no rollout folder to fall back on).
+#[test]
+fn codex_open_subagent_rollout_is_not_the_pane() {
+    let (_t, home) = tmp();
+    let start = Utc::now() - Duration::seconds(120);
+    let day = day_folder(&format!("{home}/.codex/sessions"), local_naive(start).date());
+    fs::create_dir_all(&day).unwrap();
+    let write = |dt: i64, id: &str, source: &str| {
+        let t = start + Duration::seconds(dt);
+        let p = format!("{day}/{}", rollout_name(t, id));
+        let meta = format!(
+            r#"{{"timestamp":"x","type":"session_meta","payload":{{"id":"{id}","timestamp":"{}","cwd":"/w/lead","source":{source}}}}}"#,
+            iso(t)
+        ) + "\n";
+        fs::write(&p, meta).unwrap();
+        p
+    };
+    let lead = write(2, "lead", r#""cli""#);
+    let guardian = write(40, "guardian", r#"{"subagent":{"other":"guardian"}}"#);
+
+    let procs = vec![proc_(900_003, 1, start, "node /opt/bin/codex HC_TERMINAL_ID=t5")];
+    let need = Need::new("hc:t5", "codex", "/w/lead", vec![900_003]);
+    let open = vec![lead.clone(), guardian.clone()];
+    let mut r = resolver(|r| {
+        r.home = home.clone();
+        r.codex_dir = format!("{home}/no-rollout-folder");
+        r.open_files = Box::new(move |pids| if pids.contains(&900_003) { open.clone() } else { vec![] });
+    });
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t5").cloned();
+    assert_eq!(got, Some(lead), "the lead's open rollout, not its guardian's");
+}

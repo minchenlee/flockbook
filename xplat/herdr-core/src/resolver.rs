@@ -162,6 +162,8 @@ pub struct SessionResolver {
     pub claude_dir: String,
     pub pi_agent_dir: String,
     pub agy_dir: String,
+    /// The home folder the open-file route matches logs under (`~/.codex/sessions/`, `~/.claude/projects/`, ...).
+    pub home: String,
     /// Unresolved panes are tried again after this (seconds); resolved ones are re-checked after `recheck`.
     pub retry: f64,
     pub recheck: f64,
@@ -256,7 +258,8 @@ impl SessionResolver {
             projects_dir: session_log::default_dir("claude").to_string_lossy().into_owned(),
             claude_dir: home.clone() + "/.claude/sessions",
             pi_agent_dir: home.clone() + "/.pi/agent",
-            agy_dir: home + "/.gemini/antigravity-cli",
+            agy_dir: home.clone() + "/.gemini/antigravity-cli",
+            home,
             retry: 5.0,
             recheck: 30.0,
             verdict_cap: 8 << 20,
@@ -540,7 +543,7 @@ impl SessionResolver {
             };
         }
         let grok = if n.kind == "grok" { Some(grok_home(&agent.line)) } else { None };
-        if let Some(p) = log_path(&open, &n.kind, grok.as_deref(), &home_dir()) {
+        if let Some(p) = log_path(&open, &n.kind, grok.as_deref(), &self.home) {
             if !is_claimed(&p, claimed) {
                 return (Some(p), None);
             }
