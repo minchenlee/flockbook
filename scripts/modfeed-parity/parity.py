@@ -23,7 +23,8 @@ LOGS = {
     "t4": (["claude"], "injected.jsonl"), "t5": (["claude"], "pasted.jsonl"), "t6": (["codex"], "codex.jsonl"),
     "t7": (["codex"], "question-codex.jsonl"), "t8": (["pi"], "pi.jsonl"), "t9": (["grok"], "grok.jsonl"),
     "t10": (["agy"], "agy.jsonl"), "t11": (["agy"], "agy-order.jsonl"), "t12": (["agy"], "agy-injected.jsonl"),
-    "t13": (["cursor-agent"], "cursor.jsonl"), "t20": (["claude"], "turn.jsonl"),
+    "t13": (["cursor-agent"], "cursor.jsonl"), "t14": (["claude"], "hc-notes.jsonl"), "t15": (["codex"], "hc-notes-codex.jsonl"),
+    "t20": (["claude"], "turn.jsonl"),
 }
 
 
@@ -343,6 +344,17 @@ EXPECT = {
     "approve t4 (no identity)": ("no-identity", []),
     "send t4 (no identity)": ("no-identity", []),
 }
+# The user rows of the hc note feeds, (from, text), checked on each side alone: a note row has the sender and the
+# text without the tag; anything else is the user's own text (no `from`).
+NOTES = {
+    "feed t14 (hc-notes.jsonl)": [
+        (None, "Ask the docs worker for the notes."), ("t2 docs-worker", "Done: notes updated.\nSee notes.md"),
+        ("t3", "Short note"),
+        ("t4 review", "Review x.rs"), ("", "A note"), (None, 'see <hc from="t2">a</hc>'),
+        (None, '<hc from="t2">a</hc><hc from="t3">b</hc>')],
+    "feed t15 (hc-notes-codex.jsonl)": [
+        (None, "Review the parser with a helper."), ("t4 review", "Review done: no P1.\n\nTwo P2s in parse.rs.")],
+}
 # Steps where the two sidecars differ on purpose (not compared), with fixed results for each side.
 DIFFER = {
     "version": "Rust has the `helper` command (helpers on other machines)",
@@ -370,6 +382,13 @@ def expectation_misses(steps, work, side):
         if (result is not None and got != result) or brief(sent) != want:
             misses.append("%s: want %s %s, got %s %s" % (name, result, want, got, brief(sent)))
     misses += ["%s: did not run" % n for n in expect if n not in seen]
+    for name, out, _ in steps:
+        if name in NOTES:
+            seen.add(name)
+            got = [(l.get("from"), l.get("text")) for l in out["lines"] if l.get("k") == "user"]
+            if got != NOTES[name]:
+                misses.append("%s: want user rows %s, got %s" % (name, NOTES[name], got))
+    misses += ["%s: did not run" % n for n in NOTES if n not in seen]
     return misses
 
 
@@ -396,7 +415,7 @@ def main():
     for side in ("a", "b"):
         problems += ["%s: %s" % (side.upper(), m) for m in expectation_misses(results[side], work, side)]
     same, diffs, lines = 0, [], 0
-    expectations = 2 * len(EXPECT) + sum(len(e) for e in EXPECT_SIDE.values())
+    expectations = 2 * (len(EXPECT) + len(NOTES)) + sum(len(e) for e in EXPECT_SIDE.values())
     for (name, oa, sa), (_, ob, sb) in zip(results["a"], results["b"]):
         lines += len(oa["lines"])
         if name in DIFFER:

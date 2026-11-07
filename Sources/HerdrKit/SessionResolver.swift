@@ -61,6 +61,8 @@ public actor SessionResolver {
     private let claudeDir: String
     private let piAgentDir: String
     private let agyDir: String
+    /// The home folder the open-file route matches logs under (`~/.codex/sessions/`, `~/.claude/projects/`, ...).
+    private let home: String
     /// `lsof` of a process tree (injected by checks).
     private let lsof: @Sendable ([Int32]) -> [String]
     /// Unresolved panes are tried again after this; resolved ones are re-checked (pid still the same) after `recheck`.
@@ -73,11 +75,11 @@ public actor SessionResolver {
                 projectsDir: String = SessionLog.defaultDir(agent: "claude"),
                 claudeDir: String = NSHomeDirectory() + "/.claude/sessions",
                 piAgentDir: String = NSHomeDirectory() + "/.pi/agent",
-                agyDir: String = NSHomeDirectory() + "/.gemini/antigravity-cli",
+                agyDir: String = NSHomeDirectory() + "/.gemini/antigravity-cli", home: String = NSHomeDirectory(),
                 retry: TimeInterval = 5, recheck: TimeInterval = 30, verdictCap: Int = 8 << 20, remote: RemoteHost? = nil,
                 openFiles: (@Sendable ([Int32]) -> [String])? = nil) {
         self.socketPath = socketPath; self.codexDir = codexDir; self.projectsDir = projectsDir; self.verdictCap = verdictCap
-        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir; self.agyDir = agyDir
+        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir; self.agyDir = agyDir; self.home = home
         self.lsof = openFiles ?? { Self.openFiles(pids: $0) }
         self.retry = retry; self.recheck = recheck; self.remote = remote != nil
     }
@@ -308,13 +310,16 @@ public actor SessionResolver {
             return Self.isClaimed(hit.sid, claimed) ? (nil, hit.pid) : (hit.sid, hit.pid)
         }
         let tree = Self.subtree(agent.pid, procs: procs)
-        let open = lsof(tree)
+        var open = lsof(tree)
+        if n.kind == "codex" {   // Codex also keeps its subagents' rollouts open: only the pane's own one counts
+            open.removeAll { ($0 as NSString).lastPathComponent.hasPrefix("rollout-") && Self.codexSubagentRollout($0) }
+        }
         if n.kind == "agy" {   // agy keeps no log open: its presence lock names the conversation
             guard let p = Self.agyLogPath(openFiles: open, dataDir: agyDir), !Self.isClaimed(p, claimed) else { return (nil, nil) }
             return (p, nil)
         }
         let grok = n.kind == "grok" ? Self.grokHome(agent.line) : nil
-        if let p = Self.logPath(openFiles: open, kind: n.kind, grokHome: grok), !Self.isClaimed(p, claimed) { return (p, nil) }
+        if let p = Self.logPath(openFiles: open, kind: n.kind, grokHome: grok, home: home), !Self.isClaimed(p, claimed) { return (p, nil) }
         if let grok {   // Grok Build lists its running sessions with their pids
             let sessions = grok + "/sessions"
             guard let data = FileManager.default.contents(atPath: grok + "/active_sessions.json"),
@@ -613,12 +618,28 @@ public actor SessionResolver {
     public static func codexMeta(data: Data) -> (cwd: String, start: Date)? {
         guard let nl = data.firstIndex(of: 0x0A) ?? (data.isEmpty ? nil : data.endIndex),
               let o = try? JSONSerialization.jsonObject(with: data[..<nl]) as? [String: Any],
-              o["type"] as? String == "session_meta", let p = o["payload"] as? [String: Any],
+              o["type"] as? String == "session_meta", let p = o["payload"] as? [String: Any], !isSubagentSource(p),
               let cwd = p["cwd"] as? String, let ts = p["timestamp"] as? String ?? o["timestamp"] as? String else { return nil }
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let start = iso.date(from: ts) ?? ISO8601DateFormatter().date(from: ts) else { return nil }
         return (cwd, start)
+    }
+
+    /// A subagent's rollout (the approvals reviewer "guardian", `spawn_agent` helpers): `source` is `{"subagent": ...}`.
+    static func isSubagentSource(_ payload: [String: Any]) -> Bool {
+        (payload["source"] as? [String: Any])?["subagent"] != nil
+    }
+
+    /// Whether the rollout at `path` belongs to a subagent of the Codex that keeps it open, not to the pane.
+    static func codexSubagentRollout(_ path: String) -> Bool {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? fh.close() }
+        guard let data = try? fh.read(upToCount: 1 << 20), !data.isEmpty else { return false }
+        let nl = data.firstIndex(of: 0x0A) ?? data.endIndex
+        guard let o = try? JSONSerialization.jsonObject(with: data[..<nl]) as? [String: Any],
+              let p = o["payload"] as? [String: Any] else { return false }
+        return isSubagentSource(p)
     }
 
     // MARK: - Subprocesses (read-only)

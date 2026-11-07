@@ -1,0 +1,9 @@
+{"type": "user", "uuid": "h1", "timestamp": "2026-11-03T01:40:00.000Z", "message": {"role": "user", "content": "Ask the docs worker for the notes."}}
+{"type": "assistant", "uuid": "h2", "timestamp": "2026-11-03T01:40:05.000Z", "message": {"role": "assistant", "model": "claude-test-1", "content": [{"type": "text", "text": "Asked."}]}}
+{"type": "user", "uuid": "h3", "timestamp": "2026-11-03T01:41:00.000Z", "message": {"role": "user", "content": "<hc from=\"t2 docs-worker\">Done: notes updated.\nSee notes.md</hc>"}}
+{"type": "assistant", "uuid": "h4", "timestamp": "2026-11-03T01:41:05.000Z", "message": {"role": "assistant", "model": "claude-test-1", "content": [{"type": "text", "text": "Thanks, read them."}]}}
+{"type": "user", "uuid": "h5", "timestamp": "2026-11-03T01:42:00.000Z", "message": {"role": "user", "content": "<pasted_content id=\"a1\">\n<hc from=\"t3\">Short note</hc>\n</pasted_content id=\"a1\">"}}
+{"type": "user", "uuid": "h6", "timestamp": "2026-11-03T01:43:00.000Z", "message": {"role": "user", "content": "<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>"}}
+{"type": "user", "uuid": "h7", "timestamp": "2026-11-03T01:44:00.000Z", "message": {"role": "user", "content": "<hc>A note</hc>"}}
+{"type": "user", "uuid": "h8", "timestamp": "2026-11-03T01:45:00.000Z", "message": {"role": "user", "content": "see <hc from=\"t2\">a</hc>"}}
+{"type": "user", "uuid": "h9", "timestamp": "2026-11-03T01:46:00.000Z", "message": {"role": "user", "content": "<hc from=\"t2\">a</hc><hc from=\"t3\">b</hc>"}}

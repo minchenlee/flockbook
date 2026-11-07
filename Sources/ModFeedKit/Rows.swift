@@ -11,6 +11,9 @@ public struct FeedRow: Encodable, Sendable, Equatable {
     /// Stable across reads of the same log: the mod keys rows (and their measured heights) by it.
     public var id: String
     public var text: String?
+    /// A user row that is a note from another agent (`hc send`): its sender as hc wrote it ("t2 docs-worker"), and
+    /// `text` without the `<hc>` tag.
+    public var from: String?
     /// Milliseconds since 1970.
     public var ts: Double?
     /// user: how many pictures the owner attached.
@@ -88,7 +91,9 @@ public enum FeedRows {
         var r = FeedRow(k: "status", id: it.id, ts: ms(it.timestamp))
         switch it.kind {
         case .userText(let s):
-            r.k = "user"; r.text = cut(s, textCap); if !it.images.isEmpty { r.images = it.images.count }
+            r.k = "user"
+            if let note = ConversationParser.hcNote(s) { r.text = cut(note.text, textCap); r.from = note.from } else { r.text = cut(s, textCap) }
+            if !it.images.isEmpty { r.images = it.images.count }
         case .assistantText(let s):
             r.k = "assistant"; r.text = cut(s, textCap)
         case .status(let s):
