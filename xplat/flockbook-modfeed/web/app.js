@@ -1440,7 +1440,15 @@ function itemView(it      , pane        )              {
   const images = "images" in it ? it.images : undefined;
   const pictures = images?.length ? picturesView(pane, it.id, images) : null;
   switch (it.kind) {
-    case "user": return h("div", { class: "msg user" }, it.text ? h("p", {}, it.text) : null, pictures);
+    case "user": {
+      if (it.from == null) return h("div", { class: "msg user" }, it.text ? h("p", {}, it.text) : null, pictures);
+      // A note from another agent: one line on the agent's side, "↳ name: first line", that opens to the whole note.
+      const key = `${pane} ${it.id} note`;
+      return h("div", { class: "tools" }, toggled(h("details", { class: "chip note", open: state.chipsOpen.has(key) },
+        h("summary", {}, h("span", { class: "note-line" }, `↳ ${noteSender(it.from)}: ${oneLine(it.text)}`)),
+        h("div", { class: "note-body" }, markdown(it.text))),
+        (open) => { if (open) state.chipsOpen.add(key); else state.chipsOpen.delete(key); }), pictures);
+    }
     case "assistant": return h("div", { class: "msg assistant" }, markdown(it.text));
     case "status": return h("p", { class: "status-line" }, it.text);
     case "tools":
@@ -1499,6 +1507,20 @@ function screenView(pane        , text        , byDefault         )             
 
 /** Calls `changed` when the reader opens or closes `e`. Built open, a `details` gets a toggle event of its own (the
  *  HTML spec queues one for any change of `open`): that one leaves `open` as built and is not the reader's. */
+/** Who sent a note (hc's "t2 docs-worker"): the name after the terminal id, else the terminal id, else "agent". */
+function noteSender(from        )         {
+  const [id, ...name] = from.trim().split(/\s+/);
+  return name.join(" ") || id || "agent";
+}
+
+/** A text in one line: its first line with text, and " …" when more lines follow. */
+function oneLine(text        )         {
+  const lines = text.split(/\r\n|\r|\n/).map((l) => l.replace(/\t/g, " ").trim());
+  const i = lines.findIndex(Boolean);
+  if (i < 0) return "";
+  return lines.slice(i + 1).some(Boolean) ? `${lines[i]} …` : lines[i];
+}
+
 function toggled(e                    , changed                         )                     {
   let shown = e.open;
   e.addEventListener("toggle", () => { if (e.open !== shown) { shown = e.open; changed(e.open); } });

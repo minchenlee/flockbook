@@ -223,6 +223,10 @@ h2 .parts { font: var(--caption); color: var(--label-2); }
 .chip summary::after { content: "›"; margin-left: 6px; color: var(--label-3); }
 .chip[open] { flex-basis: 100%; }
 .chip[open] summary::after { content: "⌄"; }
+.chip.note { min-width: 0; max-width: 100%; }
+.chip.note summary { max-width: 100%; box-sizing: border-box; }
+.note-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-body { margin: 6px 0 0; padding: 4px 12px; color: var(--label-2); background: rgba(var(--primary), .04); border-radius: var(--r-card); }
 .chip ul { margin: 6px 0 0; padding: 6px; list-style: none; background: rgba(var(--primary), .04); border-radius: var(--r-card); }
 .chip li { padding: 4px 6px; overflow-wrap: anywhere; }
 .chip li code { font-size: 14px; }

@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   # Manual run: the offline checks and the two checks with a real window.
-  # only: check names (spaces or commas) for both OSes; the phone page's (morph, composer, transport, earlier-held)
+  # only: check names (spaces or commas) for both OSes; the phone page's (morph, composer, note, transport, earlier-held)
   # run in the build job, with no app UI check job; macos15_only: skip the macos-26 jobs.
   workflow_dispatch:
     inputs:
@@ -104,7 +104,7 @@ jobs:
         run: |
           native=; web=
           for want in ${ONLY//,/ }; do
-            case " transport earlier-held morph composer " in
+            case " transport earlier-held morph composer note " in
               *" $want "*) web="$web $want" ;;
               *) native="$native $want" ;;
             esac
@@ -161,18 +161,18 @@ jobs:
 
       # The phone page in a headless browser (Chrome's own headless mode, no window), against the fake hub, CPU 2x
       # slower, every wait on a state: the open/close morph (the first page held as a phone's round trip) and the
-      # composer at the bottom from the first frame. `only` with web checks: those sections only. Each section runs;
+      # composer at the bottom from the first frame, a note from another agent as one line. `only` with web checks: those sections only. Each section runs;
       # the step fails if any failed.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Phone page morph and composer (headless browser)
+      - name: Phone page morph, composer and notes (headless browser)
         timeout-minutes: 10
         env:
           WEB: ${{ needs.gate.outputs.web }}
         run: |
           failed=
-          for section in ${WEB:-morph composer}; do
+          for section in ${WEB:-morph composer note}; do
             node scripts/web-test.mjs --only "$section" || failed="$failed $section"
           done
           if [ -n "$failed" ]; then echo "::error title=Phone page checks failed::$failed"; exit 1; fi

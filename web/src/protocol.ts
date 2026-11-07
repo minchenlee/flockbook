@@ -25,7 +25,9 @@ export interface ToolChip { symbol: string; text: string; calls: ToolCall[] }
 export interface Picture { width: number; height: number }
 
 export type Item =
-  | { id: string; time?: string; kind: "user" | "assistant" | "status"; text: string; images?: Picture[] }
+  | { id: string; time?: string; kind: "user" | "assistant" | "status"; text: string; images?: Picture[];
+      /** A user item that is a note from another agent (`hc send`): its sender as hc wrote it ("t2 docs-worker", or ""). */
+      from?: string }
   | { id: string; time?: string; kind: "tools"; tools: ToolChip[]; images?: Picture[] }
   | { id: string; time?: string; kind: "approval"; approval: Approval }
   | { id: string; time?: string; kind: "question"; question: QuestionRequest };

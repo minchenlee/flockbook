@@ -235,6 +235,10 @@ pub fn item(row: &Value) -> Option<Value> {
         }
         _ => return None,
     };
+    // A note from another agent (`hc send`): the page shows one line with its sender, not the owner's bubble.
+    if let Some(from) = row["from"].as_str().filter(|_| row["k"] == "user") {
+        o["from"] = json!(from);
+    }
     if let Some(t) = time(&row["ts"]) {
         o["time"] = json!(t);
     }
@@ -974,6 +978,11 @@ mod tests {
     fn rows_to_items() {
         let u = item(&json!({"id": "u1", "k": "user", "text": "hi", "ts": 1793670000000_i64, "type": "row"})).unwrap();
         assert_eq!(u, json!({"id": "u1", "kind": "user", "text": "hi", "time": "2026-11-03T01:40:00.000Z"}));
+        // A note from another agent (`hc send`): its sender goes to the page, which shows one line, not a bubble.
+        let n = item(&json!({"from": "t2 docs-worker", "id": "u2", "k": "user", "text": "Done.", "type": "row"})).unwrap();
+        assert_eq!(n, json!({"from": "t2 docs-worker", "id": "u2", "kind": "user", "text": "Done."}));
+        let n = item(&json!({"from": "", "id": "u3", "k": "user", "text": "Done.", "type": "row"})).unwrap();
+        assert_eq!(n["from"], json!(""), "a note with no sender is still a note");
         assert!(item(&json!({"id": "f1", "k": "footer", "text": "x"})).is_none());
         assert!(item(&json!({"id": "s1", "k": "sep", "text": "x"})).is_none());
         let t = item(&json!({"id": "a1-t3", "k": "tools", "chips": [{"symbol": "terminal", "text": "Ran a command",
