@@ -18,11 +18,14 @@ import Foundation
     ts.start()
     check(await eventually { attaches().count == 1 }, "A: watcher attached")
     try await Task.sleep(for: .milliseconds(100))
+    let watcher = fake.lastChannel
     fake.attachDelay = 0.3
     for i in 0..<2000 { ts.send(text: "q\(i);") }
     let typer = Task.detached { for j in 0..<1500 { ts.send(text: "d\(j);"); if j % 10 == 0 { try? await Task.sleep(for: .milliseconds(1)) } } }
     await typer.value
     fake.attachDelay = 0
+    // The fake gives the controller its channel only after attachDelay; the typer can finish first.
+    check(await eventually(5) { fake.lastChannel > watcher }, "A: controller attached")
     let ch = fake.lastChannel
     check(await eventually(5) { String(decoding: fake.viewerBytes(ch), as: UTF8.self).hasSuffix("d1499;") }, "A: all keys arrive")
     let toks = String(decoding: fake.viewerBytes(ch), as: UTF8.self).split(separator: ";").map(String.init)

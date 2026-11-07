@@ -85,6 +85,20 @@ extension ContentTests {
         func srgb(_ c: NSColor?) -> NSColor? { c?.usingColorSpace(.sRGB) }
         func same(_ p: NSColor?, _ q: NSColor?) -> Bool { ContentTests.same(srgb(p), srgb(q)) }
         func hex(_ c: NSColor?) -> String { ContentTests.hex(srgb(c)) }
+        // The window server can hand back an all-black image before it has the window's first frame (CI: 000000 for
+        // the cursor and the background). Capture again until the probe pixel is drawn: no theme here is pure black.
+        func capturedDrawn(_ w: NSWindow, _ h: NSView, to path: String, probe: CGPoint) async -> ((CGFloat, CGFloat) -> NSColor?)? {
+            var at: ((CGFloat, CGFloat) -> NSColor?)?
+            for attempt in 0..<20 {
+                capture(w, to: path)
+                at = pixels(path, h)
+                if let c = srgb(at?(probe.x, probe.y)), c.redComponent + c.greenComponent + c.blueComponent > 0 { return at }
+                print("termtheme-test: capture \(attempt + 1) of \((path as NSString).lastPathComponent) not drawn yet (\(hex(at?(probe.x, probe.y)))), again")
+                try? await Task.sleep(for: .milliseconds(100))
+                h.layoutSubtreeIfNeeded(); w.displayIfNeeded(); CATransaction.flush()
+            }
+            return at
+        }
         let fm = FileManager.default
         let tmp = NSTemporaryDirectory() + "fb-termtheme-\(getpid())", home = tmp + "/home", ghostty = home + "/.config/ghostty"
         try? fm.createDirectory(atPath: ghostty + "/themes", withIntermediateDirectories: true)
@@ -151,8 +165,8 @@ extension ContentTests {
             guard received else { win.orderOut(nil); continue }
             host.layoutSubtreeIfNeeded(); win.displayIfNeeded(); CATransaction.flush()
             let path = "\(dir)/termtheme\(mode == .flockbook ? "-flockbook" : "")\(dark ? "-dark" : "").png"
-            capture(win, to: path)
-            let at = pixels(path, host), px = at?(size.width / 2, size.height - 12)
+            let at = await capturedDrawn(win, host, to: path, probe: CGPoint(x: size.width / 2, y: size.height - 12))
+            let px = at?(size.width / 2, size.height - 12)
             // The cursor as drawn: in its cell, the pixel farthest from the background.
             var cursor: NSColor?
             if let tv = terminalView(host), let at, let bg = srgb(px) {
@@ -187,8 +201,7 @@ extension ContentTests {
             let (ref, refHost) = offscreen(Color(nsColor: (dark ? inkBg : paperBg).ns), NSSize(width: 40, height: 40))
             ref.appearance = win.appearance
             try? await Task.sleep(for: .milliseconds(300))
-            capture(ref, to: "\(dir)/termtheme-ref.png")
-            let want = pixels("\(dir)/termtheme-ref.png", refHost)?(20, 20)
+            let want = await capturedDrawn(ref, refHost, to: "\(dir)/termtheme-ref.png", probe: CGPoint(x: 20, y: 20))?(20, 20)
             ref.orderOut(nil)
             step("\(dark ? "dark" : "light"): the empty rows are exactly the theme's background (\(hex(px)) = \(hex(want)))", want != nil && same(px, want))
         }
