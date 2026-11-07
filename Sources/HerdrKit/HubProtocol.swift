@@ -640,6 +640,8 @@ public struct HubItem: Codable, Hashable, Sendable {
     public var question: HubQuestion?
     /// The item's pictures (`Hub.pictures(of:)`); nil when none, or when the hub shows no pictures.
     public var images: [HubPicture]?
+    /// A user item that is a note from another agent (`hc send`): its sender as hc wrote it ("t2 docs-worker", or "").
+    public var from: String?
     public init(id: String, kind: Kind, time: String? = nil, text: String? = nil, tools: [HubTool]? = nil, approval: HubApproval? = nil, question: HubQuestion? = nil,
                 images: [HubPicture]? = nil) {
         self.id = id; self.kind = kind; self.time = time; self.text = text; self.tools = tools; self.approval = approval; self.question = question; self.images = images
@@ -648,7 +650,10 @@ public struct HubItem: Codable, Hashable, Sendable {
     public init(_ item: ConversationItem, pictures: Bool = true) {
         let t = Hub.time(item.timestamp)
         switch item.kind {
-        case .userText(let s): self.init(id: item.id, kind: .user, time: t, text: s)
+        case .userText(let s):
+            // A note from another agent (`hc send`): the page shows one line with its sender, not the owner's bubble.
+            if let note = ConversationParser.hcNote(s) { self.init(id: item.id, kind: .user, time: t, text: note.text); from = note.from }
+            else { self.init(id: item.id, kind: .user, time: t, text: s) }
         case .assistantText(let s): self.init(id: item.id, kind: .assistant, time: t, text: s)
         case .toolChips(let c): self.init(id: item.id, kind: .tools, time: t, tools: c.map(HubTool.init))
         case .permissionRequest(let r): self.init(id: item.id, kind: .approval, time: t, approval: HubApproval(r))

@@ -1,0 +1,5 @@
+{"type": "session_meta", "payload": {"id": "cx-hc", "cwd": "/tmp/demo", "source": "cli"}}
+{"timestamp": "2026-11-03T01:40:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Review the parser with a helper."}]}}
+{"timestamp": "2026-11-03T01:40:05.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Asked t4."}]}}
+{"timestamp": "2026-11-03T01:41:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<hc from=\"t4 review\">Review done: no P1.\n\nTwo P2s in parse.rs.</hc>"}]}}
+{"timestamp": "2026-11-03T01:41:05.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Fixing the P2s."}]}}

@@ -403,7 +403,8 @@ public struct ConversationParser: Sendable {
 
     /// Tags whose text is the user's own. Claude Code wraps pasted text in `<pasted_content id="…">`. Any other text
     /// that starts with a tag (`<system-reminder>`, `<command-name>`, `<task-notification>`, …) is injected context.
-    static let visibleTags: Set<String> = ["pasted_content"]
+    /// `hc`: a note another agent sent with `hc send` (see `hcNote`).
+    static let visibleTags: Set<String> = ["pasted_content", "hc"]
 
     /// The text to show for a user message, or nil when it is injected context. Pasted blocks lose their wrapper
     /// tags; typed text and pasted blocks keep their order, separated by a blank line.
@@ -437,6 +438,26 @@ public struct ConversationParser: Sendable {
         }
         parts.append(rest)
         return parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
+    /// A note from another agent, as herdr-core's `hc send` types it: the whole message is one
+    /// `<hc from="t2 name" …>text</hc>` (quoted attributes, no second `</hc>`). The sender as written ("t2 name", or ""
+    /// without `from`) and the text. herdr-core `hc_note`, the same rules.
+    public static func hcNote(_ text: String) -> (from: String, text: String)? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let m = t.wholeMatch(of: /<hc((?:\s+[\w-]+="[^"]*")*)\s*>(.*)<\/hc>/.dotMatchesNewlines()), !m.2.contains("</hc>") else { return nil }
+        let from = m.1.firstMatch(of: /\sfrom="([^"]*)"/).map { String($0.1) } ?? ""
+        return (from, String(m.2).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// A note in one line, as the phone page draws it: `↳ <name>: <first line>`. The name is what follows the terminal id
+    /// in `from`, else the id, else "agent"; " …" ends the line when more lines with text follow.
+    public static func noteLine(from: String, text: String) -> String {
+        let words = from.split(whereSeparator: \.isWhitespace)
+        let name = words.count > 1 ? words.dropFirst().joined(separator: " ") : words.first.map(String.init) ?? "agent"
+        let lines = text.components(separatedBy: .newlines).map { $0.replacingOccurrences(of: "\t", with: " ").trimmingCharacters(in: .whitespaces) }
+        guard let i = lines.firstIndex(where: { !$0.isEmpty }) else { return "↳ \(name): " }
+        return "↳ \(name): \(lines[i])" + (lines[(i + 1)...].contains { !$0.isEmpty } ? " …" : "")
     }
 
     static func isInjected(_ text: String) -> Bool {

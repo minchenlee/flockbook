@@ -93,6 +93,39 @@ import Foundation
     check(describe(cxp) == ["user:codex paste"], "pasted: codex user text uses the same rule")
 }
 
+// A note another agent sent with `hc send`: one `<hc from="<terminal> [name]">…</hc>` envelope typed into the agent.
+// It is the conversation, not injected context: a user item with its tag (the row decides how to draw it).
+// herdr-core tests/conversation.rs `hc_notes_are_shown`, the same rules.
+@MainActor func checksHCNotes() async throws {
+    let note = "<hc from=\"t2 docs-worker\">Done: notes updated.\nSee notes.md</hc>"
+    check(ConversationParser.userVisible(note) == note, "hc note: visible")
+    let esc = note.replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
+    let got = describe(SessionLog.parse(lines: [
+        #"{"timestamp":"2026-10-10T01:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(esc)"}]}}"#,
+        #"{"type":"user","uuid":"u1","timestamp":"2026-10-10T01:00:01.000Z","message":{"role":"user","content":"<pasted_content id=\"a1\">\n<hc from=\"t3\">Short note</hc>\n</pasted_content id=\"a1\">"}}"#,
+        #"{"type":"user","uuid":"u2","timestamp":"2026-10-10T01:00:02.000Z","message":{"role":"user","content":"<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>"}}"#,
+    ]))
+    check(got == ["user:" + note, "user:<hc from=\"t3\">Short note</hc>", "user:<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>"],
+          "hc note: Codex and Claude Code notes, pasted or not, are user items (\(got))")
+    let n = ConversationParser.hcNote(note)
+    check(n?.from == "t2 docs-worker" && n?.text == "Done: notes updated.\nSee notes.md", "hc note: the sender as hc wrote it and the text without its tag")
+    let r = ConversationParser.hcNote("<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>")
+    check(r?.from == "t4 review" && r?.text == "Review x.rs", "hc note: other attributes")
+    let q = ConversationParser.hcNote(#"<hc from="t2" reach="a > b">body</hc>"#)
+    check(q?.from == "t2" && q?.text == "body", "hc note: a '>' inside a quoted attribute stays out of the body")
+    let bare = ConversationParser.hcNote("  <hc>A note</hc>\n")
+    check(bare?.from == "" && bare?.text == "A note", "hc note: no sender, the whole text trimmed")
+    for typed in ["Fix it", "<hc from=\"t2\">a</hc> and more I typed", "see <hc from=\"t2\">a</hc>", "<hcx>a</hcx>",
+                  "<hc from=\"t2\">a</hc><hc from=\"t3\">b</hc>", "<hc from=t2>a</hc>"] {
+        check(ConversationParser.hcNote(typed) == nil, "hc note: not a note: \(typed)")
+    }
+    // The one line the Mac view draws, as the phone page does: the name after the terminal id, else the id, else "agent".
+    check(ConversationParser.noteLine(from: "t2 docs-worker", text: "Done: notes updated.\nSee notes.md") == "↳ docs-worker: Done: notes updated. …",
+          "hc note line: the name after the terminal id, the first line, and … when more lines follow")
+    check(ConversationParser.noteLine(from: "t3", text: "\n  Short note\n\n") == "↳ t3: Short note", "hc note line: only the id, blank lines skipped")
+    check(ConversationParser.noteLine(from: "", text: "A\tnote") == "↳ agent: A note", "hc note line: no sender is \"agent\", tabs as spaces")
+}
+
 // Codex rollout
 @MainActor func checksCodexRollout() async throws {
     check(describe(SessionLog.parse(lines: cx)) == [

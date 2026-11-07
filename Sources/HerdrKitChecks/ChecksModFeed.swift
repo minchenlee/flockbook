@@ -127,3 +127,28 @@ func checksModFeed() throws {
     FeedLocate.writeCache(cache, to: cf)
     check(FeedLocate.readCache(cf) == cache, "modfeed locate: cache round trip")
 }
+
+/// A note from another agent (`hc send`): its user row has `from` (the sender as hc wrote it) and the text without the
+/// tag, for the mod and the phone page (herdr-core `hc_note`, flockbook-modfeed tests/feed.rs, the same rules).
+func checksModFeedHCNotes() throws {
+    func item(_ id: String, _ t: String) -> ConversationItem { ConversationItem(id: id, kind: .userText(t), timestamp: Date(timeIntervalSince1970: 1_793_670_000)) }
+    func wire(_ r: FeedRow) -> [String: Any] { (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(r))) as? [String: Any] ?? [:] }
+    let note = wire(FeedRows.row(item("u1", "<hc from=\"t2 docs-worker\">Done: notes updated.\nSee notes.md</hc>")))
+    check(note["k"] as? String == "user", "hc note row: still a user row (older mods draw it as a bubble)")
+    check(note["from"] as? String == "t2 docs-worker" && note["text"] as? String == "Done: notes updated.\nSee notes.md",
+          "hc note row: the sender as hc wrote it, the text without its tag (\(note))")
+    let reach = FeedRows.row(item("u2", "<hc from=\"t4 review\" reach=\"hc send t1 when done or stuck\">Review x.rs</hc>"))
+    check(reach.from == "t4 review" && reach.text == "Review x.rs", "hc note row: other attributes")
+    let bare = FeedRows.row(item("u3", "<hc>A note</hc>"))
+    check(bare.from == "" && bare.text == "A note", "hc note row: no sender")
+    for typed in ["Fix it", "<hc from=\"t2\">a</hc> and more I typed", "see <hc from=\"t2\">a</hc>", "<hcx>a</hcx>"] {
+        let r = FeedRows.row(item("u4", typed))
+        check(r.from == nil && r.text == typed && wire(r)["from"] == nil, "hc note row: typed text stays as it is: \(typed)")
+    }
+    // The Mac's hub: the phone page gets `from` too, and draws one line, not the owner's bubble.
+    let hub = HubItem(item("u5", "<hc from=\"t2 docs-worker\">Done.</hc>"))
+    check(hub.kind == .user && hub.from == "t2 docs-worker" && hub.text == "Done.", "hc note hub item: from and the text without its tag")
+    check(HubItem(item("u6", "Go")).from == nil, "hc note hub item: the owner's message has no from")
+    let w = String(decoding: (try? Hub.encode(HubItem(item("u7", "<hc>Hi</hc>")))) ?? Data(), as: UTF8.self)
+    check(w.contains("\"from\":\"\""), "hc note hub item: a note with no sender is still a note on the wire (\(w))")
+}
