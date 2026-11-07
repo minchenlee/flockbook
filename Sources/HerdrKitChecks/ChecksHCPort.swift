@@ -52,19 +52,21 @@ import Foundation
     let prompt = "Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No"
     fake.setScreen("t1", prompt)
     let hc = HCClient(session: HCSession(socketPath: fake.path), callTimeout: 0.4)
+    // For the parts that expect `.sent`: a busy runner can take longer than 0.4 s for one call even when hc answers.
+    let roomy = HCClient(session: HCSession(socketPath: fake.path), callTimeout: 10)
     guard let s = await hc.approvalState(paneId: "hc:t1", agentKind: "claude", blocked: true, pending: nil),
           let id = ApprovalNotice.promptIDs(s, writes: true).last else { check(false, "answer once: the prompt has an id"); return }
     func keys() -> Int { fake.calls.filter { $0.method == "terminal.keys" }.count }
     let sender = ApprovalSender()
-    func answer() async -> ApprovalAnswer {
-        await sender.answer(paneId: "hc:t1", via: hc, prompt: id, allow: true, agentKind: "claude", blocked: true, pending: nil,
+    func answer(via client: HCClient? = nil) async -> ApprovalAnswer {
+        await sender.answer(paneId: "hc:t1", via: client ?? hc, prompt: id, allow: true, agentKind: "claude", blocked: true, pending: nil,
                             poll: .milliseconds(100), maxWait: .seconds(5))
     }
 
     // Two at once (card and notification): one goes out, the other is refused before any read.
     fake.keysDelay = 0.2
-    async let a = answer()
-    async let b = answer()
+    async let a = answer(via: roomy)
+    async let b = answer(via: roomy)
     let both = await [a, b]
     check(both.filter { $0 == .sent }.count == 1 && both.contains(.busy) && keys() == 1, "answer once: two presses, one answer (\(both), \(keys()) keys)")
 
