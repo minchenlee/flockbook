@@ -31,6 +31,15 @@
         "code",
         "platform"
       ]
+    },
+    {
+      "login": "choru-k",
+      "name": "Cheol Kang",
+      "avatar_url": "https://github.com/choru-k.png",
+      "profile": "https://github.com/choru-k",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
