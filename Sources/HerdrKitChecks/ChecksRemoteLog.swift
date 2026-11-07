@@ -133,18 +133,34 @@ import UniformTypeIdentifiers
         check(rf.items.get() == r0, "remote log: failed earlier fetch preserves the visible tail")
         try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
         var r = r0, l = l0
+        // A failed fetch is not the end: the next scroll asks again. The loop retries it (a few times), and one fetch in
+        // the middle fails on purpose (the host file unreadable for that call): the log must still load to its start.
+        var retried = 0
         for (log, feed) in [(remote, rf), (local, lf)] {
-            var more = true, n = 0
+            var more = true, n = 0, failed = 0
             while more && n < 100 {
                 let c = feed.items.get().count
-                more = await log.loadEarlier(bytes: 40_000) == .more
+                let failOnce = log === remote && n == 3
+                if failOnce { try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path) }
+                let res = await log.loadEarlier(bytes: 40_000)
+                if failOnce {
+                    try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
+                    check(res == .failed, "remote log: a fetch in the middle fails while the host file is unreadable (\(res))")
+                }
+                n += 1
+                if res == .failed {
+                    failed += 1; more = failed <= 3
+                    try await Task.sleep(for: .milliseconds(200))
+                    continue
+                }
+                more = res == .more
                 // the last call (.end) also loads a page: wait for it too, long enough for a slow runner
                 _ = await feed.wait(timeout: 10) { $0.count > c }
-                n += 1
             }
+            retried += failed
         }
         r = rf.items.get(); l = lf.items.get()
-        check(r.count == 3000 && r == l, "remote log: loadEarlier to the start, items match local (\(r.count) vs \(l.count))")
+        check(r.count == 3000 && r == l, "remote log: loadEarlier to the start, items match local (\(r.count) vs \(l.count), \(retried) failed fetches retried)")
         if let murl { check(bytes(murl) == bytes(URL(fileURLWithPath: path)), "remote log: mirror equals the host file after loading all") }
 
         // Growth on the host shows up.
