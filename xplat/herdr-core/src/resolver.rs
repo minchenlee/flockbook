@@ -143,6 +143,7 @@ struct Entry {
     checked: Instant,
     stamp: Option<Option<SystemTime>>,
     stamp_pid: Option<i32>,
+    stamp_dir: String,
     need_pids: Vec<i32>,
 }
 
@@ -481,12 +482,14 @@ impl SessionResolver {
                 let claude_hc = !n.pids.is_empty() && n.kind == "claude";
                 // Unresolved: watch the agent's own file, where a new session id would most likely appear.
                 let stamp_pid = found.as_ref().and_then(|f| f.1).or(agent.as_ref().map(|a| a.pid));
+                let stamp_dir = self.claude_sessions_dir(agent.as_ref());
                 let entry = Entry {
                     pid: agent.as_ref().map(|a| a.pid),
                     path: found.and_then(|f| f.0),
                     checked: now,
-                    stamp: if claude_hc { Some(stamp_pid.and_then(|p| self.pid_file_stamp(p))) } else { None },
+                    stamp: if claude_hc { Some(stamp_pid.and_then(|p| self.pid_file_stamp(p, &stamp_dir))) } else { None },
                     stamp_pid: if claude_hc { stamp_pid } else { None },
+                    stamp_dir,
                     need_pids: n.pids.clone(),
                 };
                 self.cache.insert(n.pane_id.clone(), entry);
@@ -505,11 +508,16 @@ impl SessionResolver {
     fn pid_file_changed(&self, e: &Entry) -> bool {
         let Some(stamp) = e.stamp else { return false };
         let Some(pid) = e.stamp_pid.or(e.pid) else { return false };
-        self.pid_file_stamp(pid) != stamp // no file: None both times, not a change
+        self.pid_file_stamp(pid, &e.stamp_dir) != stamp // no file: None both times, not a change
     }
 
-    fn pid_file_stamp(&self, pid: i32) -> Option<SystemTime> {
-        mtime(&format!("{}/{pid}.json", self.claude_dir))
+    fn pid_file_stamp(&self, pid: i32, dir: &str) -> Option<SystemTime> {
+        mtime(&format!("{dir}/{pid}.json"))
+    }
+
+    /// Claude's pid files: `<CLAUDE_CONFIG_DIR>/sessions` from the agent's env, else `claude_dir`.
+    fn claude_sessions_dir(&self, agent: Option<&Proc>) -> String {
+        agent.and_then(|a| claude_home(&a.line)).map(|c| c + "/sessions").unwrap_or_else(|| self.claude_dir.clone())
     }
 
     /// The log path (or Claude session id) and, for hc Claude, the pid whose `<pid>.json` named it.
@@ -526,7 +534,14 @@ impl SessionResolver {
             // hc: Claude's own pid file names the session id
             let mut pids = vec![agent.pid];
             pids.extend(&n.pids);
-            let Some((sid, pid)) = claude_session_source(&pids, procs, &self.claude_dir) else { return (None, None) };
+            let dir = self.claude_sessions_dir(Some(agent));
+            let Some((sid, pid)) = claude_session_source(&pids, procs, &dir) else { return (None, None) };
+            let sid = match claude_home(&agent.line) {
+                Some(home) => session_log::locate_claude(&sid, format!("{home}/projects"))
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or(sid),
+                None => sid,
+            };
             return if is_claimed(&sid, claimed) { (None, Some(pid)) } else { (Some(sid), Some(pid)) };
         }
         let tree = subtree(agent.pid, procs);
@@ -1020,6 +1035,12 @@ pub fn is_claimed_in_cwd(path: &str, claimed: &HashSet<String>, cwd: &str, claim
             Some(other) => standardize_path(other) == want,
         }
     })
+}
+
+/// Claude Code's config folder for an agent process: `CLAUDE_CONFIG_DIR` from its env, if set.
+pub fn claude_home(proc_line: &str) -> Option<String> {
+    let re = regex::Regex::new(r"\sCLAUDE_CONFIG_DIR=(\S+)\s").expect("claude home pattern");
+    re.captures(&format!(" {proc_line} ")).map(|m| m[1].trim_end_matches('/').to_string())
 }
 
 /// Grok Build's home for an agent process: `GROK_HOME` from its env, else `~/.grok`.
