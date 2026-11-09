@@ -559,6 +559,28 @@ fn hc_sessions() {
 }
 
 #[test]
+fn hc_claude_config_dir() {
+    let (_t, cfg) = tmp();
+    let (_d, default_dir) = tmp();
+    fs::create_dir_all(format!("{cfg}/sessions")).unwrap();
+    fs::create_dir_all(format!("{cfg}/projects/-w")).unwrap();
+    let log = format!("{cfg}/projects/-w/sid-cfg.jsonl");
+    fs::write(&log, "{}\n").unwrap();
+    let procs = parse_ps(&format!(
+        "  500     1 Sat Oct 31 10:00:00 2026     -zsh HC_TERMINAL_ID=t1\n  501   500 Sat Oct 31 10:01:00 2026     claude CLAUDE_CONFIG_DIR={cfg} HC_TERMINAL_ID=t1\n"
+    ));
+    let start = procs.iter().find(|p| p.pid == 501).unwrap().start;
+    write_pid_file(&format!("{cfg}/sessions"), 501, "sid-cfg", start);
+    let mut res = resolver(|r| r.claude_dir = default_dir.clone());
+    let need = Need::new("hc:t1", "claude", "/w", vec![501, 500]);
+    assert_eq!(
+        res.resolve_with(&[need], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"),
+        Some(&log),
+        "CLAUDE_CONFIG_DIR of the agent: its pid file and its log"
+    );
+}
+
+#[test]
 fn hc_edge_claude_clear() {
     let procs = parse_ps("  500     1 Sat Oct 31 10:00:00 2026     -zsh HC_TERMINAL_ID=t1\n  501   500 Sat Oct 31 10:01:00 2026     claude HC_TERMINAL_ID=t1\n");
     let (_t, dir) = tmp();
