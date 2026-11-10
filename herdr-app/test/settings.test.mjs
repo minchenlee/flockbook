@@ -5,7 +5,7 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { setting, loadConfig, setSetting, configBad, pollUpdate, updateShown, DEFAULTS, KEY_CONFIG } from "../mods/flockbook/config.js";
+import { setting, loadConfig, setSetting, configBad, pollUpdate, updateShown, textScale, DEFAULTS, KEY_CONFIG } from "../mods/flockbook/config.js";
 import { SettingsView } from "../mods/flockbook/settings.js";
 import { SideView } from "../mods/flockbook/side.js";
 import { Composer } from "../mods/flockbook/composer.js";
@@ -54,7 +54,7 @@ const press = (el) => el._h.on_click({}, fakeCx());
 
 test("no config.json: every setting is its default, and nothing is written", async () => {
   await loadConfig();
-  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false });
+  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false, text_size: "default" });
   for (const [k, v] of Object.entries(DEFAULTS)) assert.equal(setting(k), v, k);
   assert.equal(configBad(), false);
   assert.equal(log.writes.length, 0, "opening Flockbook never creates the file");
@@ -78,6 +78,23 @@ test("a config.json that is not JSON: defaults, a warning, and the file is left 
   assert.match(textOf(byId(el, "set-bad")), /could not be read/);
   assert.equal(await setSetting("check_updates", false), false);
   assert.equal(file, "{ check_updates: false", "a file the person broke is theirs to fix");
+});
+
+test("text size: three choices under Chat; Large writes the file and scales the chat to 18 px", async () => {
+  file = JSON.stringify({ mine: 1 });
+  await loadConfig();
+  assert.equal(textScale(), 1, "the default is 16 px");
+  const v = new SettingsView(fakeCx());
+  let el = v.render(fakeCx());
+  for (const x of ["small", "default", "large"]) assert.ok(opt(el, "text_size", x), x);
+  assert.equal(opt(el, "text_size", "default")._a.bg, "#selected");
+  press(opt(el, "text_size", "large"));
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(JSON.parse(file), { mine: 1, text_size: "large" });
+  assert.equal(textScale(), 18 / 16);
+  file = JSON.stringify({ text_size: "huge" });
+  await loadConfig();
+  assert.equal(textScale(), 1, "a value that is not a choice is the default");
 });
 
 test("a change keeps the other keys and every view sees it at once", async () => {
@@ -166,7 +183,7 @@ test("settings layout: a click, Enter or Space on a section shows it; every sett
     assert.equal(byId(el, `set-nav-${id}`)._a.bg, "#selected");
     for (const key of [...SETTINGS.map((s) => s.key), "phone"]) if (byId(byId(el, "settings-root"), `set-${key}`)) (where[key] ??= []).push(id);
   }
-  assert.deepEqual(where, { status_row: ["general"], remote_helper: ["general"], phone: ["phone"], check_updates: ["updates"] });
+  assert.deepEqual(where, { text_size: ["general"], status_row: ["general"], remote_helper: ["general"], phone: ["phone"], check_updates: ["updates"] });
 });
 
 test("settings layout: a row is the title and its line on the left, the control on the right", async () => {

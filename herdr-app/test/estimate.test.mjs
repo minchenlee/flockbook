@@ -25,6 +25,16 @@ const reply = [
   "要不要做？要的話，我等 build-bot 修完 Shift+Enter，再接著交給它。它熟 `grid.js`，也最能避開和設定畫面的衝突，順便補上測試。",
 ].join("\n");
 
+test("text size: the default guesses as before; a smaller size is shorter but not under its own drawing", () => {
+  assert.equal(markdownHeight(reply, W, null, 1), markdownHeight(reply, W));
+  const small = markdownHeight(reply, W, null, 14 / 16), large = markdownHeight(reply, W, null, 18 / 16);
+  assert.ok(small < markdownHeight(reply, W) && markdownHeight(reply, W) < large);
+  // Full-width text at 14 px: 14 px characters on lines 26 × 14/16 px tall.
+  const para = "目".repeat(120);
+  assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(120 / Math.floor(W / 14)) * LINE * 14 / 16);
+  assert.equal(rowHeight({ k: "assistant", text: reply }, W, false, 1), rowHeight({ k: "assistant", text: reply }, W));
+});
+
 test("a CJK reply with inline code and a list is not guessed shorter than drawn (the cut last line)", () => {
   // Drawn: 1 + (2 + 1) + 1 + 2 lines; gaps: title to list, between items, list to paragraph, paragraph to paragraph.
   const drawn = 7 * LINE + GAP + ITEM_GAP + GAP + GAP;

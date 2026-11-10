@@ -14,6 +14,7 @@ import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, BUBBLE_GAP, IMAGES_FS, bubbleWid
   CALL_H, SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 import { Composer } from "./composer.js";
 import { markdownView, codeBlockAt } from "./mdblocks.js";
+import { textScale } from "./config.js";
 import { openMenu } from "./menu.js";
 import { Cards, wanted } from "./cards.js";
 import { startTop, overBar, BAR_H } from "./top.js";
@@ -70,7 +71,7 @@ export class ChatView {
     this.width = 0;              // the pane's width, from on_size_change
     this.follow = true;          // keep the newest row on screen
     this.open = new Set();       // tool rows that show their calls
-    this.heights = new WeakMap(); // row → { w, open, h }
+    this.heights = new WeakMap(); // row → { w, open, k, h }
     this.busy = false;
     this.lastPoll = 0;
     this.composer = new Composer(cx);
@@ -159,17 +160,17 @@ export class ChatView {
   colWidth() { return columnWidth(this.width); }
 
   height(row) {
-    const w = this.colWidth(), open = this.open.has(row.id);
+    const w = this.colWidth(), open = this.open.has(row.id), k = textScale();
     const c = this.heights.get(row);
-    if (c && c.w === w && c.open === open) return c.h;
-    const h = rowHeight(row, w, open);
-    this.heights.set(row, { w, open, h });
+    if (c && c.w === w && c.open === open && c.k === k) return c.h;
+    const h = rowHeight(row, w, open, k);
+    this.heights.set(row, { w, open, k, h });
     return h;
   }
 
   // A row's content, without the list's fixed height. No handlers: list rows cannot have any.
   body(row, t) {
-    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w);
+    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w, textScale());
     switch (row.k) {
       case "user":
         if (row.from != null) return this.agentNote(row, t, md);
@@ -259,7 +260,7 @@ export class ChatView {
     const w = this.colWidth();
     const at = typeof y0 !== "number" ? null : row.k === "assistant" ? { y: y0 - ROW_PAD_Y, w }
       : row.from == null ? { y: y0 - ROW_PAD_Y - BUBBLE_PAD_Y, w: bubbleTextWidth(w) } : null;
-    const code = at ? codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0)) : null;
+    const code = at ? codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0), textScale()) : null;
     if (code !== null) items.push({ label: "Copy code", act: "copy", args: { text: code } });
     items.push({ label: "Copy message", act: "copy", args: { text: row.text || "" } });
     return openMenu(items);
