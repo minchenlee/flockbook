@@ -375,7 +375,7 @@ test("Enter completes a part of a name; on a full name it sends that name", asyn
   assert.equal(sent[0][sent[0].indexOf("--text") + 1], "/clear");
 });
 
-test("no list for other agents, nor when the helper has no commands command", async () => {
+test("a list for any agent the helper lists commands for; none when its list is empty or the helper has no commands", async () => {
   const r = slashRig({ hasCommands: false });
   await r.type("/");
   assert.equal(r.rows(), null);
@@ -384,11 +384,13 @@ test("no list for other agents, nor when the helper has no commands command", as
   fake.agents[0] = agent("t1", "idle", { tab_name: "api", app: "codex", program: { key: "codex", name: "Codex" } });
   s.c.box(fake.agents[0]);
   await s.type("/");
-  assert.equal(byId(s.c.render(fake.agents[0], T), "slash"), null);
-  assert.equal(s.asked.length, 0, "a Codex chat asks for nothing");
+  assert.equal(byId(s.c.render(fake.agents[0], T), "slash").kids.length, 4, "a Codex chat shows what the helper lists");
+  assert.equal(s.asked.length, 1);
   const e = slashRig({ list: [] });
   await e.type("/");
-  assert.equal(e.rows(), null, "an empty list shows nothing");
+  assert.equal(e.rows(), null, "an empty list (an agent the helper has no commands for) shows nothing");
+  await e.type("/c");
+  assert.equal(e.asked.length, 1, "and is not asked again at once");
 });
 
 // More matches than rows: a window of 8 follows the pick; the wheel moves it.

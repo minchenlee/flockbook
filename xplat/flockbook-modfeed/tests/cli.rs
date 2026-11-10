@@ -84,7 +84,9 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     assert_eq!(model["screen"], true);
     assert_eq!(v.last().unwrap()["ok"], true);
     let o = run_home(&["commands", "--terminal", "t2"]);
-    assert_eq!(o[1], serde_json::json!({"type": "commands", "agent": "codex", "commands": []}), "another agent: nothing");
+    assert_eq!(o[1]["agent"], "codex");
+    let codex: Vec<&str> = o[1]["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert!(codex.contains(&"model") && codex.contains(&"compact") && !codex.contains(&"deploy"), "Codex: its built-ins, not Claude's files: {codex:?}");
     assert_eq!(run_home(&["commands", "--terminal", "t3"])[1]["code"], "not-agent");
     assert_eq!(run_home(&["commands"])[1]["message"], "commands needs --terminal <addr>");
     assert!(fake.keys().is_empty(), "commands sends no keys");
