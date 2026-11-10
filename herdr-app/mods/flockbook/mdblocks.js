@@ -26,9 +26,9 @@ export function codeMarkdown(text) {
 
 // The code box under `y` (px from the text's top, at `width`), as written for Copy; null when `y` is not
 // on one. Box places are the estimate's, the same guess the row heights use.
-export function codeBlockAt(text, width, y, k = 1) {
+export function codeBlockAt(text, width, y, k = 1, zoom = 1) {
   const spans = [];
-  markdownHeight(String(text ?? ""), width, spans, k);
+  markdownHeight(String(text ?? ""), width, spans, k, zoom);
   const s = spans.find((b) => y >= b.top && y <= b.bottom);
   return s ? s.lines.join("\n") : null;
 }

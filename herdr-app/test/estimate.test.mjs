@@ -4,7 +4,7 @@
 // a full-width character 16 px wide, inline code Menlo 8.4 px a character plus 4 px padding each side.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { markdownHeight, rowHeight } from "../mods/flockbook/estimate.js";
+import { markdownHeight, rowHeight, lineHeight } from "../mods/flockbook/estimate.js";
 
 const W = 748;
 const LINE = 26, GAP = 10, ITEM_GAP = 4;
@@ -25,13 +25,26 @@ const reply = [
   "要不要做？要的話，我等 build-bot 修完 Shift+Enter，再接著交給它。它熟 `grid.js`，也最能避開和設定畫面的衝突，順便補上測試。",
 ].join("\n");
 
+test("line heights round like gpui's: whole px of the window, so a zoom or a text size can round them up", () => {
+  assert.deepEqual([lineHeight(16), lineHeight(13), lineHeight(13.5)], [26, 21, 22], "the measured heights at zoom 1");
+  // Zoom 0.9: code lines are drawn 19 px apart (measured), 21.11 px at zoom 1; counted as 21, a 113-line
+  // code box came out 12 px short and cut the reply's last line.
+  assert.equal(lineHeight(13, 0.9), 19 / 0.9);
+  const code = "```\n" + Array.from({ length: 113 }, (_v, i) => `line_${i} = ${i}`).join("\n") + "\n```";
+  assert.ok(markdownHeight(code, W, null, 1, 0.9) >= 34 + 113 * 19 / 0.9);
+  // Small text (14 px) draws prose lines 23 px apart (22.65 rounded), not 22.75.
+  assert.equal(lineHeight(14), 23);
+  const para = "目".repeat(400);
+  assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(400 / Math.floor(W / 14)) * 23);
+});
+
 test("text size: the default guesses as before; a smaller size is shorter but not under its own drawing", () => {
   assert.equal(markdownHeight(reply, W, null, 1), markdownHeight(reply, W));
   const small = markdownHeight(reply, W, null, 14 / 16), large = markdownHeight(reply, W, null, 18 / 16);
   assert.ok(small < markdownHeight(reply, W) && markdownHeight(reply, W) < large);
-  // Full-width text at 14 px: 14 px characters on lines 26 × 14/16 px tall.
+  // Full-width text at 14 px: 14 px characters on 23 px lines.
   const para = "目".repeat(120);
-  assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(120 / Math.floor(W / 14)) * LINE * 14 / 16);
+  assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(120 / Math.floor(W / 14)) * lineHeight(14));
   assert.equal(rowHeight({ k: "assistant", text: reply }, W, false, 1), rowHeight({ k: "assistant", text: reply }, W));
 });
 

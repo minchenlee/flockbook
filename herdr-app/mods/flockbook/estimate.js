@@ -113,13 +113,19 @@ export function wrapLines(text, width, fs = 14) {
 
 // `spans`, when given, gets each code box as drawn: { top, bottom, lines } in px from the text's top
 // (the box itself, without its 6 px margin) and its source lines, for finding the box under a point.
-// `k`: the chat's text size over the default 16 px (settings: text_size). Text and its line heights scale
-// by it; padding and margins stay. Headings and list indents are counted at no less than their default
-// size, so a guess never comes out shorter than drawn.
-export function markdownHeight(text, width, spans = null, k = 1) {
-  const CODE_LH = 21 * k;  // TextView at 13 px (Menlo): its own line height
-  const CELL_LH = 22 * k;  // table text at 13.5 px (measured 11-10)
-  const fs = FS * k, lh = LH * k, up = Math.max(1, k);
+// A line as gpui draws it: 1.618 × the text size, rounded to a whole px of the window, so at a zoom the
+// rounding is in zoomed px. In the guesses' px (zoom 1) that is round(size × zoom × 1.618) / zoom: 26, 21
+// and 22 px for prose (16), code (13) and table text (13.5) at zoom 1 (measured), and code is 19 px at
+// zoom 0.9 (measured), not 18.9. Counted as 18.9, a 113-line code box came out 12 px short at zoom 0.9.
+export const lineHeight = (size, zoom = 1) => Math.round(size * zoom * 1.618) / zoom;
+
+// `k`: the chat's text size over the default 16 px (settings: text_size); `zoom`: Herdr's zoom. Text and its
+// line heights scale by k; padding and margins stay. Headings and list indents are counted at no less than
+// their default size, so a guess never comes out shorter than drawn.
+export function markdownHeight(text, width, spans = null, k = 1, zoom = 1) {
+  const CODE_LH = lineHeight(13 * k, zoom);    // TextView at 13 px (Menlo): its own line height
+  const CELL_LH = lineHeight(13.5 * k, zoom);  // table text at 13.5 px (measured 11-10)
+  const fs = FS * k, lh = lineHeight(fs, zoom), up = Math.max(1, k);
   let h = 0, p = 0, prevBlank = true;  // h: drawn exactly; p: prose, wraps
   // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
   let gap = 0;
@@ -232,13 +238,13 @@ export const columnWidth = (paneWidth) => Math.max(240, Math.min(READ_W, (paneWi
 
 // The height of a row. `open`: its tool chip shows the calls, or its note from another agent the whole text.
 // The sizes are the drawing's (metrics.js).
-export function rowHeight(row, width, open = false, k = 1) {
+export function rowHeight(row, width, open = false, k = 1, zoom = 1) {
   switch (row.k) {
     case "user":
-      if (row.from != null) return CHIP_ROW + (open ? markdownHeight(row.text || "", width - OPEN_INDENT, null, k) + CHIP_GAP : 0);
-      return markdownHeight(row.text || "", bubbleTextWidth(width), null, k) + (row.images ? BUBBLE_GAP + IMAGES_LINE_H : 0)
+      if (row.from != null) return CHIP_ROW + (open ? markdownHeight(row.text || "", width - OPEN_INDENT, null, k, zoom) + CHIP_GAP : 0);
+      return markdownHeight(row.text || "", bubbleTextWidth(width), null, k, zoom) + (row.images ? BUBBLE_GAP + IMAGES_LINE_H : 0)
         + 2 * BUBBLE_PAD_Y + 2 * ROW_PAD_Y;
-    case "assistant": return markdownHeight(row.text || "", width, null, k) + 2 * ROW_PAD_Y;
+    case "assistant": return markdownHeight(row.text || "", width, null, k, zoom) + 2 * ROW_PAD_Y;
     case "tools": {
       const calls = (row.chips || []).reduce((n, c) => n + (c.calls || []).length, 0);
       return CHIP_ROW + (open ? calls * CALL_H + CALLS_PAD : 0);
@@ -251,6 +257,6 @@ export function rowHeight(row, width, open = false, k = 1) {
   }
 }
 
-export function sizes(rows, width, open = new Set(), k = 1) {
-  return rows.map((r) => rowHeight(r, width, open.has(r.id), k));
+export function sizes(rows, width, open = new Set(), k = 1, zoom = 1) {
+  return rows.map((r) => rowHeight(r, width, open.has(r.id), k, zoom));
 }
