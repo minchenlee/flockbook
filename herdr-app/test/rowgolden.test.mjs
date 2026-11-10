@@ -2,7 +2,7 @@
 // estimate.js, mdblocks.js or chat.js must keep them exactly; a change in behaviour updates them on purpose,
 // in its own commit, with a test of its own.
 // Also: the estimate (markdownHeight's code box spans) and the drawing (splitBlocks) must see the same code
-// boxes. The texts in KNOWN_MISMATCH do not today; their test is a TODO until the two share one block parser.
+// boxes. Both use blocks.js; a text in KNOWN_MISMATCH would be one they still split differently (none now).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { markdownHeight, rowHeight } from "../mods/flockbook/estimate.js";
@@ -14,7 +14,10 @@ const MARKDOWN = {
   short: [32, 32], latin: [110, 188], latinParas: [104, 182], softBreaks: [32, 58], cjk: [84, 136], cjkReply: [160, 238],
   inlineCode: [84, 162], nestedList: [178, 178], listAfterPara: [128, 128], heading: [166, 166], quote: [58, 58],
   rule: [104, 104], table: [128, 149], tableInText: [158, 158], code: [134, 134], codeLong: [76, 118],
-  twoCodes: [163, 163], codeUnclosed: [108, 108], tildeFence: [68, 68], fenceInfo: [87, 87],
+  twoCodes: [163, 163], codeUnclosed: [108, 108],
+  // Were 68: the estimate saw no code box in a ~~~ fence and cut the drawn box off. fenceInfo kept its number
+  // (the estimate counted its box already; the drawing now sees it too).
+  tildeFence: [129, 129], fenceInfo: [87, 87],
 };
 
 // rowHeight at WIDTHS.
@@ -59,10 +62,3 @@ for (const name of Object.keys(TEXTS)) {
     assert.deepEqual(estimated, drawn);
   });
 }
-
-test("the known mismatches do differ today (remove a text from KNOWN_MISMATCH once it agrees)", () => {
-  for (const name of KNOWN_MISMATCH) {
-    const { drawn, estimated } = boxes(TEXTS[name]);
-    assert.notDeepEqual(estimated, drawn, name);
-  }
-});

@@ -26,13 +26,13 @@ export const TEXTS = {
   codeLong: ["```js", "const x = " + "\"a long string that wraps in the box\" + ".repeat(4) + "1;", "```"].join("\n"),
   twoCodes: ["```", "a", "```", "between", "```py", "b", "c", "```"].join("\n"),
   codeUnclosed: ["Start", "```", "never closed", "still code"].join("\n"),
-  // Known mismatches (the estimate and the drawing split these differently): see rowgolden.test.mjs.
+  // Split differently by the estimate and the drawing before both used blocks.js.
   tildeFence: ["Run:", "", "~~~", "one", "two", "three", "~~~"].join("\n"),
   fenceInfo: ["```js title=a.js", "const a = 1;", "```", "", "after"].join("\n"),
 };
 
-// Texts the estimate and the drawing split into different blocks today.
-export const KNOWN_MISMATCH = new Set(["tildeFence", "fenceInfo"]);
+// Texts the estimate and the drawing split into different blocks (their test is a TODO). None now.
+export const KNOWN_MISMATCH = new Set();
 
 export const WIDTHS = [748, 400];
 
