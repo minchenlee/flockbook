@@ -15,3 +15,5 @@ One short line: what this release is about.
 - Herdr app mod: a code block fenced with `~~~`, or with more words after its language (`` ```js title=a.js ``), shows whole. Before, the first was cut off at the bottom, and the second drew the rest of the message as code.
 
 ### ⚙️ Changes
+
+- Herdr app mod: the "working" spinner turns more smoothly: a short arc over a faint ring, one turn in 0.9 s, like Herdr's own.
