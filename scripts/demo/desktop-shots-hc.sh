@@ -69,7 +69,7 @@ check) check ;;
 shot) [ $# -ge 2 ] || { echo "usage: $0 shot <name> [agent]" >&2; exit 2; }; check >/dev/null; shot "$2" "${3:-}" ;;
 all)
     check
-    shot chat orchard-api-dev
+    shot chat atlas-import-dev
     shot question orchard-promo-dev
     shot approval harbor-deploy-ops
     shot done meadow-card-dev
