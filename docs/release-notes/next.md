@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Mac app: right-click a message in the chat (yours or the agent's) and choose "Copy Message" to copy its whole text as Markdown, with nothing selected. On a code block it comes after "Copy Code".
+
 - Herdr app mod: the "/" list above the reply box works in Codex, pi and Antigravity CLI (agy) chats too: their common built-ins, pi's prompt templates and `/skill:` commands, and agy's skills.
 
 - Herdr app mod: type "/" in the reply box of a Claude Code chat to see its commands: your own commands, skills, plugins, and `/clear`, `/compact`, `/context`. ↑ ↓ choose, Tab or Enter completes the name, Esc closes. Needs the Flockbook helper of this release.

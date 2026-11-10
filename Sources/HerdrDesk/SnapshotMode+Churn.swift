@@ -90,6 +90,7 @@ extension ContentTests {
             step("selection: one message is one text view; all of it copies the first and the last paragraph (\(last))",
                  copied.hasPrefix("Finished step") && copied.contains(last) && copied.contains("let value = parse(line)"))
         } else { step("selection: a multi-paragraph message is one selectable text view", false) }
+        copyMessage(in: host, window: win, step: step)
         // Older long replies fold to 14 lines: the text view is cut there.
         let line = (ReadingSize(rawValue: AppDefaults.store.string(forKey: ReadingSize.key) ?? "") ?? .m).line
         let folded = Self.all(MessageTextView.self, in: host).filter { $0.fold != nil }
@@ -758,6 +759,58 @@ enum ChurnData {
             }
         }
         return out
+    }
+}
+
+extension ContentTests {
+    /// The right-click menu of a message: "Copy Message" after Copy (and Copy Code on a code block), and what it writes:
+    /// the message's markdown as it was written, with nothing selected. On a named pasteboard: a check never writes
+    /// the owner's clipboard.
+    static func copyMessage(in host: NSView, window win: NSWindow, step: (String, Bool) -> Void) {
+        func menu(_ tv: MessageTextView, at p: NSPoint) -> [String] {
+            let e = NSEvent.mouseEvent(with: .rightMouseDown, location: tv.convert(p, to: nil), modifierFlags: [], timestamp: 0,
+                                       windowNumber: win.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            return e.flatMap { tv.menu(for: $0) }?.items.map { $0.isSeparatorItem ? "-" : $0.title } ?? []
+        }
+        func written(_ tv: MessageTextView) -> String? {
+            let pb = NSPasteboard(name: NSPasteboard.Name("copy-message-test-\(UUID().uuidString)"))
+            defer { pb.releaseGlobally() }
+            return tv.writeMessage(to: pb) ? pb.string(forType: .string) : nil
+        }
+        /// A point in the middle of the first line that has `text`.
+        func point(_ tv: MessageTextView, of text: String) -> NSPoint? {
+            let r = (tv.string as NSString).range(of: text)
+            guard r.location != NSNotFound, let lm = tv.layoutManager, let c = tv.textContainer else { return nil }
+            let box = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: c)
+            return NSPoint(x: box.midX + tv.textContainerOrigin.x, y: box.midY + tv.textContainerOrigin.y)
+        }
+        let views = all(MessageTextView.self, in: host)
+        // An assistant reply with a list and a code block.
+        if let tv = views.first(where: { $0.string.hasPrefix("Finished step") && $0.string.contains("let value = parse(line)") }),
+           let prose = point(tv, of: "Finished step"), let code = point(tv, of: "let value = parse(line)") {
+            tv.setSelectedRange(NSRange(location: 0, length: 0))
+            let onProse = menu(tv, at: prose), onCode = menu(tv, at: code)
+            step("copy message: the menu on a reply's text (\(onProse))", onProse == ["Copy", "Copy Message", "-", "Select All"])
+            step("copy message: on a code block it comes after Copy Code (\(onCode))", onCode == ["Copy", "Copy Code", "Copy Message", "-", "Select All"])
+            let md = written(tv) ?? ""
+            step("copy message: the reply's markdown as written, with nothing selected (\(md.count) characters)",
+                 md.hasPrefix("Finished step") && md.contains("with **bold** and `code` spans") && md.contains("\n- first point\n")
+                 && md.contains("```swift\nlet value = parse(line)\nprint(value)\n```"))
+            // The plain Copy of the whole text has no markdown marks: the two are not the same text.
+            step("copy message: not the plain text of Copy", md != tv.plainText(NSRange(location: 0, length: (tv.string as NSString).length)))
+        } else { step("copy message: a reply with a code block is on screen", false) }
+        // The owner's own message.
+        if let tv = views.first(where: { $0.string.hasPrefix("Step ") && $0.string.hasSuffix("report what changed.") }) {
+            let titles = menu(tv, at: NSPoint(x: 4, y: 4)), md = written(tv) ?? ""
+            step("copy message: a user message has it too (\(titles)) and gives its text (\(md))",
+                 titles == ["Copy", "Copy Message", "-", "Select All"] && md == tv.string)
+        } else { step("copy message: a user message is on screen", false) }
+        // Plain text (tool output, a command) is no message.
+        let plain = MessageTextView.make()
+        plain.load(.plain("ls -la", monoSize: 12))
+        plain.frame = NSRect(x: 0, y: 0, width: 300, height: 40)
+        step("copy message: none on tool output (\(menu(plain, at: NSPoint(x: 4, y: 4))))",
+             menu(plain, at: NSPoint(x: 4, y: 4)) == ["Copy", "-", "Select All"] && written(plain) == nil)
     }
 }
 
