@@ -55,7 +55,8 @@ pub struct Done {
     #[serde(rename = "type")]
     pub t: &'static str,
     /// "sent", "unconfirmed", "changed", "no-identity", "answered", "failed", "opens_screen" (`send`: a screen
-    /// command sent bare; nothing was sent).
+    /// command sent bare; nothing was sent), "box_not_empty" (`send`: the agent's input box has text; nothing was
+    /// sent).
     pub result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -84,6 +85,16 @@ pub fn no_identity() -> Done {
     )
 }
 /// Why the gate said no: the agent changed, or it has no identity to check, which no retry fixes.
+/// Claude Code's prompt suggestions are on (its default) unless its user settings say `"promptSuggestionEnabled": false`.
+pub fn claude_suggests(home: Option<&Path>) -> bool {
+    let v = home.and_then(|h| std::fs::read(h.join(".claude/settings.json")).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    v.and_then(|v| v["promptSuggestionEnabled"].as_bool()).unwrap_or(true)
+}
+
+pub const BOX_NOT_EMPTY: &str = "The agent's box has text in it. Clear it in the terminal first. Nothing was sent.";
+pub fn box_not_empty() -> Done {
+    Done::new("box_not_empty", Some(BOX_NOT_EMPTY))
+}
 pub fn refused(pane: &Pane) -> Done {
     if pane.agent.as_ref().map(KeyGate::has_identity) == Some(true) {
         agent_changed()
@@ -329,6 +340,13 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     }
     if !keygate::passes(client, Some(&gate(pane)), &pane.id, None, None) {
         return refused(pane);
+    }
+    // The text would go after what is in the agent's box ("/" + "/status" = "//status"). A box not found, an agent
+    // not read, or no screen: it goes as before.
+    let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
+    let suggests = kind == "claude" && claude_suggests(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref());
+    if client.visible_text(&pane.id).ok().and_then(|s| crate::queue::box_has_text(kind, &s, suggests)) == Some(true) {
+        return box_not_empty();
     }
     let r = if files.is_empty() { client.deliver(text, &pane.id) } else { client.deliver_files(text, &pane.id, files) };
     match r {

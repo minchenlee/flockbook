@@ -117,3 +117,26 @@ fn send_refuses_a_bare_screen_command() {
     assert_ne!(send("t1", "/model sonnet")["result"], "opens_screen");
     assert_ne!(send("t2", "/status")["result"], "opens_screen", "Codex's /status prints in the chat");
 }
+
+/// `send` reads the agent's input box first: text in it (a half-typed "/") and nothing is typed (`box_not_empty`).
+/// An empty box, its placeholder, or no screen to read: it goes as before.
+#[test]
+fn send_refuses_when_the_agents_box_has_text() {
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    let rule = "─".repeat(40);
+    let screen = |row: &str| format!("● Done.\n\n{rule}\n{row}\n{rule}\n  ~/proj\n");
+    let send = || -> Value { run(&fake.path, &["send", "--terminal", "t1", "--text", "/compact"]).into_iter().find(|l| l["type"] == "done").unwrap() };
+    fake.set_screen("t1", &screen("❯\u{a0}/"));
+    let d = send();
+    assert_eq!(d["result"], "box_not_empty");
+    assert_eq!(d["message"], "The agent's box has text in it. Clear it in the terminal first. Nothing was sent.");
+    assert!(fake.calls("terminal.send").is_empty(), "nothing was typed");
+    fake.set_screen("t1", &screen("❯\u{a0}Try \"fix typecheck errors\""));
+    assert_ne!(send()["result"], "box_not_empty", "only its placeholder: empty");
+    let typed = fake.calls("terminal.send").len();
+    assert!(typed >= 1);
+    fake.clear_screen("t1");
+    assert_ne!(send()["result"], "box_not_empty", "no screen: it goes as before");
+    assert!(fake.calls("terminal.send").len() > typed);
+}

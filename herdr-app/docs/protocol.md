@@ -440,7 +440,19 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
 | `answered` | `approve` only: this prompt was answered less than 60 s ago (or its key may still arrive) and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `busy` | `approve` only: another press of a prompt in this terminal (another view, or a double key) was being handled at the same moment. Nothing was sent and nothing is decided. | Keeps the card and its buttons, shows `message` (press again). |
 | `opens_screen` | `send` only: the text is a screen command alone (`/model`, `/status`), and its screen would open in the terminal. Nothing was sent. `message` says what to add. | Keeps the text, shows `message`. |
+| `box_not_empty` | `send` only: the agent's own input box already has text (the text would go after it: "/" and "/status" make "//status"). Nothing was sent. `message`: "The agent's box has text in it. Clear it in the terminal first. Nothing was sent." | Keeps the text, shows `message`. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
+
+`send` reads the screen right before it types. Where it finds the agent's input box and the box has text, it sends
+nothing (`box_not_empty`). The box per agent (queue.rs `box_has_text`): Claude Code, the rows after "❯" between the
+last two rules (its placeholder `Try "…"` or "Press up to edit queued messages" counts as empty; with prompt
+suggestions on, its default, a suggested prompt stands dim in the empty box and the screen's text has no dim, so only
+a box that starts with "/" counts as text: `"promptSuggestionEnabled": false` in `~/.claude/settings.json` reads
+any text); Codex, the last
+"›" row ("Ask Codex to do anything" is empty); pi, the rows between the last two rules; agy, "> " between the last
+two rules (a mode's note "… (shift+tab to cycle)" is empty); Grok Build, "│ ❯" inside the last "╭ … ╰" box. Another
+agent, a screen it cannot read, or a screen where the box is not found (a dialog, a menu): it sends as before, so a
+doubt never blocks a message (but then the text may still go after what is in the box).
 
 `approve` reads the screen again right before the keys and sends only while the box on screen is
 still `request` (the app's `respondIfOpen`). Claude and agy: `--allow` sends `1` (allow once),

@@ -15,6 +15,8 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 
+- Herdr app mod: a message is not sent when the agent's own input box in the terminal already has text in it (Claude Code, Codex, pi, agy and Grok Build). Before, the message was added after that text: a "/" left in the box made "/status" into "//status", which the agent took as a prompt. Now the chat says to clear the box in the terminal first and keeps your text. The phone page does the same.
+
 - Herdr app mod: the "/" list in a Claude Code chat scrolls past 8 rows (↑ ↓ or the wheel; "4–11 of 20" says where you are), and lists the common built-ins too: `/model` and `/effort` (then their values: `/model sonnet`), `/resume`, `/review`, `/init`, `/rewind`, `/usage` and more. A row says "opens a screen" when the command, sent alone, opens a screen in the terminal.
 
 - Herdr app mod: a message you sent with pictures shows whole. Its "2 images" line was not counted in the row's height, so the bottom of the bubble was cut off.

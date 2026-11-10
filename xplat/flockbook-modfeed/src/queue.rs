@@ -621,6 +621,83 @@ fn box_rows(lines: &[String], mark: char) -> Vec<String> {
     out
 }
 
+// MARK: is the input box empty
+
+/// Whether the agent's input box holds text, from its screen: `Some(true)` text, `Some(false)` empty (or only its
+/// placeholder), `None` the box is not found or the agent is not one read here (then a send goes as before: no
+/// block on doubt). Spike 11-10 (Claude Code 2.1, Codex 0.167, pi 1.3, agy 1.5, Grok Build 1.0): `send` types after
+/// whatever is in the box, so a half-typed "/" turned "/status" into "//status".
+///
+/// Claude Code with prompt suggestions on (`claude_suggests`, its default) shows a suggested prompt dim in the empty
+/// box, and the screen's text has no dim: then only a box that starts with "/" (a command being typed; a suggestion
+/// is not one) counts as text, and any other text is a doubt.
+pub fn box_has_text(kind: &str, screen: &str, claude_suggests: bool) -> Option<bool> {
+    let lines = lines_of(screen);
+    let rows = match kind {
+        // "❯ " and its rows between the last two rules; its placeholder: "Try \"…\"", or the queue's.
+        "claude" => {
+            let rows = ruled(&lines, Some('❯'))?;
+            let hint = rows.len() == 1 && ((rows[0].starts_with("Try \"") && rows[0].ends_with('"')) || rows[0] == CLAUDE_PLACEHOLDER);
+            let rows = if hint { vec![] } else { rows };
+            if claude_suggests && rows.iter().any(|r| !trim(r).is_empty()) && !rows[0].trim_start().starts_with('/') {
+                return None;
+            }
+            rows
+        }
+        "codex" => {
+            if !lines.iter().any(|l| l.starts_with("› ") || trim(l) == "›") {
+                return None;
+            }
+            let rows = codex_box(&lines);
+            if rows == [CODEX_PLACEHOLDER] { vec![] } else { rows }
+        }
+        // No placeholder: the rows between the last two rules.
+        "pi" => ruled(&lines, None)?,
+        // "> " between the last two rules; a mode's note stands there when it is empty ("Auto mode: … (shift+tab to
+        // cycle)").
+        "agy" => {
+            let rows = ruled(&lines, Some('>'))?;
+            if rows.len() == 1 && rows[0].ends_with("(shift+tab to cycle)") { vec![] } else { rows }
+        }
+        // "│ ❯ …" rows between the last "╭" and "╰".
+        "grok" => {
+            let top = lines.iter().rposition(|l| trim(l).starts_with('╭'))?;
+            let bottom = top + 1 + lines[top + 1..].iter().position(|l| trim(l).starts_with('╰'))?;
+            let inner: Vec<String> = lines[top + 1..bottom]
+                .iter()
+                .map(|l| trim(l).trim_start_matches('│').trim_end_matches('│').to_string())
+                .collect();
+            let first = inner.first()?.trim_start().to_string();
+            if !first.starts_with('❯') {
+                return None;
+            }
+            let mut rows = inner;
+            rows[0] = first.trim_start_matches('❯').to_string();
+            rows
+        }
+        _ => return None,
+    };
+    Some(rows.iter().any(|r| !trim(r).is_empty()))
+}
+
+/// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
+/// first row (a dialog, a menu): `None`.
+fn ruled(lines: &[String], mark: Option<char>) -> Option<Vec<String>> {
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| is_rule(&lines[i])).collect();
+    let [.., a, b] = rules[..] else { return None };
+    let inside = &lines[a + 1..b];
+    match mark {
+        Some(m) => {
+            let first = inside.first()?.replace('\u{a0}', " ");
+            if !first.starts_with(m) {
+                return None;
+            }
+            Some(box_rows(inside, m))
+        }
+        None => Some(inside.iter().map(|l| trailing(&l.replace('\u{a0}', " "))).collect()),
+    }
+}
+
 // MARK: on a live pane
 
 /// Claude Code's queue from the last `tail::BYTES` of its log (the part the app shows first).
@@ -661,5 +738,83 @@ impl PullIo for Live<'_> {
     }
     fn settle(&mut self) {
         std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+}
+
+#[cfg(test)]
+mod box_tests {
+    fn box_has_text(kind: &str, screen: &str) -> Option<bool> {
+        super::box_has_text(kind, screen, false)
+    }
+    fn box_has_text_c(screen: &str) -> Option<bool> {
+        super::box_has_text("claude", screen, false)
+    }
+
+    const RULE: &str = "────────────────────────────────────────";
+
+    fn claude(row: &str) -> String {
+        format!("● Done.\n\n{RULE}\n{row}\n{RULE}\n  ~/proj  ⎇main\n  Opus 5.5 ·medium\n")
+    }
+
+    #[test]
+    fn claude_box() {
+        assert_eq!(box_has_text_c(&claude("❯\u{a0}Try \"fix typecheck errors\"")), Some(false), "its placeholder");
+        assert_eq!(box_has_text_c(&claude("❯\u{a0}")), Some(false));
+        assert_eq!(box_has_text_c(&claude("❯ Press up to edit queued messages")), Some(false));
+        assert_eq!(box_has_text_c(&claude("❯\u{a0}/")), Some(true), "a half-typed command");
+        assert_eq!(box_has_text_c(&claude("❯\u{a0}hi there")), Some(true));
+        assert_eq!(box_has_text_c(&claude("❯ \n  second line")), Some(true), "text on a later row");
+        assert_eq!(box_has_text_c(&claude(" Do you want to proceed?\n ❯ 1. Yes")), None, "a dialog: not the box");
+        assert_eq!(box_has_text_c("no box here"), None);
+    }
+
+    #[test]
+    fn claude_with_prompt_suggestions() {
+        let c = |row: &str| super::box_has_text("claude", &claude(row), true);
+        assert_eq!(c("❯\u{a0}run the tests"), None, "maybe its dim suggestion: a doubt, sent as before");
+        assert_eq!(c("❯\u{a0}/"), Some(true), "a command being typed is never a suggestion");
+        assert_eq!(c("❯\u{a0}/sta"), Some(true));
+        assert_eq!(c("❯\u{a0}"), Some(false));
+        assert_eq!(c("❯\u{a0}Try \"fix typecheck errors\""), Some(false));
+    }
+
+    #[test]
+    fn codex_box() {
+        let codex = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · Context 100% left · 0 in\n  ← for agents · ? for shortcuts\n");
+        assert_eq!(box_has_text("codex", &codex("› Ask Codex to do anything")), Some(false));
+        assert_eq!(box_has_text("codex", &codex("› hi there")), Some(true));
+        assert_eq!(box_has_text("codex", &codex("› /")), Some(true));
+        assert_eq!(box_has_text("codex", "nothing"), None);
+    }
+
+    #[test]
+    fn pi_box() {
+        let pi = |row: &str| format!("{RULE}\n{RULE}\n{row}\n{RULE}\n~/proj  ⎇main\n");
+        assert_eq!(box_has_text("pi", &pi("")), Some(false));
+        assert_eq!(box_has_text("pi", &pi("hi there")), Some(true));
+        assert_eq!(box_has_text("pi", &pi("\nsecond")), Some(true));
+        assert_eq!(box_has_text("pi", "no rules"), None);
+    }
+
+    #[test]
+    fn agy_box() {
+        let agy = |row: &str| format!("  Gemini 3.8 Flash (Medium)\n\n{RULE}\n{row}\n{RULE}\n? for shortcuts\n");
+        assert_eq!(box_has_text("agy", &agy(">")), Some(false));
+        assert_eq!(box_has_text("agy", &agy("> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)")), Some(false), "a mode's note");
+        assert_eq!(box_has_text("agy", &agy("> hi there")), Some(true));
+        assert_eq!(box_has_text("agy", &agy("Switch Model")), None, "a menu");
+    }
+
+    #[test]
+    fn grok_box() {
+        let grok = |row: &str| format!("  Update: available\n\n  ╭──────────────\n  │ {row}   \n  ╰──────────────\n  Enter:send\n");
+        assert_eq!(box_has_text("grok", &grok("❯ ")), Some(false));
+        assert_eq!(box_has_text("grok", &grok("❯ hi there")), Some(true));
+        assert_eq!(box_has_text("grok", "  ╭──\n  │ Pick one\n  ╰──\n"), None);
+    }
+
+    #[test]
+    fn others_are_not_read() {
+        assert_eq!(box_has_text("cursor-agent", "❯ hi"), None);
     }
 }
