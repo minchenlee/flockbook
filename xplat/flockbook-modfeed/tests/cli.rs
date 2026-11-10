@@ -76,9 +76,12 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     let v = run_home(&["commands", "--terminal", "t1"]);
     assert_eq!(v[1]["type"], "commands");
     assert_eq!(v[1]["agent"], "claude");
-    let names: Vec<&str> = v[1]["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert_eq!(names, vec!["clear", "compact", "context", "deploy", "review"]);
-    assert_eq!(v[1]["commands"][3], serde_json::json!({"name": "deploy", "description": "Deploy the app", "source": "project"}));
+    let cmds = v[1]["commands"].as_array().unwrap();
+    let own: Vec<&Value> = cmds.iter().filter(|c| c["source"] != "builtin").collect();
+    assert_eq!(own, vec![&serde_json::json!({"name": "deploy", "description": "Deploy the app", "source": "project"})], "the user's review is hidden by the built-in /review");
+    let model = cmds.iter().find(|c| c["name"] == "model").unwrap();
+    assert_eq!(model["args"], serde_json::json!(["opus", "sonnet", "haiku", "fable", "default"]));
+    assert_eq!(model["screen"], true);
     assert_eq!(v.last().unwrap()["ok"], true);
     let o = run_home(&["commands", "--terminal", "t2"]);
     assert_eq!(o[1], serde_json::json!({"type": "commands", "agent": "codex", "commands": []}), "another agent: nothing");

@@ -1,6 +1,7 @@
 //! `commands`: the "/" commands of a Claude Code terminal, read from files (no key goes to the agent). The mod shows
 //! them above its reply box when the text starts with "/". Sources, as Claude Code finds them:
-//! - a short fixed list of built-ins that open no screen of their own (`BUILTINS`);
+//! - the built-ins people use most (`BUILTINS`), with an argument hint, the values of /model and /effort, and a mark
+//!   on those that open a screen in the terminal when sent bare;
 //! - custom commands: `.claude/commands/*.md` in the terminal's folder, then in the user's home;
 //! - skills: `.claude/skills/<name>/SKILL.md` in the terminal's folder, then in the home;
 //! - plugins (`~/.claude/plugins/installed_plugins.json`, not turned off in `enabledPlugins`): their commands and
@@ -13,12 +14,46 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Built-ins that do their work in the chat, without a screen in the terminal (spike, Claude Code 2.1: /model,
-/// /config, /status and most others open one; the chat cannot show it, so they are left out).
-pub const BUILTINS: [(&str, &str); 3] = [
-    ("clear", "Start a new conversation (clears the history)"),
-    ("compact", "Summarise the conversation so far, to free context"),
-    ("context", "Show how full the context is"),
+/// A built-in: name, description (as Claude Code's own menu says it), argument hint, argument values (the mod offers
+/// them after "/name "), and whether sent bare it opens a screen in the terminal (a picker, a dialog: the chat cannot
+/// show it, the owner answers it in the terminal). Checked against Claude Code 2.1 (spike): /agents is gone, /cost
+/// and /review are other names of /usage and /code-review.
+pub struct Builtin {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub hint: &'static str,
+    pub args: &'static [&'static str],
+    pub screen: bool,
+}
+
+const fn b(name: &'static str, description: &'static str, hint: &'static str, args: &'static [&'static str], screen: bool) -> Builtin {
+    Builtin { name, description, hint, args, screen }
+}
+
+pub const MODELS: [&str; 5] = ["opus", "sonnet", "haiku", "fable", "default"];
+pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+pub const BUILTINS: [Builtin; 20] = [
+    b("add-dir", "Add a new working directory", "<path>", &[], true),
+    b("clear", "Start a new conversation (clears the history)", "", &[], false),
+    b("compact", "Summarise the conversation so far, to free context", "[instructions]", &[], false),
+    b("config", "Open the settings", "", &[], true),
+    b("context", "Show how full the context is", "", &[], false),
+    b("effort", "Set effort level for model usage", "low|medium|high|xhigh|max", &EFFORTS, true),
+    b("export", "Export the current conversation to a file or clipboard", "[file]", &[], true),
+    b("help", "Show help and the keys", "", &[], true),
+    b("hooks", "Show the hooks", "", &[], true),
+    b("init", "Initialize a new CLAUDE.md file with codebase documentation", "", &[], false),
+    b("mcp", "Manage MCP servers", "", &[], true),
+    b("memory", "Edit the memory and instruction files", "", &[], true),
+    b("model", "Set the AI model for Claude Code", "<model>", &MODELS, true),
+    b("permissions", "Show and edit the tool permission rules", "", &[], true),
+    b("resume", "Resume an earlier conversation", "[session]", &[], true),
+    b("review", "Review the current diff or a PR for bugs", "", &[], false),
+    b("rewind", "Restore the code and/or conversation to a previous point", "", &[], true),
+    b("status", "Show the version, model, account and connections", "", &[], true),
+    b("usage", "Show session cost, plan usage, and activity stats", "", &[], true),
+    b("plugin", "Manage plugins", "", &[], true),
 ];
 
 /// At most this many entries, and description characters.
@@ -33,6 +68,15 @@ pub struct Command {
     pub description: String,
     /// "builtin", "project", "user", "skill", or "plugin".
     pub source: &'static str,
+    /// Built-ins: what may follow the name ("<model>", "[file]").
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub hint: String,
+    /// Built-ins: the values offered after "/name " (/model, /effort).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Built-ins: sent bare, it opens a screen in the terminal.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub screen: bool,
 }
 
 /// The commands for a Claude Code terminal in `cwd`, with the user's home `home`. Sorted by name.
@@ -41,11 +85,16 @@ pub fn list(home: &Path, cwd: &Path) -> Vec<Command> {
     let mut seen = HashSet::new();
     let mut add = |out: &mut Vec<Command>, name: String, description: String, source: &'static str| {
         if out.len() < MAX && valid(&name) && seen.insert(name.clone()) {
-            out.push(Command { name, description: cut(&description), source });
+            out.push(Command { name, description: cut(&description), source, hint: String::new(), args: vec![], screen: false });
         }
     };
-    for (n, d) in BUILTINS {
-        add(&mut out, n.into(), d.into(), "builtin");
+    for b in &BUILTINS {
+        add(&mut out, b.name.into(), b.description.into(), "builtin");
+        if let Some(c) = out.last_mut().filter(|c| c.name == b.name) {
+            c.hint = b.hint.into();
+            c.args = b.args.iter().map(|a| a.to_string()).collect();
+            c.screen = b.screen;
+        }
     }
     let claude = home.join(".claude");
     for (dir, source) in [(cwd.join(".claude/commands"), "project"), (claude.join("commands"), "user")] {
@@ -214,7 +263,23 @@ mod tests {
     fn builtins_only_without_files() {
         let t = tempfile::tempdir().unwrap();
         let v = list(&t.path().join("home"), &t.path().join("proj"));
-        assert_eq!(names(&v), vec![("clear", "builtin"), ("compact", "builtin"), ("context", "builtin")]);
+        let got: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            got,
+            vec![
+                "add-dir", "clear", "compact", "config", "context", "effort", "export", "help", "hooks", "init", "mcp", "memory", "model",
+                "permissions", "plugin", "resume", "review", "rewind", "status", "usage"
+            ]
+        );
+        assert!(v.iter().all(|c| c.source == "builtin"));
+        let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(c("model").args, vec!["opus", "sonnet", "haiku", "fable", "default"]);
+        assert_eq!(c("effort").args, vec!["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(c("model").hint, "<model>");
+        assert!(c("model").screen && c("config").screen && !c("clear").screen && !c("context").screen);
+        // On the wire: hint, args and screen only where they say something.
+        assert_eq!(serde_json::to_value(c("clear")).unwrap(), serde_json::json!({"name": "clear", "description": "Start a new conversation (clears the history)", "source": "builtin"}));
+        assert_eq!(serde_json::to_value(c("add-dir")).unwrap()["hint"], "<path>");
     }
 
     #[test]
@@ -224,7 +289,7 @@ mod tests {
         put(&proj.join(".claude/commands/deploy.md"), "---\ndescription: \"Deploy the app\"\n---\nRun the deploy.");
         put(&proj.join(".claude/commands/ops/restart.md"), "# Restart the server\n\nThen check.");
         put(&home.join(".claude/commands/deploy.md"), "---\ndescription: the user's deploy\n---\n");
-        put(&home.join(".claude/commands/review.md"), "Review the diff.");
+        put(&home.join(".claude/commands/lint.md"), "Lint the diff.");
         put(&home.join(".claude/commands/bad name.md"), "a name with a space");
         put(&home.join(".claude/skills/notes/SKILL.md"), "---\nname: take-notes\ndescription: Write notes\n---\nbody");
         put(&home.join(".claude/skills/hidden/SKILL.md"), "---\ndescription: model only\nuser-invocable: false\n---\n");
@@ -247,24 +312,22 @@ mod tests {
         );
         put(&home.join(".claude/settings.json"), r#"{"enabledPlugins": {"off@market": false, "kit@market": true}}"#);
         let v = list(&home, &proj);
+        let own: Vec<Command> = v.iter().filter(|c| c.source != "builtin").cloned().collect();
         assert_eq!(
-            names(&v),
+            names(&own),
             vec![
-                ("clear", "builtin"),
-                ("compact", "builtin"),
-                ("context", "builtin"),
                 ("deploy", "project"),
                 ("kit:hello", "plugin"),
                 ("kit:tidy", "plugin"),
+                ("lint", "user"),
                 ("restart", "project"),
-                ("review", "user"),
                 ("take-notes", "skill"),
             ]
         );
         let d = |n: &str| v.iter().find(|c| c.name == n).unwrap().description.clone();
         assert_eq!(d("deploy"), "Deploy the app", "the project's command wins over the user's, quotes off");
         assert_eq!(d("restart"), "Restart the server", "no front matter: the first line, without its #");
-        assert_eq!(d("review"), "Review the diff.");
+        assert_eq!(d("lint"), "Lint the diff.");
         assert_eq!(d("kit:hello"), "Say hello");
     }
 

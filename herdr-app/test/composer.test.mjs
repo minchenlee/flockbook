@@ -323,7 +323,7 @@ test("slashQuery: the name after a leading /, while there is no space; matchComm
   assert.deepEqual(matchCommands(CMDS, "CO").map((x) => x.name), ["compact", "context"]);
   assert.deepEqual(matchCommands(CMDS, "zz"), []);
   const many = Array.from({ length: 20 }, (_v, i) => ({ name: `cmd${i}` }));
-  assert.equal(matchCommands(many, "").length, 8);
+  assert.equal(matchCommands(many, "").length, 20, "all matches: the list scrolls");
 });
 
 test("typing / in a Claude Code chat shows its commands above the box, filtered as you type", async () => {
@@ -343,16 +343,19 @@ test("typing / in a Claude Code chat shows its commands above the box, filtered 
   assert.equal(byId(r.view(), "slash-keys")._a.key_context, "FlockbookSlash");
 });
 
-test("up and down choose, Tab completes the full name and a space; Esc closes until the text changes", async () => {
+test("up and down choose (stopping at the ends), Tab completes the full name and a space; Esc closes until the text changes", async () => {
   const r = slashRig();
   await r.type("/c");
   await r.act("flockbook_slash_up");
-  assert.match(r.rows()[2], /context/, "up from the first row goes round to the last");
-  await r.act("flockbook_slash_down"); await r.act("flockbook_slash_down");
+  await r.act("flockbook_slash_down");
   await r.act("flockbook_slash_complete");
-  assert.equal(r.b.input.value(), "/compact ", "the second of clear, compact, context");
+  assert.equal(r.b.input.value(), "/compact ", "up on the first row stays there; down: the second");
   assert.equal(r.rows(), null);
   assert.equal(sent.length, 0, "completing sends nothing");
+  await r.type("/c");
+  for (let i = 0; i < 5; i++) await r.act("flockbook_slash_down");
+  await r.act("flockbook_slash_complete");
+  assert.equal(r.b.input.value(), "/context ", "down on the last row stays there (no wrap)");
   await r.type("/c");
   await r.act("flockbook_slash_close");
   assert.equal(r.rows(), null, "Esc closes it");
@@ -386,4 +389,79 @@ test("no list for other agents, nor when the helper has no commands command", as
   const e = slashRig({ list: [] });
   await e.type("/");
   assert.equal(e.rows(), null, "an empty list shows nothing");
+});
+
+// More matches than rows: a window of 8 follows the pick; the wheel moves it.
+const MANY = Array.from({ length: 20 }, (_v, i) => ({ name: `cmd${String(i).padStart(2, "0")}`, description: `Command ${i}`, source: "user" }));
+const shown = (r) => r.rows().filter((x) => x.startsWith("/")).map((x) => x.split(/\s/)[0]);
+
+test("20 matches: 8 rows show; down past the last row moves the window; the count says there are more", async () => {
+  const r = slashRig({ list: MANY });
+  await r.type("/cmd");
+  assert.deepEqual(shown(r), MANY.slice(0, 8).map((c) => `/${c.name}`));
+  assert.match(textOf(byId(r.view(), "slash-more")), /1–8 of 20/);
+  for (let i = 0; i < 10; i++) await r.act("flockbook_slash_down");
+  assert.deepEqual(shown(r), MANY.slice(3, 11).map((c) => `/${c.name}`), "pick 10 is the window's last row: rows 3 to 10");
+  assert.match(textOf(byId(r.view(), "slash-more")), /4–11 of 20/);
+  for (let i = 0; i < 20; i++) await r.act("flockbook_slash_down");
+  assert.deepEqual(shown(r).at(-1), "/cmd19", "down stops at the last match");
+  for (let i = 0; i < 19; i++) await r.act("flockbook_slash_up");
+  assert.deepEqual(shown(r), MANY.slice(0, 8).map((c) => `/${c.name}`), "up to the first: the window follows back");
+  for (let i = 0; i < 12; i++) await r.act("flockbook_slash_down");
+  await r.type("/cmd1");
+  assert.deepEqual(shown(r), MANY.slice(10, 18).map((c) => `/${c.name}`), "a new filter starts at its first match");
+  await r.act("flockbook_slash_complete");
+  assert.equal(r.b.input.value(), "/cmd10 ");
+});
+
+test("the wheel moves the window a row per 30 px; the pick stays on a shown row", async () => {
+  const r = slashRig({ list: MANY });
+  await r.type("/cmd");
+  const wheel = async (dy) => { byId(r.view(), "slash")._h.on_scroll_wheel({ delta: { x: 0, y: dy }, touch_phase: "moved" }, r.cx); await r.cx.settle(); };
+  await wheel(-90);
+  assert.deepEqual(shown(r), MANY.slice(3, 11).map((c) => `/${c.name}`), "down 90 px: three rows");
+  await r.act("flockbook_slash_complete");
+  assert.equal(r.b.input.value(), "/cmd03 ", "the pick moved into the window");
+  await r.type("/cmd");
+  await wheel(-15); await wheel(-15);
+  assert.equal(shown(r)[0], "/cmd01", "small trackpad steps add up");
+  await wheel(+1000);
+  assert.equal(shown(r)[0], "/cmd00", "up stops at the top");
+  await wheel(-10000);
+  assert.equal(shown(r).at(-1), "/cmd19", "down stops at the bottom");
+});
+
+const BUILT = [
+  { name: "clear", description: "Start a new conversation", source: "builtin" },
+  { name: "effort", description: "Set effort level", source: "builtin", hint: "low|medium|high|xhigh|max", args: ["low", "medium", "high", "xhigh", "max"], screen: true },
+  { name: "model", description: "Set the AI model", source: "builtin", hint: "<model>", args: ["opus", "sonnet", "haiku", "fable", "default"], screen: true },
+];
+
+test("a built-in shows its argument hint, and a mark when it opens a screen in the terminal sent bare", async () => {
+  const r = slashRig({ list: BUILT });
+  await r.type("/");
+  const rows = r.rows();
+  assert.match(rows[2], /\/model\s*<model>.*Set the AI model.*opens a screen/);
+  assert.doesNotMatch(rows[0], /opens a screen/);
+});
+
+test("after \"/model \" the list offers the model names; Tab or Enter completes one, Enter on a whole one sends it", async () => {
+  const r = slashRig({ list: BUILT });
+  await r.type("/mo");
+  await r.act("flockbook_slash_complete");
+  assert.equal(r.b.input.value(), "/model ");
+  await r.type("/model ");
+  assert.deepEqual(shown(r).length, 0, "values are not commands");
+  assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["opus", "sonnet", "haiku", "fable", "default"]);
+  await r.type("/model s");
+  assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["sonnet"]);
+  await r.act("flockbook_slash_complete");
+  assert.equal(r.b.input.value(), "/model sonnet");
+  r.b.input._h.submit({}, r.cx); await r.cx.settle();
+  assert.equal(sent.at(-1)[sent.at(-1).indexOf("--text") + 1], "/model sonnet");
+  await r.type("/effort x");
+  r.b.input.set_value("/effort x\n"); r.b.input._h.submit({}, r.cx); await r.cx.settle();
+  assert.equal(r.b.input.value(), "/effort xhigh", "Enter on a part of a value completes it");
+  await r.type("/clear x");
+  assert.equal(r.rows(), null, "a command without values: no list after its space");
 });
