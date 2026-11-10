@@ -161,13 +161,10 @@ pub fn run(argv: &[String]) -> String {
             let log = url.as_deref();
             match cmd.as_str() {
                 "commands" => {
-                    // Claude Code only: other agents get an empty list. Files only, in the terminal's folder and the
-                    // user's home (HOME); nothing goes to the agent.
+                    // Per agent kind (Claude Code, Codex, pi, agy); other agents get an empty list. Files only, in the
+                    // terminal's folder and the user's home (HOME); nothing goes to the agent.
                     let home = std::env::var_os("HOME").map(PathBuf::from);
-                    let list = match home {
-                        Some(h) if kind == "claude" => crate::commands::list(&h, Path::new(&found.pane.cwd)),
-                        _ => vec![],
-                    };
+                    let list = home.map(|h| crate::commands::list(&kind, &h, Path::new(&found.pane.cwd))).unwrap_or_default();
                     r.out.emit_value(json!({"type": "commands", "agent": kind, "commands": list}));
                     return r.finish(true);
                 }

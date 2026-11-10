@@ -82,7 +82,8 @@ function bindPaste(cx) {
   } catch { /* the box's own paste stays, and paste_other still attaches an image */ }
 }
 
-// "/" commands (Claude Code only; docs/protocol.md, commands): while the text is "/" and a name with no space, a
+// "/" commands (docs/protocol.md, commands; the helper lists them for Claude Code, Codex, pi and agy, and none for
+// other agents): while the text is "/" and a name with no space, a
 // list of the agent's commands shows above the box; after "/model " (a built-in with values) its values. All the
 // matches are in the list; SLASH_ROWS show at a time, and the window follows the pick (↑ ↓ stop at the ends, no
 // wrap) or the wheel. Tab or Enter completes, Esc closes.
@@ -130,7 +131,6 @@ export function windowTop(top, pick, n, rows = SLASH_ROWS) {
 }
 const ROW_PX = 30;   // a list row; the wheel moves the window a row per ROW_PX
 
-const isClaude = (agent) => agent?.program?.key === "claude" || agent?.app === "claude-code";
 
 // What `paste-image` found to attach: copied files, else the saved image. Empty: paste the text.
 export function pastedFiles(lines) {
@@ -217,10 +217,11 @@ export class Composer {
     return a ? this : null;
   }
 
-  // Asks the helper for the shown Claude Code agent's commands (at most every CMDS_MS), if it has `commands`.
+  // Asks the helper for the shown agent's commands (at most every CMDS_MS), if it has `commands`. An agent it lists
+  // none for gets an empty list: no list shows.
   async loadCommands(cx) {
     const a = this.address;
-    if (!a || !isClaude(this.agent) || this.cmdsBusy) return;
+    if (!a || !this.agent || this.cmdsBusy) return;
     const had = this.cmds.get(a);
     if (had && Date.now() - had.at < CMDS_MS) return;
     this.cmdsBusy = true;
@@ -241,7 +242,7 @@ export class Composer {
   }
 
   slashFor(v) {
-    if (!isClaude(this.agent) || !this.address) return null;
+    if (!this.agent || !this.address) return null;
     const list = this.cmds.get(this.address)?.list ?? [];
     let kind = "cmd", query = slashQuery(v), items, cmd = null;
     if (query !== null) items = matchCommands(list, query);
