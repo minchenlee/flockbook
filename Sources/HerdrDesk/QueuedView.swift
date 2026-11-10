@@ -158,7 +158,7 @@ struct QueuedStrip: View {
             HStack(spacing: 8) {
                 Text(blocked ?? "\(when) \(pullNote)").font(.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
-                if pulling { ProgressView().controlSize(.small) }
+                if pulling { Spinner() }
                 // Only Claude Code's queue can be taken back exactly (its log); Codex's and Grok's are edited in their terminals.
                 if queue.pullsAll {
                     Button(pullLabel, action: onPull)
