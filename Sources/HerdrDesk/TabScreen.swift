@@ -280,7 +280,8 @@ extension PaneView {
                      onDraft: { model.setDraft($0, for: pane.id) },
                      deliverResult: { await model.deliverResult($0, pane: pane.id, kind: agent.kind) },
                      placeholder: focused ? nil : "Click to reply to \(agent.name)",
-                     focusRequest: focusRequest, remote: pane.composerRemote(model.store.session.remote))
+                     focusRequest: focusRequest, remote: pane.composerRemote(model.store.session.remote),
+                     commands: model.slashCommands(pane: pane, kind: agent.kind))
             .id("\(pane.id)-\(model.composerResets[pane.id] ?? 0)")   // a pulled queue starts the composer again from its draft
             .overlay {
                 if !focused {

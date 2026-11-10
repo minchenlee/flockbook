@@ -527,7 +527,7 @@ public enum QueuePull {
         return rows(Array(lines[i..<end]), mark: "›")
     }
 
-    private static func rows(_ lines: [String], mark: Character) -> [String] {
+    static func rows(_ lines: [String], mark: Character) -> [String] {
         var out = lines.enumerated().map { i, l -> String in
             let l = l.replacingOccurrences(of: "\u{a0}", with: " ")
             if i == 0, l.first == mark { return QueuedInput.trailing(String(l.dropFirst(2))) }
@@ -535,6 +535,82 @@ public enum QueuePull {
         }
         while out.last?.isEmpty == true { out.removeLast() }
         return out
+    }
+}
+
+/// Whether the agent's input box holds text, from its screen. A send types after what the box holds, so the message
+/// would go out joined to it: the send path checks this first and does not send into a box with text.
+/// Rust: `box_has_text` in `xplat/flockbook-modfeed/src/queue.rs` (the same rules and tests).
+public enum AgentBox {
+    /// The note for a send that found text in the agent's box.
+    public static let notEmpty = "The agent's box has text in it. Clear it in the terminal first. Nothing was sent."
+
+    /// True: text. False: empty, or only its placeholder. Nil: the box is not found, or the agent is not one read
+    /// here (then a send goes as before: no block on doubt).
+    ///
+    /// Claude Code with prompt suggestions on (`claudeSuggests`, its default) shows a suggested prompt dim in the
+    /// empty box, and the screen's text has no dim: then only a box that starts with "/" (a command being typed; a
+    /// suggestion is not one) counts as text, and any other text is a doubt.
+    public static func hasText(kind: String, screen: String, claudeSuggests: Bool) -> Bool? {
+        let lines = screen.components(separatedBy: "\n")
+        func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespaces).isEmpty }
+        var rows: [String]
+        switch kind {
+        // "❯ " and its rows between the last two rules; its placeholder: "Try \"…\"", or the queue's.
+        case "claude":
+            guard let r = ruled(lines, mark: "❯") else { return nil }
+            let hint = r.count == 1 && ((r[0].hasPrefix("Try \"") && r[0].hasSuffix("\"")) || r[0] == QueuedInput.claudePlaceholder)
+            rows = hint ? [] : r
+            if claudeSuggests, rows.contains(where: { !blank($0) }), !rows[0].drop(while: \.isWhitespace).hasPrefix("/") { return nil }
+        case "codex":
+            guard lines.contains(where: { $0.hasPrefix("› ") || $0.trimmingCharacters(in: .whitespaces) == "›" }) else { return nil }
+            rows = QueuePull.codexBox(lines)
+            if rows == [QueuedInput.codexPlaceholder] { rows = [] }
+        // No placeholder: the rows between the last two rules.
+        case "pi":
+            guard let r = ruled(lines, mark: nil) else { return nil }
+            rows = r
+        // "> " between the last two rules; a mode's note stands there when it is empty ("Auto mode: … (shift+tab to
+        // cycle)").
+        case "agy":
+            guard let r = ruled(lines, mark: ">") else { return nil }
+            rows = r.count == 1 && r[0].hasSuffix("(shift+tab to cycle)") ? [] : r
+        // "│ ❯ …" rows between the last "╭" and "╰".
+        case "grok":
+            func t(_ s: String) -> String { s.trimmingCharacters(in: .whitespaces) }
+            guard let top = lines.lastIndex(where: { t($0).hasPrefix("╭") }),
+                  let bottom = lines[(top + 1)...].firstIndex(where: { t($0).hasPrefix("╰") }) else { return nil }
+            var inner = lines[(top + 1)..<bottom].map { l -> String in
+                var s = Substring(t(l))
+                while s.first == "│" { s.removeFirst() }
+                while s.last == "│" { s.removeLast() }
+                return String(s)
+            }
+            guard let first = inner.first.map({ $0.drop(while: \.isWhitespace) }), first.hasPrefix("❯") else { return nil }
+            inner[0] = String(first.drop { $0 == "❯" })
+            rows = inner
+        default: return nil
+        }
+        return rows.contains { !blank($0) }
+    }
+
+    /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
+    /// first row (a dialog, a menu): nil.
+    private static func ruled(_ lines: [String], mark: Character?) -> [String]? {
+        let rules = lines.indices.filter { QueuePull.isRule(lines[$0]) }
+        guard rules.count >= 2 else { return nil }
+        let inside = Array(lines[(rules[rules.count - 2] + 1)..<rules[rules.count - 1]])
+        guard let mark else { return inside.map(QueuedInput.trailing) }
+        guard let first = inside.first, first.replacingOccurrences(of: "\u{a0}", with: " ").first == mark else { return nil }
+        return QueuePull.rows(inside, mark: mark)
+    }
+
+    /// Claude Code's `promptSuggestionEnabled` (default on), from the user's settings in `home`.
+    public static func claudeSuggests(home: URL?) -> Bool {
+        guard let home, let data = try? Data(contentsOf: home.appendingPathComponent(".claude/settings.json")),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let n = o["promptSuggestionEnabled"] as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return true }
+        return n.boolValue
     }
 }
 

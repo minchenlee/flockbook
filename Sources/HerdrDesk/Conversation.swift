@@ -97,7 +97,7 @@ struct ConversationView: View {
         case .loading:
             VStack(spacing: 10) {
                 if spinnerDue {
-                    ProgressView().controlSize(.small)
+                    Spinner()
                     Text("Loading conversation…").font(.callout).foregroundStyle(.secondary)
                 }
             }
@@ -218,7 +218,7 @@ struct ConversationView: View {
                     if range.lowerBound > 0 || (onLoadEarlier != nil && moreEarlier) {
                         Button { showEarlier() } label: {
                             HStack(spacing: 6) {
-                                if loadingEarlier { ProgressView().controlSize(.mini) }
+                                if loadingEarlier { Spinner(size: .mini) }
                                 Text(earlierFailed ? "Try again" : range.lowerBound > 0 ? "Show earlier (\(range.lowerBound))" : "Show earlier")
                             }
                         }
@@ -743,7 +743,7 @@ struct AnchorProbe: NSViewRepresentable {
 private struct EarlierNotice: View {
     var body: some View {
         HStack(spacing: 6) {
-            ProgressView().controlSize(.small)
+            Spinner()
             Text("Loading earlier…").font(.callout).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -933,7 +933,7 @@ private struct CallHeader: View {
                     .font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
                 if call.isError { Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red) }
-                else if call.output == nil { ProgressView().controlSize(.mini) }
+                else if call.output == nil { Spinner(size: .mini) }
                 Image(systemName: "chevron.right").font(.caption2).imageScale(.small).foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
             }

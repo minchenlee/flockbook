@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// One conversation message as one selectable text view: a drag selects across paragraphs, lists, code and tables;
-/// Cmd-C and the context menu copy plain text.
+/// Cmd-C and the context menu copy plain text; the menu's "Copy Message" copies the message's markdown.
 ///
 /// SwiftUI's `.textSelection(.enabled)` puts an AppKit overlay on each Text and re-sets its font on every update, which asks
 /// for another layout; a long conversation could lay out forever (100% CPU). Here the text is built once per (text, size)
@@ -73,6 +73,14 @@ struct MessageText: NSViewRepresentable {
     private final class Held { weak var content: MessageContent?; init(_ c: MessageContent) { content = c } }
     private static var held: [Int: [Held]] = [:]
     private var key: Key?
+    /// The message as it was written, its markdown ("Copy Message"); nil for plain text (tool output, a command).
+    var source: String? {
+        guard let key else { return nil }
+        switch key.kind {
+        case .markdown, .bubble: return key.text
+        case .plain: return nil
+        }
+    }
     private static var heldPrune = 1024
     /// Texts built and sizes measured so far (checks: a change must not rebuild what is on screen).
     static var builds = 0
@@ -293,6 +301,9 @@ final class MessageTextView: NSTextView {
             let item = menu.addItem(withTitle: "Copy Code", action: #selector(copyCode(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = code.code
         }
+        if messageMarkdown != nil {
+            menu.addItem(withTitle: "Copy Message", action: #selector(copyMessage(_:)), keyEquivalent: "").target = self
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "").target = self
         return menu
@@ -309,6 +320,19 @@ final class MessageTextView: NSTextView {
         guard let code = sender.representedObject as? String else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(code, forType: .string)
+    }
+
+    /// The whole message as its markdown, as it was written; nil when the text is no message (tool output, a command)
+    /// or is empty. "Copy Message" works whatever the selection: Copy needs one, and a selection ends at this text view.
+    var messageMarkdown: String? { content?.source.flatMap { $0.isEmpty ? nil : $0 } }
+
+    @objc private func copyMessage(_ sender: Any?) { writeMessage(to: .general) }
+
+    /// Puts the message's markdown on `pboard` as plain text. False: no message.
+    @discardableResult func writeMessage(to pboard: NSPasteboard) -> Bool {
+        guard let text = messageMarkdown else { return false }
+        pboard.clearContents()
+        return pboard.setString(text, forType: .string)
     }
 }
 

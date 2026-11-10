@@ -1,49 +1,12 @@
 // Markdown with our own code boxes and tables: herdr's TextView draws them square and takes no CSS,
-// so the text is split into blocks; code fences and tables are drawn here (rounded), the rest stays
-// TextView markdown. Heights stay as estimate.js guesses them (same line heights).
+// so the text is split into blocks (blocks.js, the same split estimate.js counts); code fences and tables
+// are drawn here (rounded), the rest stays TextView markdown.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { tableCells, colWidths, markdownHeight } from "./estimate.js";
+import { colWidths, markdownHeight } from "./estimate.js";
+import { splitBlocks, tableCells } from "./blocks.js";
 
-export { tableCells };
-
-const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)\s*$/;
-const SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
-
-const alignOf = (cell) => {
-  const c = cell.trim();
-  return c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : "left";
-};
-
-// [{k:"md", text}, {k:"code", lang, text}, {k:"table", head, align, rows}] in order.
-export function splitBlocks(text) {
-  const lines = String(text ?? "").split("\n");
-  const out = []; let md = [];
-  const flush = () => { if (md.length && md.join("\n").trim()) out.push({ k: "md", text: md.join("\n") }); md = []; };
-  for (let i = 0; i < lines.length; i++) {
-    const f = FENCE.exec(lines[i]);
-    if (f) {
-      flush();
-      const body = []; i++;
-      while (i < lines.length && !(FENCE.exec(lines[i]) && lines[i].trim().startsWith(f[1]))) body.push(lines[i++]);
-      out.push({ k: "code", lang: f[2] || "", text: body.join("\n") });
-      continue;
-    }
-    if (/^\s*\|/.test(lines[i]) && i + 1 < lines.length && SEP.test(lines[i + 1])) {
-      flush();
-      const head = tableCells(lines[i]);
-      const align = tableCells(lines[i + 1]).map(alignOf);
-      const rows = []; i += 2;
-      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(tableCells(lines[i++]));
-      i--;
-      out.push({ k: "table", head, align, rows });
-      continue;
-    }
-    md.push(lines[i]);
-  }
-  flush();
-  return out;
-}
+export { splitBlocks, tableCells };
 
 // The block as written, for Copy: CRs dropped, normal spaces and tabs.
 export function codeCopyText(b) {
@@ -96,10 +59,11 @@ function table(id, b, t, width) {
 }
 
 // The whole text: one element. `id` keeps the TextView ids unique per row; `width` is the text's
-// width in px (tables need it).
+// width in px (tables need it). A text block's id is always md-<id>-<i>, one block or many: a message that
+// grows a code box while the agent writes keeps its first view (and the selection in it).
 export function markdownView(id, text, t, width) {
   const blocks = splitBlocks(text);
-  if (blocks.length === 1 && blocks[0].k === "md") return TextView.markdown(`md-${id}`, blocks[0].text).selectable(true);
+  if (blocks.length === 1 && blocks[0].k === "md") return TextView.markdown(`md-${id}-0`, blocks[0].text).selectable(true);
   return v_flex().w_full().children(blocks.map((b, i) =>
     b.k === "code" ? codeBox(`md-${id}-k${i}`, b, t)
       : b.k === "table" ? table(`md-${id}-t${i}`, b, t, width)

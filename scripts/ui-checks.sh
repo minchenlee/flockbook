@@ -42,6 +42,7 @@ OFFLINE=(
     "tabkeys|tabkeys-test: PASS|--test-tabkeys"
     "settings-page|settings-page-test: PASS|--test-settings-page"
     "sendfail|sendfail-test: PASS|--test-sendfail"
+    "slash|slash-test: PASS|--test-slash"
     "earlier-failure|earlier-failure: PASS|--test-earlier-failure"
     "loadstate|loadstate-test: PASS|--test-loadstate"
     "termfail|termfail-test: PASS|--test-termfail"

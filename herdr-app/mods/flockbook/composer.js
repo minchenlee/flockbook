@@ -82,6 +82,85 @@ function bindPaste(cx) {
   } catch { /* the box's own paste stays, and paste_other still attaches an image */ }
 }
 
+// "/" commands (docs/protocol.md, commands; the helper lists them for Claude Code, Codex, pi and agy, and none for
+// other agents): while the text is "/" and a name with no space, a
+// list of the agent's commands shows above the box; after "/model " (a built-in with values) its values. All the
+// matches are in the list; SLASH_ROWS show at a time, and the window follows the pick (↑ ↓ stop at the ends, no
+// wrap) or the wheel. Tab or Enter completes, Esc closes.
+// The box takes ↑ ↓ and Tab itself (as ⌘V), so they are bound under a key context the box's wrapper has only while
+// the list shows: without the list they move the cursor as before. Only full names go out: Claude Code's own "/"
+// menu takes the Enter of a part of a name and runs its first match.
+export const SLASH_CONTEXT = "FlockbookSlash";
+export const SLASH = { up: "flockbook_slash_up", down: "flockbook_slash_down", complete: "flockbook_slash_complete", close: "flockbook_slash_close" };
+export const SLASH_ROWS = 8;
+const CMDS_MS = 30000;   // the list is asked again after this long
+let slashBound = false;
+function bindSlash(cx) {
+  if (slashBound || typeof cx?.bind_keys !== "function") return;
+  try {
+    cx.bind_keys([["up", SLASH.up], ["down", SLASH.down], ["tab", SLASH.complete], ["escape", SLASH.close]]
+      .map(([keystroke, action]) => ({ keystroke, action, context: `${SLASH_CONTEXT} > Input` })));
+    slashBound = true;
+  } catch { /* no keys for the list: a click on a row and Enter still complete */ }
+}
+
+// The name being typed after a leading "/", or null: the text has a space (or is not a "/" name).
+export function slashQuery(text) {
+  const m = /^\/([^\s]*)$/.exec(String(text ?? ""));
+  return m ? m[1] : null;
+}
+
+// The commands whose name starts with `query` (any case), in the list's order. All of them: the list scrolls.
+export function matchCommands(list, query) {
+  const q = String(query ?? "").toLowerCase();
+  return (list ?? []).filter((c) => String(c.name).toLowerCase().startsWith(q));
+}
+
+// A command's values as list items: { name: value, description: label }. A value is a string, or
+// { value, label } (the helper's /model lists).
+export function argItems(args) {
+  return (Array.isArray(args) ? args : []).map((x) => (x && typeof x === "object"
+    ? { name: String(x.value ?? ""), description: x.label ? String(x.label) : "" }
+    : { name: String(x) })).filter((x) => x.name);
+}
+
+// The values that have `query` in their value or label (any case), in the list's order: a model can be found by a
+// part of its name ("sonnet", "flash").
+export function matchArgs(items, query) {
+  const q = String(query ?? "").toLowerCase();
+  return items.filter((x) => x.name.toLowerCase().includes(q) || (x.description ?? "").toLowerCase().includes(q));
+}
+
+// "/<name> <part>" (one space, no other): the command and the part of a value typed after it; else null.
+export function argQuery(text) {
+  const m = /^\/([^\s]+) ([^\s]*)$/.exec(String(text ?? ""));
+  return m ? { name: m[1], query: m[2] } : null;
+}
+
+// A screen command sent bare ("/model", spaces trimmed) opens a screen in the terminal the chat cannot show: why it is
+// not sent, or null. `list`: the agent's commands (a listed screen takes a value); `screens`: the names the helper
+// left out (they take none). The helper's `send` checks the same and builds the same text (commands.rs).
+export function screenNote(list, screens, text) {
+  const m = /^\/(\S+)$/.exec(String(text ?? "").trim());
+  if (!m) return null;
+  const name = m[1];
+  if ((screens ?? []).includes(name)) return `/${name} opens a screen in the terminal. Use it there.`;
+  const c = (list ?? []).find((x) => x.name === name && x.screen);
+  if (!c) return null;
+  const example = argItems(c.args)[0]?.name || c.hint || "";
+  return `/${name} opens a menu in the terminal. Add a value, like /${name} ${example}.`;
+}
+
+// The first shown row so that `pick` is shown, from the window's last top. Keeps the window still while it can.
+export function windowTop(top, pick, n, rows = SLASH_ROWS) {
+  let t = Math.max(0, Math.min(top, Math.max(0, n - rows)));
+  if (pick < t) t = pick;
+  else if (pick >= t + rows) t = pick - rows + 1;
+  return t;
+}
+const ROW_PX = 30;   // a list row; the wheel moves the window a row per ROW_PX
+
+
 // What `paste-image` found to attach: copied files, else the saved image. Empty: paste the text.
 export function pastedFiles(lines) {
   const files = lines.find((l) => l.type === "files")?.paths;
@@ -109,6 +188,7 @@ export class Composer {
     this.input = TextareaState.new({ placeholder: "Reply to the agent", rows: 1 });
     this.input.set_auto_grow?.(1, 8);
     bindPaste(_cx);
+    bindSlash(_cx);
     // A paste that found no text, when the binding above is missing: the clipboard's image, if any.
     this.input.on("paste_other", (_e, cx) => cx.spawn((cx) => this.paste(cx, undefined)));
     // Enter sends. On Shift+Enter the box puts the new line in itself (at the cursor, over a selection);
@@ -125,7 +205,18 @@ export class Composer {
       const v = this.input.value();
       if (v !== this.typed[1]) this.typed = [this.typed[1], v];
       const e = !v.trim(); if (e !== this.empty) { this.empty = e; cx.notify(); }
+      if (this.slashClosed !== null && v !== this.slashClosed) this.slashClosed = null;
+      this.pick = 0; this.top = 0; this.wheel = 0;
+      if (slashQuery(v) !== null || argQuery(v) !== null) cx.spawn((cx) => this.loadCommands(cx));
+      cx.notify();
     });
+    this.cmds = new Map();      // address → { at, list } of a Claude Code agent's "/" commands
+    this.cmdsBusy = false;
+    this.agent = null;          // the agent the box is for (its kind decides the list)
+    this.pick = 0;              // the chosen match of the list
+    this.top = 0;               // the first shown match
+    this.wheel = 0;             // wheel pixels not yet a whole row
+    this.slashClosed = null;    // the text Esc closed the list at
     this.drafts = new Map();   // address → { text, files } of agents not shown
     this.address = null;
     // address → { agent, path } the chat showed last (set by the chat); send is bound to it.
@@ -143,6 +234,7 @@ export class Composer {
 
   // Shows `agent`'s draft in the box. Safe while drawing: it only sets values.
   box(agent) {
+    this.agent = agent ?? null;
     const a = agent?.address ?? null;
     if (a !== this.address) {
       if (this.address) this.drafts.set(this.address, { text: this.input.value(), files: this.files });
@@ -152,6 +244,81 @@ export class Composer {
       this.address = a; this.note = null; this.statusAt = 0;
     }
     return a ? this : null;
+  }
+
+  // Asks the helper for the shown agent's commands (at most every CMDS_MS), if it has `commands`. An agent it lists
+  // none for gets an empty list: no list shows.
+  async loadCommands(cx) {
+    const a = this.address;
+    if (!a || !this.agent || this.cmdsBusy) return;
+    const had = this.cmds.get(a);
+    if (had && Date.now() - had.at < CMDS_MS) return;
+    this.cmdsBusy = true;
+    try {
+      if (!(await sidecar.hasCommand("commands"))) return;
+      const r = await sidecar.commands(a);
+      const line = r.error ? null : r.lines.find((l) => l.type === "commands");
+      const list = r.error ? had?.list ?? [] : (line?.commands ?? []);
+      const screens = r.error ? had?.screens ?? [] : (line?.screens ?? []);
+      this.cmds.set(a, { at: Date.now(), list, screens });
+      cx.notify();
+    } finally { this.cmdsBusy = false; }
+  }
+
+  // The list to show now: { kind, query, items, pick, top, cmd } or null. `kind` "cmd": commands for "/<part>";
+  // "arg": the values of `cmd` for "/<cmd> <part>" (items are { name: value, description: label }).
+  slash() {
+    const v = this.input.value();
+    return v === this.slashClosed ? null : this.slashFor(v);
+  }
+
+  slashFor(v) {
+    if (!this.agent || !this.address) return null;
+    const list = this.cmds.get(this.address)?.list ?? [];
+    let kind = "cmd", query = slashQuery(v), items, cmd = null;
+    if (query !== null) items = matchCommands(list, query);
+    else {
+      const a = argQuery(v);
+      cmd = a && list.find((c) => c.name === a.name && Array.isArray(c.args) && c.args.length);
+      if (!cmd) return null;
+      kind = "arg"; query = a.query;
+      items = matchArgs(argItems(cmd.args), query);
+    }
+    if (!items.length) return null;
+    const pick = Math.min(this.pick, items.length - 1);
+    return { kind, query, items, pick, top: windowTop(this.top, pick, items.length), cmd };
+  }
+
+  // A command: "/<name> " (whole, and the space closes the list or opens its values). A value: "/<cmd> <value>".
+  complete(s, item, cx) {
+    this.setText(s.kind === "arg" ? `/${s.cmd.name} ${item.name}` : `/${item.name} `);
+    this.empty = false; this.pick = 0; this.top = 0; this.wheel = 0; this.slashClosed = null;
+    cx?.notify?.();
+  }
+
+  slashKey(what, cx) {
+    const s = this.slash();
+    if (!s) return;
+    if (what === "up") this.pick = Math.max(0, s.pick - 1);
+    else if (what === "down") this.pick = Math.min(s.items.length - 1, s.pick + 1);
+    else if (what === "complete") return this.complete(s, s.items[s.pick], cx);
+    else if (what === "close") this.slashClosed = this.input.value();
+    this.top = windowTop(s.top, this.pick, s.items.length);
+    cx.notify();
+  }
+
+  // Wheel or trackpad over the list: the window moves a row per ROW_PX (small steps add up), and the pick stays on
+  // a shown row.
+  slashWheel(e, cx) {
+    const s = this.slash();
+    if (!s || s.items.length <= SLASH_ROWS) return;
+    this.wheel -= Number(e?.delta?.y) || 0;   // y > 0: up
+    const rows = Math.trunc(this.wheel / ROW_PX);
+    if (!rows) return;
+    this.wheel -= rows * ROW_PX;
+    this.top = Math.max(0, Math.min(s.items.length - SLASH_ROWS, s.top + rows));
+    this.pick = Math.max(this.top, Math.min(this.top + SLASH_ROWS - 1, s.pick));
+    cx.notify();
   }
 
   async pollStatus(cx) {
@@ -201,6 +368,13 @@ export class Composer {
     const now = b.input.value();
     const text = withoutEnter(now, now === this.typed[1] ? this.typed[0] : this.typed[1]).replace(/\s+$/, "");
     if (!text.trim() && !b.files.length) { b.setText(""); return; }
+    // A screen command alone ("/model", "/status"): not sent; the text stays for a value to be added.
+    const had = this.cmds.get(a);
+    const blocked = b.files.length ? null : screenNote(had?.list, had?.screens, text);
+    if (blocked) { b.setText(text); this.note = { text: blocked, bad: true }; cx.notify(); return; }
+    // The list shows and the name is not whole yet: Enter completes it (a part of a name would run another command).
+    const s = text !== this.slashClosed ? this.slashFor(text) : null;
+    if (s && !s.items.some((c) => c.name === s.query)) return this.complete(s, s.items[s.pick], cx);
     const files = b.files;
     this.sending = true; this.note = null;
     b.setText(""); b.files = [];
@@ -226,6 +400,21 @@ export class Composer {
     const branch = tags.find((x) => x.kind === "branch");
     const b = this.box(agent);
     if (!b) return div();
+    const s = this.slash();
+    const shown = s ? s.items.slice(s.top, s.top + SLASH_ROWS) : [];
+    const row = (c, j) => h_flex().id(`slash-${s.top + j}`).w_full().h(ROW_PX).px(10).gap(10).items_center().rounded(8)
+      .when(s.top + j === s.pick, (el) => el.bg(t.hover))
+      .hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => this.complete(s, c, cx))
+      .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(s.kind === "arg" ? c.name : `/${c.name}`))
+      .when(Boolean(c.hint), (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child(c.hint)))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(c.description || ""))
+      // Sent bare, it opens a screen in the terminal (a picker, settings): it goes out only with a value.
+      .when(Boolean(c.screen), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("needs a value")));
+    const more = s && s.items.length > SLASH_ROWS
+      ? div().id("slash-more").w_full().px(10).pt(2).text_size(11).text_color(t.dim)
+        .child(`${s.top + 1}–${s.top + shown.length} of ${s.items.length}`)
+      : null;
     const empty = !b.input.value().trim() && !b.files.length;
     const tag = (x) => h_flex().h(22).px(8).gap(4).items_center().rounded(11).flex_none().text_size(11.5)
       .bg(x.warn ? t.blocked : t.chrome).text_color(x.warn ? t.background : t.muted).border(1).border_color(x.warn ? t.blocked : t.border)
@@ -240,9 +429,18 @@ export class Composer {
       .key_context(PASTE_CONTEXT)
       .on_action(PASTE_ACTION, (_e, cx) => { const text = cx.read_from_clipboard?.(); cx.spawn((cx) => this.paste(cx, text)); })
       .when(setting("status_row") !== "hide", (el) => el.child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag))))
+      .when(Boolean(s), (el) => el.child(v_flex().id("slash").w_full().max_w(800).p(4).gap(0).rounded(12).bg(t.raised)
+        .border(1).border_color(t.border).shadow_sm().on_scroll_wheel((e, cx) => this.slashWheel(e, cx))
+        .children(shown.map(row)).when(Boolean(more), (l) => l.child(more))))
       .child(v_flex().id("box").w_full().max_w(800).rounded(16).bg(t.raised).border(1).border_color(t.border).shadow_sm().px(12).pt(10).pb(8).gap(6)
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))
-        .child(Textarea.new(b.input).w_full())
+        .child(div().id("slash-keys").w_full()
+          .when(Boolean(s), (el) => el.key_context(SLASH_CONTEXT))
+          .on_action(SLASH.up, (_e, cx) => this.slashKey("up", cx))
+          .on_action(SLASH.down, (_e, cx) => this.slashKey("down", cx))
+          .on_action(SLASH.complete, (_e, cx) => this.slashKey("complete", cx))
+          .on_action(SLASH.close, (_e, cx) => this.slashKey("close", cx))
+          .child(Textarea.new(b.input).w_full()))
         .child(h_flex().gap(8).items_center()
           .when(canPick(), (el) => el.child(div().id("attach").size(28).flex_none().flex().items_center().justify_center().rounded(14).text_color(t.muted)
             .hover((s) => s.bg(t.hover).text_color(t.foreground))

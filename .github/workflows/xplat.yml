@@ -8,12 +8,14 @@ on:
     paths:
       - "xplat/**"
       - "herdr-app/**"
+      - "Tests/HerdrKitTests/Fixtures/slash-tables.json"
       - ".github/workflows/xplat.yml"
   pull_request:
     branches: [main]
     paths:
       - "xplat/**"
       - "herdr-app/**"
+      - "Tests/HerdrKitTests/Fixtures/slash-tables.json"
       - ".github/workflows/xplat.yml"
   workflow_dispatch:
 

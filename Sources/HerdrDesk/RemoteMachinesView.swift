@@ -27,7 +27,7 @@ struct RemoteMachinesSection: View {
                            symbol: "server.rack", chosen: machines.selected == m.id) {
                     choose(m.id)
                 } controls: {
-                    if testing.contains(m.id) { ProgressView().controlSize(.small) }
+                    if testing.contains(m.id) { Spinner() }
                     Button("Test") { test(m) }.controlSize(.small).disabled(testing.contains(m.id))
                         .help("Runs herdr's remote-api-bridge --check on the machine over SSH")
                     Button { editing = MachineDraft(m) } label: { Image(systemName: "pencil") }

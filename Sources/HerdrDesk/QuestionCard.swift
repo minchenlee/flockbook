@@ -300,7 +300,7 @@ struct QuestionCard: View {
                 hint(q)
             }
             Spacer(minLength: 8)
-            if busy { ProgressView().controlSize(.small) }
+            if busy { Spinner() }
             if flow.step > 0 { Button("Back") { flow.back(); focus = .card } }
             Button(flow.isLast ? (flow.total > 1 ? "Send Answers" : "Send") : "Next") { returnKey() }
                 .buttonStyle(.borderedProminent)

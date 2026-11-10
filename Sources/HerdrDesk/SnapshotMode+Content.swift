@@ -13,6 +13,7 @@ import SwiftUI
         if args.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua); dir = "build/snapshots-content-light" }
         if args.contains("--test-textsize") { Task { await textSize() }; return true }
         if args.contains("--test-sendfail") { Task { await sendFail() }; return true }
+        if args.contains("--test-slash") { Task { await slash() }; return true }
         if args.contains("--test-earlier-failure") { Task { await earlierFailure() }; return true }
         if args.contains("--test-loadstate") { Task { await loadState() }; return true }
         if args.contains("--test-termfail") { Task { await termFail() }; return true }
@@ -575,7 +576,46 @@ import SwiftUI
         }
         step("control: idle glyphs do not (captures equal)", !still)
         step(String(format: "CPU 12 working %.1f %% vs idle glyphs %.1f %% (<= +1.5)", busy, idle), busy - idle <= 1.5)
-        print("glyph-test: picture \(dir)/glyphs.png")
+        // The spinner (the Herdr app mod's drawing and speed): a quarter arc over a ring of its own colour at a quarter of
+        // its opacity, 0.9 s a turn, the line 1.8 on 16. The waiting places (in place of the system's spinner) have the
+        // same arc in the secondary text colour, 16 and 12 pt.
+        for dark in [false, true] {
+            let look = VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) { Spinner(); Text("Loading conversation…").font(.callout).foregroundStyle(.secondary) }
+                HStack(spacing: 6) { Spinner(size: .mini); Text("Show earlier").font(.callout) }
+                HStack(spacing: 10) { StatusGlyph(status: .working, size: 13); Text("Working").font(.callout) }
+                HStack(spacing: 16) {
+                    SpinnerArc(reduceMotion: true).frame(width: 64, height: 64)
+                    SpinnerArc(reduceMotion: true, tint: .secondaryLabelColor).frame(width: 64, height: 64)
+                }
+            }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(WindowSurface(glass: .off))
+            let (win, host) = offscreen(look, NSSize(width: 320, height: 200))
+            win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            try? await Task.sleep(for: .seconds(1))
+            capture(win, to: "\(dir)/spinners\(dark ? "-dark" : "").png")
+            let arcs = all(SpinnerArc.ArcView.self, in: host)
+            let sides = arcs.map { Int($0.bounds.width) }
+            step("spinner\(dark ? " (dark)" : ""): the waiting spinners are 16 and 12 pt, the working glyph's arc 11 (\(sides))", sides.sorted() == [11, 12, 16, 64, 64])
+            step("spinner: a quarter arc (\(arcs.map { $0.arc.strokeEnd }))", !arcs.isEmpty && arcs.allSatisfy { $0.arc.strokeEnd == 0.25 && $0.ring.strokeEnd == 1 })
+            step("spinner: the line is 1.8 on 16, not under 1.25 (\(arcs.map { $0.arc.lineWidth }))",
+                 arcs.allSatisfy { abs($0.arc.lineWidth - max(1.25, $0.bounds.width * 1.8 / 16)) < 0.001 && $0.ring.lineWidth == $0.arc.lineWidth })
+            step("spinner: the ring is the arc's colour at a quarter of its opacity",
+                 arcs.allSatisfy { v in
+                     guard let a = v.arc.strokeColor, let r = v.ring.strokeColor, a.alpha > 0 else { return false }
+                     return abs(r.alpha - a.alpha * 0.25) < 0.001 && a.copy(alpha: 1) == r.copy(alpha: 1)
+                 })
+            // The two 64 pt ones stand still for the picture (and so does every one under Reduce Motion).
+            let turning = arcs.filter { $0.bounds.width < 64 }
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                step("spinner: Reduce Motion: none turns", arcs.allSatisfy { $0.arc.animation(forKey: "spin") == nil })
+            } else {
+                step("spinner: one turn takes 0.9 s (\(turning.map { $0.arc.animation(forKey: "spin")?.duration ?? 0 }))",
+                     turning.count == 3 && turning.allSatisfy { $0.arc.animation(forKey: "spin")?.duration == 0.9 }
+                     && arcs.filter { $0.bounds.width == 64 }.allSatisfy { $0.arc.animation(forKey: "spin") == nil })
+            }
+            win.orderOut(nil)
+        }
+        print("glyph-test: pictures \(dir)/glyphs.png, \(dir)/spinners.png, \(dir)/spinners-dark.png")
         print("glyph-test: \(failures == 0 ? "PASS" : "FAIL x\(failures)")")
         NSApp.terminate(nil)
     }

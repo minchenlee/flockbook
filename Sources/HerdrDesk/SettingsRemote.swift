@@ -188,7 +188,7 @@ struct TailscaleSteps: View {
 
     private var checkAgain: some View {
         HStack(spacing: 8) {
-            if hub.checking { ProgressView().controlSize(.small) }
+            if hub.checking { Spinner() }
             Button("Check Again") { Task { await hub.checkTailscale() } }.disabled(hub.checking)
         }
     }

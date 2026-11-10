@@ -50,12 +50,13 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
 | `queue` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; `serve` and other machines) | `queued` |
+| `commands` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only) | `commands` |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
 
-`card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
+`card` and `commands` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
@@ -160,7 +161,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -369,6 +370,60 @@ while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` 
 - `pullable`: the agent's input box is empty, so the queue can be pulled back now.
 - `pullsAll`: Claude Code (Up takes back every queued message as one text).
 
+### `commands` (`commands`)
+
+The "/" commands of an agent's terminal, for the list above the reply box: Claude Code, Codex, pi and agy. Read from
+files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
+
+```json
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["config","help","hooks","mcp","memory","permissions","plugin","rewind","status","usage"]}
+```
+
+- Sources per agent (`agent`), the first one with a name wins:
+  - `claude`: built-ins (the ones people use most that the chat can send: `add-dir`, `clear`, `compact`, `context`,
+    `effort`, `export`, `init`, `model`, `resume`, `review`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
+    home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`; not when its front matter says
+    `user-invocable: false`); installed plugins that are not turned off (`enabledPlugins`), their commands and
+    skills as `<plugin>:<name>` (`plugin`).
+  - `codex`: a short set of its built-ins only (`/model` with the models of its cache). Its skills are not "/"
+    commands.
+  - `pi`: its built-ins; prompt templates `~/.pi/agent/prompts/*.md` (top level; `user`; the project's load only
+    after the project is trusted, so they are left out); skills as `skill:<name>` from the project's `.pi/skills`,
+    `.agents/skills` from the terminal's folder up to the repository root, `~/.pi/agent/skills` and `~/.agents/skills`
+    (none when its settings say `"enableSkillCommands": false`). Commands of pi's extensions are not in files: not
+    listed.
+  - `agy`: its built-ins (one row a command; its other names in the description); skills from `~/.gemini/skills`
+    and `~/.gemini/antigravity/skills` (`skill`).
+- `description`: the front matter's `description`, else the file's first line; at most 120 characters.
+- Each when it says something: `hint`, what may follow the name (`<model>`, `[file]`; for a file, its front matter's
+  `argument-hint`); built-ins only: `args`, the values the mod offers after `/<name> `, each `{"value", "label"}` (no
+  `label` where the value says it all; the mod also takes plain strings). Fixed lists in the helper: Claude Code's and
+  agy's `effort`, pi's `thinking`. `model`, per agent (models.rs), where its `/model <value>` switches with no screen:
+  - `claude`: its current models' full ids, then the aliases (a table: its list is inside its program), plus ids in
+    `~/.claude/settings.json` (`modelSettings`, `availableModels`) and `~/.claude.json`
+    `additionalModelOptionsCache`. It also saves the model as the default for new sessions, as its picker does.
+  - `codex`: `~/.codex/models_cache.json`, the models its picker lists, in its order (this session only). No cache:
+    `/model` takes no value and is in `screens`.
+  - `pi`: `provider/id` of the providers it has a key for (`auth.json`, or `apiKey` in `models.json`), from
+    `models-store.json` and `models.json`; only those `enabledModels` names when it names some. Another value opens
+    pi's picker.
+  - `agy`: a table (agy reads its list from its server): its slugs, `gemini-4-argon-medium`; it also saves the
+    default.
+  A value list with no hint gets the hint `<model>`. The mod finds a value by any part of its value or label.
+  `screen: true`, sent bare
+  it opens a screen in the terminal (a picker or a dialog: the chat cannot show it), so it goes out only with a
+  value (the mod's row says "needs a value").
+- `screens`: the built-ins that open a screen and take no value (`/status`, `/config`). They can never be sent from
+  the chat, so they are not in `commands`; their names stay the built-ins' (a file of the same name is not listed).
+- A screen command sent bare (the text is exactly `/<name>`, spaces trimmed, no files) is not sent: the mod keeps the
+  text and shows a note ("/model opens a menu in the terminal. Add a value, like /model opus."; for a name in
+  `screens`: "/status opens a screen in the terminal. Use it there."), and `send` refuses it with `opens_screen`
+  (for the phone page and older mods). `/model sonnet` goes out.
+- Sorted by name; at most 500. A name has only letters, digits and `-_.:`.
+- The mod sends the full name (`send --text "/deploy"`): Claude Code's own "/" menu takes the Enter for a part of a
+  name and runs its first match, and pi sends a part of a name to the model as a message. A full name, with or
+  without an argument, runs the command in all four (spike).
+
 ### `done` (`approve`, `answer`, `send`)
 
 ```json
@@ -384,7 +439,20 @@ while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` 
 | `no-identity` | Flockbook cannot tell the agent from another program in that terminal (hc: no process, for example under a wrapper script). Nothing was sent; a retry does not help. | Keeps the text or the card, shows `message`. |
 | `answered` | `approve` only: this prompt was answered less than 60 s ago (or its key may still arrive) and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `busy` | `approve` only: another press of a prompt in this terminal (another view, or a double key) was being handled at the same moment. Nothing was sent and nothing is decided. | Keeps the card and its buttons, shows `message` (press again). |
+| `opens_screen` | `send` only: the text is a screen command alone (`/model`, `/status`), and its screen would open in the terminal. Nothing was sent. `message` says what to add. | Keeps the text, shows `message`. |
+| `box_not_empty` | `send` only: the agent's own input box already has text (the text would go after it: "/" and "/status" make "//status"). Nothing was sent. `message`: "The agent's box has text in it. Clear it in the terminal first. Nothing was sent." | Keeps the text, shows `message`. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
+
+`send` reads the screen right before it types. Where it finds the agent's input box and the box has text, it sends
+nothing (`box_not_empty`). The box per agent (queue.rs `box_has_text`): Claude Code, the rows after "❯" between the
+last two rules (its placeholder `Try "…"` or "Press up to edit queued messages" counts as empty; with prompt
+suggestions on, its default, a suggested prompt stands dim in the empty box and the screen's text has no dim, so only
+a box that starts with "/" counts as text: `"promptSuggestionEnabled": false` in `~/.claude/settings.json` reads
+any text); Codex, the last
+"›" row ("Ask Codex to do anything" is empty); pi, the rows between the last two rules; agy, "> " between the last
+two rules (a mode's note "… (shift+tab to cycle)" is empty); Grok Build, "│ ❯" inside the last "╭ … ╰" box. Another
+agent, a screen it cannot read, or a screen where the box is not found (a dialog, a menu): it sends as before, so a
+doubt never blocks a message (but then the text may still go after what is in the box).
 
 `approve` reads the screen again right before the keys and sends only while the box on screen is
 still `request` (the app's `respondIfOpen`). Claude and agy: `--allow` sends `1` (allow once),

@@ -1,0 +1,742 @@
+{
+ "about": "The built-in \"/\" commands and /model values per agent kind. The Rust helper (xplat/flockbook-modfeed commands.rs, models.rs) and the Mac app (HerdrKit SlashCommands) each hold these tables in code; a test on each side compares its tables with this file, so they stay in step. Change all three together.",
+ "efforts": [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+ ],
+ "pi_thinking": [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+ ],
+ "builtins": {
+  "claude": [
+   {
+    "name": "add-dir",
+    "description": "Add a new working directory",
+    "hint": "<path>",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "clear",
+    "description": "Start a new conversation (clears the history)",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "compact",
+    "description": "Summarise the conversation so far, to free context",
+    "hint": "[instructions]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "config",
+    "description": "Open the settings",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "context",
+    "description": "Show how full the context is",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "effort",
+    "description": "Set effort level for model usage",
+    "hint": "low|medium|high|xhigh|max",
+    "args": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ],
+    "screen": true
+   },
+   {
+    "name": "export",
+    "description": "Export the current conversation to a file or clipboard",
+    "hint": "[file]",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "help",
+    "description": "Show help and the keys",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "hooks",
+    "description": "Show the hooks",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "init",
+    "description": "Initialize a new CLAUDE.md file with codebase documentation",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "mcp",
+    "description": "Manage MCP servers",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "memory",
+    "description": "Edit the memory and instruction files",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "model",
+    "description": "Set the AI model for Claude Code",
+    "hint": "<model>",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "permissions",
+    "description": "Show and edit the tool permission rules",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "resume",
+    "description": "Resume an earlier conversation",
+    "hint": "[session]",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "review",
+    "description": "Review the current diff or a PR for bugs",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "rewind",
+    "description": "Restore the code and/or conversation to a previous point",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "status",
+    "description": "Show the version, model, account and connections",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "usage",
+    "description": "Show session cost, plan usage, and activity stats",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "plugin",
+    "description": "Manage plugins",
+    "hint": "",
+    "args": [],
+    "screen": true
+   }
+  ],
+  "codex": [
+   {
+    "name": "clear",
+    "description": "Clear the terminal and start a new chat",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "compact",
+    "description": "Summarize conversation to prevent hitting the context limit",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "config",
+    "description": "Configure Codex preferences",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "copy",
+    "description": "Copy the last response or part of it",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "diff",
+    "description": "Show git diff (including untracked files)",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "export",
+    "description": "Export the conversation as markdown",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "fork",
+    "description": "Fork the current chat",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "goal",
+    "description": "Set or view the goal for a long-running task",
+    "hint": "[goal]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "init",
+    "description": "Create an AGENTS.md file with instructions for Codex",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "mcp",
+    "description": "List MCP tools",
+    "hint": "[verbose]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "model",
+    "description": "Choose what model and reasoning effort to use",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "new",
+    "description": "Start a new chat during a conversation",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "permissions",
+    "description": "Choose what Codex is allowed to do",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "plan",
+    "description": "Switch to Plan mode",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "rename",
+    "description": "Rename the current thread",
+    "hint": "<name>",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "resume",
+    "description": "Resume a saved chat",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "review",
+    "description": "Review my current changes and find issues",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "status",
+    "description": "Show current session configuration and token usage",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "usage",
+    "description": "View account usage or use a usage limit reset",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "skills",
+    "description": "Use skills to improve how Codex performs specific tasks",
+    "hint": "",
+    "args": [],
+    "screen": true
+   }
+  ],
+  "pi": [
+   {
+    "name": "changelog",
+    "description": "Show changelog entries",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "clone",
+    "description": "Duplicate the current session at the current position",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "compact",
+    "description": "Compact the session context, optionally with instructions",
+    "hint": "[instructions]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "copy",
+    "description": "Copy the last agent message to the clipboard",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "export",
+    "description": "Export the session as HTML or JSONL",
+    "hint": "[path]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "fork",
+    "description": "Create a new fork from a previous user message",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "hotkeys",
+    "description": "Show all keyboard shortcuts",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "model",
+    "description": "Select a model",
+    "hint": "[provider/model]",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "name",
+    "description": "Set the session display name",
+    "hint": "[name]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "new",
+    "description": "Start a new session",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "reload",
+    "description": "Reload keybindings, extensions, skills, prompts, themes and context files",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "resume",
+    "description": "Resume a different session",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "scoped-models",
+    "description": "Enable or disable models for Ctrl+P cycling",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "session",
+    "description": "Show session info and stats",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "settings",
+    "description": "Open the settings menu",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "thinking",
+    "description": "Set the thinking level",
+    "hint": "[level]",
+    "args": [
+     "off",
+     "minimal",
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ],
+    "screen": true
+   },
+   {
+    "name": "tree",
+    "description": "Navigate the session tree",
+    "hint": "",
+    "args": [],
+    "screen": true
+   }
+  ],
+  "agy": [
+   {
+    "name": "add-dir",
+    "description": "Add a directory to the workspace",
+    "hint": "<path>",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "agents",
+    "description": "List available custom agents",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "artifact",
+    "description": "View and review artifacts",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "btw",
+    "description": "Ask a side question without interrupting the current task",
+    "hint": "<question>",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "changelog",
+    "description": "Show release notes and changes",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "clear",
+    "description": "Clear conversation and start a new one (also /new)",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "codesearch",
+    "description": "Search code in the workspace (also /cs)",
+    "hint": "<query>",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "compact",
+    "description": "Compact the conversation now",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "config",
+    "description": "Open settings panel (also /settings)",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "context",
+    "description": "Visualize current context usage",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "copy",
+    "description": "Copy the last planner response to the clipboard",
+    "hint": "[n]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "credits",
+    "description": "Show remaining credits",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "diff",
+    "description": "View uncommitted changes and per-turn diffs",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "effort",
+    "description": "Set the reasoning effort",
+    "hint": "[level]",
+    "args": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ],
+    "screen": true
+   },
+   {
+    "name": "fork",
+    "description": "Create a branch of the conversation at this point (also /branch)",
+    "hint": "[name]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "goal",
+    "description": "Run until the specified goal is completely finished",
+    "hint": "<goal>",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "help",
+    "description": "Show available commands and keybindings",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "hooks",
+    "description": "Manage hook configurations for tool events",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "mcp",
+    "description": "Manage MCP servers",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "model",
+    "description": "Set a model, or run a single prompt on another model",
+    "hint": "[model]",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "permissions",
+    "description": "Manage tool permissions",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "plan",
+    "description": "Plan carefully before executing a task",
+    "hint": "[task]",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "plugin",
+    "description": "Manage plugins",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "rename",
+    "description": "Rename the current conversation",
+    "hint": "<name>",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "resume",
+    "description": "Browse and resume past conversations (also /switch)",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "rewind",
+    "description": "Rewind conversation to a previous message (also /undo)",
+    "hint": "",
+    "args": [],
+    "screen": true
+   },
+   {
+    "name": "skills",
+    "description": "List available skills",
+    "hint": "",
+    "args": [],
+    "screen": false
+   },
+   {
+    "name": "usage",
+    "description": "View model quota usage (also /quota)",
+    "hint": "",
+    "args": [],
+    "screen": true
+   }
+  ]
+ },
+ "models": {
+  "claude": [
+   [
+    "claude-fable-5-2",
+    "Fable 5.2"
+   ],
+   [
+    "claude-opus-5-5",
+    "Opus 5.5"
+   ],
+   [
+    "claude-sonnet-5-5",
+    "Sonnet 5.5"
+   ],
+   [
+    "claude-haiku-5-5",
+    "Haiku 5.5"
+   ],
+   [
+    "claude-fable-5-1",
+    "Fable 5.1"
+   ],
+   [
+    "default",
+    "The recommended model"
+   ],
+   [
+    "fable",
+    "The latest Fable"
+   ],
+   [
+    "opus",
+    "The latest Opus"
+   ],
+   [
+    "sonnet",
+    "The latest Sonnet"
+   ],
+   [
+    "haiku",
+    "The latest Haiku"
+   ]
+  ],
+  "agy": [
+   [
+    "gemini-4-argon-low",
+    "Gemini 4 Argon (Low)"
+   ],
+   [
+    "gemini-4-argon-medium",
+    "Gemini 4 Argon (Medium)"
+   ],
+   [
+    "gemini-4-argon-high",
+    "Gemini 4 Argon (High)"
+   ],
+   [
+    "gemini-3.8-flash-low",
+    "Gemini 3.8 Flash (Low)"
+   ],
+   [
+    "gemini-3.8-flash-medium",
+    "Gemini 3.8 Flash (Medium)"
+   ],
+   [
+    "gemini-3.8-flash-high",
+    "Gemini 3.8 Flash (High)"
+   ],
+   [
+    "claude-opus-5-5-low",
+    "Claude Opus 5.5 (Low)"
+   ],
+   [
+    "claude-opus-5-5-medium",
+    "Claude Opus 5.5 (Medium)"
+   ],
+   [
+    "claude-opus-5-5-high",
+    "Claude Opus 5.5 (High)"
+   ],
+   [
+    "claude-sonnet-5-5-low",
+    "Claude Sonnet 5.5 (Low)"
+   ],
+   [
+    "claude-sonnet-5-5-medium",
+    "Claude Sonnet 5.5 (Medium)"
+   ],
+   [
+    "claude-sonnet-5-5-high",
+    "Claude Sonnet 5.5 (High)"
+   ],
+   [
+    "gpt-oss-120b-medium",
+    "GPT-OSS 120B (Medium)"
+   ]
+  ]
+ }
+}

@@ -131,7 +131,7 @@ One shape and one color per state, the same everywhere (sidebar row, tab, avatar
 
 | State | Small symbol (14 pt) | Ring around avatar | SF Symbol (Swift) |
 |---|---|---|---|
-| working | gray track + blue arc | blue arc = progress % | `progress.indicator` / `ProgressView(.circular)` small |
+| working | faint blue ring + blue quarter arc, 0.9 s a turn | blue arc = progress % | `SpinnerArc` (the same arc in the secondary text colour where something is waited for: `Spinner`) |
 | blocked | orange disc + `!` | full orange ring | `exclamationmark.circle.fill` (orange) |
 | done | green disc + check | none | `checkmark.circle.fill` (green) |
 | idle | gray hollow circle | none | `circle` (tertiary label) |
