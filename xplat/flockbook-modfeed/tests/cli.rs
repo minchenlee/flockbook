@@ -80,7 +80,10 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     let own: Vec<&Value> = cmds.iter().filter(|c| c["source"] != "builtin").collect();
     assert_eq!(own, vec![&serde_json::json!({"name": "deploy", "description": "Deploy the app", "source": "project"})], "the user's review is hidden by the built-in /review");
     let model = cmds.iter().find(|c| c["name"] == "model").unwrap();
-    assert_eq!(model["args"], serde_json::json!(["opus", "sonnet", "haiku", "fable", "default"]));
+    assert_eq!(model["args"][1], serde_json::json!({"value": "claude-opus-5-5", "label": "Opus 5.5"}), "full ids, with labels");
+    assert!(model["args"].as_array().unwrap().contains(&serde_json::json!({"value": "opus", "label": "The latest Opus"})));
+    let effort = cmds.iter().find(|c| c["name"] == "effort").unwrap();
+    assert_eq!(effort["args"][0], serde_json::json!({"value": "low"}), "no label where the value says it all");
     assert_eq!(model["screen"], true);
     assert_eq!(v.last().unwrap()["ok"], true);
     let o = run_home(&["commands", "--terminal", "t2"]);
@@ -107,7 +110,7 @@ fn send_refuses_a_bare_screen_command() {
     };
     let d = send("t1", " /model ");
     assert_eq!(d["result"], "opens_screen");
-    assert_eq!(d["message"], "/model opens a menu in the terminal. Add a value, like /model opus.");
+    assert_eq!(d["message"], "/model opens a menu in the terminal. Add a value, like /model claude-fable-5-2.");
     assert_eq!(send("t1", "/status")["message"], "/status opens a screen in the terminal. Use it there.");
     assert_eq!(send("t2", "/model")["result"], "opens_screen");
     assert!(fake.calls("terminal.send").is_empty(), "nothing was typed");

@@ -4,6 +4,8 @@
 //!   folder, then in the user's home; skills, `.claude/skills/<name>/SKILL.md` there and in the home; plugins
 //!   (`~/.claude/plugins/installed_plugins.json`, not turned off in `enabledPlugins`) as `<plugin>:<name>`.
 //! - Codex: a short set of its built-ins (`CODEX`). Its skills are not "/" commands, and it has no prompt files here.
+//!
+//! `/model`'s values come from the agent's files (models.rs).
 //! - pi: its built-ins (`PI`); prompt templates, `~/.pi/agent/prompts/*.md` (top level; the project's need its trust,
 //!   so they are left out); skills as `skill:<name>` from `~/.pi/agent/skills`, `~/.agents/skills`, the project's
 //!   `.pi/skills`, and `.agents/skills` from the folder up to the repository root (off with `enableSkillCommands`).
@@ -19,6 +21,7 @@
 //! show the screen. One that takes a value stays in the list ("/model sonnet" goes out); one that takes none
 //! (/status, /config) can never be sent from the chat, so `list` leaves it out and `screens` names it.
 
+use crate::models::{self, Arg};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
@@ -40,7 +43,6 @@ const fn b(name: &'static str, description: &'static str, hint: &'static str, ar
     Builtin { name, description, hint, args, screen }
 }
 
-pub const MODELS: [&str; 5] = ["opus", "sonnet", "haiku", "fable", "default"];
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const PI_THINKING: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -58,7 +60,7 @@ pub const CLAUDE: [Builtin; 20] = [
     b("init", "Initialize a new CLAUDE.md file with codebase documentation", "", &[], false),
     b("mcp", "Manage MCP servers", "", &[], true),
     b("memory", "Edit the memory and instruction files", "", &[], true),
-    b("model", "Set the AI model for Claude Code", "<model>", &MODELS, true),
+    b("model", "Set the AI model for Claude Code", "<model>", &[], true),
     b("permissions", "Show and edit the tool permission rules", "", &[], true),
     b("resume", "Resume an earlier conversation", "[session]", &[], true),
     b("review", "Review the current diff or a PR for bugs", "", &[], false),
@@ -80,7 +82,7 @@ pub const CODEX: [Builtin; 20] = [
     b("goal", "Set or view the goal for a long-running task", "[goal]", &[], false),
     b("init", "Create an AGENTS.md file with instructions for Codex", "", &[], false),
     b("mcp", "List MCP tools", "[verbose]", &[], false),
-    b("model", "Choose what model and reasoning effort to use", "", &[], true),
+    b("model", "Choose what model and reasoning effort to use", "", &[], true),   // values: models.rs
     b("new", "Start a new chat during a conversation", "", &[], false),
     b("permissions", "Choose what Codex is allowed to do", "", &[], true),
     b("plan", "Switch to Plan mode", "", &[], false),
@@ -156,26 +158,49 @@ pub fn builtins(kind: &str) -> &'static [Builtin] {
     }
 }
 
-impl Builtin {
-    /// It takes a value after its name (a hint or fixed values).
-    pub fn takes_value(&self) -> bool {
+/// A built-in with its values for this user: `/model`'s come from the agent's files (models.rs); a value list
+/// with no hint gets "<model>".
+struct Resolved {
+    b: &'static Builtin,
+    hint: String,
+    args: Vec<Arg>,
+}
+
+impl Resolved {
+    /// It takes a value after its name (a hint or values).
+    fn takes_value(&self) -> bool {
         !self.hint.is_empty() || !self.args.is_empty()
     }
 }
 
+fn resolve(kind: &str, home: Option<&Path>) -> Vec<Resolved> {
+    builtins(kind)
+        .iter()
+        .map(|b| {
+            let mut args: Vec<Arg> = b.args.iter().map(|a| Arg::new(*a, "")).collect();
+            if b.name == "model" {
+                args = home.map(|h| models::values(kind, h)).unwrap_or_default();
+            }
+            let hint = if b.hint.is_empty() && !args.is_empty() { "<model>".to_string() } else { b.hint.to_string() };
+            Resolved { b, hint, args }
+        })
+        .collect()
+}
+
 /// The screen built-ins of `kind` that take no value: never sent from the chat, so not in `list`. Sorted by name.
-pub fn screens(kind: &str) -> Vec<&'static str> {
-    let mut v: Vec<&str> = builtins(kind).iter().filter(|b| b.screen && !b.takes_value()).map(|b| b.name).collect();
+pub fn screens(kind: &str, home: Option<&Path>) -> Vec<&'static str> {
+    let mut v: Vec<&str> = resolve(kind, home).iter().filter(|r| r.b.screen && !r.takes_value()).map(|r| r.b.name).collect();
     v.sort_unstable();
     v
 }
 
 /// `text` is a screen built-in of `kind` sent bare ("/model", spaces around it trimmed): why it is not sent, for the
 /// person. Anything after the name ("/model sonnet"), or any other text: `None`.
-pub fn opens_screen(kind: &str, text: &str) -> Option<String> {
+pub fn opens_screen(kind: &str, text: &str, home: Option<&Path>) -> Option<String> {
     let name = text.trim().strip_prefix('/')?;
-    let b = builtins(kind).iter().find(|b| b.screen && b.name == name)?;
-    Some(screen_note(b.name, b.args.first().copied().unwrap_or(b.hint), b.takes_value()))
+    let r = resolve(kind, home).into_iter().find(|r| r.b.screen && r.b.name == name)?;
+    let example = r.args.first().map(|a| a.value.clone()).unwrap_or_else(|| r.hint.clone());
+    Some(screen_note(r.b.name, &example, r.takes_value()))
 }
 
 /// The note for a bare screen command. The mod builds the same text (composer.js `screenNote`).
@@ -202,9 +227,9 @@ pub struct Command {
     /// Built-ins: what may follow the name ("<model>", "[file]").
     #[serde(skip_serializing_if = "String::is_empty")]
     pub hint: String,
-    /// Built-ins: the values offered after "/name " (/model, /effort).
+    /// Built-ins: the values offered after "/name " (/model, /effort), each with a label where one helps.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub args: Vec<String>,
+    pub args: Vec<Arg>,
     /// Built-ins: sent bare, it opens a screen in the terminal, so it needs a value to be sent (`opens_screen`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub screen: bool,
@@ -215,7 +240,7 @@ pub fn list(kind: &str, home: &Path, cwd: &Path) -> Vec<Command> {
     let mut l = Lister::default();
     match kind {
         "claude" => {
-            l.builtins(&CLAUDE);
+            l.builtins(kind, home);
             let claude = home.join(".claude");
             for (dir, source) in [(cwd.join(".claude/commands"), "project"), (claude.join("commands"), "user")] {
                 for (name, desc, hint) in commands_in(&dir, 3) {
@@ -236,9 +261,9 @@ pub fn list(kind: &str, home: &Path, cwd: &Path) -> Vec<Command> {
                 }
             }
         }
-        "codex" => l.builtins(&CODEX),
+        "codex" => l.builtins(kind, home),
         "pi" => {
-            l.builtins(&PI);
+            l.builtins(kind, home);
             let agent = home.join(".pi/agent");
             for (name, desc, hint) in commands_in(&agent.join("prompts"), 0) {
                 l.add(name, desc, "user", hint);
@@ -255,7 +280,7 @@ pub fn list(kind: &str, home: &Path, cwd: &Path) -> Vec<Command> {
             }
         }
         "agy" => {
-            l.builtins(&AGY);
+            l.builtins(kind, home);
             for d in [home.join(".gemini/skills"), home.join(".gemini/antigravity/skills")] {
                 for (name, desc) in skills_in(&d, 0) {
                     l.add(name, desc, "skill", String::new());
@@ -284,16 +309,17 @@ impl Lister {
         self.out.last_mut()
     }
 
-    fn builtins(&mut self, list: &[Builtin]) {
-        for b in list {
+    fn builtins(&mut self, kind: &str, home: &Path) {
+        for r in resolve(kind, Some(home)) {
             // A screen with no value can never be sent from the chat: left out, and its name stays the built-in's.
-            if b.screen && !b.takes_value() {
-                self.seen.insert(b.name.into());
+            if r.b.screen && !r.takes_value() {
+                self.seen.insert(r.b.name.into());
                 continue;
             }
-            if let Some(c) = self.add(b.name.into(), b.description.into(), "builtin", b.hint.into()) {
-                c.args = b.args.iter().map(|a| a.to_string()).collect();
-                c.screen = b.screen;
+            let screen = r.b.screen;
+            if let Some(c) = self.add(r.b.name.into(), r.b.description.into(), "builtin", r.hint) {
+                c.args = r.args;
+                c.screen = screen;
             }
         }
     }
@@ -461,6 +487,10 @@ mod tests {
         fs::write(p, s).unwrap();
     }
 
+    fn vals(v: &[Arg]) -> Vec<&str> {
+        v.iter().map(|a| a.value.as_str()).collect()
+    }
+
     fn names(v: &[Command]) -> Vec<(&str, &str)> {
         v.iter().map(|c| (c.name.as_str(), c.source)).collect()
     }
@@ -477,8 +507,10 @@ mod tests {
         );
         assert!(v.iter().all(|c| c.source == "builtin"));
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
-        assert_eq!(c("model").args, vec!["opus", "sonnet", "haiku", "fable", "default"]);
-        assert_eq!(c("effort").args, vec!["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(vals(&c("model").args)[..2], ["claude-fable-5-2", "claude-opus-5-5"], "full ids first");
+        assert_eq!(c("model").args[1].label, "Opus 5.5");
+        assert!(vals(&c("model").args).contains(&"opus"), "and the aliases");
+        assert_eq!(vals(&c("effort").args), vec!["low", "medium", "high", "xhigh", "max"]);
         assert_eq!(c("model").hint, "<model>");
         assert!(c("model").screen && c("resume").screen && !c("clear").screen && !c("context").screen);
         // On the wire: hint, args and screen only where they say something.
@@ -554,11 +586,16 @@ mod tests {
         put(&home.join(".claude/commands/claude-only.md"), "x");
         let v = list("codex", &home, &t.path().join("proj"));
         assert!(v.iter().all(|c| c.source == "builtin"), "no prompts, no skills, nothing of Claude's");
-        assert_eq!(v.len(), CODEX.len() - screens("codex").len());
+        assert_eq!(v.len(), CODEX.len() - screens("codex", Some(&home)).len());
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
         assert!(!c("status").screen, "Codex's /status prints in the chat");
-        assert_eq!(screens("codex"), vec!["config", "model", "permissions", "resume", "skills"]);
+        assert_eq!(screens("codex", Some(&home)), vec!["config", "model", "permissions", "resume", "skills"], "no model cache: /model takes no value");
         assert_eq!(c("rename").hint, "<name>");
+        put(&home.join(".codex/models_cache.json"), r#"{"models": [{"slug": "gpt-x", "display_name": "GPT-X", "visibility": "list", "priority": 1}]}"#);
+        let v = list("codex", &home, &t.path().join("proj"));
+        let m = v.iter().find(|c| c.name == "model").expect("with the cache, /model is listed");
+        assert_eq!((m.hint.as_str(), m.screen, m.args.clone()), ("<model>", true, vec![Arg::new("gpt-x", "GPT-X")]));
+        assert!(!screens("codex", Some(&home)).contains(&"model"));
     }
 
     #[test]
@@ -596,9 +633,9 @@ mod tests {
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
         assert_eq!(c("review").hint, "[focus]");
         assert_eq!(c("review").description, "Review staged changes");
-        assert_eq!(c("thinking").args, vec!["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(vals(&c("thinking").args), vec!["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
         assert!(c("thinking").screen && c("model").screen && !c("session").screen);
-        assert_eq!(screens("pi"), vec!["fork", "resume", "scoped-models", "settings", "tree"]);
+        assert_eq!(screens("pi", Some(&home)), vec!["fork", "resume", "scoped-models", "settings", "tree"]);
         put(&home.join(".pi/agent/settings.json"), r#"{"enableSkillCommands": false}"#);
         assert!(list("pi", &home, &proj).iter().all(|c| !c.name.starts_with("skill:")), "skill commands turned off");
     }
@@ -616,12 +653,20 @@ mod tests {
         assert!(v.iter().all(|c| !["new", "settings", "switch", "undo", "quota", "cs", "branch"].contains(&c.name.as_str())), "other names are not rows");
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
         assert!(c("clear").description.contains("/new"));
-        assert_eq!(c("effort").args, vec!["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(vals(&c("effort").args), vec!["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(c("model").args[1], Arg::new("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"));
     }
 
     #[test]
     fn bare_screen_commands_are_not_sent() {
-        assert_eq!(opens_screen("claude", "/model").as_deref(), Some("/model opens a menu in the terminal. Add a value, like /model opus."));
+        let t = tempfile::tempdir().unwrap();
+        let h = Some(t.path());
+        let opens_screen = |kind: &str, text: &str| super::opens_screen(kind, text, h);
+        let screens = |kind: &str| super::screens(kind, h);
+        assert_eq!(
+            opens_screen("claude", "/model").as_deref(),
+            Some("/model opens a menu in the terminal. Add a value, like /model claude-fable-5-2.")
+        );
         assert_eq!(opens_screen("claude", "  /status \n").as_deref(), Some("/status opens a screen in the terminal. Use it there."));
         assert_eq!(
             opens_screen("claude", "/resume").as_deref(),
@@ -631,14 +676,20 @@ mod tests {
         for ok in ["/model sonnet", "/status please", "/clear", "/compact", "/modelx", "model", "hello /model", "/"] {
             assert_eq!(opens_screen("claude", ok), None, "{ok}");
         }
-        assert!(opens_screen("codex", "/model").is_some() && opens_screen("codex", "/status").is_none(), "per agent");
+        assert_eq!(
+            opens_screen("codex", "/model").as_deref(),
+            Some("/model opens a screen in the terminal. Use it there."),
+            "per agent; Codex with no model cache"
+        );
+        assert!(opens_screen("codex", "/status").is_none());
         assert!(opens_screen("pi", "/thinking").is_some() && opens_screen("agy", "/usage").is_some());
         assert_eq!(opens_screen("cursor-agent", "/model"), None);
         assert_eq!(screens("claude"), vec!["config", "help", "hooks", "mcp", "memory", "permissions", "plugin", "rewind", "status", "usage"]);
         // Every screen command is either listed (it takes a value) or named in `screens`.
         for kind in ["claude", "codex", "pi", "agy"] {
+            let listed = list(kind, t.path(), t.path());
             for b in builtins(kind).iter().filter(|b| b.screen) {
-                assert!(b.takes_value() != screens(kind).contains(&b.name), "{kind} /{}", b.name);
+                assert!(listed.iter().any(|c| c.name == b.name) != screens(kind).contains(&b.name), "{kind} /{}", b.name);
             }
         }
     }

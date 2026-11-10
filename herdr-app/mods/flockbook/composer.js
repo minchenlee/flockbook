@@ -116,6 +116,21 @@ export function matchCommands(list, query) {
   return (list ?? []).filter((c) => String(c.name).toLowerCase().startsWith(q));
 }
 
+// A command's values as list items: { name: value, description: label }. A value is a string, or
+// { value, label } (the helper's /model lists).
+export function argItems(args) {
+  return (Array.isArray(args) ? args : []).map((x) => (x && typeof x === "object"
+    ? { name: String(x.value ?? ""), description: x.label ? String(x.label) : "" }
+    : { name: String(x) })).filter((x) => x.name);
+}
+
+// The values that have `query` in their value or label (any case), in the list's order: a model can be found by a
+// part of its name ("sonnet", "flash").
+export function matchArgs(items, query) {
+  const q = String(query ?? "").toLowerCase();
+  return items.filter((x) => x.name.toLowerCase().includes(q) || (x.description ?? "").toLowerCase().includes(q));
+}
+
 // "/<name> <part>" (one space, no other): the command and the part of a value typed after it; else null.
 export function argQuery(text) {
   const m = /^\/([^\s]+) ([^\s]*)$/.exec(String(text ?? ""));
@@ -132,7 +147,7 @@ export function screenNote(list, screens, text) {
   if ((screens ?? []).includes(name)) return `/${name} opens a screen in the terminal. Use it there.`;
   const c = (list ?? []).find((x) => x.name === name && x.screen);
   if (!c) return null;
-  const example = (Array.isArray(c.args) && c.args.length ? String(c.args[0]) : "") || c.hint || "";
+  const example = argItems(c.args)[0]?.name || c.hint || "";
   return `/${name} opens a menu in the terminal. Add a value, like /${name} ${example}.`;
 }
 
@@ -251,7 +266,7 @@ export class Composer {
   }
 
   // The list to show now: { kind, query, items, pick, top, cmd } or null. `kind` "cmd": commands for "/<part>";
-  // "arg": the values of `cmd` for "/<cmd> <part>" (items are { name: value }).
+  // "arg": the values of `cmd` for "/<cmd> <part>" (items are { name: value, description: label }).
   slash() {
     const v = this.input.value();
     return v === this.slashClosed ? null : this.slashFor(v);
@@ -267,7 +282,7 @@ export class Composer {
       cmd = a && list.find((c) => c.name === a.name && Array.isArray(c.args) && c.args.length);
       if (!cmd) return null;
       kind = "arg"; query = a.query;
-      items = matchCommands(cmd.args.map((x) => ({ name: String(x) })), query);
+      items = matchArgs(argItems(cmd.args), query);
     }
     if (!items.length) return null;
     const pick = Math.min(this.pick, items.length - 1);

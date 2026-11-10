@@ -323,7 +323,7 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     // A screen command sent bare ("/model"): the chat cannot show its screen, so it is not sent (the mod checks too;
     // this covers the phone page and other callers). With files the text is not bare.
     if files.is_empty() {
-        if let Some(note) = pane.agent.as_ref().and_then(|a| crate::commands::opens_screen(&a.kind, text)) {
+        if let Some(note) = pane.agent.as_ref().and_then(|a| crate::commands::opens_screen(&a.kind, text, std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref())) {
             return Done::new("opens_screen", Some(&note));
         }
     }

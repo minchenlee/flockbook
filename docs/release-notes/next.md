@@ -22,6 +22,8 @@ One short line: what this release is about.
 
 ### ⚙️ Changes
 
+- Herdr app mod: after `/model ` the "/" list offers each agent's real models with their names: Claude Code's full ids (`claude-opus-5-5` "Opus 5.5", then the aliases), Codex's models, pi's models of the providers it has a key for (`provider/model`), and agy's. Type any part of a name ("sonnet", "flash") to find one. Codex's `/model` is back in the list.
+
 - Herdr app mod: a "/" command that opens a menu or a screen in the terminal is not sent alone. `/model` stays in the box with a note: add a value, like `/model sonnet`. Commands that need the terminal and take no value (`/status`, `/config`, `/permissions` …) are no longer in the "/" list. The phone page refuses them the same way.
 
 - Herdr app mod: the "working" spinner turns more smoothly: a short arc over a faint ring, one turn in 0.9 s, like Herdr's own.
