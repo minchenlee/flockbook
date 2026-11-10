@@ -29,6 +29,9 @@
     "cmd-,": "app.settings",
     "cmd-shift-,": "flockbook.settings",
     "cmd-/": "app.help",
-    "cmd-shift-\\": "flockbook.overview"
+    "cmd-shift-\\": "flockbook.overview",
+    "cmd-alt--": "flockbook.text-smaller",
+    "cmd-alt-=": "flockbook.text-larger",
+    "cmd-alt-0": "flockbook.text-default"
   }
 }

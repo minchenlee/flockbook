@@ -17,7 +17,7 @@ export const SETTINGS = [
   { key: "check_updates", title: "Check for updates", choices: [[true, "On", "on"], [false, "Off", "off"]],
     about: "Once a day, Flockbook asks GitHub (api.github.com) for its latest release and shows a line when a newer one is out." },
   { key: "text_size", title: "Text size", choices: [["small", "Small", "small"], ["default", "Default", "default"], ["large", "Large", "large"]],
-    about: "The size of the messages, code and tables in the chat. Herdr's zoom (⌘- and ⌘=) scales the whole window." },
+    about: "The size of the messages, code and tables in the chat. ⌥⌘- and ⌥⌘= step it, ⌥⌘0 resets it; Herdr's zoom (⌘- and ⌘=) scales the whole window." },
   { key: "status_row", title: "Status row", choices: [["show", "Show", "show"], ["hide", "Hide", "hide"]],
     about: "The model, context, cost, folder and branch above the reply box." },
   { key: "remote_helper", title: "Helper on other machines", choices: [["ask", "Ask", "ask"], ["never", "Never", "never"]],

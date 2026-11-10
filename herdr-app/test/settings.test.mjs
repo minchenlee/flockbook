@@ -97,6 +97,19 @@ test("text size: three choices under Chat; Large writes the file and scales the 
   assert.equal(textScale(), 1, "a value that is not a choice is the default");
 });
 
+test("text size keys: ⌥⌘- and ⌥⌘= step through Small, Default, Large without wrapping; ⌥⌘0 resets", async () => {
+  file = JSON.stringify({ mine: 1 });
+  await loadConfig();
+  assert.equal(await command("text-larger"), true);
+  assert.equal(setting("text_size"), "large");
+  assert.equal(await command("text-larger"), false, "Large is the end");
+  assert.equal(await command("text-default"), true);
+  assert.equal(await command("text-smaller"), true);
+  assert.equal(setting("text_size"), "small");
+  assert.equal(await command("text-smaller"), false, "Small is the end");
+  assert.deepEqual(JSON.parse(file), { mine: 1, text_size: "small" });
+});
+
 test("a change keeps the other keys and every view sees it at once", async () => {
   file = JSON.stringify({ mine: 1 });
   await loadConfig();
