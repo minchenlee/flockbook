@@ -785,6 +785,11 @@ mod box_tests {
         assert_eq!(box_has_text("codex", &codex("› hi there")), Some(true));
         assert_eq!(box_has_text("codex", &codex("› /")), Some(true));
         assert_eq!(box_has_text("codex", "nothing"), None);
+        // A newer Codex footer: a blank line, then model · folder · thread title (no "% left"), then the shortcuts.
+        let titled = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · ~/src/app · Fix the login form · Main [default]\n  ← for agents · ? for shortcuts\n");
+        assert_eq!(box_has_text("codex", &titled("› Ask Codex to do anything")), Some(false));
+        assert_eq!(box_has_text("codex", &titled("› hi there")), Some(true));
+        assert_eq!(box_has_text("codex", &titled("› first line\n  second line")), Some(true));
     }
 
     #[test]
