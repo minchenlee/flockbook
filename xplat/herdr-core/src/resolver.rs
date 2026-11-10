@@ -414,7 +414,7 @@ impl SessionResolver {
             .filter(|n| match self.cache.get(&n.pane_id) {
                 None => true,
                 Some(e) => {
-                    let wait = if e.path.is_none() { self.retry } else { self.recheck };
+                    let wait = if e.path.is_none() || self.waits_for_log(e) { self.retry } else { self.recheck };
                     now.duration_since(e.checked).as_secs_f64() >= wait || self.pid_file_changed(e) || e.need_pids != n.pids
                 }
             })
@@ -459,6 +459,7 @@ impl SessionResolver {
                             && !self.pid_file_changed(old)
                             && n.kind != "agy"
                             && (n.kind != "pi" || Path::new(path).exists())
+                            && !self.waits_for_log(old)
                         {
                             let e = self.cache.get_mut(&n.pane_id).unwrap();
                             e.checked = now;
@@ -509,6 +510,12 @@ impl SessionResolver {
         let Some(stamp) = e.stamp else { return false };
         let Some(pid) = e.stamp_pid.or(e.pid) else { return false };
         self.pid_file_stamp(pid, &e.stamp_dir) != stamp // no file: None both times, not a change
+    }
+
+    /// A Claude with its own `CLAUDE_CONFIG_DIR` and no log yet holds a bare session id, which
+    /// `path` would look for under the default projects folder: check it like an unresolved entry.
+    fn waits_for_log(&self, e: &Entry) -> bool {
+        e.stamp.is_some() && e.stamp_dir != self.claude_dir && e.path.as_deref().is_some_and(|p| !Path::new(p).exists())
     }
 
     fn pid_file_stamp(&self, pid: i32, dir: &str) -> Option<SystemTime> {
