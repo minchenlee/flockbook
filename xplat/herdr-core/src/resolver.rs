@@ -20,7 +20,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
 
 mod linux;
@@ -1046,14 +1046,16 @@ pub fn is_claimed_in_cwd(path: &str, claimed: &HashSet<String>, cwd: &str, claim
 
 /// Claude Code's config folder for an agent process: `CLAUDE_CONFIG_DIR` from its env, if set.
 pub fn claude_home(proc_line: &str) -> Option<String> {
-    let re = regex::Regex::new(r"\sCLAUDE_CONFIG_DIR=(\S+)\s").expect("claude home pattern");
-    re.captures(&format!(" {proc_line} ")).map(|m| m[1].trim_end_matches('/').to_string())
+    static RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\sCLAUDE_CONFIG_DIR=(\S+)\s").expect("claude home pattern"));
+    RE.captures(&format!(" {proc_line} ")).map(|m| m[1].trim_end_matches('/').to_string())
 }
 
 /// Grok Build's home for an agent process: `GROK_HOME` from its env, else `~/.grok`.
 pub fn grok_home(proc_line: &str) -> String {
-    let re = regex::Regex::new(r"\sGROK_HOME=(\S+)\s").expect("grok home pattern");
-    if let Some(m) = re.captures(&format!(" {proc_line} ")) {
+    static RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\sGROK_HOME=(\S+)\s").expect("grok home pattern"));
+    if let Some(m) = RE.captures(&format!(" {proc_line} ")) {
         return m[1].to_string();
     }
     home_dir() + "/.grok"
