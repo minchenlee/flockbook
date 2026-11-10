@@ -89,6 +89,11 @@ test("a blank box sends nothing; a failed send puts the text back with the reaso
   b.input.set_value("third"); await c.submit(cx);
   assert.equal(b.input.value(), "third");
   assert.match(textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note")), /cannot tell this agent/);
+  // Text already in the agent's own box: not sent, the text stays, the helper says to clear the box.
+  fake.sendResult = "box_not_empty"; fake.sendMessage = "The agent's box has text in it. Clear it in the terminal first. Nothing was sent.";
+  b.input.set_value("/status"); await c.submit(cx);
+  assert.equal(b.input.value(), "/status");
+  assert.match(textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note")), /Clear it in the terminal first/);
 });
 
 test("each agent keeps its own draft", () => {
