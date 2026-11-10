@@ -50,12 +50,13 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
 | `queue` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; `serve` and other machines) | `queued` |
+| `commands` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only) | `commands` |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
 
-`card` only reads. `approve` and `answer` send keys to the agent; the mod runs them only when the
+`card` and `commands` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
@@ -160,7 +161,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -368,6 +369,25 @@ while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` 
 - `items`: oldest first; `null` is a queued message whose text neither the log nor the screen shows.
 - `pullable`: the agent's input box is empty, so the queue can be pulled back now.
 - `pullsAll`: Claude Code (Up takes back every queued message as one text).
+
+### `commands` (`commands`)
+
+The "/" commands of a Claude Code terminal, for the list above the reply box. Read from files only; no key goes to
+the agent. Another agent: `commands` is empty (the mod shows no list).
+
+```json
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"}]}
+```
+
+- Sources, the first one with a name wins: built-ins (only `clear`, `compact` and `context`: the others open a
+  screen in the terminal that the chat cannot show); `.claude/commands/**/*.md` in the terminal's folder
+  (`project`), then in the user's home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`;
+  not when its front matter says `user-invocable: false`); installed plugins that are not turned off
+  (`enabledPlugins`), their commands and skills as `<plugin>:<name>` (`plugin`).
+- `description`: the front matter's `description`, else the file's first line; at most 120 characters.
+- Sorted by name; at most 500. A name has only letters, digits and `-_.:`.
+- The mod sends the full name (`send --text "/deploy"`): Claude Code's own "/" menu takes the Enter for a part of a
+  name and runs its first match.
 
 ### `done` (`approve`, `answer`, `send`)
 
