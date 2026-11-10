@@ -6,7 +6,7 @@ import { theme, layout, window, settings, openOverlay, run, setAgentOrder, nextC
 import { openMenu, tabItems } from "./menu.js";
 import { spaceAgents, spaceTabs, activeTab, currentAgent, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
   SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
-import { loadConfig, pollUpdate, updateDot } from "./config.js";
+import { loadConfig, pollUpdate, updateDot, stepTextSize } from "./config.js";
 import { dragger, dropPlace } from "./drag.js";
 
 function find(node, id) {
@@ -49,6 +49,7 @@ export function command(c) {
   if (c === "sidebar") return toggleSidebar();
   if (c === "overview") return showOverview();
   if (c === "settings") return showSettings();
+  if (c === "text-smaller" || c === "text-larger" || c === "text-default") return stepTextSize(c);
   if ((c === "move-left" || c === "move-right") && i >= 0) {
     const to = i + (c === "move-left" ? -1 : 1);
     if (to >= 0 && to < tabs.length) run("tab.move", { id: tab.id, index: tabs[to].index });

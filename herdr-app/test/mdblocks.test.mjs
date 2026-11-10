@@ -27,6 +27,17 @@ test("cells split on pipes, not on escaped ones or pipes inside code", () => {
   assert.deepEqual(tableCells("| a \\| b | `x|y` | c |"), ["a | b", "`x|y`", "c"]);
 });
 
+test("text size: the default sets no size; another sets it on the text, code boxes and tables, scaled", () => {
+  const T = new Proxy({}, { get: (_t, k) => `#${k}` });
+  const all = (el) => { const out = []; (function walk(n) { if (!n) return; out.push(n); (n.kids ?? []).forEach(walk); })(el); return out; };
+  const text = "Intro\n\n```\ncode\n```\n| H |\n|---|\n| v |";
+  assert.ok(all(markdownView("r", text, T, 600)).every((n) => n._a?.text_size !== 16), "no size at the default");
+  assert.equal(all(markdownView("r", "plain", T, 600, 1))[0]._a?.text_size, undefined, "one block stays a bare view");
+  const small = all(markdownView("r", text, T, 600, 14 / 16)).map((n) => n._a?.text_size).filter(Boolean);
+  assert.deepEqual(small, [14, 13 * 14 / 16, 13.5 * 14 / 16]);
+  assert.equal(all(markdownView("r", "plain", T, 600, 18 / 16))[0]._a?.text_size, 18);
+});
+
 test("the view: rounded code box keeps the indent; rounded table with a header", () => {
   const T = new Proxy({}, { get: (_t, k) => `#${k}` });
   const el = markdownView("r1", "```\n  indented\n```\n| H |\n|---|\n| v |", T);

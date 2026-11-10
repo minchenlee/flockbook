@@ -1,7 +1,7 @@
 // The "settings" view: the Flockbook settings dialog (sidebar row "Flockbook", ⌘⇧, or the tab menu),
 // over the window as Herdr's own Settings, and laid out like it: sections in a sidebar on the left,
 // UPPERCASE headings on the right, a row's title and line on the left and its control on the right.
-// Esc, a click beside it or its close button closes it. Three settings, each two choices, saved in
+// Esc, a click beside it or its close button closes it. Four settings of two or three choices, saved in
 // <appHome>/flockbook/config.json (config.js), and the Phone page (phone.js). Tab moves through the
 // sections, then the choices; Enter or Space picks one. Also the update line, which the sidebar shows too.
 import { div, svg } from "gpui-kit";
@@ -16,6 +16,8 @@ const PHONE = { title: "Phone page", about: "Read your agents on your phone, thr
 export const SETTINGS = [
   { key: "check_updates", title: "Check for updates", choices: [[true, "On", "on"], [false, "Off", "off"]],
     about: "Once a day, Flockbook asks GitHub (api.github.com) for its latest release and shows a line when a newer one is out." },
+  { key: "text_size", title: "Text size", choices: [["small", "Small", "small"], ["default", "Default", "default"], ["large", "Large", "large"]],
+    about: "The size of the messages, code and tables in the chat. ⌥⌘- and ⌥⌘= step it, ⌥⌘0 resets it; Herdr's zoom (⌘- and ⌘=) scales the whole window." },
   { key: "status_row", title: "Status row", choices: [["show", "Show", "show"], ["hide", "Hide", "hide"]],
     about: "The model, context, cost, folder and branch above the reply box." },
   { key: "remote_helper", title: "Helper on other machines", choices: [["ask", "Ask", "ask"], ["never", "Never", "never"]],
@@ -24,7 +26,7 @@ export const SETTINGS = [
 
 // The sidebar's sections; `parts`: [heading, setting keys] in order.
 export const SECTIONS = [
-  { id: "general", label: "General", icon: "sliders", parts: [["CHAT", ["status_row"]], ["OTHER MACHINES", ["remote_helper"]]] },
+  { id: "general", label: "General", icon: "sliders", parts: [["CHAT", ["text_size", "status_row"]], ["OTHER MACHINES", ["remote_helper"]]] },
   { id: "phone", label: "Phone page", icon: "phone" },
   { id: "updates", label: "Updates", icon: "refresh", parts: [["UPDATES", ["check_updates"]]] },
 ];
@@ -114,7 +116,7 @@ export class SettingsView {
   content(t, _cx) {
     const bad = configBad();
     let stop = SECTIONS.length;
-    // Two choices: `current` is the chosen value, `pick(value, cx)` acts, `off`: nothing can be picked.
+    // The choices: `current` is the chosen value, `pick(value, cx)` acts, `off`: nothing can be picked.
     const seg = (key, choices, pick, current = setting(key), off = bad) => h_flex().flex_none().p(2).gap(2).rounded(8).bg(t.chrome).border(1).border_color(t.border)
       .children(choices.map(([value, label, slug]) => {
         const on = current === value;
