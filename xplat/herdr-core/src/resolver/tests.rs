@@ -581,6 +581,29 @@ fn hc_claude_config_dir() {
 }
 
 #[test]
+fn hc_claude_config_dir_log_later() {
+    let (_t, cfg) = tmp();
+    let (_d, default_dir) = tmp();
+    fs::create_dir_all(format!("{cfg}/sessions")).unwrap();
+    let procs = parse_ps(&format!(
+        "  500     1 Sat Oct 31 10:00:00 2026     -zsh HC_TERMINAL_ID=t1\n  501   500 Sat Oct 31 10:01:00 2026     claude CLAUDE_CONFIG_DIR={cfg} HC_TERMINAL_ID=t1\n"
+    ));
+    let start = procs.iter().find(|p| p.pid == 501).unwrap().start;
+    write_pid_file(&format!("{cfg}/sessions"), 501, "sid-new", start);
+    let mut res = resolver(|r| {
+        r.claude_dir = default_dir.clone();
+        r.retry = 0.0;
+    });
+    let need = Need::new("hc:t1", "claude", "/w", vec![501, 500]);
+    let get = |res: &mut SessionResolver| res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
+    assert_eq!(get(&mut res), Some("sid-new".into()), "fresh Claude, no turn yet: the bare session id, no log yet");
+    fs::create_dir_all(format!("{cfg}/projects/-w")).unwrap();
+    let log = format!("{cfg}/projects/-w/sid-new.jsonl");
+    fs::write(&log, "{}\n").unwrap();
+    assert_eq!(get(&mut res), Some(log), "the first turn writes the log under the config dir: the same pid file now gives its path");
+}
+
+#[test]
 fn hc_edge_claude_clear() {
     let procs = parse_ps("  500     1 Sat Oct 31 10:00:00 2026     -zsh HC_TERMINAL_ID=t1\n  501   500 Sat Oct 31 10:01:00 2026     claude HC_TERMINAL_ID=t1\n");
     let (_t, dir) = tmp();
