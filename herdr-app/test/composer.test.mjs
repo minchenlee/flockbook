@@ -4,7 +4,7 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { Composer, tagsFor, shortPath, quoted, withFiles, slashQuery, matchCommands, screenNote } from "../mods/flockbook/composer.js";
+import { Composer, tagsFor, shortPath, quoted, withFiles, slashQuery, matchCommands, screenNote, argItems, matchArgs } from "../mods/flockbook/composer.js";
 import { ChatView } from "../mods/flockbook/chat.js";
 import { forgetCommands } from "../mods/flockbook/sidecar.js";
 
@@ -484,6 +484,8 @@ test("after \"/model \" the list offers the model names; Tab or Enter completes 
   assert.deepEqual(shown(r).length, 0, "values are not commands");
   assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["opus", "sonnet", "haiku", "fable", "default"]);
   await r.type("/model s");
+  assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["opus", "sonnet"], "any part of a value");
+  await r.type("/model so");
   assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["sonnet"]);
   await r.act("flockbook_slash_complete");
   assert.equal(r.b.input.value(), "/model sonnet");
@@ -495,3 +497,35 @@ test("after \"/model \" the list offers the model names; Tab or Enter completes 
   await r.type("/clear x");
   assert.equal(r.rows(), null, "a command without values: no list after its space");
 });
+
+// The helper's /model lists: { value, label } values (plain strings still work).
+const LABELED = [
+  { name: "model", description: "Set the AI model", source: "builtin", hint: "<model>", screen: true,
+    args: [{ value: "claude-opus-5-5", label: "Opus 5.5" }, { value: "claude-sonnet-5-5", label: "Sonnet 5.5" }, { value: "sonnet", label: "The latest Sonnet" }] },
+];
+
+test("argItems and matchArgs: labeled or plain values, found by a part of the value or the label", () => {
+  assert.deepEqual(argItems(["low", { value: "x", label: "X one" }, { value: "" }, null].filter((v) => v !== null)),
+    [{ name: "low" }, { name: "x", description: "X one" }]);
+  const items = argItems(LABELED[0].args);
+  assert.deepEqual(matchArgs(items, "SONNET").map((x) => x.name), ["claude-sonnet-5-5", "sonnet"]);
+  assert.deepEqual(matchArgs(items, "5.5").map((x) => x.name), ["claude-opus-5-5", "claude-sonnet-5-5"], "by the label");
+  assert.deepEqual(matchArgs(items, "").length, 3);
+});
+
+test("/model lists full ids with their labels; a part completes; the note's example is the first value", async () => {
+  const r = slashRig({ list: LABELED });
+  await r.type("/model ");
+  const rows = r.rows();
+  assert.match(rows[0], /^claude-opus-5-5\s*Opus 5\.5/);
+  await r.type("/model opus 5");
+  assert.equal(r.rows(), null, "a space ends the value");
+  await r.type("/model op");
+  assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["claude-opus-5-5"]);
+  r.b.input.set_value("/model op\n"); r.b.input._h.submit({}, r.cx); await r.cx.settle();
+  assert.equal(r.b.input.value(), "/model claude-opus-5-5", "Enter on a part completes it");
+  r.b.input._h.submit({}, r.cx); await r.cx.settle();
+  assert.equal(sent.at(-1)[sent.at(-1).indexOf("--text") + 1], "/model claude-opus-5-5");
+  assert.equal(screenNote(LABELED, [], "/model"), "/model opens a menu in the terminal. Add a value, like /model claude-opus-5-5.");
+});
+

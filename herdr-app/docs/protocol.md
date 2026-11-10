@@ -376,7 +376,7 @@ The "/" commands of an agent's terminal, for the list above the reply box: Claud
 files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
 
 ```json
-{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":["opus","sonnet","haiku","fable","default"],"screen":true}],"screens":["config","help","hooks","mcp","memory","permissions","plugin","rewind","status","usage"]}
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["config","help","hooks","mcp","memory","permissions","plugin","rewind","status","usage"]}
 ```
 
 - Sources per agent (`agent`), the first one with a name wins:
@@ -385,7 +385,8 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`; not when its front matter says
     `user-invocable: false`); installed plugins that are not turned off (`enabledPlugins`), their commands and
     skills as `<plugin>:<name>` (`plugin`).
-  - `codex`: a short set of its built-ins only. Its skills are not "/" commands.
+  - `codex`: a short set of its built-ins only (`/model` with the models of its cache). Its skills are not "/"
+    commands.
   - `pi`: its built-ins; prompt templates `~/.pi/agent/prompts/*.md` (top level; `user`; the project's load only
     after the project is trusted, so they are left out); skills as `skill:<name>` from the project's `.pi/skills`,
     `.agents/skills` from the terminal's folder up to the repository root, `~/.pi/agent/skills` and `~/.agents/skills`
@@ -395,8 +396,21 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     and `~/.gemini/antigravity/skills` (`skill`).
 - `description`: the front matter's `description`, else the file's first line; at most 120 characters.
 - Each when it says something: `hint`, what may follow the name (`<model>`, `[file]`; for a file, its front matter's
-  `argument-hint`); built-ins only: `args`, the values the mod offers after `/<name> ` (Claude Code's `model` and
-  `effort`, pi's `thinking`, agy's `effort`; a fixed list in the helper); `screen: true`, sent bare
+  `argument-hint`); built-ins only: `args`, the values the mod offers after `/<name> `, each `{"value", "label"}` (no
+  `label` where the value says it all; the mod also takes plain strings). Fixed lists in the helper: Claude Code's and
+  agy's `effort`, pi's `thinking`. `model`, per agent (models.rs), where its `/model <value>` switches with no screen:
+  - `claude`: its current models' full ids, then the aliases (a table: its list is inside its program), plus ids in
+    `~/.claude/settings.json` (`modelSettings`, `availableModels`) and `~/.claude.json`
+    `additionalModelOptionsCache`. It also saves the model as the default for new sessions, as its picker does.
+  - `codex`: `~/.codex/models_cache.json`, the models its picker lists, in its order (this session only). No cache:
+    `/model` takes no value and is in `screens`.
+  - `pi`: `provider/id` of the providers it has a key for (`auth.json`, or `apiKey` in `models.json`), from
+    `models-store.json` and `models.json`; only those `enabledModels` names when it names some. Another value opens
+    pi's picker.
+  - `agy`: a table (agy reads its list from its server): its slugs, `gemini-4-argon-medium`; it also saves the
+    default.
+  A value list with no hint gets the hint `<model>`. The mod finds a value by any part of its value or label.
+  `screen: true`, sent bare
   it opens a screen in the terminal (a picker or a dialog: the chat cannot show it), so it goes out only with a
   value (the mod's row says "needs a value").
 - `screens`: the built-ins that open a screen and take no value (`/status`, `/config`). They can never be sent from

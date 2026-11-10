@@ -8,6 +8,7 @@ pub mod config;
 pub mod feed;
 pub mod install;
 pub mod locate;
+pub mod models;
 pub mod paste;
 pub mod protocol;
 pub mod queue;
