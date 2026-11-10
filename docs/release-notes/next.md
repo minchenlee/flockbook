@@ -19,6 +19,7 @@ One short line: what this release is about.
 ### 🐛 Bug Fixes
 
 - Mac app, phone page: a message from the phone is held back in the same two cases as in the Mac reply box: a command that opens a screen in the terminal sent alone (`/model`, `/status`), and any message while the agent's own input box already has text. The phone says why and keeps your text.
+- Herdr app mod: a Claude Code chat started with its own `CLAUDE_CONFIG_DIR` (for example a second account in `~/.claude-work`) shows its conversation. The helper looked for Claude's pid file and log only under `~/.claude`, and showed "No conversation yet".
 
 - Herdr app mod: a message is not sent when the agent's own input box in the terminal already has text in it (Claude Code, Codex, pi, agy and Grok Build). Before, the message was added after that text: a "/" left in the box made "/status" into "//status", which the agent took as a prompt. Now the chat says to clear the box in the terminal first and keeps your text. The phone page does the same.
 

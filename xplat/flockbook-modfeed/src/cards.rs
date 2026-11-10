@@ -84,7 +84,6 @@ pub fn no_identity() -> Done {
         Some("Flockbook cannot tell this agent from another program in this terminal, so it sends nothing. Use the terminal."),
     )
 }
-/// Why the gate said no: the agent changed, or it has no identity to check, which no retry fixes.
 /// Claude Code's prompt suggestions are on (its default) unless its user settings say `"promptSuggestionEnabled": false`.
 pub fn claude_suggests(home: Option<&Path>) -> bool {
     let v = home.and_then(|h| std::fs::read(h.join(".claude/settings.json")).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
@@ -95,6 +94,7 @@ pub const BOX_NOT_EMPTY: &str = "The agent's box has text in it. Clear it in the
 pub fn box_not_empty() -> Done {
     Done::new("box_not_empty", Some(BOX_NOT_EMPTY))
 }
+/// Why the gate said no: the agent changed, or it has no identity to check, which no retry fixes.
 pub fn refused(pane: &Pane) -> Done {
     if pane.agent.as_ref().map(KeyGate::has_identity) == Some(true) {
         agent_changed()
