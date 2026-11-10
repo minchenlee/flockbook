@@ -596,11 +596,18 @@ fn claude_box(lines: &[String]) -> Vec<String> {
     box_rows(&lines[a + 1..b], '❯')
 }
 
-/// Codex: the last row that starts with "› ", and the rows under it down to the footer.
+/// Codex: the last row that starts with "› ", and the rows under it down to the footer. A newer footer has a
+/// status line with no "% left" (model · folder · thread title, after a blank line): that line is the footer's.
 fn codex_box(lines: &[String]) -> Vec<String> {
     let Some(i) = lines.iter().rposition(|l| l.starts_with("› ")) else { return vec![] };
     let Some(end) = lines[i + 1..].iter().position(|l| l.contains("% left") || l.contains("? for shortcuts")) else { return vec![] };
-    box_rows(&lines[i..i + 1 + end], '›')
+    let mut rows = &lines[i..i + 1 + end];
+    if let [.., blank, status] = rows {
+        if rows.len() > 2 && trim(blank).is_empty() && status.starts_with("  ") && status.contains(" · ") {
+            rows = &rows[..rows.len() - 2];
+        }
+    }
+    box_rows(rows, '›')
 }
 
 fn box_rows(lines: &[String], mark: char) -> Vec<String> {
