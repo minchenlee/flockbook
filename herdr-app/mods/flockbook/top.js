@@ -152,7 +152,7 @@ export function topBar(t, over = false) {
       const to = dropPlace(tabs, d);
       if (to >= 0) run("tab.move", { id: d.id, index: tabs[to].index });
     })
-    .child(tabs.length ? h_flex().id("tab-scroll").min_w(0).gap(4).items_center().overflow_x_scrollbar()
+    .child(tabs.length ? h_flex().id("tab-scroll").min_w(0).gap(4).items_center().overflow_x_scroll()
       .when(Boolean(dragging), (el) => el.cursor_grabbing())
       .children(tabs.map(pill))
       : div().px(12).text_size(12.5).text_color(t.muted).child("No tabs in this space"));

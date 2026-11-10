@@ -279,3 +279,9 @@ test("the spinner: one turn per 900 ms (Herdr draws about 30 frames a second: 13
   assert.equal(Math.abs(Number(arc[5])), Number(arc[3]), "a quarter turn: as far across as the radius");
   assert.equal(Math.abs(Number(arc[6])), Number(arc[3]), "and as far down");
 });
+
+test("the tab row scrolls sideways with no scrollbar drawn over the pills", () => {
+  const row = byId(new TopView(fakeCx()).render(fakeCx()), "tab-scroll");
+  assert.ok("overflow_x_scroll" in row._a, "wheel and trackpad still scroll it");
+  assert.ok(!("overflow_x_scrollbar" in row._a), "no bar");
+});
