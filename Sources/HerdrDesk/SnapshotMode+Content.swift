@@ -13,6 +13,7 @@ import SwiftUI
         if args.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua); dir = "build/snapshots-content-light" }
         if args.contains("--test-textsize") { Task { await textSize() }; return true }
         if args.contains("--test-sendfail") { Task { await sendFail() }; return true }
+        if args.contains("--test-slash") { Task { await slash() }; return true }
         if args.contains("--test-earlier-failure") { Task { await earlierFailure() }; return true }
         if args.contains("--test-loadstate") { Task { await loadState() }; return true }
         if args.contains("--test-termfail") { Task { await termFail() }; return true }
