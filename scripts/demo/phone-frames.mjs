@@ -5,7 +5,7 @@
 // sends (title "Needs you · <agent title>", body "<agent> · <workspace> · <tab>", as PushNotice.agent words them),
 // next to the list they open.
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,7 +13,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../..');
 const [stills, out = join(root, 'docs/media')] = process.argv.slice(2);
 if (!stills) { console.log('usage: node scripts/demo/phone-frames.mjs <phone-stills-dir> [out-dir]'); process.exit(2); }
-const { chromium } = createRequire(join(root, 'site/package.json'))('playwright');
+// Playwright from this checkout's site/, else from the main checkout's (a worktree may not have run npm ci).
+const site = [join(root, 'site'), join(root, '../../site')].find((d) => existsSync(join(d, 'node_modules/playwright'))) ?? join(root, 'site');
+const { chromium } = createRequire(join(site, 'package.json'))('playwright');
 const data = (file, type) => `data:${type};base64,${readFileSync(file).toString('base64')}`;
 const icon = data(join(root, 'site/static/flockbook-light.svg'), 'image/svg+xml');
 
@@ -66,7 +68,7 @@ function page(look, phones) {
 const lock = `<div class="lock"><p class="date">Tuesday 20 October</p><p class="time">9:41</p>${notices.map(([t, b, when]) =>
 	`<section class="note"><img src="${icon}" alt=""><div><header><span>Flockbook</span><span>${when}</span></header><b>${t}</b><p>${b}</p></div></section>`).join('')}</div>`;
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_HEADLESS });
 for (const look of ['light', 'dark']) {
 	const shot = (name) => `<img src="${data(join(stills, `phone-${name}-${look}.png`), 'image/png')}" alt="">`;
 	for (const [name, phones] of [['phone', [shot('list'), shot('pictures')]], ['push', [lock, shot('list')]]]) {
