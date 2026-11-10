@@ -51,7 +51,8 @@ test("table cells have a fixed width, so long text wraps inside the table; estim
   assert.ok(ws[1] < 100 && ws[0] > 500, "the short column stays narrow, the long one takes the rest");
   assert.ok(cells.some((c) => "text_right" in c._a), "right-aligned column");
   const short = markdownHeight("x\n| A | B |\n|---|--:|\n| a | 1 |", 602);
-  assert.ok(markdownHeight(text, 602) >= short + 4 * 21, "a wrapped row is guessed taller");
+  // The long cell is drawn on 4 lines of 22 px (word wrap at its width), the short one on 1.
+  assert.ok(markdownHeight(text, 602) >= short + 3 * 22, "a wrapped row is guessed taller");
 });
 
 test("column widths follow the content: short columns keep their size, the space left goes by length", () => {

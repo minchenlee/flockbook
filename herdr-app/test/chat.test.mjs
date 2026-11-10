@@ -62,8 +62,8 @@ test("estimates: wide characters wrap sooner; code and headings add height", () 
 test("estimates: code boxes and tables are guessed at their drawn height (no wrap margin, no gap)", () => {
   // codeBox: 6 px margin + 10 px padding + 1 px border, each side; 21 px per line (a TextView line at 13 px).
   assert.equal(markdownHeight("```\na\nb\nc\n```", 600), 3 * 21 + 34);
-  // table: 6 px margin + 1 px border each side; a row is 8 + 21 + 8 px plus a 1 px line (1 px high on the head row, on purpose).
-  assert.equal(markdownHeight("| A | B |\n|---|---|\n| a | b |", 600), 14 + 17 + 21 + 17 + 21);
+  // table: 6 px margin + 1 px border each side; a row is 8 + 22 + 8 px plus a 1 px line (1 px high on the head row, on purpose).
+  assert.equal(markdownHeight("| A | B |\n|---|---|\n| a | b |", 600), 14 + 17 + 22 + 17 + 22);
   // The prose gets a small pad at the end, once per text, so a long answer with code is not guessed far too tall.
   const prose = "word ".repeat(30);
   const code = "```\n" + "x = 1\n".repeat(30) + "```";

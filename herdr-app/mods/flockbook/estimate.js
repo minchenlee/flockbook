@@ -73,6 +73,34 @@ export function proseLines(text, width, fs = FS) {
   return n;
 }
 
+// Lines of a table cell (13.5 px) as gpui fills it, measured on a 2× screenshot of a 760 px column (11-10):
+// character by character to the cell's width; a line may break at a space, after a hyphen, or next to a
+// full-width character, and a word with none of these breaks where it must. A full-width ） that does
+// not fit goes to a line of its own. Inline code: Menlo 11.8 px (7.05 px a character) and about 4.5 px
+// padding each side; counted a little wide.
+const CELL_CODE_CH = 7.1, CELL_CODE_PAD = 5;
+export function cellLines(text, width, fs = 13.5) {
+  const gs = [];
+  let code = false;
+  for (const ch of String(text).replace(/\*\*/g, "")) {
+    if (ch === "`") { code = !code; gs.push({ ch: "", w: CELL_CODE_PAD }); continue; }
+    const wide = isWide(ch.codePointAt(0));
+    gs.push({ ch, wide, w: code ? CELL_CODE_CH : wide ? fs : ch === " " ? fs * 0.3 : latinWidth(ch, fs) });
+  }
+  let n = 1, x = 0, candX = -1;  // candX: where the line may break, in px from its start
+  for (let i = 0; i < gs.length; i++) {
+    const g = gs[i], prev = gs[i - 1];
+    if (x > 0 && (prev.ch === " " || prev.ch === "-" || prev.wide || g.wide)) candX = x;
+    if (x > 0 && x + g.w > width) {
+      n++;
+      x = candX > 0 ? x - candX : 0;
+      candX = -1;
+    }
+    x += g.w;
+  }
+  return n;
+}
+
 export function wrapLines(text, width, fs = 14) {
   let w = 0, n = 1;
   for (let i = 0; i < text.length; i++) {
@@ -85,7 +113,8 @@ export function wrapLines(text, width, fs = 14) {
 // `spans`, when given, gets each code box as drawn: { top, bottom, lines } in px from the text's top
 // (the box itself, without its 6 px margin) and its source lines, for finding the box under a point.
 export function markdownHeight(text, width, spans = null) {
-  const CODE_LH = 21;  // TextView at 13 px (Menlo): its own line height, as table text (13.5 px) draws 21
+  const CODE_LH = 21;  // TextView at 13 px (Menlo): its own line height
+  const CELL_LH = 22;  // table text at 13.5 px (measured 11-10)
   let h = 0, p = 0, prevBlank = true;  // h: drawn exactly; p: prose, wraps
   // A blank line is a 10 px paragraph gap, but not next to a code box or table: their margin is the gap.
   let gap = 0;
@@ -113,14 +142,14 @@ export function markdownHeight(text, width, spans = null) {
     }
     if (b.k === "table") {
       // A table as mdblocks.js draws it: 6 px above and below, a 1 px frame; each row 8 px padding top
-      // and bottom plus a 1 px line, as tall as its tallest cell at the colWidths widths.
+      // and bottom plus a 1 px line (none on the header), as tall as its tallest cell at the colWidths widths.
       close(); lastLevel = null;
       const rows = [b.head, ...b.rows];
       const n = Math.max(...rows.map((r) => r.length));
       const ws = colWidths(width, rows, n);
       // The paragraph gap above a table stays (unlike a code box's): as counted before the shared parser.
       gap = 0; h += 14;
-      for (const r of rows) h += 17 + 21 * Math.max(1, ...ws.map((w, c) => wrapLines(r[c] ?? "", w - 24, 13.5)));
+      for (const r of rows) h += 17 + CELL_LH * Math.max(1, ...ws.map((w, c) => cellLines(r[c] ?? "", w - 24)));
       prevBlank = true;
       continue;
     }

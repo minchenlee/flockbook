@@ -138,3 +138,27 @@ test("a user row with pictures counts the \"N images\" line under its text (4 px
     assert.equal(with2 - plain, 4 + 19, JSON.stringify(text));
   }
 });
+
+// A table whose first column is narrow and starts with long inline code (2× screenshot of a 760 px column,
+// Herdr app, 11-10): cell text 13.5 px on 22 px lines; inline code Menlo 11.8 px (7.05 px a character) with
+// about 4.5 px padding each side; a code word that does not fit breaks after its hyphen; a full-width ）
+// that does not fit goes to a line of its own. A row is 8 + 8 px padding and a 1 px line, plus its tallest
+// cell; the table 6 px above and below and a 1 px frame. Synthetic text of the same shape as the cut reply.
+const narrowFirst = [
+  "| 工具 | 現在的問題 | 新版改了什麼 |",
+  "|---|---|---|",
+  "| `kite-press`（收件的看門員） | 風箏線收不回來時只顯示「失敗」，沒有原因；Kite 的 `.spool`、舊的備用線軸都被拒 | 多三條收線規則：線軸的下載副本、倉庫資料夾裡面的子資料夾、有登記過的備用線軸。`--explain` 只看不收，會清楚列出每一項沒通過的檢查和下一步要做什麼。每次收線都會寫進同一份新的紀錄檔 `kite-moves.jsonl` |",
+  "| `kite-guard`（每 30 分鐘量一次剩餘空間） | 風太大的時候要叫 `kite-inventory` 點名，但從 10-29 起一次都沒送出 | 找到原因了：排程的工作一結束，就把背景跑的 `kite-inventory` 一起停掉。改成在前景跑，大約 20 秒。另外每 30 分鐘寫一行時間線，之後才能看出風是在什麼時候、怎麼變大的 |",
+  "| `kite-inventory`（點名 admin 清理） | 同上，通知送不出去 | 修好送出；單位改成正確的 m/s |",
+  "| `kite-deletes-read`（新增） | — | 讀收線紀錄：誰、什麼時候、收了什麼、多長 |",
+].join("\n");
+
+test("a narrow table column with long inline code is guessed at least as drawn (the cut reply)", () => {
+  // First column, 78 px inside at 760: kite- / press（收 / 件的看門員 / ） = 4 lines; kite- / guard（每 /
+  // 30 分鐘量一 / 次剩餘空間 / ） = 5; kite- / inventory / （點名 / admin 清理 / ） = 5; kite- / deletes- /
+  // read（新增 / ） = 4. The other columns take fewer lines.
+  const drawn = 6 + 6 + 2 + (16 + 22) + [4, 5, 5, 4].reduce((a, n) => a + 17 + 22 * n, 0);
+  const guess = markdownHeight(narrowFirst, 760);
+  assert.ok(guess >= drawn, `${guess} < ${drawn}`);
+  assert.ok(guess - drawn < 22, `${guess} is a line or more over ${drawn}`);
+});

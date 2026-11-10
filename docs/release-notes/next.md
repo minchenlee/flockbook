@@ -18,6 +18,8 @@ One short line: what this release is about.
 
 ### 🐛 Bug Fixes
 
+- Herdr app mod: a reply with a table shows whole when a narrow column starts with long `code` (a tool name that breaks after its hyphen). The row was guessed 3 lines short in that column and with 21 px table lines where 22 are drawn, so the end of the reply was cut off.
+
 - Mac app, phone page: a message from the phone is held back in the same two cases as in the Mac reply box: a command that opens a screen in the terminal sent alone (`/model`, `/status`), and any message while the agent's own input box already has text. The phone says why and keeps your text.
 - Herdr app mod: a Claude Code chat started with its own `CLAUDE_CONFIG_DIR` (for example a second account in `~/.claude-work`) shows its conversation. The helper looked for Claude's pid file and log only under `~/.claude`, and showed "No conversation yet".
 
