@@ -10,7 +10,7 @@ import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
-import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, bubbleWidth, bubbleTextWidth, CHIP_H, CHIP_PAD_Y, CHIP_GAP, OPEN_INDENT,
+import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, BUBBLE_GAP, IMAGES_FS, bubbleWidth, bubbleTextWidth, CHIP_H, CHIP_PAD_Y, CHIP_GAP, OPEN_INDENT,
   CALL_H, SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 import { Composer } from "./composer.js";
 import { markdownView, codeBlockAt } from "./mdblocks.js";
@@ -174,9 +174,9 @@ export class ChatView {
       case "user":
         if (row.from != null) return this.agentNote(row, t, md);
         return h_flex().w_full().justify_end().py(ROW_PAD_Y)
-          .child(v_flex().max_w(bubbleWidth(this.colWidth())).px(BUBBLE_PAD_X).py(BUBBLE_PAD_Y).gap(4).rounded(16).bg(t.raised).text_color(t.foreground)
+          .child(v_flex().max_w(bubbleWidth(this.colWidth())).px(BUBBLE_PAD_X).py(BUBBLE_PAD_Y).gap(BUBBLE_GAP).rounded(16).bg(t.raised).text_color(t.foreground)
             .child(md(row.text, bubbleTextWidth(this.colWidth())))
-            .when(Boolean(row.images), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(row.images === 1 ? "1 image" : `${row.images} images`))));
+            .when(Boolean(row.images), (el) => el.child(div().text_size(IMAGES_FS).text_color(t.muted).child(row.images === 1 ? "1 image" : `${row.images} images`))));
       case "assistant":
         return div().w_full().py(ROW_PAD_Y).text_color(t.foreground).child(md(row.text));
       case "tools": return this.tools(row, t);
@@ -245,19 +245,24 @@ export class ChatView {
     return div().h(this.height(row)).w_full().px(pad).overflow_hidden().child(this.body(row, t));
   }
 
-  // Right-click on a code box: "Copy code" for that box. Elsewhere no menu. The list gives the press
+  // Right-click on a message (the user's, the agent's, a note from another agent): "Copy message", its markdown
+  // as written; on a code box "Copy code" for that box first. Other rows: no menu. The list gives the press
   // against the row's box; the row's padding (and the first row's bar) is taken off to get the text's y.
-  codeMenu(key, e) {
+  // Copy message works whatever the selection: a drag across two text views, or a redraw while the agent
+  // writes, can leave ⌘C with nothing to copy.
+  rowMenu(key, e) {
     const rows = this.feed()?.rows ?? [];
     const i = rows.findIndex((r) => r.id === key);
     const row = rows[i], y0 = e?.local_position?.y;
-    if (!row || typeof y0 !== "number") return null;
+    if (!row || !(row.k === "assistant" || row.k === "user")) return null;
+    const items = [];
     const w = this.colWidth();
-    const at = row.k === "assistant" ? { y: y0 - ROW_PAD_Y, w }
-      : row.k === "user" && row.from == null ? { y: y0 - ROW_PAD_Y - BUBBLE_PAD_Y, w: bubbleTextWidth(w) } : null;
-    if (!at) return null;
-    const code = codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0));
-    return code === null ? null : openMenu([{ label: "Copy code", act: "copy", args: { text: code } }]);
+    const at = typeof y0 !== "number" ? null : row.k === "assistant" ? { y: y0 - ROW_PAD_Y, w }
+      : row.from == null ? { y: y0 - ROW_PAD_Y - BUBBLE_PAD_Y, w: bubbleTextWidth(w) } : null;
+    const code = at ? codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0)) : null;
+    if (code !== null) items.push({ label: "Copy code", act: "copy", args: { text: code } });
+    items.push({ label: "Copy message", act: "copy", args: { text: row.text || "" } });
+    return openMenu(items);
   }
 
   click(key, cx) {
@@ -318,7 +323,7 @@ export class ChatView {
         record("chat.rows", now() - t0, range.end - range.start);
         return out;
       }).track_scroll(this.scroll).on_item_click((key, cx) => this.click(key, cx))
-        .on_item_secondary_click((key, e) => this.codeMenu(key, e)))
+        .on_item_secondary_click((key, e) => this.rowMenu(key, e)))
       .child(Scrollbar.vertical("chat").absolute().inset_0());
     // A round ↓ that fades in while you read older messages and out when you are back at the end.
     if (n) {

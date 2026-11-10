@@ -22,8 +22,9 @@ export function showScreen(child) {
 const MOD = "mods/flockbook";
 export const icon = (name) => `${MOD}/icons/${name}.svg`;
 
-// One spinner speed everywhere (ms per turn).
-export const SPIN_MS = 600;
+// One spinner speed everywhere (ms per turn). Herdr draws a spin at about 30 frames a second: at 900 ms
+// the arc moves 13 degrees a frame (at 600 ms it was 20, and looked jerky). Herdr's own spinner turns at 900.
+export const SPIN_MS = 900;
 
 // Motion: a quick ease-out for fades and a soft spring for moves, as in the web app.
 export const FADE = { duration: 180, easing: "ease-out" };

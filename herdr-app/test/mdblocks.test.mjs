@@ -126,3 +126,12 @@ test("codeBlockAt finds the code box under a point: several boxes, a box at the 
   assert.equal(codeBlockAt(only, W, 3), null, "in the margin");
   assert.equal(codeBlockAt("no code at all", W, 5), null);
 });
+
+test("text view ids stay the same when the message grows a code box (a redraw keeps the selection)", () => {
+  const T = new Proxy({}, { get: (_t, k) => `#${k}` });
+  const ids = (text) => { const out = []; (function walk(n) { if (!n) return; if (n._a?.id) out.push(n._a.id); (n.kids ?? []).forEach(walk); })(markdownView("r1", text, T, 600)); return out; };
+  assert.deepEqual(ids("First paragraph."), ["md-r1-0"], "one block: the same id as the first of many");
+  const grown = ids("First paragraph.\n\n```\nx\n```\nMore.");
+  assert.equal(grown[0], "md-r1-0", "the first text keeps its id when a code box comes after it");
+  assert.equal(new Set(grown).size, grown.length, "ids are unique in the message");
+});

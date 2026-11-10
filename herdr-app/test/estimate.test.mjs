@@ -130,3 +130,11 @@ test("bold markers are not counted as drawn text", () => {
   const text = "**" + "粗".repeat(46) + "**";
   assert.ok(markdownHeight(text, W) < 2 * LINE, `${markdownHeight(text, W)}`);
 });
+
+test("a user row with pictures counts the \"N images\" line under its text (4 px gap, an 11.5 px line)", () => {
+  for (const text of ["hi", "", "目前還有兩個問題，使用者在地圖外面放開手指時。".repeat(4)]) {
+    const plain = rowHeight({ k: "user", text }, W), with2 = rowHeight({ k: "user", text, images: 2 }, W);
+    // gpui's line height is about 1.618 × the size: 18.6 px, counted 19.
+    assert.equal(with2 - plain, 4 + 19, JSON.stringify(text));
+  }
+});

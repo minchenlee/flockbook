@@ -36,7 +36,7 @@ export const image = (path) => { const e = mk("image"); e._a.path = path; return
 export const v_flex = () => mk("v");
 export const h_flex = () => mk("h");
 export class View {}
-export const TextView = { markdown: (_id, text) => { const e = mk("md"); e._a.text = text; return e; } };
+export const TextView = { markdown: (id, text) => { const e = mk("md"); e._a.text = text; e._a.id = id; return e; } };
 export const Scrollbar = { vertical: () => mk("sb") };
 export const Textarea = { new: () => mk("ta") };
 export const Input = { new: (state) => { const e = mk("input"); e._a.state = state; return e; } };
