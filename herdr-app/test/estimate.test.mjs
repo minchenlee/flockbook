@@ -32,8 +32,10 @@ test("line heights round like gpui's: whole px of the window, so a zoom or a tex
   assert.equal(lineHeight(13, 0.9), 19 / 0.9);
   const code = "```\n" + Array.from({ length: 113 }, (_v, i) => `line_${i} = ${i}`).join("\n") + "\n```";
   assert.ok(markdownHeight(code, W, null, 1, 0.9) >= 34 + 113 * 19 / 0.9);
-  // Small text (14 px) draws prose lines 23 px apart (22.65 rounded), not 22.75.
+  // Small text (14 px): prose lines are 22.65 px, drawn 23 on a 1× screen and 22.5 on a 2× one; 23 covers both.
   assert.equal(lineHeight(14), 23);
+  // 21.3 px is drawn 21.5 on a 2× screen: counted as 21 it would come out short.
+  assert.equal(lineHeight(21.3 / 1.618), 21.5);
   const para = "目".repeat(400);
   assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(400 / Math.floor(W / 14)) * 23);
 });

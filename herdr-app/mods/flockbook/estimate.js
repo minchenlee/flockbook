@@ -113,11 +113,16 @@ export function wrapLines(text, width, fs = 14) {
 
 // `spans`, when given, gets each code box as drawn: { top, bottom, lines } in px from the text's top
 // (the box itself, without its 6 px margin) and its source lines, for finding the box under a point.
-// A line as gpui draws it: 1.618 × the text size, rounded to a whole px of the window, so at a zoom the
-// rounding is in zoomed px. In the guesses' px (zoom 1) that is round(size × zoom × 1.618) / zoom: 26, 21
-// and 22 px for prose (16), code (13) and table text (13.5) at zoom 1 (measured), and code is 19 px at
-// zoom 0.9 (measured), not 18.9. Counted as 18.9, a 113-line code box came out 12 px short at zoom 0.9.
-export const lineHeight = (size, zoom = 1) => Math.round(size * zoom * 1.618) / zoom;
+// A line as gpui draws it: 1.618 × the text size, rounded to the screen's pixels, so at a zoom the rounding
+// is in zoomed px: whole px on a 1× screen, half px on a 2× one (measured on 2×: 26, 21 and 22 px for prose
+// (16), code (13) and table text (13.5) at zoom 1; code 19 px at zoom 0.9, not 18.9; Small code 16.5 px at
+// zoom 0.9). The scale is not known here, so the larger of the two roundings is counted: never under what
+// either screen draws, at most half a px a line over. Counted as 18.9, a 113-line code box came out 12 px
+// short at zoom 0.9.
+export function lineHeight(size, zoom = 1) {
+  const v = size * zoom * 1.618;
+  return Math.max(Math.round(v), Math.round(v * 2) / 2) / zoom;
+}
 
 // `k`: the chat's text size over the default 16 px (settings: text_size); `zoom`: Herdr's zoom. Text and its
 // line heights scale by k; padding and margins stay. Headings and list indents are counted at no less than
