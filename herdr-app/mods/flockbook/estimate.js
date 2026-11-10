@@ -6,6 +6,8 @@
 // letters are counted per character a little wide, and END_PAD px go on the end.
 // No percentage on top: on a long pasted message 8% of the height was many lines of empty space.
 import { splitBlocks, tableCells } from "./blocks.js";
+import { ROW_PAD_Y, BUBBLE_PAD_Y, bubbleTextWidth, CHIP_ROW, CHIP_GAP, OPEN_INDENT, CALL_H, CALLS_PAD,
+  SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 
 export const READ_W = 760;  // the reading column's width at most
 export const GUTTER = 24;   // each side of the column
@@ -195,21 +197,22 @@ export function colWidths(width, rows, n) {
 export const columnWidth = (paneWidth) => Math.max(240, Math.min(READ_W, (paneWidth || 800) - GUTTER * 2));
 
 // The height of a row. `open`: its tool chip shows the calls, or its note from another agent the whole text.
+// The sizes are the drawing's (metrics.js).
 export function rowHeight(row, width, open = false) {
   switch (row.k) {
     case "user":
-      if (row.from != null) return 40 + (open ? markdownHeight(row.text || "", width - 12) + 4 : 0);
-      return markdownHeight(row.text || "", Math.floor(width * 0.78) - 28) + 20 + 16;
-    case "assistant": return markdownHeight(row.text || "", width) + 16;
+      if (row.from != null) return CHIP_ROW + (open ? markdownHeight(row.text || "", width - OPEN_INDENT) + CHIP_GAP : 0);
+      return markdownHeight(row.text || "", bubbleTextWidth(width)) + 2 * BUBBLE_PAD_Y + 2 * ROW_PAD_Y;
+    case "assistant": return markdownHeight(row.text || "", width) + 2 * ROW_PAD_Y;
     case "tools": {
       const calls = (row.chips || []).reduce((n, c) => n + (c.calls || []).length, 0);
-      return 40 + (open ? calls * 26 + 8 : 0);
+      return CHIP_ROW + (open ? calls * CALL_H + CALLS_PAD : 0);
     }
-    case "sep": return 40;
-    case "footer": return 30;
-    case "status": return 34;
-    case "perm": case "question": return 44;
-    default: return 30;
+    case "sep": return SEP_H;
+    case "footer": return FOOTER_H;
+    case "status": return STATUS_H;
+    case "perm": case "question": return CARD_ROW_H;
+    default: return OTHER_H;
   }
 }
 
