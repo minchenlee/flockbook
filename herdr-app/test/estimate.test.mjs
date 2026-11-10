@@ -25,6 +25,17 @@ const reply = [
   "要不要做？要的話，我等 build-bot 修完 Shift+Enter，再接著交給它。它熟 `grid.js`，也最能避開和設定畫面的衝突，順便補上測試。",
 ].join("\n");
 
+test("lines ending in two spaces or a backslash are hard breaks: each starts a line, as drawn", () => {
+  // A report shaped like Codex's: label lines ended with two spaces, then a paragraph after a code box.
+  const lines = ["Result: **the call worked.**", "To do: none", "Open: why the earlier call failed", "Checked: one row came back", "Branch: none"];
+  const twoSpaces = lines.join("  \n");
+  assert.ok(markdownHeight(twoSpaces, W) >= lines.length * LINE, `${markdownHeight(twoSpaces, W)} < ${lines.length * LINE}`);
+  const backslash = lines.join("\\\n");
+  assert.ok(markdownHeight(backslash, W) >= lines.length * LINE, `${markdownHeight(backslash, W)} < ${lines.length * LINE}`);
+  // A soft break still joins: the same lines without the marks are one wrapped paragraph.
+  assert.ok(markdownHeight(lines.join("\n"), W) < lines.length * LINE);
+});
+
 test("a CJK reply with inline code and a list is not guessed shorter than drawn (the cut last line)", () => {
   // Drawn: 1 + (2 + 1) + 1 + 2 lines; gaps: title to list, between items, list to paragraph, paragraph to paragraph.
   const drawn = 7 * LINE + GAP + ITEM_GAP + GAP + GAP;
