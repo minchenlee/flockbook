@@ -10,6 +10,8 @@ import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
+import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, bubbleWidth, bubbleTextWidth, CHIP_H, CHIP_PAD_Y, CHIP_GAP, OPEN_INDENT,
+  CALL_H, SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 import { Composer } from "./composer.js";
 import { markdownView, codeBlockAt } from "./mdblocks.js";
 import { openMenu } from "./menu.js";
@@ -22,6 +24,12 @@ const CHECK_MS = 400;
 // Older rows load by themselves while all rows fit on screen (with FILL_PX to spare), at most AUTO_OLDER
 // times a chat is opened: a log whose last 2 MB is only tool output can hold no rows for a long way back.
 const AUTO_OLDER = 5, FILL_PX = 400;
+
+// A chat chip: a tool chip, a note from another agent, a running call. The caller adds what it shows.
+function chip(t) {
+  return h_flex().h(CHIP_H).px(10).gap(6).items_center().rounded(14).bg(t.chrome).border(1).border_color(t.border)
+    .text_size(12.5).text_color(t.muted);
+}
 
 // The chip's SF Symbols name, mapped to one of this mod's icons.
 export function chipIcon(symbol) {
@@ -165,68 +173,65 @@ export class ChatView {
     switch (row.k) {
       case "user":
         if (row.from != null) return this.agentNote(row, t, md);
-        return h_flex().w_full().justify_end().py(8)
-          .child(v_flex().max_w(Math.floor(this.colWidth() * 0.78)).px(14).py(10).gap(4).rounded(16).bg(t.raised).text_color(t.foreground)
-            .child(md(row.text, Math.floor(this.colWidth() * 0.78) - 28))
+        return h_flex().w_full().justify_end().py(ROW_PAD_Y)
+          .child(v_flex().max_w(bubbleWidth(this.colWidth())).px(BUBBLE_PAD_X).py(BUBBLE_PAD_Y).gap(4).rounded(16).bg(t.raised).text_color(t.foreground)
+            .child(md(row.text, bubbleTextWidth(this.colWidth())))
             .when(Boolean(row.images), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(row.images === 1 ? "1 image" : `${row.images} images`))));
       case "assistant":
-        return div().w_full().py(8).text_color(t.foreground).child(md(row.text));
+        return div().w_full().py(ROW_PAD_Y).text_color(t.foreground).child(md(row.text));
       case "tools": return this.tools(row, t);
       case "sep":
-        return h_flex().w_full().h(40).items_center().justify_center().text_size(11.5).text_color(t.dim).child(row.text || "");
+        return h_flex().w_full().h(SEP_H).items_center().justify_center().text_size(11.5).text_color(t.dim).child(row.text || "");
       case "footer":
-        return div().w_full().h(30).pt(2).text_size(11.5).text_color(t.dim).child(row.text || "");
+        return div().w_full().h(FOOTER_H).pt(2).text_size(11.5).text_color(t.dim).child(row.text || "");
       case "status":
-        return h_flex().w_full().h(34).items_center().justify_center().text_size(12).text_color(t.muted).child(row.text || "");
+        return h_flex().w_full().h(STATUS_H).items_center().justify_center().text_size(12).text_color(t.muted).child(row.text || "");
       case "perm": {
         // A call without a result yet. Whether it waits for an approval is the card's job (cards.js).
         const what = oneLine(row.text || row.perm?.title || row.perm?.tool) || "a tool";
         const pending = row.perm?.state === "pending";
-        return h_flex().w_full().h(44).items_center().child(h_flex().h(28).px(10).gap(6).items_center().rounded(14)
-          .bg(t.chrome).border(1).border_color(t.border).text_size(12.5).text_color(t.muted)
+        return h_flex().w_full().h(CARD_ROW_H).items_center().child(chip(t)
           .child(pending ? svg(icon("spinner")).size(11).text_color(t.working).spin(SPIN_MS) : svg(icon("check")).size(12).text_color(t.done))
           .child(div().max_w(Math.floor(this.colWidth() * 0.8)).truncate().child(pending ? `Running · ${what}` : what)));
       }
       case "question":
         return this.note(t, row.question?.state === "pending" ? "The agent asks a question" : "Question answered");
       default:
-        return div().h(30);
+        return div().h(OTHER_H);
     }
   }
 
   note(t, text) {
-    return h_flex().w_full().h(44).items_center().child(div().px(12).py(6).rounded(10).border(1).border_color(t.border)
+    return h_flex().w_full().h(CARD_ROW_H).items_center().child(div().px(12).py(6).rounded(10).border(1).border_color(t.border)
       .text_size(12.5).text_color(t.muted).truncate().child(oneLine(text)));
   }
 
   // A note from another agent: one line, "↳ name: first line", like a tool chip; open, the whole note under it.
   agentNote(row, t, md) {
     const open = this.open.has(row.id);
-    const box = v_flex().w_full().py(6).gap(4)
-      .child(h_flex().child(h_flex().h(28).px(10).gap(6).items_center().rounded(14).bg(t.chrome).border(1).border_color(t.border)
-        .text_size(12.5).text_color(t.muted)
+    const box = v_flex().w_full().py(CHIP_PAD_Y).gap(CHIP_GAP)
+      .child(h_flex().child(chip(t)
         .child(div().max_w(this.colWidth() - 40).truncate().child(`↳ ${noteSender(row.from)}: ${oneLine(row.text)}`))
         .child(div().flex_none().text_color(t.dim).child(open ? "▴" : "▾"))));
     if (!open) return box;
-    return box.child(div().pl(12).text_color(t.muted).child(md(row.text, this.colWidth() - 12)));
+    return box.child(div().pl(OPEN_INDENT).text_color(t.muted).child(md(row.text, this.colWidth() - OPEN_INDENT)));
   }
 
   tools(row, t) {
     const open = this.open.has(row.id);
     const chips = row.chips || [];
     const running = chips.some((c) => (c.calls || []).some((k) => !k.done));
-    const box = v_flex().w_full().py(6).gap(4)
+    const box = v_flex().w_full().py(CHIP_PAD_Y).gap(CHIP_GAP)
       .child(h_flex().gap(6).flex_wrap().children(chips.map((c) =>
-        h_flex().h(28).px(10).gap(6).items_center().rounded(14).bg(t.chrome).border(1).border_color(t.border)
-          .text_size(12.5).text_color(t.muted)
+        chip(t)
           .child(svg(chipIcon(c.symbol)).size(13).flex_none())
           .child(oneLine(c.text))
           .when(running, (el) => el.child(svg(icon("spinner")).size(11).text_color(t.working).spin(SPIN_MS)))
           .child(div().text_color(t.dim).child(open ? "▴" : "▾")))));
     if (!open) return box;
     const calls = chips.flatMap((c) => c.calls || []);
-    // One line a call: a row is 26 px tall (estimate.js counts it so), and clips whatever does not fit.
-    return box.child(v_flex().pl(12).gap(0).children(calls.map((k) => h_flex().h(26).overflow_hidden().gap(8).items_center().text_size(12)
+    // One line a call: a row is CALL_H tall (estimate.js counts it so), and clips whatever does not fit.
+    return box.child(v_flex().pl(OPEN_INDENT).gap(0).children(calls.map((k) => h_flex().h(CALL_H).overflow_hidden().gap(8).items_center().text_size(12)
       .child(div().flex_none().text_color(t.foreground).child(oneLine(k.name) || "tool"))
       .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(oneLine(k.summary)))
       .child(k.error ? div().flex_none().text_color(t.blocked).child("failed")
@@ -248,8 +253,8 @@ export class ChatView {
     const row = rows[i], y0 = e?.local_position?.y;
     if (!row || typeof y0 !== "number") return null;
     const w = this.colWidth();
-    const at = row.k === "assistant" ? { y: y0 - 8, w }
-      : row.k === "user" && row.from == null ? { y: y0 - 18, w: Math.floor(w * 0.78) - 28 } : null;
+    const at = row.k === "assistant" ? { y: y0 - ROW_PAD_Y, w }
+      : row.k === "user" && row.from == null ? { y: y0 - ROW_PAD_Y - BUBBLE_PAD_Y, w: bubbleTextWidth(w) } : null;
     if (!at) return null;
     const code = codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0));
     return code === null ? null : openMenu([{ label: "Copy code", act: "copy", args: { text: code } }]);
