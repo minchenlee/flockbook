@@ -1,5 +1,5 @@
 // The chat's row sizes, in px: one set for the drawing (chat.js), the row height guess (estimate.js) and
-// the right-click menu's offsets (chat.js codeMenu). Change a size here and all three follow.
+// the right-click menu's offsets (chat.js rowMenu). Change a size here and all three follow.
 // Pure (no gpui): the node tests import it as it is.
 
 // Above and below a user or assistant row's content.

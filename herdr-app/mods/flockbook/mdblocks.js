@@ -59,10 +59,11 @@ function table(id, b, t, width) {
 }
 
 // The whole text: one element. `id` keeps the TextView ids unique per row; `width` is the text's
-// width in px (tables need it).
+// width in px (tables need it). A text block's id is always md-<id>-<i>, one block or many: a message that
+// grows a code box while the agent writes keeps its first view (and the selection in it).
 export function markdownView(id, text, t, width) {
   const blocks = splitBlocks(text);
-  if (blocks.length === 1 && blocks[0].k === "md") return TextView.markdown(`md-${id}`, blocks[0].text).selectable(true);
+  if (blocks.length === 1 && blocks[0].k === "md") return TextView.markdown(`md-${id}-0`, blocks[0].text).selectable(true);
   return v_flex().w_full().children(blocks.map((b, i) =>
     b.k === "code" ? codeBox(`md-${id}-k${i}`, b, t)
       : b.k === "table" ? table(`md-${id}-t${i}`, b, t, width)

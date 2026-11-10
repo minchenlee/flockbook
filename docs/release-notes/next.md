@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Herdr app mod: right-click a message in the chat and choose "Copy message" to copy its whole text as Markdown. It works when selecting text and ⌘C copy nothing (a drag across a code box, or a reply that is still being written).
+
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
