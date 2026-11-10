@@ -376,15 +376,19 @@ The "/" commands of a Claude Code terminal, for the list above the reply box. Re
 the agent. Another agent: `commands` is empty (the mod shows no list).
 
 ```json
-{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"}]}
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":["opus","sonnet","haiku","fable","default"],"screen":true}]}
 ```
 
-- Sources, the first one with a name wins: built-ins (only `clear`, `compact` and `context`: the others open a
-  screen in the terminal that the chat cannot show); `.claude/commands/**/*.md` in the terminal's folder
+- Sources, the first one with a name wins: built-ins (the ones people use most: `add-dir`, `clear`, `compact`,
+  `config`, `context`, `effort`, `export`, `help`, `hooks`, `init`, `mcp`, `memory`, `model`, `permissions`,
+  `plugin`, `resume`, `review`, `rewind`, `status`, `usage`); `.claude/commands/**/*.md` in the terminal's folder
   (`project`), then in the user's home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`;
   not when its front matter says `user-invocable: false`); installed plugins that are not turned off
   (`enabledPlugins`), their commands and skills as `<plugin>:<name>` (`plugin`).
 - `description`: the front matter's `description`, else the file's first line; at most 120 characters.
+- Built-ins only, each when it says something: `hint`, what may follow the name (`<model>`, `[file]`); `args`, the
+  values the mod offers after `/<name> ` (`model`, `effort`; a fixed list in the helper); `screen: true`, sent bare
+  it opens a screen in the terminal (a picker or a dialog: the chat cannot show it, the owner answers it there).
 - Sorted by name; at most 500. A name has only letters, digits and `-_.:`.
 - The mod sends the full name (`send --text "/deploy"`): Claude Code's own "/" menu takes the Enter for a part of a
   name and runs its first match.
