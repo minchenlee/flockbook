@@ -12,6 +12,11 @@ export const BUBBLE_PAD_Y = 10;
 // The bubble's outer width and its text's width, for a column `width` px wide.
 export const bubbleWidth = (width) => Math.floor(width * BUBBLE_W);
 export const bubbleTextWidth = (width) => bubbleWidth(width) - 2 * BUBBLE_PAD_X;
+// Under the text, BUBBLE_GAP below it: "2 images" at IMAGES_FS px, one line (gpui's line height is about 1.618 ×
+// the size: 18.6 px, counted high).
+export const BUBBLE_GAP = 4;
+export const IMAGES_FS = 11.5;
+export const IMAGES_LINE_H = Math.ceil(IMAGES_FS * 1.618);   // 19
 
 // A row of chips (tool calls, a note from another agent): the chip and the row's padding above and below.
 export const CHIP_H = 28;

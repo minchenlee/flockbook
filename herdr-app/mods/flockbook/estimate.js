@@ -6,7 +6,7 @@
 // letters are counted per character a little wide, and END_PAD px go on the end.
 // No percentage on top: on a long pasted message 8% of the height was many lines of empty space.
 import { splitBlocks, tableCells } from "./blocks.js";
-import { ROW_PAD_Y, BUBBLE_PAD_Y, bubbleTextWidth, CHIP_ROW, CHIP_GAP, OPEN_INDENT, CALL_H, CALLS_PAD,
+import { ROW_PAD_Y, BUBBLE_PAD_Y, bubbleTextWidth, BUBBLE_GAP, IMAGES_LINE_H, CHIP_ROW, CHIP_GAP, OPEN_INDENT, CALL_H, CALLS_PAD,
   SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 
 export const READ_W = 760;  // the reading column's width at most
@@ -202,7 +202,8 @@ export function rowHeight(row, width, open = false) {
   switch (row.k) {
     case "user":
       if (row.from != null) return CHIP_ROW + (open ? markdownHeight(row.text || "", width - OPEN_INDENT) + CHIP_GAP : 0);
-      return markdownHeight(row.text || "", bubbleTextWidth(width)) + 2 * BUBBLE_PAD_Y + 2 * ROW_PAD_Y;
+      return markdownHeight(row.text || "", bubbleTextWidth(width)) + (row.images ? BUBBLE_GAP + IMAGES_LINE_H : 0)
+        + 2 * BUBBLE_PAD_Y + 2 * ROW_PAD_Y;
     case "assistant": return markdownHeight(row.text || "", width) + 2 * ROW_PAD_Y;
     case "tools": {
       const calls = (row.chips || []).reduce((n, c) => n + (c.calls || []).length, 0);

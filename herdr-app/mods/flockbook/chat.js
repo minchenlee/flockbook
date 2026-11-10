@@ -10,7 +10,7 @@ import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
-import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, bubbleWidth, bubbleTextWidth, CHIP_H, CHIP_PAD_Y, CHIP_GAP, OPEN_INDENT,
+import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, BUBBLE_GAP, IMAGES_FS, bubbleWidth, bubbleTextWidth, CHIP_H, CHIP_PAD_Y, CHIP_GAP, OPEN_INDENT,
   CALL_H, SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 import { Composer } from "./composer.js";
 import { markdownView, codeBlockAt } from "./mdblocks.js";
@@ -174,9 +174,9 @@ export class ChatView {
       case "user":
         if (row.from != null) return this.agentNote(row, t, md);
         return h_flex().w_full().justify_end().py(ROW_PAD_Y)
-          .child(v_flex().max_w(bubbleWidth(this.colWidth())).px(BUBBLE_PAD_X).py(BUBBLE_PAD_Y).gap(4).rounded(16).bg(t.raised).text_color(t.foreground)
+          .child(v_flex().max_w(bubbleWidth(this.colWidth())).px(BUBBLE_PAD_X).py(BUBBLE_PAD_Y).gap(BUBBLE_GAP).rounded(16).bg(t.raised).text_color(t.foreground)
             .child(md(row.text, bubbleTextWidth(this.colWidth())))
-            .when(Boolean(row.images), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(row.images === 1 ? "1 image" : `${row.images} images`))));
+            .when(Boolean(row.images), (el) => el.child(div().text_size(IMAGES_FS).text_color(t.muted).child(row.images === 1 ? "1 image" : `${row.images} images`))));
       case "assistant":
         return div().w_full().py(ROW_PAD_Y).text_color(t.foreground).child(md(row.text));
       case "tools": return this.tools(row, t);

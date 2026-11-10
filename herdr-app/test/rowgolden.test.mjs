@@ -22,7 +22,8 @@ const MARKDOWN = {
 
 // rowHeight at WIDTHS.
 const ROW = {
-  "user": [222, 326], "user short": [68, 68], "user images": [68, 68], "user only images": [36, 36],
+  // The image rows were 68 and 36: the "N images" line under the text was not counted (fix/user-image-row).
+  "user": [222, 326], "user short": [68, 68], "user images": [91, 91], "user only images": [59, 59],
   "note": [40, 40], "note open": [148, 226], "assistant": [150, 150], "assistant table": [144, 165],
   "tools": [40, 40], "tools open": [126, 126], "sep": [40, 40], "footer": [30, 30], "status": [34, 34],
   "perm": [44, 44], "question": [44, 44], "other": [30, 30],
