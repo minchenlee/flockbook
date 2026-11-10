@@ -22,4 +22,6 @@ One short line: what this release is about.
 
 ### ⚙️ Changes
 
+- Herdr app mod: a "/" command that opens a menu or a screen in the terminal is not sent alone. `/model` stays in the box with a note: add a value, like `/model sonnet`. Commands that need the terminal and take no value (`/status`, `/config`, `/permissions` …) are no longer in the "/" list. The phone page refuses them the same way.
+
 - Herdr app mod: the "working" spinner turns more smoothly: a short arc over a faint ring, one turn in 0.9 s, like Herdr's own.

@@ -122,6 +122,20 @@ export function argQuery(text) {
   return m ? { name: m[1], query: m[2] } : null;
 }
 
+// A screen command sent bare ("/model", spaces trimmed) opens a screen in the terminal the chat cannot show: why it is
+// not sent, or null. `list`: the agent's commands (a listed screen takes a value); `screens`: the names the helper
+// left out (they take none). The helper's `send` checks the same and builds the same text (commands.rs).
+export function screenNote(list, screens, text) {
+  const m = /^\/(\S+)$/.exec(String(text ?? "").trim());
+  if (!m) return null;
+  const name = m[1];
+  if ((screens ?? []).includes(name)) return `/${name} opens a screen in the terminal. Use it there.`;
+  const c = (list ?? []).find((x) => x.name === name && x.screen);
+  if (!c) return null;
+  const example = (Array.isArray(c.args) && c.args.length ? String(c.args[0]) : "") || c.hint || "";
+  return `/${name} opens a menu in the terminal. Add a value, like /${name} ${example}.`;
+}
+
 // The first shown row so that `pick` is shown, from the window's last top. Keeps the window still while it can.
 export function windowTop(top, pick, n, rows = SLASH_ROWS) {
   let t = Math.max(0, Math.min(top, Math.max(0, n - rows)));
@@ -228,8 +242,10 @@ export class Composer {
     try {
       if (!(await sidecar.hasCommand("commands"))) return;
       const r = await sidecar.commands(a);
-      const list = r.error ? had?.list ?? [] : (r.lines.find((l) => l.type === "commands")?.commands ?? []);
-      this.cmds.set(a, { at: Date.now(), list });
+      const line = r.error ? null : r.lines.find((l) => l.type === "commands");
+      const list = r.error ? had?.list ?? [] : (line?.commands ?? []);
+      const screens = r.error ? had?.screens ?? [] : (line?.screens ?? []);
+      this.cmds.set(a, { at: Date.now(), list, screens });
       cx.notify();
     } finally { this.cmdsBusy = false; }
   }
@@ -337,6 +353,10 @@ export class Composer {
     const now = b.input.value();
     const text = withoutEnter(now, now === this.typed[1] ? this.typed[0] : this.typed[1]).replace(/\s+$/, "");
     if (!text.trim() && !b.files.length) { b.setText(""); return; }
+    // A screen command alone ("/model", "/status"): not sent; the text stays for a value to be added.
+    const had = this.cmds.get(a);
+    const blocked = b.files.length ? null : screenNote(had?.list, had?.screens, text);
+    if (blocked) { b.setText(text); this.note = { text: blocked, bad: true }; cx.notify(); return; }
     // The list shows and the name is not whole yet: Enter completes it (a part of a name would run another command).
     const s = text !== this.slashClosed ? this.slashFor(text) : null;
     if (s && !s.items.some((c) => c.name === s.query)) return this.complete(s, s.items[s.pick], cx);
@@ -374,8 +394,8 @@ export class Composer {
       .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(s.kind === "arg" ? c.name : `/${c.name}`))
       .when(Boolean(c.hint), (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child(c.hint)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(c.description || ""))
-      // Sent bare, it opens a screen in the terminal (a picker, settings): answer it there.
-      .when(Boolean(c.screen), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("opens a screen")));
+      // Sent bare, it opens a screen in the terminal (a picker, settings): it goes out only with a value.
+      .when(Boolean(c.screen), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("needs a value")));
     const more = s && s.items.length > SLASH_ROWS
       ? div().id("slash-more").w_full().px(10).pt(2).text_size(11).text_color(t.dim)
         .child(`${s.top + 1}–${s.top + shown.length} of ${s.items.length}`)

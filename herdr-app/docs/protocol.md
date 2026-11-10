@@ -376,13 +376,12 @@ The "/" commands of an agent's terminal, for the list above the reply box: Claud
 files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
 
 ```json
-{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":["opus","sonnet","haiku","fable","default"],"screen":true}]}
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":["opus","sonnet","haiku","fable","default"],"screen":true}],"screens":["config","help","hooks","mcp","memory","permissions","plugin","rewind","status","usage"]}
 ```
 
 - Sources per agent (`agent`), the first one with a name wins:
-  - `claude`: built-ins (the ones people use most: `add-dir`, `clear`, `compact`, `config`, `context`, `effort`,
-    `export`, `help`, `hooks`, `init`, `mcp`, `memory`, `model`, `permissions`, `plugin`, `resume`, `review`,
-    `rewind`, `status`, `usage`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
+  - `claude`: built-ins (the ones people use most that the chat can send: `add-dir`, `clear`, `compact`, `context`,
+    `effort`, `export`, `init`, `model`, `resume`, `review`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
     home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`; not when its front matter says
     `user-invocable: false`); installed plugins that are not turned off (`enabledPlugins`), their commands and
     skills as `<plugin>:<name>` (`plugin`).
@@ -398,7 +397,14 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
 - Each when it says something: `hint`, what may follow the name (`<model>`, `[file]`; for a file, its front matter's
   `argument-hint`); built-ins only: `args`, the values the mod offers after `/<name> ` (Claude Code's `model` and
   `effort`, pi's `thinking`, agy's `effort`; a fixed list in the helper); `screen: true`, sent bare
-  it opens a screen in the terminal (a picker or a dialog: the chat cannot show it, the owner answers it there).
+  it opens a screen in the terminal (a picker or a dialog: the chat cannot show it), so it goes out only with a
+  value (the mod's row says "needs a value").
+- `screens`: the built-ins that open a screen and take no value (`/status`, `/config`). They can never be sent from
+  the chat, so they are not in `commands`; their names stay the built-ins' (a file of the same name is not listed).
+- A screen command sent bare (the text is exactly `/<name>`, spaces trimmed, no files) is not sent: the mod keeps the
+  text and shows a note ("/model opens a menu in the terminal. Add a value, like /model opus."; for a name in
+  `screens`: "/status opens a screen in the terminal. Use it there."), and `send` refuses it with `opens_screen`
+  (for the phone page and older mods). `/model sonnet` goes out.
 - Sorted by name; at most 500. A name has only letters, digits and `-_.:`.
 - The mod sends the full name (`send --text "/deploy"`): Claude Code's own "/" menu takes the Enter for a part of a
   name and runs its first match, and pi sends a part of a name to the model as a message. A full name, with or
@@ -419,6 +425,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
 | `no-identity` | Flockbook cannot tell the agent from another program in that terminal (hc: no process, for example under a wrapper script). Nothing was sent; a retry does not help. | Keeps the text or the card, shows `message`. |
 | `answered` | `approve` only: this prompt was answered less than 60 s ago (or its key may still arrive) and is still on screen. Nothing was sent. | Shows the note; no buttons. |
 | `busy` | `approve` only: another press of a prompt in this terminal (another view, or a double key) was being handled at the same moment. Nothing was sent and nothing is decided. | Keeps the card and its buttons, shows `message` (press again). |
+| `opens_screen` | `send` only: the text is a screen command alone (`/model`, `/status`), and its screen would open in the terminal. Nothing was sent. `message` says what to add. | Keeps the text, shows `message`. |
 | `failed` | It did not go out. `message` says why. | Keeps the text or the card, shows `message`. |
 
 `approve` reads the screen again right before the keys and sends only while the box on screen is

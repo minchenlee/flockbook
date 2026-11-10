@@ -4,7 +4,7 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { Composer, tagsFor, shortPath, quoted, withFiles, slashQuery, matchCommands } from "../mods/flockbook/composer.js";
+import { Composer, tagsFor, shortPath, quoted, withFiles, slashQuery, matchCommands, screenNote } from "../mods/flockbook/composer.js";
 import { ChatView } from "../mods/flockbook/chat.js";
 import { forgetCommands } from "../mods/flockbook/sidecar.js";
 
@@ -294,12 +294,12 @@ const CMDS = [
   { name: "deploy", description: "Deploy the app", source: "project" },
 ];
 const T = new Proxy({}, { get: (_t, k) => `#${k}` });
-function slashRig({ hasCommands = true, list = CMDS } = {}) {
+function slashRig({ hasCommands = true, list = CMDS, screens = [] } = {}) {
   const asked = [];
   forgetCommands();
   fake.exec = (cmd, args) => {
     if (args[0] === "version") return jl(header("version"), { type: "version", commands: ["version", "send", ...(hasCommands ? ["commands"] : [])] }, end);
-    if (args[0] === "commands") { asked.push(args); return jl(header("commands"), { type: "commands", agent: "claude", commands: list }, end); }
+    if (args[0] === "commands") { asked.push(args); return jl(header("commands"), { type: "commands", agent: "claude", commands: list, screens }, end); }
     if (args[0] === "send") { sent.push(args); return jl(header("send"), { type: "done", result: "sent" }, end); }
     return jl(header(args[0]), end);
   };
@@ -439,12 +439,40 @@ const BUILT = [
   { name: "model", description: "Set the AI model", source: "builtin", hint: "<model>", args: ["opus", "sonnet", "haiku", "fable", "default"], screen: true },
 ];
 
-test("a built-in shows its argument hint, and a mark when it opens a screen in the terminal sent bare", async () => {
+test("a built-in shows its argument hint, and \"needs a value\" when sent bare it opens a screen in the terminal", async () => {
   const r = slashRig({ list: BUILT });
   await r.type("/");
   const rows = r.rows();
-  assert.match(rows[2], /\/model\s*<model>.*Set the AI model.*opens a screen/);
-  assert.doesNotMatch(rows[0], /opens a screen/);
+  assert.match(rows[2], /\/model\s*<model>.*Set the AI model.*needs a value/);
+  assert.doesNotMatch(rows[0], /needs a value/);
+});
+
+test("screenNote: a screen command alone, with or without a value it takes; anything else is null", () => {
+  const screens = ["status", "config"];
+  assert.equal(screenNote(BUILT, screens, "/model"), "/model opens a menu in the terminal. Add a value, like /model opus.");
+  assert.equal(screenNote(BUILT, screens, "  /status\n"), "/status opens a screen in the terminal. Use it there.");
+  const hintOnly = [{ name: "resume", hint: "[session]", screen: true }];
+  assert.equal(screenNote(hintOnly, [], "/resume"), "/resume opens a menu in the terminal. Add a value, like /resume [session].");
+  for (const t of ["/model sonnet", "/status now", "/clear", "/mode", "model", "hi /model", "/", ""]) assert.equal(screenNote(BUILT, screens, t), null, JSON.stringify(t));
+  assert.equal(screenNote(undefined, undefined, "/model"), null, "no list yet: the helper's send checks");
+});
+
+test("Enter on a bare screen command sends nothing, keeps the text and says why; with a value it goes out", async () => {
+  const r = slashRig({ list: [...BUILT, { name: "statusline", description: "Set up the status line", source: "user" }], screens: ["status"] });
+  const before = sent.length;
+  const enter = async (v) => { await r.type(v); r.b.input.set_value(`${v}\n`); r.b.input._h.submit({}, r.cx); await r.cx.settle(); };
+  await enter("/model");
+  assert.equal(sent.length, before, "nothing sent");
+  assert.equal(r.b.input.value(), "/model", "the text stays for a value");
+  assert.match(textOf(byId(r.view(), "send-note")), /\/model opens a menu in the terminal\. Add a value, like \/model opus\./);
+  await enter("/status");
+  assert.equal(sent.length, before, "a left-out screen is not completed to another name, and not sent");
+  assert.equal(r.b.input.value(), "/status");
+  assert.match(textOf(byId(r.view(), "send-note")), /\/status opens a screen in the terminal\. Use it there\./);
+  await enter("/model sonnet");
+  assert.equal(sent.at(-1)[sent.at(-1).indexOf("--text") + 1], "/model sonnet");
+  await enter("/clear");
+  assert.equal(sent.at(-1)[sent.at(-1).indexOf("--text") + 1], "/clear");
 });
 
 test("after \"/model \" the list offers the model names; Tab or Enter completes one, Enter on a whole one sends it", async () => {
