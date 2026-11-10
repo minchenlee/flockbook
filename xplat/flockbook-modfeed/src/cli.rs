@@ -162,10 +162,11 @@ pub fn run(argv: &[String]) -> String {
             match cmd.as_str() {
                 "commands" => {
                     // Per agent kind (Claude Code, Codex, pi, agy); other agents get an empty list. Files only, in the
-                    // terminal's folder and the user's home (HOME); nothing goes to the agent.
+                    // terminal's folder and the user's home (HOME); nothing goes to the agent. `screens`: the
+                    // built-ins left out because sent bare they open a screen and they take no value.
                     let home = std::env::var_os("HOME").map(PathBuf::from);
                     let list = home.map(|h| crate::commands::list(&kind, &h, Path::new(&found.pane.cwd))).unwrap_or_default();
-                    r.out.emit_value(json!({"type": "commands", "agent": kind, "commands": list}));
+                    r.out.emit_value(json!({"type": "commands", "agent": kind, "commands": list, "screens": crate::commands::screens(&kind)}));
                     return r.finish(true);
                 }
                 "status" => {

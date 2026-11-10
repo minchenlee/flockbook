@@ -86,8 +86,31 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     let o = run_home(&["commands", "--terminal", "t2"]);
     assert_eq!(o[1]["agent"], "codex");
     let codex: Vec<&str> = o[1]["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert!(codex.contains(&"model") && codex.contains(&"compact") && !codex.contains(&"deploy"), "Codex: its built-ins, not Claude's files: {codex:?}");
+    assert!(codex.contains(&"compact") && !codex.contains(&"deploy"), "Codex: its built-ins, not Claude's files: {codex:?}");
+    assert!(!codex.contains(&"model"), "Codex's /model takes no value: it can never be sent from the chat");
+    assert_eq!(o[1]["screens"], serde_json::json!(["config", "model", "permissions", "resume", "skills"]));
+    assert!(v[1]["screens"].as_array().unwrap().contains(&serde_json::json!("status")));
     assert_eq!(run_home(&["commands", "--terminal", "t3"])[1]["code"], "not-agent");
     assert_eq!(run_home(&["commands"])[1]["message"], "commands needs --terminal <addr>");
     assert!(fake.keys().is_empty(), "commands sends no keys");
+}
+
+/// `send` of a screen command sent bare ("/model", "/status"): refused with `opens_screen`, nothing goes to the
+/// agent. With a value, or for an agent whose command prints in the chat, it goes out.
+#[test]
+fn send_refuses_a_bare_screen_command() {
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle"), common::terminal("t2", &["codex"], Some(77), Some("idle"), None)]);
+    let send = |t: &str, text: &str| -> Value {
+        let v = run(&fake.path, &["send", "--terminal", t, "--text", text]);
+        v.into_iter().find(|l| l["type"] == "done").unwrap()
+    };
+    let d = send("t1", " /model ");
+    assert_eq!(d["result"], "opens_screen");
+    assert_eq!(d["message"], "/model opens a menu in the terminal. Add a value, like /model opus.");
+    assert_eq!(send("t1", "/status")["message"], "/status opens a screen in the terminal. Use it there.");
+    assert_eq!(send("t2", "/model")["result"], "opens_screen");
+    assert!(fake.calls("terminal.send").is_empty(), "nothing was typed");
+    assert_ne!(send("t1", "/model sonnet")["result"], "opens_screen");
+    assert_ne!(send("t2", "/status")["result"], "opens_screen", "Codex's /status prints in the chat");
 }

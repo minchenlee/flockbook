@@ -54,7 +54,8 @@ impl Card {
 pub struct Done {
     #[serde(rename = "type")]
     pub t: &'static str,
-    /// "sent", "unconfirmed", "changed", "no-identity", "answered", "failed".
+    /// "sent", "unconfirmed", "changed", "no-identity", "answered", "failed", "opens_screen" (`send`: a screen
+    /// command sent bare; nothing was sent).
     pub result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -317,6 +318,13 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     if let Some(p) = expect_path {
         if Some(p.to_string()) != log.map(|l| l.to_string_lossy().into_owned()) {
             return Done::new("changed", Some("another agent or conversation is in this pane now; nothing was sent"));
+        }
+    }
+    // A screen command sent bare ("/model"): the chat cannot show its screen, so it is not sent (the mod checks too;
+    // this covers the phone page and other callers). With files the text is not bare.
+    if files.is_empty() {
+        if let Some(note) = pane.agent.as_ref().and_then(|a| crate::commands::opens_screen(&a.kind, text)) {
+            return Done::new("opens_screen", Some(&note));
         }
     }
     if !keygate::passes(client, Some(&gate(pane)), &pane.id, None, None) {

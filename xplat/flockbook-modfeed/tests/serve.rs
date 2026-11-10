@@ -254,6 +254,12 @@ fn socket_reads_and_keys_go_with_post() {
     let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p4", "type": "send", "pane": id, "text": "x\u{1b}[2J", "agent": "claude"}));
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()[0]["error"]["code"], "badRequest");
     assert_eq!(fake.calls("terminal.send").len(), sends);
+    // A screen command sent bare opens a screen the phone cannot show: refused, with the helper's reason.
+    let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p5", "type": "send", "pane": id, "text": "/model", "agent": "claude"}));
+    let r: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(r[0]["ok"], false, "{r}");
+    assert!(r[0]["error"]["message"].as_str().unwrap().starts_with("/model opens a menu in the terminal"), "{r}");
+    assert_eq!(fake.calls("terminal.send").len(), sends);
 }
 
 #[test]
