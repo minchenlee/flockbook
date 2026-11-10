@@ -367,7 +367,7 @@ try await client.moveTab("w5:t1", toIndex: 2)   // final 0-based position among 
 
 ```swift
 switch store.conversationState(for: pane.agent?.sessionId) {
-case .loading: ProgressView()                    // first read still running
+case .loading: Spinner()                         // first read still running
 case .ready:   items.isEmpty ? "No messages yet" : list
 case .missing: "No conversation log"             // no file for this session id (yet)
 case .failed(let why): Text(why)                 // file exists but cannot be opened
