@@ -188,6 +188,22 @@ extension ContentTests {
         step("with a value it goes out (\(r))", r == .sent && typed.last == "/model sonnet")
         r = await model.deliverResult("/model", pane: pane.id, kind: "cursor-agent")
         step("an agent with no list: sent as before (\(r))", r == .sent && typed.last == "/model")
+        // A phone's send (the hub's backend, `AppHubBackend.send`) has the same two checks and gives the note back: the
+        // hub answers "failed" with it, as the helper's server does.
+        let hub = AppHubBackend(model: model)
+        let before = typed.count
+        screen = claude("❯\u{a0}/sta")
+        var viaHub = await hub.send(pane: pane.id, text: "from the phone", images: [], agent: agent, allowed: { true })
+        step("phone: text in the agent's box: held back with the note, nothing typed (\(viaHub))", viaHub == .refused(AgentBox.notEmpty) && typed.count == before)
+        screen = claude("❯\u{a0}Try \"fix typecheck errors\"")
+        let modelNote = SlashCommands.opensScreen("claude", text: "/model", home: home)
+        viaHub = await hub.send(pane: pane.id, text: "/model", images: [], agent: agent, allowed: { true })
+        step("phone: a bare screen command: held back with its note (\(viaHub))", modelNote != nil && viaHub == .refused(modelNote ?? "") && typed.count == before)
+        viaHub = await hub.send(pane: pane.id, text: "/model sonnet", images: [], agent: agent, allowed: { true })
+        step("phone: with a value, and an empty box: sent (\(viaHub))", viaHub == .sent && typed.count == before + 1 && typed.last == "/model sonnet")
+        var asked = 0
+        viaHub = await hub.send(pane: pane.id, text: "/status", images: [], agent: agent, allowed: { asked += 1; return false })
+        step("phone: a device with no input is told nothing about the box or the command (\(viaHub), asked \(asked))", viaHub == .failed && asked > 0 && typed.count == before + 1)
         step("the preview pane's agent is on this Mac", model.agentIsLocal(pane: pane.id) && model.slashHome(pane: pane.id) == home)
         step("a pane on another machine reads no local files", !model.agentIsLocal(pane: "hc:far/t1") && model.slashHome(pane: "hc:far/t1") == SlashCommands.noFiles)
 

@@ -259,6 +259,15 @@ import Foundation
         b.sendResult = .changed
         let r2 = await s.receive(msg(#"{"v":1,"type":"send","id":"c2","pane":"w1:p1","text":"hi"}"#))
         check(code(r2) == .promptOpen, "review2: pane changed before the keys -> promptOpen (\(String(describing: code(r2))))")
+        // The backend held the message back (a screen command alone, the agent's box has text): failed, and the reply's
+        // message is the backend's note, word for word.
+        for (n, note) in [AgentBox.notEmpty, "/status opens a screen in the terminal. Use it there."].enumerated() {
+            b.sendResult = .refused(note)
+            let r = await s.receive(msg(#"{"v":1,"type":"send","id":"h\#(n)","pane":"w1:p1","text":"hi"}"#))
+            let said: String? = if case .reply(let reply)? = r.last { reply.error?.message } else { nil }
+            check(code(r) == .failed && said == note, "held back by the backend -> failed with its note (\(String(describing: code(r))), \(said ?? "nil"))")
+        }
+        b.sendResult = .sent
 
         // On the wire: a fresh snapshot and screen right before the keys.
         let fake = FakeHerdr(path: NSTemporaryDirectory() + "hkrr-\(getpid()).sock")

@@ -40,6 +40,11 @@ import Foundation
         // The pane's lock for the whole send: a pull (Mac or phone) never runs in between.
         guard model.claim(id) else { return .changed }
         defer { model.release(id) }
+        let message = ([text] + images.map(ComposerHandle.quoted)).filter { !$0.isEmpty }.joined(separator: " ")
+        // The composer's two checks (`AppModel.sendRefusal`): a screen command alone, and text already in the agent's
+        // box. Nothing is sent; the device shows the note and keeps its text.
+        if let why = await model.sendRefusal(message, pane: id, kind: agent.kind) { return .refused(why) }
+        guard may() else { return .failed }
         if let hook = model.sendHook { return await hook(id, text) ? .sent : .failed }
         guard let reader = model.screen(paneId: id) else { return .failed }
         // herdr has no compare-and-send: this read and the keys are two calls, so a small window stays.
@@ -48,7 +53,6 @@ import Foundation
         // Every image must still be a file of ours; else nothing is sent (it would go as plain text).
         guard images.allSatisfy({ ImagePaste.ownFile($0.path) }) else { return .failed }
         model.noteSent(id)
-        let message = ([text] + images.map(ComposerHandle.quoted)).filter { !$0.isEmpty }.joined(separator: " ")
         if let hc = reader as? HCClient {
             // hc types the whole message in one `terminal.send`: files go first (another machine: a call each), then
             // the gate once, right before the text. Unconfirmed (no answer in time) counts as sent: the core may still
