@@ -30,6 +30,8 @@ One short line: what this release is about.
 
 ### ⚙️ Changes
 
+- Herdr app mod: the tab bar and the status tags above the reply box no longer draw a thick scrollbar over themselves. They still scroll sideways when they do not fit (trackpad, or the wheel).
+
 - Mac app: one spinner everywhere, the same as the Herdr app mod's: a short arc that turns over a faint ring, 0.9 s a turn. The working mark of an agent keeps its blue; the places that wait (loading a conversation, earlier messages, a running tool, a queue pull, a question being sent, a machine test) show it in gray in place of the system spinner.
 
 - Herdr app mod: after `/model ` the "/" list offers each agent's real models with their names: Claude Code's full ids (`claude-opus-5-5` "Opus 5.5", then the aliases), Codex's models, pi's models of the providers it has a key for (`provider/model`), and agy's. Type any part of a name ("sonnet", "flash") to find one. Codex's `/model` is back in the list.

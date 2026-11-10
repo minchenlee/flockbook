@@ -534,3 +534,11 @@ test("/model lists full ids with their labels; a part completes; the note's exam
   assert.equal(screenNote(LABELED, [], "/model"), "/model opens a menu in the terminal. Add a value, like /model claude-opus-5-5.");
 });
 
+
+test("the status tags row scrolls sideways with no scrollbar", async () => {
+  const cx = fakeCx(); const c = new Composer(cx);
+  c.box(fake.agents[0]);
+  await c.pollStatus(cx);
+  const row = byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "tags");
+  assert.ok("overflow_x_scroll" in row._a && !("overflow_x_scrollbar" in row._a));
+});
