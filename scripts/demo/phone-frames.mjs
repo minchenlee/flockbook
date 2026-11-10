@@ -1,6 +1,6 @@
 // The phone slides for the README and the website: phone stills (scripts/demo/phone-stills.mjs) in plain phone
 // frames on a transparent 2560x1704 canvas, the shape of the Mac stills.
-//   node scripts/demo/phone-frames.mjs <phone-stills-dir> [out-dir]   -> <out>/phone-*.png, push-*.png
+//   node scripts/demo/phone-frames.mjs <phone-stills-dir> [out-dir]   -> <out>/phone-*.png, push-*.png, lock-*.png
 // phone: the list of agents and a conversation with pictures. push: a lock screen with the notifications the hub
 // sends (title "Needs you · <agent title>", body "<agent> · <workspace> · <tab>", as PushNotice.agent words them),
 // next to the list they open.
@@ -77,6 +77,12 @@ for (const look of ['light', 'dark']) {
 		await p.waitForLoadState('load');
 		await p.evaluate(() => window.ready);
 		await p.screenshot({ path: join(out, `${name}-${look}.png`), omitBackground: true });
+		if (name === 'push') {
+			// The lock screen alone, square and with no island, for a mockup tool that draws its own phone.
+			await p.evaluate(() => { const s = document.querySelector('.screen'); s.style.borderRadius = '0'; s.querySelector('.island').remove(); });
+			await p.locator('.screen').first().screenshot({ path: join(out, `lock-${look}.png`) });
+			console.log(`lock-${look}.png`);
+		}
 		await p.close();
 		console.log(`${name}-${look}.png`);
 	}

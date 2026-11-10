@@ -1,7 +1,9 @@
 #!/bin/sh
 # Desktop stills of the Herdr mod on the herdr-core demo (scripts/demo-hc.sh seed), for "plan A" of the Threads assets.
 # The person quits their own Herdr and opens the demo one themselves:
-#   HC_SESSION=flockbook-demo HERDR_APP_HOME=<demo home>/.config/herdr-app herdr-app
+#   HOME=<demo home> HC_SESSION=flockbook-demo HERDR_APP_HOME=<demo home>/.config/herdr-app herdr-app
+# HOME too: hc finds the core under HOME, and the mod finds the agents' logs there. Without it the window starts an
+# empty core of the same name under your own home.
 # (install the mod there first: sh herdr-app/install-isolated.sh <demo home>/.config/herdr-app <flockbook-modfeed>).
 # This script never opens a window, never moves the mouse and never types: it only talks to the window whose home is
 # the demo's, with `herdr-app do` and `herdr-app shot`. Your own window (~/.config/herdr-app) is never reached.
@@ -38,17 +40,24 @@ if not names or other:
     sys.exit("desktop-shots-hc: the window shows spaces that are not the demo: " + ", ".join(other or ["(none)"]))
 '
 }
-address() {
-    demo hc ls --json | python3 -c 'import json, sys
-t = [t["address"] for t in json.load(sys.stdin)["terminals"] if t["name"] == sys.argv[1]]
-print(t[0] if t else "")' "$1"
+# "<space id> <tab id> <pane id>" of a demo agent, from the window's own list.
+place() {
+    demo herdr-app ls | python3 -c 'import json, sys
+for s in json.load(sys.stdin)["spaces"]:
+    for t in s["tabs"]:
+        for p in t["terminals"]:
+            if p["name"] == sys.argv[1]: print(s["id"], t["id"], p["pane"]); sys.exit()' "$1"
 }
 shot() {
     name=$1 agent=${2:-}
     if [ -n "$agent" ]; then
-        a=$(address "$agent")
-        [ -n "$a" ] || { echo "desktop-shots-hc: no demo agent $agent" >&2; exit 1; }
-        demo herdr-app do agent.focus --terminal "$a" >/dev/null
+        set -- $(place "$agent")
+        [ $# -eq 3 ] || { echo "desktop-shots-hc: no demo agent $agent in the window" >&2; exit 1; }
+        # Space, tab, then pane: the Flockbook layout shows the focused pane of the shown tab (agent.focus alone
+        # does not change what it shows).
+        demo herdr-app do space.select --id "$1" >/dev/null
+        demo herdr-app do tab.select --id "$2" >/dev/null
+        demo herdr-app do pane.focus --pane "$3" >/dev/null
         sleep 2
     fi
     mkdir -p "$out"
@@ -65,5 +74,5 @@ all)
     shot approval harbor-deploy-ops
     shot done meadow-card-dev
     ;;
-*) sed -n 2,13p "$0" >&2; exit 2 ;;
+*) sed -n 2,15p "$0" >&2; exit 2 ;;
 esac
