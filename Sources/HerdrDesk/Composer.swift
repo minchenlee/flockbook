@@ -15,7 +15,12 @@ struct ComposerTextView: NSViewRepresentable {
     var onDropFiles: ([URL]) -> Void = { _ in }
     /// A file drag is over the text (the composer shows its drop outline).
     var onDropTarget: (Bool) -> Void = { _ in }
-    var onSubmit: () -> Void
+    /// Return. False: the text was not taken (a "/" name was completed, or a bare screen command was held back), so
+    /// it stays in the field.
+    var onSubmit: () -> Bool
+    /// ↑ ↓ Tab Esc while the "/" list may show. False: no list took the key, so it is the text's own (the cursor
+    /// moves, Tab inserts).
+    var onListKey: (SlashListKey) -> Bool = { _ in false }
     var canSubmit = true
     var maxHeight: CGFloat = 160
     var handle: ComposerHandle? = nil
@@ -54,7 +59,11 @@ struct ComposerTextView: NSViewRepresentable {
         context.coordinator.parent = self
         SettingsFocus.cover(scroll, context.environment.underSettings)
         guard let tv = context.coordinator.textView else { return }
-        if tv.string != text, !tv.hasMarkedText() { tv.string = text; context.coordinator.recalc() }
+        if tv.string != text, !tv.hasMarkedText() {
+            tv.string = text
+            tv.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))   // after a completed "/" name: type on
+            context.coordinator.recalc()
+        }
     }
 
     final class SubmitTextView: NSTextView {
@@ -115,10 +124,21 @@ struct ComposerTextView: NSViewRepresentable {
             let marked = tv.hasMarkedText()
             if parent.composing != marked { parent.composing = marked }
         }
+        /// The "/" list's keys, only while it shows (never during IME composition: the keys are the input method's).
+        func textView(_ tv: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard !tv.hasMarkedText(), parent.canSubmit else { return false }
+            switch selector {
+            case #selector(NSResponder.moveUp(_:)): return parent.onListKey(.up)
+            case #selector(NSResponder.moveDown(_:)): return parent.onListKey(.down)
+            case #selector(NSResponder.insertTab(_:)): return parent.onListKey(.complete)
+            case #selector(NSResponder.cancelOperation(_:)): return parent.onListKey(.close)
+            default: return false
+            }
+        }
         func submit() {
             guard let tv = textView, !tv.hasMarkedText(), parent.canSubmit else { return }
             parent.text = tv.string
-            parent.onSubmit()
+            guard parent.onSubmit() else { return }
             tv.string = ""
             parent.text = ""
             recalc()
@@ -132,6 +152,9 @@ struct ComposerTextView: NSViewRepresentable {
         }
     }
 }
+
+/// The keys the "/" list takes from the text while it shows.
+enum SlashListKey { case up, down, complete, close }
 
 /// Lets the toolbar buttons reach the NSTextView (insert text, take focus).
 @MainActor final class ComposerHandle {
@@ -188,13 +211,16 @@ struct ComposerView: View {
     var remote: RemoteHost? = nil
     /// The host folder for attached files (checks use a temp folder).
     var uploadFolder = RemoteUpload.defaultFolder
+    /// The agent's "/" commands (`SlashCommands.listing`, read from files off the main thread). Nil: no list.
+    var commands: (@Sendable () async -> SlashCommands.Listing)? = nil
     @State private var text: String
     @State private var images: [URL]
     var pasteboard: NSPasteboard = .general
     init(agentName: String, readOnly: Bool = false, branch: String? = nil, draft: ComposerDraft = ComposerDraft(),
          onSend: @escaping (String) -> Void, onDraft: @escaping (ComposerDraft) -> Void = { _ in }, probe: PlaceholderProbe? = nil, pasteboard: NSPasteboard = .general,
          deliver: ((String) async -> Bool)? = nil, deliverResult: ((String) async -> DeliveryOutcome)? = nil, placeholder: String? = nil, focusRequest: Int = 0, remote: RemoteHost? = nil,
-         uploadFolder: String = RemoteUpload.defaultFolder) {
+         uploadFolder: String = RemoteUpload.defaultFolder, commands: (@Sendable () async -> SlashCommands.Listing)? = nil) {
+        self.commands = commands
         self.pasteboard = pasteboard; self.deliver = deliver; self.deliverResult = deliverResult; self.placeholder = placeholder; self.focusRequest = focusRequest
         self.remote = remote; self.uploadFolder = uploadFolder
         self.agentName = agentName; self.readOnly = readOnly; self.branch = branch
@@ -212,6 +238,17 @@ struct ComposerView: View {
     @State private var uploading = 0
     /// Text the failed send gave back; the note goes once the owner edits it.
     @State private var returnedText = ""
+    /// The "/" list: the agent's commands (asked again after `listingAge`), and the pick and window between keys.
+    @State private var listing: SlashCommands.Listing?
+    @State private var listedAt: Date?
+    @State private var listingBusy = false
+    @State private var picker = SlashPicker()
+    static let listingAge: TimeInterval = 30
+
+    /// The list to show above the box now.
+    private var slash: SlashList? {
+        readOnly || composing ? nil : picker.list(text: text, commands: listing?.commands ?? [])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -230,7 +267,7 @@ struct ComposerView: View {
                 }
                 ComposerTextView(text: $text, height: $height, composing: $composing, pasteboard: pasteboard,
                                  onPasteImages: { images.append(contentsOf: $0) }, onDropFiles: { attachFiles($0) }, onDropTarget: { dropping = $0 },
-                                 onSubmit: { send() }, canSubmit: !readOnly && !underSettings, handle: handle)
+                                 onSubmit: { send() }, onListKey: { listKey($0) }, canSubmit: !readOnly && !underSettings, handle: handle)
                     .frame(height: height)
             }
             if uploading > 0, let remote {
@@ -258,7 +295,7 @@ struct ComposerView: View {
                     NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
                 } label: { Image(systemName: "mic").foregroundStyle(.secondary) }
                     .buttonStyle(HoverIconStyle()).help("Dictate").disabled(readOnly)
-                Button(action: send) {
+                Button { send() } label: {
                     Image(systemName: "arrow.up")
                         .font(.body.weight(.bold))
                         .foregroundStyle(canSend ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
@@ -270,16 +307,21 @@ struct ComposerView: View {
         }
         .onChange(of: dropping) { probe?.dropping = dropping }
         .onChange(of: text) {
+            picker.textChanged(text)
+            if SlashList.slashQuery(text) != nil || SlashList.argQuery(text) != nil { loadCommands() }
             onDraft(ComposerDraft(text: text, images: images))
             if sendError != nil, !text.isEmpty, text != returnedText { withAnimation(.easeOut(duration: 0.2)) { sendError = nil } }
             probe?.text = text
         }
         .onChange(of: sendError) { probe?.error = sendError }
+        .onChange(of: slash) { probe?.slash = slash }
         .onChange(of: focusRequest) { DispatchQueue.main.async { handle.focus() } }
         .onChange(of: images) { onDraft(ComposerDraft(text: text, images: images)); probe?.images = images }
         .onAppear {
             probe?.images = images; probe?.removeFirst = { if let u = images.first { removeImage(u) } }
             probe?.drop = { attachFiles($0) }
+            probe?.slash = slash; probe?.slashWheel = { wheel($0) }; probe?.slashClick = { i in slash.map { if $0.items.indices.contains(i) { complete($0, $0.items[i]) } } }
+            if SlashList.slashQuery(text) != nil || SlashList.argQuery(text) != nil { loadCommands() }   // a draft that starts with "/"
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .glassCard(radius: Radius.bubble)
@@ -293,7 +335,44 @@ struct ComposerView: View {
         .background { GeometryReader { g in Color.clear.onAppear { DropOutlineProbe.card = g.frame(in: .global) }.onChange(of: g.frame(in: .global)) { DropOutlineProbe.card = $1 } } }
         .background { FileDropArea(onFiles: readOnly ? nil : { attachFiles($0) }, onTarget: { dropping = $0 }) }
         .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+        // The "/" list floats over the conversation, right above the card: the bar keeps its height, nothing moves.
+        // (A line with no height on the card's top edge holds it by its bottom: an overlay's own alignment guide
+        // does not pass through the overlay's implicit stack.)
+        .overlay(alignment: .top) {
+            if let slash {
+                Color.clear.frame(height: 0).overlay(alignment: .bottom) {
+                    SlashListView(list: slash, onPick: { complete(slash, $0) }, onWheel: { wheel($0) }).padding(.bottom, 6)
+                }
+            }
+        }
     }
+
+    private func loadCommands() {
+        guard let commands, !listingBusy, listedAt.map({ Date().timeIntervalSince($0) > Self.listingAge }) ?? true else { return }
+        listingBusy = true
+        Task {
+            let l = await commands()
+            listing = l; listedAt = Date(); listingBusy = false
+        }
+    }
+    private func listKey(_ key: SlashListKey) -> Bool {
+        let cmds = listing?.commands ?? []
+        switch key {
+        case .up: return picker.move(-1, text: text, commands: cmds)
+        case .down: return picker.move(1, text: text, commands: cmds)
+        case .close: return picker.close(text: text, commands: cmds)
+        case .complete:
+            guard let done = picker.completion(text: text, commands: cmds) else { return false }
+            text = done
+            return true
+        }
+    }
+    /// A click on a row: the same as Tab on it.
+    private func complete(_ list: SlashList, _ item: SlashList.Item) {
+        text = list.completed(item)
+        handle.focus()
+    }
+    private func wheel(_ deltaY: Double) { picker.scroll(deltaY: deltaY, text: text, commands: listing?.commands ?? []) }
 
     private func attach() {
         let panel = NSOpenPanel()
@@ -333,17 +412,33 @@ struct ComposerView: View {
     }
     /// Not while attached files are still being copied to the host: their paths are not in the text yet.
     private var canSend: Bool { !readOnly && uploading == 0 && !(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty) }
-    /// Message = text, then the absolute image paths (agents read an image path as an attachment).
-    private func send() {
+    /// Message = text, then the absolute image paths (agents read an image path as an attachment). True: the text
+    /// was taken (the field clears). A bare screen command ("/model") is not sent: the text stays for a value to be
+    /// added, and the note says why. A part of a "/" name is completed, not sent (the agent's own menu would run its
+    /// first match).
+    @discardableResult private func send() -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !readOnly, !underSettings, uploading == 0, !(t.isEmpty && images.isEmpty) else { return }   // the draft stays
+        if t.isEmpty && images.isEmpty { return !readOnly && !underSettings }   // nothing to send: only spaces go
+        guard !readOnly, !underSettings, uploading == 0 else { return false }   // the draft stays
+        var typed = Substring(text)
+        while typed.last?.isWhitespace == true { typed.removeLast() }
+        switch picker.enter(text: String(typed), listing: listing, hasFiles: !images.isEmpty) {
+        case .blocked(let note):
+            returnedText = text
+            withAnimation(.easeOut(duration: 0.2)) { sendError = note }
+            return false
+        case .complete(let done):
+            text = done
+            return false
+        case .send: break
+        }
         let paths = images.map { ComposerHandle.quoted($0) }.joined(separator: " ")
         let message = [t, paths].filter { !$0.isEmpty }.joined(separator: " ")
         let sent = (text: text, images: images)
         text = ""; images = []   // files stay: the agent reads them; they are purged after 7 days
         sendError = nil
         let deliverResult = self.deliverResult ?? deliver.map { d in { (m: String) async -> DeliveryOutcome in await d(m) ? .sent : .failed } }
-        guard let deliverResult else { onSend(message); return }
+        guard let deliverResult else { onSend(message); return true }
         Task {
             switch await deliverResult(message) {
             case .sent: return
@@ -355,9 +450,11 @@ struct ComposerView: View {
             }
             if text.isEmpty && images.isEmpty { text = sent.text; images = sent.images }
             returnedText = text
-            let why = MessageSender.takeFailure(message).map { "Not sent. \($0) Press Return to try again." }
+            // A refusal's note is whole (the agent's box has text, a bare screen command); a failure's gets a frame.
+            let why = MessageSender.takeRefusal(message) ?? MessageSender.takeFailure(message).map { "Not sent. \($0) Press Return to try again." }
             withAnimation(.easeOut(duration: 0.2)) { sendError = why ?? "Not sent: herdr did not take the message. Press Return to try again." }
         }
+        return true
     }
     static let unconfirmedNote = "Sent, not confirmed: no answer in time. Check the terminal before you send it again."
 
@@ -370,4 +467,8 @@ struct ComposerView: View {
 /// Checks: where the composer's drop outline was drawn, and the card's frame (window coordinates, from SwiftUI).
 @MainActor enum DropOutlineProbe { static var outline = CGRect.zero; static var card = CGRect.zero }
 
-@MainActor final class PlaceholderProbe { var shown = false; var images: [URL] = []; var text = ""; var error: String?; var removeFirst: (() -> Void)?; var drop: (([URL]) -> Void)?; var dropping = false }
+@MainActor final class PlaceholderProbe {
+    var shown = false; var images: [URL] = []; var text = ""; var error: String?; var removeFirst: (() -> Void)?; var drop: (([URL]) -> Void)?; var dropping = false
+    /// The "/" list on screen, the wheel over it (points, above zero: up), and a click on match `i`.
+    var slash: SlashList?; var slashWheel: ((Double) -> Void)?; var slashClick: ((Int) -> Void)?
+}

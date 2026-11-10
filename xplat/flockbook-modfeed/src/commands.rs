@@ -703,6 +703,27 @@ mod tests {
         assert!(v.iter().all(|c| c.name != "status"), "the built-in runs, not the file: not listed");
     }
 
+    /// The Mac app holds the same tables in Swift (`Sources/HerdrKit/SlashCommands.swift`). Each side compares its
+    /// tables with this file, so a change on one side fails the other's check until both have it.
+    #[test]
+    fn tables_are_the_shared_fixture() {
+        let text = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Tests/HerdrKitTests/Fixtures/slash-tables.json"));
+        let v: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(v["efforts"], serde_json::json!(EFFORTS));
+        assert_eq!(v["pi_thinking"], serde_json::json!(PI_THINKING));
+        assert_eq!(v["builtins"].as_object().unwrap().len(), 4, "the four kinds, no other");
+        for kind in ["claude", "codex", "pi", "agy"] {
+            let own: Vec<serde_json::Value> = builtins(kind)
+                .iter()
+                .map(|b| serde_json::json!({"name": b.name, "description": b.description, "hint": b.hint, "args": b.args, "screen": b.screen}))
+                .collect();
+            assert_eq!(v["builtins"][kind], serde_json::Value::Array(own), "{kind}");
+        }
+        let pairs = |t: &[(&str, &str)]| serde_json::Value::Array(t.iter().map(|(id, name)| serde_json::json!([id, name])).collect());
+        assert_eq!(v["models"]["claude"], pairs(&crate::models::CLAUDE_MODELS));
+        assert_eq!(v["models"]["agy"], pairs(&crate::models::AGY_MODELS));
+    }
+
     #[test]
     fn other_agents_get_nothing() {
         let t = tempfile::tempdir().unwrap();

@@ -12,6 +12,15 @@ import Foundation
     private static var failures: [String: String] = [:]
     static func takeFailure(_ message: String) -> String? { failures.removeValue(forKey: message) }
 
+    /// Why this message text was held back before any key went out (`AppModel.sendRefusal`): the whole note for the
+    /// person, shown as it is. Read once by the composer.
+    private static var refusals: [String: String] = [:]
+    static func refuse(_ message: String, _ note: String) {
+        if refusals.count > 20 { refusals.removeAll() }
+        refusals[message] = note
+    }
+    static func takeRefusal(_ message: String) -> String? { refusals.removeValue(forKey: message) }
+
     /// True when the message was submitted (see `MessageSend.send`). A remote session (`HerdrSession.remote`) copies
     /// each image to the host first (`RemoteUpload`) and pastes the host path.
     @discardableResult

@@ -459,6 +459,10 @@ final class AppModel {
             return .failed
         }
         defer { release(id) }
+        if let why = await sendRefusal(text, pane: id, kind: kind) {
+            MessageSender.refuse(text, why)
+            return .failed
+        }
         noteSent(id)
         let outcome: DeliveryOutcome
         if let sendHook { outcome = await sendHook(id, text) ? .sent : .failed }
@@ -467,6 +471,49 @@ final class AppModel {
         if outcome != .failed { composerSent(pane: id) }
         return outcome
     }
+    /// Test hooks: the pane's screen text for the send guard (checks never read a real pane), and the home the agent's
+    /// "/" files are read from.
+    @ObservationIgnored var screenHook: ((String) async -> String?)?
+    @ObservationIgnored var agentHome = FileManager.default.homeDirectoryForCurrentUser
+
+    /// Why `text` does not go to the pane's agent now (the note for the person), or nil. Before any key:
+    /// 1. A screen command alone ("/model", "/status"): it would open a screen in the terminal that the chat cannot
+    ///    show (`SlashCommands.opensScreen`).
+    /// 2. The agent's input box already holds text: a send types after it, so the two would go out as one message
+    ///    (`AgentBox.hasText`, from one read of the visible screen). A box that cannot be read for sure is a doubt,
+    ///    and a doubt sends as before.
+    /// The helper of the Herdr app mod has the same two checks in the same order (`cards.rs`, `send`).
+    func sendRefusal(_ text: String, pane id: String, kind: String?) async -> String? {
+        guard let kind else { return nil }
+        let home = slashHome(pane: id)
+        if text.contains("/") {
+            let note = await Task.detached { SlashCommands.opensScreen(kind, text: text, home: home) }.value
+            if let note { return note }
+        }
+        let shown: String?
+        if let screenHook { shown = await screenHook(id) }
+        else if sendHook != nil { shown = nil }   // checks: no real pane is read
+        else { shown = try? await screen(paneId: id)?.visibleText(paneId: id) }
+        guard let shown else { return nil }
+        // Claude Code's prompt suggestions: its setting on this Mac; an agent on another machine: on (its default).
+        let suggests = kind == "claude" ? await Task.detached { [local = agentIsLocal(pane: id)] in AgentBox.claudeSuggests(home: local ? home : nil) }.value : false
+        return AgentBox.hasText(kind: kind, screen: shown, claudeSuggests: suggests) == true ? AgentBox.notEmpty : nil
+    }
+
+    /// The pane's agent runs on this Mac (not on the herdr session's host, not on another machine of the core).
+    func agentIsLocal(pane id: String) -> Bool {
+        HCMapper.address(fromPaneId: id) != nil ? !HerdrStore.isRemotePane(id) : store.session.remote == nil
+    }
+    /// Where the agent's own "/" files are read: this Mac's home for an agent here. An agent on another machine keeps
+    /// its files there, out of reach: an empty folder, so only the built-in tables answer.
+    func slashHome(pane id: String) -> URL { agentIsLocal(pane: id) ? agentHome : SlashCommands.noFiles }
+    /// The "/" commands of the pane's agent, for its composer.
+    func slashCommands(pane: Pane, kind: String) -> @Sendable () async -> SlashCommands.Listing {
+        let home = slashHome(pane: pane.id), local = agentIsLocal(pane: pane.id)
+        let cwd = local ? URL(fileURLWithPath: (pane.cwd as NSString).expandingTildeInPath) : SlashCommands.noFiles
+        return { await Task.detached { SlashCommands.listing(kind, home: home, cwd: cwd) }.value }
+    }
+
     /// Pulled texts kept until a composer sent them (`PulledText`): the Mac's own, and the phones' (the hub's).
     /// The app keeps them in a file (`HerdrDeskApp`); offscreen runs in memory.
     @ObservationIgnored var pulledTexts = MemoryPulledStore()
