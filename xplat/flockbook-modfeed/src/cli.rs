@@ -59,7 +59,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands"], "release": update::release()}));
             r.finish(true)
         }
         "paste-image" => {
@@ -130,7 +130,7 @@ pub fn run(argv: &[String]) -> String {
                 Err((code, message)) => r.fail(code, &message),
             }
         }
-        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" => {
+        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" => {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
             let cache_path = opt("--cache").map(PathBuf::from);
             let cache_url = cache_path.as_deref();
@@ -160,6 +160,17 @@ pub fn run(argv: &[String]) -> String {
             let url = found.path.as_ref().map(PathBuf::from);
             let log = url.as_deref();
             match cmd.as_str() {
+                "commands" => {
+                    // Claude Code only: other agents get an empty list. Files only, in the terminal's folder and the
+                    // user's home (HOME); nothing goes to the agent.
+                    let home = std::env::var_os("HOME").map(PathBuf::from);
+                    let list = match home {
+                        Some(h) if kind == "claude" => crate::commands::list(&h, Path::new(&found.pane.cwd)),
+                        _ => vec![],
+                    };
+                    r.out.emit_value(json!({"type": "commands", "agent": kind, "commands": list}));
+                    return r.finish(true);
+                }
                 "status" => {
                     let env = herdr_core::hc::session::process_env();
                     status::run(&kind, log, &status::default_settings(&env), &mut r.out, SystemTime::now());

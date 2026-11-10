@@ -82,6 +82,39 @@ function bindPaste(cx) {
   } catch { /* the box's own paste stays, and paste_other still attaches an image */ }
 }
 
+// "/" commands (Claude Code only; docs/protocol.md, commands): while the text is "/" and a name with no space, a
+// list of the agent's commands shows above the box. ↑ ↓ choose, Tab or Enter completes the full name, Esc closes.
+// The box takes ↑ ↓ and Tab itself (as ⌘V), so they are bound under a key context the box's wrapper has only while
+// the list shows: without the list they move the cursor as before. Only full names go out: Claude Code's own "/"
+// menu takes the Enter of a part of a name and runs its first match.
+export const SLASH_CONTEXT = "FlockbookSlash";
+export const SLASH = { up: "flockbook_slash_up", down: "flockbook_slash_down", complete: "flockbook_slash_complete", close: "flockbook_slash_close" };
+export const SLASH_ROWS = 8;
+const CMDS_MS = 30000;   // the list is asked again after this long
+let slashBound = false;
+function bindSlash(cx) {
+  if (slashBound || typeof cx?.bind_keys !== "function") return;
+  try {
+    cx.bind_keys([["up", SLASH.up], ["down", SLASH.down], ["tab", SLASH.complete], ["escape", SLASH.close]]
+      .map(([keystroke, action]) => ({ keystroke, action, context: `${SLASH_CONTEXT} > Input` })));
+    slashBound = true;
+  } catch { /* no keys for the list: a click on a row and Enter still complete */ }
+}
+
+// The name being typed after a leading "/", or null: the text has a space (or is not a "/" name).
+export function slashQuery(text) {
+  const m = /^\/([^\s]*)$/.exec(String(text ?? ""));
+  return m ? m[1] : null;
+}
+
+// The commands whose name starts with `query` (any case), in the list's order, at most SLASH_ROWS.
+export function matchCommands(list, query) {
+  const q = String(query ?? "").toLowerCase();
+  return (list ?? []).filter((c) => String(c.name).toLowerCase().startsWith(q)).slice(0, SLASH_ROWS);
+}
+
+const isClaude = (agent) => agent?.program?.key === "claude" || agent?.app === "claude-code";
+
 // What `paste-image` found to attach: copied files, else the saved image. Empty: paste the text.
 export function pastedFiles(lines) {
   const files = lines.find((l) => l.type === "files")?.paths;
@@ -109,6 +142,7 @@ export class Composer {
     this.input = TextareaState.new({ placeholder: "Reply to the agent", rows: 1 });
     this.input.set_auto_grow?.(1, 8);
     bindPaste(_cx);
+    bindSlash(_cx);
     // A paste that found no text, when the binding above is missing: the clipboard's image, if any.
     this.input.on("paste_other", (_e, cx) => cx.spawn((cx) => this.paste(cx, undefined)));
     // Enter sends. On Shift+Enter the box puts the new line in itself (at the cursor, over a selection);
@@ -125,7 +159,16 @@ export class Composer {
       const v = this.input.value();
       if (v !== this.typed[1]) this.typed = [this.typed[1], v];
       const e = !v.trim(); if (e !== this.empty) { this.empty = e; cx.notify(); }
+      if (this.slashClosed !== null && v !== this.slashClosed) this.slashClosed = null;
+      this.pick = 0;
+      if (slashQuery(v) !== null) cx.spawn((cx) => this.loadCommands(cx));
+      cx.notify();
     });
+    this.cmds = new Map();      // address → { at, list } of a Claude Code agent's "/" commands
+    this.cmdsBusy = false;
+    this.agent = null;          // the agent the box is for (its kind decides the list)
+    this.pick = 0;              // the chosen row of the list
+    this.slashClosed = null;    // the text Esc closed the list at
     this.drafts = new Map();   // address → { text, files } of agents not shown
     this.address = null;
     // address → { agent, path } the chat showed last (set by the chat); send is bound to it.
@@ -143,6 +186,7 @@ export class Composer {
 
   // Shows `agent`'s draft in the box. Safe while drawing: it only sets values.
   box(agent) {
+    this.agent = agent ?? null;
     const a = agent?.address ?? null;
     if (a !== this.address) {
       if (this.address) this.drafts.set(this.address, { text: this.input.value(), files: this.files });
@@ -152,6 +196,53 @@ export class Composer {
       this.address = a; this.note = null; this.statusAt = 0;
     }
     return a ? this : null;
+  }
+
+  // Asks the helper for the shown Claude Code agent's commands (at most every CMDS_MS), if it has `commands`.
+  async loadCommands(cx) {
+    const a = this.address;
+    if (!a || !isClaude(this.agent) || this.cmdsBusy) return;
+    const had = this.cmds.get(a);
+    if (had && Date.now() - had.at < CMDS_MS) return;
+    this.cmdsBusy = true;
+    try {
+      if (!(await sidecar.hasCommand("commands"))) return;
+      const r = await sidecar.commands(a);
+      const list = r.error ? had?.list ?? [] : (r.lines.find((l) => l.type === "commands")?.commands ?? []);
+      this.cmds.set(a, { at: Date.now(), list });
+      cx.notify();
+    } finally { this.cmdsBusy = false; }
+  }
+
+  // The list to show now: { query, items, pick } or null.
+  slash() {
+    const v = this.input.value();
+    return v === this.slashClosed ? null : this.slashFor(v);
+  }
+
+  slashFor(v) {
+    if (!isClaude(this.agent) || !this.address) return null;
+    const q = slashQuery(v);
+    if (q === null) return null;
+    const items = matchCommands(this.cmds.get(this.address)?.list, q);
+    if (!items.length) return null;
+    return { query: q, items, pick: Math.min(this.pick, items.length - 1) };
+  }
+
+  // The box gets "/<name> ": the name is whole, and the space closes the list (arguments may follow).
+  complete(name, cx) {
+    this.setText(`/${name} `); this.empty = false; this.pick = 0; this.slashClosed = null;
+    cx?.notify?.();
+  }
+
+  slashKey(what, cx) {
+    const s = this.slash();
+    if (!s) return;
+    if (what === "up") this.pick = (s.pick + s.items.length - 1) % s.items.length;
+    else if (what === "down") this.pick = (s.pick + 1) % s.items.length;
+    else if (what === "complete") return this.complete(s.items[s.pick].name, cx);
+    else if (what === "close") this.slashClosed = this.input.value();
+    cx.notify();
   }
 
   async pollStatus(cx) {
@@ -201,6 +292,9 @@ export class Composer {
     const now = b.input.value();
     const text = withoutEnter(now, now === this.typed[1] ? this.typed[0] : this.typed[1]).replace(/\s+$/, "");
     if (!text.trim() && !b.files.length) { b.setText(""); return; }
+    // The list shows and the name is not whole yet: Enter completes it (a part of a name would run another command).
+    const s = slashQuery(text) !== null && text !== this.slashClosed ? this.slashFor(text) : null;
+    if (s && !s.items.some((c) => c.name === s.query)) return this.complete(s.items[s.pick].name, cx);
     const files = b.files;
     this.sending = true; this.note = null;
     b.setText(""); b.files = [];
@@ -226,6 +320,13 @@ export class Composer {
     const branch = tags.find((x) => x.kind === "branch");
     const b = this.box(agent);
     if (!b) return div();
+    const s = this.slash();
+    const row = (c, i) => h_flex().id(`slash-${i}`).w_full().h(30).px(10).gap(10).items_center().rounded(8)
+      .when(i === s.pick, (el) => el.bg(t.hover))
+      .hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => this.complete(c.name, cx))
+      .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(`/${c.name}`))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(c.description || ""));
     const empty = !b.input.value().trim() && !b.files.length;
     const tag = (x) => h_flex().h(22).px(8).gap(4).items_center().rounded(11).flex_none().text_size(11.5)
       .bg(x.warn ? t.blocked : t.chrome).text_color(x.warn ? t.background : t.muted).border(1).border_color(x.warn ? t.blocked : t.border)
@@ -240,9 +341,17 @@ export class Composer {
       .key_context(PASTE_CONTEXT)
       .on_action(PASTE_ACTION, (_e, cx) => { const text = cx.read_from_clipboard?.(); cx.spawn((cx) => this.paste(cx, text)); })
       .when(setting("status_row") !== "hide", (el) => el.child(h_flex().id("tags").w_full().max_w(800).gap(5).items_center().overflow_x_scrollbar().children(tags.map(tag))))
+      .when(Boolean(s), (el) => el.child(v_flex().id("slash").w_full().max_w(800).p(4).gap(0).rounded(12).bg(t.raised)
+        .border(1).border_color(t.border).shadow_sm().children(s.items.map(row))))
       .child(v_flex().id("box").w_full().max_w(800).rounded(16).bg(t.raised).border(1).border_color(t.border).shadow_sm().px(12).pt(10).pb(8).gap(6)
         .when(this.files.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap().children(this.files.map(fileChip))))
-        .child(Textarea.new(b.input).w_full())
+        .child(div().id("slash-keys").w_full()
+          .when(Boolean(s), (el) => el.key_context(SLASH_CONTEXT))
+          .on_action(SLASH.up, (_e, cx) => this.slashKey("up", cx))
+          .on_action(SLASH.down, (_e, cx) => this.slashKey("down", cx))
+          .on_action(SLASH.complete, (_e, cx) => this.slashKey("complete", cx))
+          .on_action(SLASH.close, (_e, cx) => this.slashKey("close", cx))
+          .child(Textarea.new(b.input).w_full()))
         .child(h_flex().gap(8).items_center()
           .when(canPick(), (el) => el.child(div().id("attach").size(28).flex_none().flex().items_center().justify_center().rounded(14).text_color(t.muted)
             .hover((s) => s.bg(t.hover).text_color(t.foreground))

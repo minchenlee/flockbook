@@ -13,6 +13,7 @@ const mk = (tag) => {
         else if (k.startsWith("on_") || k === "hover") {
           if (k === "on_mouse_down" && a[0] === "right") t._h.on_mouse_down_right = a[a.length - 1];
           else t._h[k] = a[a.length - 1];
+          if (k === "on_action") t._h[`on_action:${a[0]}`] = a[a.length - 1];   // each action by its name too
         }
         else if (k === "when") return a[0] ? a[1](p) : p;
         else if (k === "track_scroll") t.track = a[0];

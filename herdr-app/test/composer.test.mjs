@@ -4,8 +4,9 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { Composer, tagsFor, shortPath, quoted, withFiles } from "../mods/flockbook/composer.js";
+import { Composer, tagsFor, shortPath, quoted, withFiles, slashQuery, matchCommands } from "../mods/flockbook/composer.js";
 import { ChatView } from "../mods/flockbook/chat.js";
+import { forgetCommands } from "../mods/flockbook/sidecar.js";
 
 const jl = (...lines) => ({ code: 0, stdout: lines.map((l) => JSON.stringify(l)).join("\n") + "\n", stderr: "" });
 const header = (command) => ({ type: "header", protocol: 1, sidecar: "0.1.0", command });
@@ -152,7 +153,10 @@ test("paste: the mod binds ⌘V (Ctrl+V on Linux) for its own box only, once", a
   const cx = fakeCx(); const bound = [];
   cx.bind_keys = (b) => { bound.push(...b); return b.length; };
   const v = new ChatView(cx); await cx.settle(); new ChatView(cx);
-  assert.deepEqual(bound, [{ keystroke: "secondary-v", action: "flockbook_paste", context: "FlockbookComposer > Input" }]);
+  assert.deepEqual(bound.filter((b) => b.action === "flockbook_paste"), [{ keystroke: "secondary-v", action: "flockbook_paste", context: "FlockbookComposer > Input" }]);
+  // The "/" list's keys, once, under the context its wrapper has only while the list shows.
+  assert.deepEqual(bound.filter((x) => x.action.startsWith("flockbook_slash")).map((x) => [x.keystroke, x.context]),
+    [["up", "FlockbookSlash > Input"], ["down", "FlockbookSlash > Input"], ["tab", "FlockbookSlash > Input"], ["escape", "FlockbookSlash > Input"]]);
   const el = byId(v.render(cx), "composer");
   assert.equal(el._a.key_context, "FlockbookComposer");
   assert.equal(typeof el._h.on_action, "function");
@@ -280,4 +284,106 @@ test("the chat gives the composer what its feed showed", async () => {
   const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
   v.feeds.set("t9", { agent: "codex", path: "/l/x.jsonl" });
   assert.deepEqual(v.composer.seen("t9"), { agent: "codex", path: "/l/x.jsonl" });
+});
+
+// "/" commands (Claude Code only): the list above the box while the text is "/" and a name, no space.
+const CMDS = [
+  { name: "clear", description: "Start a new conversation", source: "builtin" },
+  { name: "compact", description: "Summarise the conversation", source: "builtin" },
+  { name: "context", description: "Show how full the context is", source: "builtin" },
+  { name: "deploy", description: "Deploy the app", source: "project" },
+];
+const T = new Proxy({}, { get: (_t, k) => `#${k}` });
+function slashRig({ hasCommands = true, list = CMDS } = {}) {
+  const asked = [];
+  forgetCommands();
+  fake.exec = (cmd, args) => {
+    if (args[0] === "version") return jl(header("version"), { type: "version", commands: ["version", "send", ...(hasCommands ? ["commands"] : [])] }, end);
+    if (args[0] === "commands") { asked.push(args); return jl(header("commands"), { type: "commands", agent: "claude", commands: list }, end); }
+    if (args[0] === "send") { sent.push(args); return jl(header("send"), { type: "done", result: "sent" }, end); }
+    return jl(header(args[0]), end);
+  };
+  const cx = fakeCx(); const bound = [];
+  cx.bind_keys = (b) => { bound.push(...b); return b.length; };
+  const c = new Composer(cx);
+  const b = c.box(fake.agents[0]);
+  const type = async (v) => { b.input.set_value(v); b.input._h.change({}, cx); await cx.settle(); };
+  const view = () => c.render(fake.agents[0], T);
+  const rows = () => { const l = byId(view(), "slash"); return l ? l.kids.map((k) => textOf(k)) : null; };
+  const act = async (name) => { byId(view(), "slash-keys")._h[`on_action:${name}`](null, cx); await cx.settle(); };
+  return { cx, c, b, type, view, rows, act, asked, bound };
+}
+
+test("slashQuery: the name after a leading /, while there is no space; matchCommands: by prefix, at most 8", () => {
+  assert.equal(slashQuery("/"), "");
+  assert.equal(slashQuery("/de"), "de");
+  assert.equal(slashQuery("/kit:he"), "kit:he");
+  for (const t of ["", "de", " /de", "/de ", "/deploy now", "/a\nb"]) assert.equal(slashQuery(t), null, JSON.stringify(t));
+  assert.deepEqual(matchCommands(CMDS, "c").map((x) => x.name), ["clear", "compact", "context"]);
+  assert.deepEqual(matchCommands(CMDS, "CO").map((x) => x.name), ["compact", "context"]);
+  assert.deepEqual(matchCommands(CMDS, "zz"), []);
+  const many = Array.from({ length: 20 }, (_v, i) => ({ name: `cmd${i}` }));
+  assert.equal(matchCommands(many, "").length, 8);
+});
+
+test("typing / in a Claude Code chat shows its commands above the box, filtered as you type", async () => {
+  const r = slashRig();
+  assert.equal(r.rows(), null, "nothing before a /");
+  await r.type("/");
+  assert.equal(r.rows().length, 4);
+  assert.match(r.rows()[3], /deploy.*Deploy the app/);
+  await r.type("/co");
+  assert.deepEqual(r.rows().map((x) => x.split(/\s/)[0]), ["/compact", "/context"]);
+  await r.type("/co now");
+  assert.equal(r.rows(), null, "a space closes it");
+  assert.deepEqual(r.asked.map((a) => a.slice(0, 3)), [["commands", "--terminal", "t1"]], "the list is asked once");
+  // The keys go to the list only while it shows: its key context is on then, and off without it.
+  assert.equal(byId(r.view(), "slash-keys")._a.key_context, undefined);
+  await r.type("/d");
+  assert.equal(byId(r.view(), "slash-keys")._a.key_context, "FlockbookSlash");
+});
+
+test("up and down choose, Tab completes the full name and a space; Esc closes until the text changes", async () => {
+  const r = slashRig();
+  await r.type("/c");
+  await r.act("flockbook_slash_up");
+  assert.match(r.rows()[2], /context/, "up from the first row goes round to the last");
+  await r.act("flockbook_slash_down"); await r.act("flockbook_slash_down");
+  await r.act("flockbook_slash_complete");
+  assert.equal(r.b.input.value(), "/compact ", "the second of clear, compact, context");
+  assert.equal(r.rows(), null);
+  assert.equal(sent.length, 0, "completing sends nothing");
+  await r.type("/c");
+  await r.act("flockbook_slash_close");
+  assert.equal(r.rows(), null, "Esc closes it");
+  await r.type("/cl");
+  assert.equal(r.rows().length, 1, "typing opens it again");
+});
+
+test("Enter completes a part of a name; on a full name it sends that name", async () => {
+  const r = slashRig();
+  await r.type("/dep");
+  r.b.input.set_value("/dep\n"); r.b.input._h.submit({}, r.cx); await r.cx.settle();
+  assert.equal(sent.length, 0, "a part of a name is not sent (Claude Code's own menu would run its first match)");
+  assert.equal(r.b.input.value(), "/deploy ");
+  await r.type("/clear");
+  r.b.input._h.submit({}, r.cx); await r.cx.settle();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][sent[0].indexOf("--text") + 1], "/clear");
+});
+
+test("no list for other agents, nor when the helper has no commands command", async () => {
+  const r = slashRig({ hasCommands: false });
+  await r.type("/");
+  assert.equal(r.rows(), null);
+  assert.equal(r.asked.length, 0, "a helper without commands is not asked");
+  const s = slashRig();
+  fake.agents[0] = agent("t1", "idle", { tab_name: "api", app: "codex", program: { key: "codex", name: "Codex" } });
+  s.c.box(fake.agents[0]);
+  await s.type("/");
+  assert.equal(byId(s.c.render(fake.agents[0], T), "slash"), null);
+  assert.equal(s.asked.length, 0, "a Codex chat asks for nothing");
+  const e = slashRig({ list: [] });
+  await e.type("/");
+  assert.equal(e.rows(), null, "an empty list shows nothing");
 });

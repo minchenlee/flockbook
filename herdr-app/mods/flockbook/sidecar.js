@@ -39,6 +39,21 @@ export async function call(cmd, args = []) {
   return a;
 }
 
+// The commands this sidecar has (its `version` line), asked once. A failed ask is asked again next time.
+// The Swift sidecar and older helpers have fewer: the mod hides what a missing command would do.
+let known = null;
+export function hasCommand(name) {
+  if (!known) {
+    known = call("version").then((r) => {
+      if (r.error) { known = null; return null; }
+      return new Set(r.lines.find((l) => l.type === "version")?.commands ?? []);
+    });
+  }
+  return known.then((set) => Boolean(set?.has(name)));
+}
+// For tests: forget the answer.
+export const forgetCommands = () => { known = null; };
+
 // The commands, with the cache file the sidecar keeps.
 export const feed = (terminal, cursor) => call("feed", ["--terminal", terminal, "--cache", cachePath(), ...(cursor ? ["--cursor", cursor] : [])]);
 export const older = (terminal, before, path) => call("feed", ["--terminal", terminal, "--before", String(before), "--path", path]);
@@ -54,6 +69,8 @@ export const removeHelper = (machine) => call("helper", ["remove", "--machine", 
 export const updateCheck = (dismiss = null) => call("update-check", dismiss ? ["--dismiss", dismiss] : []);
 // The phone page as a user service: status, on, off (docs/protocol.md, phone).
 export const phone = (what) => call("phone", [what]);
+// A Claude Code terminal's "/" commands (read from files; nothing goes to the agent).
+export const commands = (terminal) => call("commands", ["--terminal", terminal, "--cache", cachePath()]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 // `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
 export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,
