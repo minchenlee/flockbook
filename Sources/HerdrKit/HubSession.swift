@@ -56,7 +56,9 @@ import CryptoKit
     func statusLine(kind: String, session: String) -> StatusLineRecord?
 }
 
-public enum HubSendResult: Sendable, Hashable { case sent, changed, failed }
+/// `refused`: the backend held the message back before any key, and says why in words for the person (a screen
+/// command alone, or the agent's own input box already has text: `SlashCommands.opensScreen`, `AgentBox`).
+public enum HubSendResult: Sendable, Hashable { case sent, changed, failed, refused(String) }
 
 public struct HubDevice: Codable, Hashable, Sendable {
     public var id: String
@@ -281,6 +283,9 @@ extension Hub {
             case .sent: return [ok(m.id)]
             case .changed: return [fail(m.id, .promptOpen, "The pane changed before the text went out. Nothing was sent.")]
             case .failed: return [fail(m.id, .failed, "herdr did not take the message.")]
+            // As the helper's server answers "opens_screen" and "box_not_empty": failed, with the note. The device
+            // keeps its text and its images.
+            case .refused(let why): return [fail(m.id, .failed, why)]
             }
         case .pullQueued(let id):
             guard canInput else { return [readOnly(m.id)] }
