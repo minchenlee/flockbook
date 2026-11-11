@@ -60,6 +60,8 @@ public actor SessionResolver {
     public private(set) var verdictReads = 0
     private let claudeDir: String
     private let piAgentDir: String
+    /// omp's sessions root, unless its process sets `PI_CODING_AGENT_DIR`.
+    private let ompSessionsDir: String
     private let agyDir: String
     /// The home folder the open-file route matches logs under (`~/.codex/sessions/`, `~/.claude/projects/`, ...).
     private let home: String
@@ -75,11 +77,12 @@ public actor SessionResolver {
                 projectsDir: String = SessionLog.defaultDir(agent: "claude"),
                 claudeDir: String = NSHomeDirectory() + "/.claude/sessions",
                 piAgentDir: String = NSHomeDirectory() + "/.pi/agent",
+                ompSessionsDir: String = NSHomeDirectory() + "/.omp/agent/sessions",
                 agyDir: String = NSHomeDirectory() + "/.gemini/antigravity-cli", home: String = NSHomeDirectory(),
                 retry: TimeInterval = 5, recheck: TimeInterval = 30, verdictCap: Int = 8 << 20, remote: RemoteHost? = nil,
                 openFiles: (@Sendable ([Int32]) -> [String])? = nil) {
         self.socketPath = socketPath; self.codexDir = codexDir; self.projectsDir = projectsDir; self.verdictCap = verdictCap
-        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir; self.agyDir = agyDir; self.home = home
+        self.claudeDir = claudeDir; self.piAgentDir = piAgentDir; self.ompSessionsDir = ompSessionsDir; self.agyDir = agyDir; self.home = home
         self.lsof = openFiles ?? { Self.openFiles(pids: $0) }
         self.retry = retry; self.recheck = recheck; self.remote = remote != nil
     }
@@ -593,6 +596,15 @@ public actor SessionResolver {
         if c.first == "/" || c.first == "\\" { c = c.dropFirst() }
         return agentDir + "/sessions/--" + String(c.map { "/\\:".contains($0) ? "-" : $0 }) + "--"
     }
+
+    /// omp's session folder for a cwd (omp session-paths.ts getDefaultSessionDirName).
+    public static func ompSessionDir(cwd: String, sessions: String, home: String, tmp: String) -> String { "" }
+
+    /// The value of `key` in an agent process's env (`ps -E`), if set and not empty.
+    static func envValue(_ procLine: String, _ key: String) -> String? { nil }
+
+    /// The path with its links resolved, as Node's realpath; as given when it cannot be resolved.
+    static func realPath(_ p: String) -> String { p }
 
     /// pi's file among `(path, mtime, first line)`: a `session` header with this cwd, started or written at or after
     /// `after` (2 s slack; a resumed session is an older file pi writes to), not claimed; the newest by mtime (pi's
