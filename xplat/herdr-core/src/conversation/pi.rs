@@ -1,6 +1,8 @@
 //! pi (`~/.pi/agent/sessions/<cwd-slug>/<time>_<uuid>.jsonl`). Entries form a tree by `id`/`parentId`; the shown
 //! conversation is the branch that ends at the newest entry. Lines are fed in file order; when an entry hangs off an
-//! earlier entry (an edited or retried turn), the items are rebuilt from that branch.
+//! earlier entry (an edited or retried turn), the items are rebuilt from that branch. omp (oh-my-pi, a pi fork) writes
+//! the same tree with more entry types, a `title` slot before the header, and `activeLeafId` on an entry written off
+//! the shown branch (late usage, a background result): the shown branch stays at that leaf.
 
 use std::collections::HashMap;
 
@@ -20,7 +22,8 @@ pub struct PiState {
     replaying: bool,
 }
 
-pub const PI_TYPES: [&str; 10] = [
+/// pi's entry types, then omp's (session-entries.ts).
+pub const PI_TYPES: [&str; 20] = [
     "session",
     "message",
     "model_change",
@@ -31,6 +34,16 @@ pub const PI_TYPES: [&str; 10] = [
     "compaction",
     "context_edit",
     "branch_summary",
+    "title",
+    "title_change",
+    "model_usage",
+    "service_tier_change",
+    "label",
+    "session_init",
+    "reset_boundary",
+    "mode_change",
+    "ttsr_injection",
+    "credential_pin",
 ];
 
 pub fn pi_renders(o: &Obj) -> bool {
@@ -60,11 +73,31 @@ impl ConversationParser {
         if json::str_(o.get("type")) == Some("session") {
             return; // header: not in the tree
         }
-        let Some(id) = json::str_(o.get("id")) else { return };
+        let Some(id) = json::str_(o.get("id")) else { return }; // omp's title slot has no id
         let parent = json::str_(o.get("parentId"));
+        // omp: the leaf after this entry (absent: the entry; null: cleared). Replayed entries are on the branch.
+        let leaf = match o.get("activeLeafId") {
+            Some(Value::Null) => None,
+            Some(v) => v.as_str(),
+            None => Some(id),
+        };
+        if !self.pi.replaying && leaf != Some(id) {
+            self.pi.parent.insert(id.into(), parent.unwrap_or("").into());
+            if pi_renders(o) {
+                self.pi.lines.insert(id.into(), line.into());
+                self.pi.offsets.insert(id.into(), offset);
+            }
+            match leaf {
+                None => self.clear_pi(),
+                Some(l) if self.pi.last.as_deref() != Some(l) && self.pi.parent.contains_key(l) => self.rebuild_pi(l),
+                Some(_) => {} // the shown leaf, or one omp no longer has: the branch stays
+            }
+            return;
+        }
+        // An entry off the shown leaf (an edited turn, or the first one after omp cleared the leaf): its branch.
         if !self.pi.replaying {
-            if let (Some(parent), Some(last)) = (parent, self.pi.last.as_deref()) {
-                if parent != last && self.pi.parent.contains_key(parent) {
+            if let Some(parent) = parent {
+                if self.pi.last.as_deref() != Some(parent) && self.pi.parent.contains_key(parent) {
                     self.rebuild_pi(parent);
                 }
             }
@@ -76,6 +109,14 @@ impl ConversationParser {
             self.pi.offsets.insert(id.into(), offset);
         }
         self.render_pi(o, id);
+    }
+
+    /// omp cleared the leaf: nothing is shown, the tree stays for a later branch.
+    fn clear_pi(&mut self) {
+        let mut fresh = ConversationParser::new();
+        fresh.pi = std::mem::take(&mut self.pi);
+        fresh.pi.last = None;
+        *self = fresh;
     }
 
     /// Items become the branch from the root to `leaf` (replayed from the kept lines).
@@ -113,6 +154,10 @@ impl ConversationParser {
                     return;
                 }
                 let all = result_text(o.get("content"));
+                // omp: a background result handed to the model, not a notice
+                if text::trim(&all).starts_with("<system-notice>") {
+                    return;
+                }
                 let Some(first) = text::first_line(text::trim(&all)) else { return };
                 self.flush();
                 self.done.push(ConversationItem::new(id, ItemKind::Status(text::prefix(first, 160).into()), self.line_ts));

@@ -102,6 +102,7 @@ fn known_kind(w: &str) -> Option<&'static str> {
         "claude" => "claude",
         "codex" => "codex",
         "pi" => "pi",
+        "omp" => "omp",
         "cursor-agent" | "cursor" => "cursor",
         "gemini" => "gemini",
         "opencode" => "opencode",
@@ -125,7 +126,8 @@ pub fn kind_of_argv(argv: &[String]) -> Option<String> {
     words.iter().take(2).find_map(|w| known_kind(w)).map(String::from)
 }
 
-/// Agent kind from the foreground process, then the start argv; last, agy's 7501 `app` name.
+/// Agent kind from the foreground process, then the start argv; last, the 7501 `app` name of agy or omp (a launcher
+/// can show a shell in front of omp).
 pub fn kind(t: &Term) -> Option<String> {
     let mut fg = vec![t.fg_name.clone().unwrap_or_default()];
     fg.extend(t.fg_argv.iter().cloned());
@@ -134,10 +136,10 @@ pub fn kind(t: &Term) -> Option<String> {
             return Some(k);
         }
     }
-    if t.status_app.as_deref() == Some("antigravity") {
-        Some("agy".into())
-    } else {
-        None
+    match t.status_app.as_deref() {
+        Some("antigravity") => Some("agy".into()),
+        Some("omp") => Some("omp".into()),
+        _ => None,
     }
 }
 
@@ -253,6 +255,19 @@ mod tests {
         assert_eq!(a.status, AgentStatus::Blocked);
         assert_eq!(a.status_kind.as_deref(), Some("permission"));
         assert_eq!(a.process, None);
+    }
+
+    #[test]
+    fn omp_kind() {
+        let t = Term::parse(&json!({"address":"t5","argv":["/usr/local/bin/omp"],"pid":20,"created_ms":7})).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("omp"));
+        assert_eq!(process(&t, Some("omp")).as_deref(), Some("20@7"));
+        let t = Term::parse(&json!({"address":"t6","argv":["bun","/opt/omp/bin/omp"],"pid":21})).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("omp"), "through an interpreter");
+        // A launcher shows a shell in front: omp by its 7501 app name.
+        let t = Term::parse(&json!({"address":"t7","argv":["launch"],"pid":22,"foreground":{"name":"fish","pid":23},"status":{"state":"idle","app":"omp"}})).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("omp"));
+        assert_eq!(process(&t, Some("omp")), None, "keys still need the omp process itself");
     }
 
     #[test]

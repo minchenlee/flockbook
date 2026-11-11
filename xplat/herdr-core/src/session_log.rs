@@ -351,7 +351,7 @@ impl Shared {
 
 pub struct SessionLog {
     pub session_id: String,
-    /// `Agent.kind`: "claude", "codex", "pi", "cursor"
+    /// `Agent.kind`: "claude", "codex", "pi", "omp", "cursor"
     pub agent: String,
     shared: Arc<Shared>,
 }
