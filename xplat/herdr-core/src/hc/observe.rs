@@ -171,6 +171,11 @@ mod tests {
     type Got = Arc<Mutex<(Value, Vec<(u32, u8, Vec<u8>)>)>>;
 
     fn fake(answer: Answer) -> (tempfile::TempDir, String, Got) {
+        fake_slow(answer, Duration::ZERO)
+    }
+
+    /// `hello_delay`: the core answers the hello this late (a busy machine).
+    fn fake_slow(answer: Answer, hello_delay: Duration) -> (tempfile::TempDir, String, Got) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hc.sock").to_string_lossy().to_string();
         let l = UnixListener::bind(&path).unwrap();
@@ -184,6 +189,7 @@ mod tests {
             r.read_line(&mut line).unwrap();
             let hello: Value = serde_json::from_str(&line).unwrap();
             g.lock().unwrap().0 = hello.clone();
+            std::thread::sleep(hello_delay);
             w.write_all(format!("{}\n", json!({"jsonrpc": "2.0", "id": hello["id"], "result": {"framed": true}})).as_bytes()).unwrap();
             loop {
                 let mut h = [0u8; 9];
@@ -231,6 +237,14 @@ mod tests {
         assert_eq!(a["params"]["terminal"], "t1");
         assert_eq!(a["params"]["observe"], true, "watch only");
         assert_eq!((frames[1].0, frames[1].1), (7, CLOSE), "detached right after");
+    }
+
+    #[test]
+    fn a_slow_hello_still_gets_the_paint() {
+        let paint = b"\x1b[1;1Hpaint".to_vec();
+        let (_d, path, _) = fake_slow(Answer::Paint(paint.clone()), Duration::from_millis(120));
+        let p = first_paint(&UnixConnector { path }, "t1", Duration::from_millis(500));
+        assert_eq!(p.ok(), Some(paint), "the hello may take more than one read step; the limit is 500 ms");
     }
 
     #[test]

@@ -74,3 +74,20 @@ fn a_dim_slash_suggestion_does_not_block_a_send() {
     assert_eq!(send(&fake.path)["result"], "box_not_empty", "the paint must read what the screen does");
     assert_eq!(sends(), 1);
 }
+
+/// Another agent came into the pane during the look: the gate runs again before anything is typed.
+#[test]
+fn an_agent_change_during_the_look_is_refused() {
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    let rule = "─".repeat(40);
+    fake.set_screen("t1", &format!("● Done.\n\n{rule}\n❯\u{a0}/clear\n{rule}\n  ~/proj\n"));
+    fake.set_paint("t1", &paint("❯\u{a0}\x1b[0m\x1b[2m/clear\x1b[0m", 3));
+    let mut other = claude("t1", "idle", "idle");
+    other["pid"] = serde_json::json!(9999);
+    fake.state.lock().unwrap().after_attach = Some(vec![other]);
+    let d = send(&fake.path);
+    assert_eq!(fake.calls("terminal.attach").len(), 1, "it looked");
+    assert_eq!(d["result"], "changed", "refused: another agent ({d})");
+    assert!(fake.calls("terminal.send").is_empty() && fake.calls("terminal.keys").is_empty(), "nothing typed");
+}

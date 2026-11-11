@@ -42,6 +42,8 @@ pub struct State {
     pub paints: HashMap<String, Vec<u8>>,
     /// `terminal.attach` answers with an error.
     pub attach_refused: bool,
+    /// The terminals `terminal.list` gives once an attach has been answered (another agent came in meanwhile).
+    pub after_attach: Option<Vec<Value>>,
 }
 
 pub struct FakeHc {
@@ -325,6 +327,9 @@ fn serve_framed(mut s: std::os::unix::net::UnixStream, mut r: BufReader<std::os:
         let _ = s.write_all(&frame(0, 0, ok.to_string().as_bytes()));
         if let Some(paint) = g.paints.get(&a) {
             let _ = s.write_all(&frame(3, 0, paint));
+        }
+        if let Some(t) = g.after_attach.take() {
+            g.terminals = t;
         }
     }
 }
