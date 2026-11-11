@@ -22,6 +22,8 @@ One short line: what this release is about.
 
 - Herdr app mod and phone page: a message to Codex is sent when its box is empty under a newer footer (model · folder · thread title, with no "% left"). That status line was read as text in the box, so every send stopped with "The agent's box has text in it".
 
+- Herdr app mod: a reply whose lines end in two spaces or a backslash (Markdown hard breaks, as in Codex's short reports) shows whole. The row guess joined those lines into one paragraph, so the end of the reply was cut off by one line per break.
+
 - Herdr app mod: a reply with a table shows whole when a narrow column starts with long `code` (a tool name that breaks after its hyphen). The row was guessed 3 lines short in that column and with 21 px table lines where 22 are drawn, so the end of the reply was cut off.
 
 - Mac app, phone page: a message from the phone is held back in the same two cases as in the Mac reply box: a command that opens a screen in the terminal sent alone (`/model`, `/status`), and any message while the agent's own input box already has text. The phone says why and keeps your text.

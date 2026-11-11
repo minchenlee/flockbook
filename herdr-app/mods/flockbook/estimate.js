@@ -169,8 +169,11 @@ export function markdownHeight(text, width, spans = null, k = 1, zoom = 1) {
       prevBlank = true;
       continue;
     }
+    let hard = false;  // the line before ended in a hard break: two or more spaces, or a backslash
     for (const raw of b.text.split("\n")) {
       const line = raw.replace(/\t/g, "    ");
+      const brk = hard;
+      hard = / {2,}$|\\$/.test(raw);
       if (!line.trim()) { close(); if (!prevBlank) { h += 10; gap = 10; } prevBlank = true; continue; }
       prevBlank = false; gap = 0;
       let m;
@@ -192,6 +195,8 @@ export function markdownHeight(text, width, spans = null, k = 1, zoom = 1) {
       }
       // A line under a rule-like or setext marker is left as its own line (rare in chat; counted high).
       if (/^\s*([-*_=])(\s*\1){2,}\s*$/.test(line)) { close(); lastLevel = null; p += lh; continue; }
+      // A hard break starts a new line in the same paragraph (no gap); a soft break joins with a space.
+      if (para && brk) { const q = para; close(); para = { ...q, text: line.trim(), extra: 0 }; continue; }
       if (para) { para.text += " " + line.trim(); continue; }
       lastLevel = null; para = { text: line, width, fs, lh, extra: 0 };
     }
