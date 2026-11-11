@@ -309,7 +309,8 @@ fn codex_foreign_claim() {
 // MARK: checksPiSession, checksPiTwoInOneCwd, checksHCResolverNewProgram (ChecksPiSession)
 
 fn pi_head(id: &str, started: Date, cwd: &str) -> String {
-    format!(r#"{{"type":"session","version":3,"id":"{id}","timestamp":"{}","cwd":"{cwd}"}}"#, iso(started))
+    // cwd as a JSON string: a Windows path has backslashes
+    format!(r#"{{"type":"session","version":3,"id":"{id}","timestamp":"{}","cwd":{}}}"#, iso(started), serde_json::to_string(cwd).unwrap())
 }
 
 #[test]
@@ -556,10 +557,12 @@ fn omp_relative_agent_dir() {
     let need = Need::new("hc:t3", "omp", &work, vec![970_001]);
     let mut r = resolver(|r| r.omp_sessions_dir = "/nonexistent/sessions".into());
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
-    assert_eq!(
+    // The folder is built from the cwd with '/' (Windows: either separator names the same file).
+    let same = |a: &String| fs::canonicalize(a).ok() == fs::canonicalize(&p).ok();
+    assert!(
+        got.get("hc:t3").is_some_and(same),
+        "{:?} is not {p}: a relative agent dir under the agent's cwd (dir {})",
         got.get("hc:t3"),
-        Some(&p),
-        "a relative agent dir under the agent's cwd (dir {})",
         r.pi_dir("omp", &work, "omp PI_CODING_AGENT_DIR=./.omp-agent")
     );
 }
