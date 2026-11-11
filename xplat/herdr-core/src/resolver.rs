@@ -439,11 +439,13 @@ impl SessionResolver {
                     hc_agent_process(&n.pids, &n.kind, procs)
                 }
             };
-            // Two pi (or omp) in one cwd: each one's start splits the folder's files between them.
-            let pi_starts: Vec<(String, String, &str, Date)> = needs
+            // Two pi (or omp) with one session folder: each one's start splits the folder's files between them.
+            let pi_starts: Vec<(String, String, Date)> = needs
                 .iter()
                 .filter(|n| pi_like(&n.kind))
-                .filter_map(|n| agent_of(n).map(|a| (n.pane_id.clone(), standardize_path(&n.cwd), n.kind.as_str(), a.start)))
+                .filter_map(|n| {
+                    agent_of(n).map(|a| (n.pane_id.clone(), self.pi_dir(&n.kind, &standardize_path(&n.cwd), &a.line), a.start))
+                })
                 .collect();
             // Earliest agent first: it takes its file before a later one looks.
             let mut ordered: Vec<(&Need, Option<Proc>)> = due.iter().map(|n| (*n, agent_of(n))).collect();
@@ -479,11 +481,11 @@ impl SessionResolver {
                         }
                     }
                 }
-                let cwd = standardize_path(&n.cwd);
+                let mine = pi_starts.iter().find(|(pane, _, _)| pane == &n.pane_id).map(|(_, d, _)| d);
                 let rivals: Vec<Date> = pi_starts
                     .iter()
-                    .filter(|(pane, c, k, _)| pane != &n.pane_id && c == &cwd && *k == n.kind)
-                    .map(|(_, _, _, s)| *s)
+                    .filter(|(pane, d, _)| pane != &n.pane_id && Some(d) == mine)
+                    .map(|(_, _, s)| *s)
                     .collect();
                 let found = agent.as_ref().map(|a| self.find(n, a, procs, &taken, claimed_cwd, &rivals));
                 let claude_hc = !n.pids.is_empty() && n.kind == "claude";
@@ -520,6 +522,18 @@ impl SessionResolver {
 
     /// A Claude with its own `CLAUDE_CONFIG_DIR` and no log yet holds a bare session id, which
     /// `path` would look for under the default projects folder: check it like an unresolved entry.
+    /// The session folder of a pi or omp agent (`line`: its process with the env) in `cwd`.
+    fn pi_dir(&self, kind: &str, cwd: &str, line: &str) -> String {
+        if kind != "omp" {
+            return pi_session_dir(cwd, &self.pi_agent_dir);
+        }
+        let sessions = env_value(line, "PI_CODING_AGENT_DIR")
+            .map(|d| d.trim_end_matches('/').to_string() + "/sessions")
+            .unwrap_or_else(|| self.omp_sessions_dir.clone());
+        let tmp = env_value(line, "TMPDIR").unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
+        omp_session_dir(&real_path(cwd), &sessions, &real_path(&self.home), &real_path(&tmp))
+    }
+
     fn waits_for_log(&self, e: &Entry) -> bool {
         e.stamp.is_some() && e.stamp_dir != self.claude_dir && e.path.as_deref().is_some_and(|p| !Path::new(p).exists())
     }
@@ -588,15 +602,7 @@ impl SessionResolver {
         }
         if pi_like(&n.kind) {
             // pi and omp keep no file open: their cwd's session folder
-            let dir = if n.kind == "omp" {
-                let sessions = env_value(&agent.line, "PI_CODING_AGENT_DIR")
-                    .map(|d| d.trim_end_matches('/').to_string() + "/sessions")
-                    .unwrap_or_else(|| self.omp_sessions_dir.clone());
-                let tmp = env_value(&agent.line, "TMPDIR").unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
-                omp_session_dir(&real_path(&n.cwd), &sessions, &real_path(&self.home), &real_path(&tmp))
-            } else {
-                pi_session_dir(&n.cwd, &self.pi_agent_dir)
-            };
+            let dir = self.pi_dir(&n.kind, &n.cwd, &agent.line);
             let mut files: Vec<(String, Date, Vec<u8>)> = vec![];
             if let Ok(rd) = std::fs::read_dir(&dir) {
                 for f in rd.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()) {
@@ -1066,13 +1072,16 @@ pub fn claude_home(proc_line: &str) -> Option<String> {
     RE.captures(&format!(" {proc_line} ")).map(|m| m[1].trim_end_matches('/').to_string())
 }
 
-/// The value of `key` in an agent process's env (`ps -E`), if set and not empty.
+/// The value of `key` in an agent process's env (`ps -E`), if set and not empty. `ps` joins the env with spaces, so a
+/// value runs to the next ` NAME=` (a path with spaces stays whole).
 fn env_value(proc_line: &str, key: &str) -> Option<String> {
-    format!(" {proc_line} ")
-        .split(' ')
-        .find_map(|w| w.strip_prefix(key).and_then(|r| r.strip_prefix('=')))
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
+    static NEXT: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r" [A-Za-z_][A-Za-z0-9_]*=").expect("env name pattern"));
+    let s = format!(" {proc_line} ");
+    let at = s.find(&format!(" {key}="))? + key.len() + 2;
+    let rest = &s[at..];
+    let end = NEXT.find(rest).map(|m| m.start()).unwrap_or(rest.len());
+    Some(rest[..end].trim_end().to_string()).filter(|v| !v.is_empty())
 }
 
 /// Grok Build's home for an agent process: `GROK_HOME` from its env, else `~/.grok`.

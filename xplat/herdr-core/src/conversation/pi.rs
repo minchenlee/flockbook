@@ -88,7 +88,7 @@ impl ConversationParser {
                 self.pi.offsets.insert(id.into(), offset);
             }
             match leaf {
-                None => self.pi.last = None,
+                None => self.clear_pi(),
                 Some(l) if self.pi.last.as_deref() != Some(l) && self.pi.parent.contains_key(l) => self.rebuild_pi(l),
                 Some(_) => {} // the shown leaf, or one omp no longer has: the branch stays
             }
@@ -108,6 +108,14 @@ impl ConversationParser {
             self.pi.offsets.insert(id.into(), offset);
         }
         self.render_pi(o, id);
+    }
+
+    /// omp cleared the leaf: nothing is shown, the tree stays for a later branch.
+    fn clear_pi(&mut self) {
+        let mut fresh = ConversationParser::new();
+        fresh.pi = std::mem::take(&mut self.pi);
+        fresh.pi.last = None;
+        *self = fresh;
     }
 
     /// Items become the branch from the root to `leaf` (replayed from the kept lines).
