@@ -496,7 +496,14 @@ fn omp_session() {
     let need = Need::new("hc:t9", "omp", &work, vec![940_002]);
     let mut r = resolver(|r| r.omp_sessions_dir = root.clone());
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
-    assert_eq!(got.get("hc:t9"), Some(&other), "agent dir from the process env, folder from the real cwd");
+    assert_eq!(
+        got.get("hc:t9"),
+        Some(&other),
+        "agent dir from the process env, folder from the real cwd (dir {}, real cwd {}, real tmp {})",
+        r.pi_dir("omp", &work, &line),
+        real_path(&work),
+        real_path(&std::env::temp_dir().to_string_lossy())
+    );
 }
 
 #[test]
@@ -549,7 +556,12 @@ fn omp_relative_agent_dir() {
     let need = Need::new("hc:t3", "omp", &work, vec![970_001]);
     let mut r = resolver(|r| r.omp_sessions_dir = "/nonexistent/sessions".into());
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
-    assert_eq!(got.get("hc:t3"), Some(&p), "a relative agent dir under the agent's cwd");
+    assert_eq!(
+        got.get("hc:t3"),
+        Some(&p),
+        "a relative agent dir under the agent's cwd (dir {})",
+        r.pi_dir("omp", &work, "omp PI_CODING_AGENT_DIR=./.omp-agent")
+    );
 }
 
 #[test]
