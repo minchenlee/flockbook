@@ -2088,8 +2088,8 @@ fn claude_hook_exact_quote_bar() {
     assert!(!e(&one.replace("  2. Didn't move", "❯ 2. Didn't move")), "quote bar: two focus marks -> no match");
     let barred_q = hooked("toolu_bar2", json!([{"question": "│ starts with a bar?","header":"Final try","multiSelect":false,"options":[
         {"label":"Moved + notice","description":"It's in Orbit now and the notice showed."},{"label":"Didn't move","description":"It's still in greenhouse."}]}]));
-    assert!(ex(&barred_q, 0, &screen("│ │ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a text that starts with │, quoted");
-    assert!(!ex(&barred_q, 0, &screen("│ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a short text that itself starts with │ looks quoted: refused (safe), never a wrong key");
+    assert!(!ex(&barred_q, 0, &screen("│ │ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a short question is never quoted: another text, refused");
+    assert!(ex(&barred_q, 0, &screen("│ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a short text that itself starts with │ is that text");
     let p = claude_parse(&wrapped).expect("parse");
     assert_eq!(p.question.text, long, "quote bar: the screen parse drops the bar too");
 }

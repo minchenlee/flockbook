@@ -93,6 +93,10 @@ impl Run {
 
 re!(row_re, r"^(❯ |  )(\d+)\.(?: |$)");
 
+/// The shortest question text Claude Code 2.1.322 draws behind a block-quote bar (it starts at about 90
+/// characters). A shorter text that starts with "│" is that text itself.
+pub(crate) const QUOTE_MIN: usize = 80;
+
 /// Claude Code 2.1.322 draws a long question (about 90 characters or more) as a block quote: "│ " in front of
 /// every line of its text, wrapped lines too. The bar is drawing, not text. `lines`: the picker's lines between
 /// the tab bar and the first row. When every line with text there starts with "│", returns them without it;
@@ -187,7 +191,9 @@ pub fn claude_exact(
     let mut region: Vec<&str> = lines[head + 1..sep].to_vec();
     // The question text's lines (above the first row) without a block-quote bar (2.1.322, long questions).
     let first_row = region.iter().position(|l| row_re().is_match(l)).unwrap_or(region.len());
-    let unquoted = drop_quote_bar(&region[..first_row]);
+    // A short question is never drawn with the bar: there a leading "│" is text and stays.
+    let unquoted =
+        if gcount(&want.text) >= QUOTE_MIN { drop_quote_bar(&region[..first_row]) } else { region[..first_row].to_vec() };
     region.splice(..first_row, unquoted);
     let mut chars: Vec<String> = vec![];
     let mut starts: HashMap<usize, usize> = HashMap::new();
@@ -326,11 +332,28 @@ pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], scre
     let mut chars: Vec<String> = vec![];
     let mut starts: HashSet<usize> = HashSet::new();
     // 2.1.322 draws a long question's "● text" lines with "│ " in front, as in the picker (drop_quote_bar): the
-    // bar is drawing. Only above "Ready to submit your answers?"; the rows below are checked as they are.
+    // bar is drawing. Only in a question's text: from a "│ ●" line to its "→" line. The "→" answer lines (a label
+    // can start with "│") and the rows below "Ready to submit your answers?" are checked as they are.
     let ready = lines.iter().rposition(|l| trim_ws(l) == "Ready to submit your answers?").unwrap_or(lines.len());
+    let mut barred = false;
     for (i, l) in lines.iter().enumerate().skip(title + 1) {
         let t = trim_ws(l);
-        let l: &str = if i < ready && t.starts_with('│') { &t['│'.len_utf8()..] } else { l };
+        let mut l: &str = l;
+        if i < ready {
+            if let Some(rest) = t.strip_prefix('│') {
+                if trim_ws(rest).starts_with('●') {
+                    barred = true;
+                }
+                if barred {
+                    l = rest;
+                }
+            } else if t.starts_with('→') || t.starts_with('●') {
+                barred = false;
+            }
+            if trim_ws(l).starts_with('→') {
+                barred = false;
+            }
+        }
         let b = bare(l);
         if !b.is_empty() {
             starts.insert(chars.len());

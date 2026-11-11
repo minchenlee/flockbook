@@ -1156,9 +1156,13 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             text.push(t.to_string());
         }
     }
-    // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line has it.
+    // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line has it
+    // and the text without it is long (claude_exact::QUOTE_MIN); a short text's own "│" stays.
     if !text.is_empty() && text.iter().all(|t| t.starts_with('│')) {
-        text = text.iter().map(|t| trim_ws(&t['│'.len_utf8()..]).to_string()).collect();
+        let unquoted: Vec<String> = text.iter().map(|t| trim_ws(&t['│'.len_utf8()..]).to_string()).collect();
+        if gcount(&unquoted.join(" ")) >= claude_exact::QUOTE_MIN {
+            text = unquoted;
+        }
     }
     // The last row is the "Other" row.
     if !closed || options.pop().is_none() {
