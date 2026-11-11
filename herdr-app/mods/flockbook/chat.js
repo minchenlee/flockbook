@@ -84,6 +84,7 @@ export class ChatView {
     this.cards = new Cards(cx);
     this.helper = new HelperUI();
     this.refresh = (cx) => { this.lastPoll = 0; return this.poll(cx); };
+    this.composer.onNewConversation = (_address, cx) => this.refresh(cx);
     this.cards.canFocus = () => this.composer?.empty !== false;
     this.switchTo(currentAgent()?.address ?? null);
     cx.spawn((cx) => this.poll(cx));

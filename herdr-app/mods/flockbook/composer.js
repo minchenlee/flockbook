@@ -221,6 +221,8 @@ export class Composer {
     this.address = null;
     // address → { agent, path } the chat showed last (set by the chat); send is bound to it.
     this.seen = null;
+    // (address, cx): the send found a new conversation of the same agent; the chat reads its feed again (set by the chat).
+    this.onNewConversation = null;
     this.files = [];
     this.sending = false;
     this.note = null;          // { text, bad } under the box, after a send
@@ -382,13 +384,14 @@ export class Composer {
     try {
       const r = await sidecar.send(a, withFiles(text, files), files, this.seen?.(a) ?? null);
       const done = r.lines.find((l) => l.type === "done");
-      const moved = sidecar.agentChanged(done);
+      const moved = sidecar.agentChanged(done), fresh = sidecar.newConversation(done);
       // Only "sent" and "unconfirmed" (it may still arrive) mean the text went out; any other result did not send.
       if (r.error || !done || (done.result !== "sent" && done.result !== "unconfirmed")) {
         // Put the text back, unless the box moved to another agent or something new was typed.
         if (this.address === a && !b.input.value()) { b.setText(text); b.files = files; }
         else if (this.address !== a) this.drafts.set(a, { text, files });
-        this.note = { text: moved ? sidecar.AGENT_CHANGED : (r.error?.message ?? done?.message) || "The message was not sent.", bad: true };
+        this.note = { text: fresh ? sidecar.NEW_CONVERSATION : moved ? sidecar.AGENT_CHANGED : (r.error?.message ?? done?.message) || "The message was not sent.", bad: true };
+        if (fresh) this.onNewConversation?.(a, cx);
       } else if (done.result === "unconfirmed") {
         this.note = { text: "Sent. The agent did not confirm it yet.", bad: false };
       }

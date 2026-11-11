@@ -73,10 +73,15 @@ export const phone = (what) => call("phone", [what]);
 export const commands = (terminal) => call("commands", ["--terminal", terminal, "--cache", cachePath()]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 // `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
+// `--cache`: the sidecar looks the log up again and writes it there, so the next `feed` reads a new conversation at once.
 export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,
   ...files.flatMap((f) => ["--file", f]),
-  ...(seen?.agent ? ["--expect-kind", seen.agent] : []), ...(seen?.path ? ["--expect-path", seen.path] : [])]);
+  ...(seen?.agent ? ["--expect-kind", seen.agent] : []), ...(seen?.path ? ["--expect-path", seen.path] : []),
+  "--cache", cachePath()]);
 
 // The sidecar's "changed" reply when another agent took the pane: nothing was sent.
 export const AGENT_CHANGED = "Another agent is in this pane now. Nothing was sent.";
 export const agentChanged = (done) => done?.result === "changed" && /another agent/i.test(done?.message ?? "");
+// The same agent started a new conversation (`/clear`): nothing was sent; the chat reads the new log.
+export const NEW_CONVERSATION = "The agent started a new conversation; the chat now shows it. Nothing was sent.";
+export const newConversation = (done) => done?.result === "changed" && /new conversation/i.test(done?.message ?? "");

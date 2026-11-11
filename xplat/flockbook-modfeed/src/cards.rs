@@ -78,6 +78,10 @@ pub fn gate(pane: &Pane) -> KeyGate {
 pub fn agent_changed() -> Done {
     Done::new("changed", Some("another agent is in this pane now; nothing was sent"))
 }
+/// The same agent, in another log: the mod and the page show the new one.
+pub fn new_conversation() -> Done {
+    Done::new("changed", Some("the agent started a new conversation; the chat now shows it; nothing was sent"))
+}
 pub fn no_identity() -> Done {
     Done::new(
         "no-identity",
@@ -322,7 +326,6 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
 /// before the send looked its log up again.
 #[allow(clippy::too_many_arguments)]
 pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: Option<&Path>, expect_kind: Option<&str>, expect_path: Option<&str>, was: Option<&crate::locate::Entry>) -> Done {
-    let _ = was;
     // The agent the owner was reading: another agent, or a new conversation, in this terminal now gets nothing.
     if let Some(k) = expect_kind {
         if Some(k) != pane.agent.as_ref().map(|a| a.kind.as_str()) {
@@ -331,6 +334,12 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     }
     if let Some(p) = expect_path {
         if Some(p.to_string()) != log.map(|l| l.to_string_lossy().into_owned()) {
+            // The same agent process wrote the log the chat showed (`/clear`, `/resume`): a new conversation. Still
+            // nothing is sent: the text was written for the conversation the chat showed.
+            let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
+            if was.is_some_and(|w| crate::locate::same_agent(w, pane, kind, p)) {
+                return new_conversation();
+            }
             return Done::new("changed", Some("another agent or conversation is in this pane now; nothing was sent"));
         }
     }

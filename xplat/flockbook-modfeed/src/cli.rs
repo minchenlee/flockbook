@@ -152,7 +152,8 @@ pub fn run(argv: &[String]) -> String {
                 }
                 Ok(None) => {}
             }
-            let (found, client) = match find(&terminal, cache_url) {
+            // A send looks the log up again: the chat's log may be a conversation the agent left (`/clear`).
+            let (found, was, client) = match find(&terminal, cache_url, cmd == "send") {
                 Ok(x) => x,
                 Err((code, message)) => return r.fail(code, &message),
             };
@@ -209,7 +210,7 @@ pub fn run(argv: &[String]) -> String {
                     let Some(text) = opt("--text").filter(|t| !t.is_empty()) else { return r.fail("usage", "send needs --text <s>") };
                     let files: Vec<String> =
                         args.iter().enumerate().filter(|(i, a)| *a == "--file" && *i + 1 < args.len()).map(|(i, _)| args[i + 1].clone()).collect();
-                    let d = cards::send(&found.pane, &client, &text, &files, log, opt("--expect-kind").as_deref(), opt("--expect-path").as_deref(), None);
+                    let d = cards::send(&found.pane, &client, &text, &files, log, opt("--expect-kind").as_deref(), opt("--expect-path").as_deref(), was.as_ref());
                     r.out.emit(&d);
                     return r.finish(true);
                 }
@@ -249,7 +250,8 @@ pub fn run(argv: &[String]) -> String {
 }
 
 /// herdr-core's client and the agent in `terminal` (with its session log), or the error line's code and message.
-fn find(terminal: &str, cache: Option<&Path>) -> Result<(locate::Found, HcClient), (&'static str, String)> {
+/// `recheck`: as `locate::recheck` (a send), with the entry the cache had; else `locate::find`.
+fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::Found, Option<locate::Entry>, HcClient), (&'static str, String)> {
     let session = HcSession::resolve_env();
     if !session.is_available() {
         return Err(("no-core", "herdr-core is not running".into()));
@@ -258,8 +260,10 @@ fn find(terminal: &str, cache: Option<&Path>) -> Result<(locate::Found, HcClient
     let client = HcClient::new(session.clone(), 8, 22);
     let ws = client.snapshot().map_err(|e| ("core", format!("herdr-core: {e}")))?;
     let now_s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-    match locate::find(terminal, &ws, &mut SessionResolver::new(&session.socket_path), cache, now_s) {
-        Ok(f) => Ok((f, client)),
+    let mut resolver = SessionResolver::new(&session.socket_path);
+    let found = if recheck { locate::recheck(terminal, &ws, &mut resolver, cache, now_s) } else { locate::find(terminal, &ws, &mut resolver, cache, now_s).map(|f| (f, None)) };
+    match found {
+        Ok((f, was)) => Ok((f, was, client)),
         Err(e @ locate::Failure::NoTerminal(_)) => Err(("no-terminal", e.to_string())),
         Err(e) => Err(("not-agent", e.to_string())),
     }
@@ -283,7 +287,7 @@ pub fn keys(terminal: &str, cache: Option<&Path>, home: Option<&str>, keys: Keys
         Ok(Some((machine, there))) => return remote_keys(&machine, &there, cache, home, keys).unwrap_or_else(|(c, m)| error(c, &m)),
         Ok(None) => {}
     }
-    let (found, client) = match find(terminal, cache) {
+    let (found, was, client) = match find(terminal, cache, matches!(keys, Keys::Send { .. })) {
         Ok(x) => x,
         Err((code, message)) => return json!({"type": "error", "code": code, "message": message}),
     };
@@ -292,7 +296,7 @@ pub fn keys(terminal: &str, cache: Option<&Path>, home: Option<&str>, keys: Keys
     let d = match keys {
         Keys::Approve { request, allow } => cards::approve(&found.pane, &client, log, &request, allow, cache),
         Keys::Answer { request, answers } => cards::answer(&found.pane, &client, log, &request, &answers),
-        Keys::Send { text, expect_kind, expect_path } => cards::send(&found.pane, &client, &text, &[], log, expect_kind.as_deref(), expect_path.as_deref(), None),
+        Keys::Send { text, expect_kind, expect_path } => cards::send(&found.pane, &client, &text, &[], log, expect_kind.as_deref(), expect_path.as_deref(), was.as_ref()),
     };
     serde_json::to_value(&d).unwrap_or_else(|_| json!({"type": "done", "result": "failed"}))
 }
@@ -356,7 +360,7 @@ pub fn pull(terminal: &str, cache: Option<&Path>, keep: &mut dyn FnMut(&str) -> 
         }
         Ok(None) => {}
     }
-    let (found, client) = find(terminal, cache)?;
+    let (found, _, client) = find(terminal, cache, false)?;
     let Some(agent) = found.pane.agent.clone() else { return Err(("not-agent", format!("terminal {terminal} runs no agent"))) };
     let log = queue::log_at(found.path.as_deref().map(Path::new));
     let mut io = queue::Live { client: &client, pane_id: found.pane.id.clone() };

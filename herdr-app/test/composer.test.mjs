@@ -66,7 +66,7 @@ test("Enter sends the text and files through the sidecar, then empties the box",
   const b = c.box(fake.agents[0]);
   b.input.set_value("Fix it\n"); c.addFiles(["/tmp/a.png", "/tmp/a.png", "/tmp/b.txt"], cx);
   b.input._h.submit({}, cx); await cx.settle();
-  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Fix it /tmp/a.png /tmp/b.txt", "--file", "/tmp/a.png", "--file", "/tmp/b.txt", "--home", "/home/test/.config/herdr-app"]);
+  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Fix it /tmp/a.png /tmp/b.txt", "--file", "/tmp/a.png", "--file", "/tmp/b.txt", "--cache", "/home/test/.config/herdr-app/flockbook/cache.json", "--home", "/home/test/.config/herdr-app"]);
   assert.equal(b.input.value(), ""); assert.deepEqual(b.files, []);
 });
 
