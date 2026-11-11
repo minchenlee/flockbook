@@ -2,7 +2,7 @@
 
 A native macOS app that shows your Herdr agents' conversations in a layout that is easier to read than the terminal.
 
-**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.11.0)** · [Website](https://flockbook.mclee.dev) · Requires macOS 15 or later. Back to the [README](../README.md).
+**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.12.0)** · [Website](https://flockbook.mclee.dev) · Requires macOS 15 or later. Back to the [README](../README.md).
 
 ## Features
 
