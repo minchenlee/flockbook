@@ -251,6 +251,8 @@ func checksModFeedReview() async throws {
         let d = await FeedCards.send(pane: p7, client: hc, text: "hi", files: [], log: freshLog, expectKind: k, expectPath: clearedLog.path, was: w)
         check(d.result == "changed" && d.message?.contains("another agent") == true, "review1 #7: \(what): refused as before (\(d))")
     }
+    let nolog7 = await FeedCards.send(pane: p7, client: hc, text: "hi", files: [], log: nil, expectKind: "claude", expectPath: clearedLog.path, was: was7)
+    check(nolog7.message?.contains("another agent") == true, "review1 #7: no log found now: refused as before (\(nolog7))")
     let none7 = await FeedCards.send(pane: p7, client: hc, text: "hi", files: [], log: freshLog, expectKind: "claude", expectPath: clearedLog.path)
     check(none7.message?.contains("another agent") == true, "review1 #7: no entry: refused as before (\(none7))")
     check(sends() == s7, "review1 #7: nothing sent in any case")

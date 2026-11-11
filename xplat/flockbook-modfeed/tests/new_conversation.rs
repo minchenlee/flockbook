@@ -60,6 +60,10 @@ fn send_after_clear_is_a_new_conversation() {
     let d = cards::send(&pane, &hc, "hi", &[], Some(&new_log), Some("claude"), Some(&old_s), Some(&elsewhere));
     assert!(d.result == "changed" && d.message.as_deref().unwrap_or("").contains("another agent"), "no proof ({d:?})");
 
+    // No log found now (the lookup failed): the chat could not show a new one, so refused as before.
+    let d = cards::send(&pane, &hc, "hi", &[], None, Some("claude"), Some(&old_s), was.as_ref());
+    assert!(d.message.as_deref().unwrap_or("").contains("another agent"), "no log now ({d:?})");
+
     // No entry, or another agent kind: refused as before.
     let d = cards::send(&pane, &hc, "hi", &[], Some(&new_log), Some("claude"), Some(&old_s), None);
     assert!(d.message.as_deref().unwrap_or("").contains("another agent"), "no entry ({d:?})");
