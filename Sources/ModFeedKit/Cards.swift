@@ -190,9 +190,9 @@ public enum FeedCards {
         // conversation, in this terminal now gets nothing.
         if let k = expectKind, k != pane.agent?.kind { return agentChanged }
         if let p = expectPath, p != log?.path {
-            // The same agent process wrote the log the chat showed (`/clear`, `/resume`): a new conversation. Still
-            // nothing is sent: the text was written for the conversation the chat showed.
-            if let w = was, FeedLocate.sameAgent(w, pane: pane, kind: pane.agent?.kind ?? "", path: p) { return newConversation }
+            // The same agent process wrote the log the chat showed (`/clear`, `/resume`), and a log was found now: a
+            // new conversation. Still nothing is sent: the text was written for the conversation the chat showed.
+            if log != nil, let w = was, FeedLocate.sameAgent(w, pane: pane, kind: pane.agent?.kind ?? "", path: p) { return newConversation }
             return Done(result: "changed", message: "another agent or conversation is in this pane now; nothing was sent")
         }
         guard await client.passes(gate(pane), paneId: pane.id) else { return refused(pane) }

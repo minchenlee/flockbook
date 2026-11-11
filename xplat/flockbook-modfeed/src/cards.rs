@@ -334,10 +334,10 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     }
     if let Some(p) = expect_path {
         if Some(p.to_string()) != log.map(|l| l.to_string_lossy().into_owned()) {
-            // The same agent process wrote the log the chat showed (`/clear`, `/resume`): a new conversation. Still
-            // nothing is sent: the text was written for the conversation the chat showed.
+            // The same agent process wrote the log the chat showed (`/clear`, `/resume`), and a log was found now: a new
+            // conversation. Still nothing is sent: the text was written for the conversation the chat showed.
             let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
-            if was.is_some_and(|w| crate::locate::same_agent(w, pane, kind, p)) {
+            if log.is_some() && was.is_some_and(|w| crate::locate::same_agent(w, pane, kind, p)) {
                 return new_conversation();
             }
             return Done::new("changed", Some("another agent or conversation is in this pane now; nothing was sent"));
