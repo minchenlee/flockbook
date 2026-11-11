@@ -7,26 +7,156 @@
 //! Frames (hc framed mode): `[channel u32 LE][kind u8][len u32 LE][payload]`; channel 0 carries JSON-RPC.
 
 use crate::error::HerdrError;
-use crate::transport::Connector;
-use std::time::Duration;
+use crate::transport::{Connector, Transport};
+use serde_json::{json, Value};
+use std::io::{self, Write};
+use std::time::{Duration, Instant};
 
 pub const DATA: u8 = 0;
 pub const CLOSE: u8 = 2;
 
+/// Each read waits this long at most, so the whole look keeps to its limit.
+const STEP: Duration = Duration::from_millis(50);
+/// The paint is done once nothing more came for this long.
+const QUIET: Duration = Duration::from_millis(60);
+/// A frame larger than this is not one hc sends: a broken stream.
+const MAX_FRAME: usize = 16 << 20;
+
 /// The first paint of `terminal`, or an error: the connection failed, the core refused, or no paint came in `limit`.
-pub fn first_paint(_connector: &dyn Connector, _terminal: &str, _limit: Duration) -> Result<Vec<u8>, HerdrError> {
-    Err(HerdrError::Protocol("first_paint: not written yet".into()))
+pub fn first_paint(connector: &dyn Connector, terminal: &str, limit: Duration) -> Result<Vec<u8>, HerdrError> {
+    let end = Instant::now() + limit;
+    let mut sock = connector.connect(Some(STEP))?;
+    let mut buf: Vec<u8> = vec![];
+    let mut channel: Option<u32> = None;
+    let r = look(sock.as_mut(), terminal, end, &mut buf, &mut channel);
+    // Detach at once, whatever happened.
+    if let Some(ch) = channel {
+        let _ = sock.write_all(&frame(ch, CLOSE, &[]));
+        let _ = sock.flush();
+    }
+    sock.shutdown();
+    r
+}
+
+fn look(sock: &mut dyn Transport, terminal: &str, end: Instant, buf: &mut Vec<u8>, channel: &mut Option<u32>) -> Result<Vec<u8>, HerdrError> {
+    let hello = json!({"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"generation": 1, "framed": true}});
+    sock.write_all(format!("{hello}\n").as_bytes()).map_err(|e| HerdrError::Socket(format!("write: {e}")))?;
+    let line = loop {
+        if let Some(nl) = buf.iter().position(|b| *b == b'\n') {
+            let line = buf[..nl].to_vec();
+            buf.drain(..=nl);
+            break line;
+        }
+        fill(sock, buf, end)?;
+    };
+    let o: Value = serde_json::from_slice(&line).map_err(|e| HerdrError::Protocol(format!("hello: {e}")))?;
+    if o["result"]["framed"] != true {
+        return Err(HerdrError::Protocol("hello: the core did not switch to framed mode".into()));
+    }
+    let attach = json!({"jsonrpc": "2.0", "id": 2, "method": "terminal.attach",
+                        "params": {"terminal": terminal, "cols": 80, "rows": 24, "history": 0, "observe": true}});
+    sock.write_all(&frame(0, DATA, attach.to_string().as_bytes())).map_err(|e| HerdrError::Socket(format!("write: {e}")))?;
+
+    // Frames for a channel before its attach reply is read are kept, then counted.
+    let mut early: Vec<(u32, Vec<u8>)> = vec![];
+    let mut paint: Vec<u8> = vec![];
+    let mut last = Instant::now();
+    loop {
+        while let Some((ch, kind, p)) = take_frame(buf)? {
+            match (ch, kind, *channel) {
+                (0, DATA, None) => {
+                    let o: Value = serde_json::from_slice(&p).map_err(|e| HerdrError::Protocol(format!("attach: {e}")))?;
+                    if o["id"] != 2 {
+                        continue;
+                    }
+                    if !o["error"].is_null() {
+                        return Err(HerdrError::Protocol(format!("terminal.attach: {}", o["error"]["message"])));
+                    }
+                    let ch = o["result"]["channel"].as_u64().ok_or_else(|| HerdrError::Protocol("terminal.attach: no channel".into()))? as u32;
+                    *channel = Some(ch);
+                    for (_, p) in early.drain(..).filter(|(c, _)| *c == ch) {
+                        paint.extend_from_slice(&p);
+                        last = Instant::now();
+                    }
+                }
+                (c, DATA, None) if c != 0 => early.push((c, p)),
+                (c, DATA, Some(ch)) if c == ch => {
+                    paint.extend_from_slice(&p);
+                    last = Instant::now();
+                }
+                (c, CLOSE, Some(ch)) if c == ch => {
+                    *channel = None;
+                    return if paint.is_empty() { Err(HerdrError::Closed) } else { Ok(paint) };
+                }
+                _ => {}
+            }
+        }
+        let now = Instant::now();
+        if !paint.is_empty() && now.duration_since(last) >= QUIET {
+            return Ok(paint);
+        }
+        if now >= end {
+            return if paint.is_empty() { Err(HerdrError::Timeout("first paint".into())) } else { Ok(paint) };
+        }
+        match fill(sock, buf, end) {
+            Ok(()) | Err(HerdrError::Timeout(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// One read into `buf`; `Timeout` when nothing came in a step or the limit passed.
+fn fill(sock: &mut dyn Transport, buf: &mut Vec<u8>, end: Instant) -> Result<(), HerdrError> {
+    if Instant::now() >= end {
+        return Err(HerdrError::Timeout("first paint".into()));
+    }
+    let mut chunk = [0u8; 65536];
+    match sock.read(&mut chunk) {
+        Ok(0) => Err(HerdrError::Closed),
+        Ok(n) => {
+            buf.extend_from_slice(&chunk[..n]);
+            Ok(())
+        }
+        Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted) => {
+            Err(HerdrError::Timeout("read".into()))
+        }
+        Err(e) => Err(HerdrError::Socket(format!("read: {e}"))),
+    }
+}
+
+fn take_frame(buf: &mut Vec<u8>) -> Result<Option<(u32, u8, Vec<u8>)>, HerdrError> {
+    if buf.len() < 9 {
+        return Ok(None);
+    }
+    let n = u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]) as usize;
+    if n > MAX_FRAME {
+        return Err(HerdrError::Protocol(format!("a frame of {n} bytes")));
+    }
+    if buf.len() < 9 + n {
+        return Ok(None);
+    }
+    let ch = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let kind = buf[4];
+    let p = buf[9..9 + n].to_vec();
+    buf.drain(..9 + n);
+    Ok(Some((ch, kind, p)))
+}
+
+fn frame(ch: u32, kind: u8, p: &[u8]) -> Vec<u8> {
+    let mut f = ch.to_le_bytes().to_vec();
+    f.push(kind);
+    f.extend_from_slice(&(p.len() as u32).to_le_bytes());
+    f.extend_from_slice(p);
+    f
 }
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::transport::UnixConnector;
-    use serde_json::{json, Value};
-    use std::io::{BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Read};
     use std::os::unix::net::UnixListener;
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
 
     /// What the fake core answers to the attach.
     #[derive(Clone)]
@@ -36,16 +166,11 @@ mod tests {
         Silent,
     }
 
-    fn frame(ch: u32, kind: u8, p: &[u8]) -> Vec<u8> {
-        let mut f = ch.to_le_bytes().to_vec();
-        f.push(kind);
-        f.extend_from_slice(&(p.len() as u32).to_le_bytes());
-        f.extend_from_slice(p);
-        f
-    }
-
     /// A framed fake core for one connection. Records the hello and every frame it got, as (channel, kind, payload).
-    fn fake(answer: Answer) -> (tempfile::TempDir, String, Arc<Mutex<(Value, Vec<(u32, u8, Vec<u8>)>)>>) {
+    /// The hello, then each frame as (channel, kind, payload).
+    type Got = Arc<Mutex<(Value, Vec<(u32, u8, Vec<u8>)>)>>;
+
+    fn fake(answer: Answer) -> (tempfile::TempDir, String, Got) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hc.sock").to_string_lossy().to_string();
         let l = UnixListener::bind(&path).unwrap();
