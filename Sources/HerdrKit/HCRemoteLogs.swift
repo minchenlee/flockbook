@@ -37,9 +37,9 @@ extension HCClient {
                     return SessionResolver.hcAgentProcess(pids: pids, kind: kind, procs: procs).map { ($0, pids) }
                 }
                 let here = remote.filter { HCMapper.machinePrefix($0.2) == machine + "/" }
-                // Two pi in one cwd: each one's start splits the folder's files between them.
-                let piStarts = here.filter { $0.0.kind == "pi" }.compactMap { n, _, a in
-                    agentOf(a, "pi").map { (pane: n.paneId, cwd: (n.cwd as NSString).standardizingPath, start: $0.0.start) }
+                // Two pi (or two omp) in one cwd: each one's start splits the folder's files between them.
+                let piStarts = here.filter { SessionResolver.piLike($0.0.kind) }.compactMap { n, _, a in
+                    agentOf(a, n.kind).map { (pane: n.paneId, kind: n.kind, cwd: (n.cwd as NSString).standardizingPath, start: $0.0.start) }
                 }
                 // Earliest agent first: it takes its file before a later one looks.
                 let ordered = due.filter { HCMapper.machinePrefix($0.2) == machine + "/" }.map { ($0.0, agentOf($0.2, $0.0.kind)) }
@@ -53,7 +53,7 @@ extension HCClient {
                         continue
                     }
                     let cwd = (n.cwd as NSString).standardizingPath
-                    let rivals = piStarts.filter { $0.pane != n.paneId && $0.cwd == cwd }.map(\.start)
+                    let rivals = piStarts.filter { $0.pane != n.paneId && $0.kind == n.kind && $0.cwd == cwd }.map(\.start)
                     let previous = old?.pid == agent.pid && old?.machine == machine ? old?.path : nil
                     var path = await remoteLog(n, agent: agent, pids: pids, procs: procs, home: home, on: machine, claimed: taken,
                                                rivals: rivals, previous: previous)
@@ -110,7 +110,7 @@ extension HCClient {
     }
 
     /// `SessionResolver.find` on another machine: Claude's pid file, else the one log its tree holds open, else (Codex)
-    /// the one unclaimed rollout of its cwd that started after it, (pi) the newest file of its cwd's session folder.
+    /// the one unclaimed rollout of its cwd that started after it, (pi, omp) the newest file of its cwd's session folder.
     private func remoteLog(_ n: SessionResolver.Need, agent: SessionResolver.Proc, pids: [Int32], procs: [SessionResolver.Proc],
                            home: String, on machine: String, claimed: Set<String>,
                            rivals: [Date] = [], previous: String? = nil) async -> String? {
@@ -139,11 +139,25 @@ extension HCClient {
             let open = out.split(separator: "\n").compactMap { $0.hasPrefix("n/") ? String($0.dropFirst()) : nil }
             if let p = SessionResolver.logPath(openFiles: open, kind: n.kind, home: home), !taken(p) { return p }
         }
-        if n.kind == "pi" {
-            // Its cwd's session folder there: path, mtime (GNU stat, else BSD), first line.
-            let dir = SessionResolver.piSessionDir(cwd: n.cwd, agentDir: home + "/.pi/agent")
+        if SessionResolver.piLike(n.kind) {
+            // Its cwd's session folder there: path, mtime (GNU stat, else BSD), first line (omp: the line after its
+            // title slot).
+            let dir: String, first: String
+            if n.kind == "omp" {
+                // omp's default root, the folder named from the real cwd, home and temp root there. `ps` there gives no
+                // env, so an omp with its own PI_CODING_AGENT_DIR or TMPDIR is not found.
+                let q = Self.shellQuote(n.cwd)
+                guard let out = try? await exec(on: machine, "for d in \(q) " + #""$HOME" "${TMPDIR:-/tmp}"; do (cd "$d" 2>/dev/null && pwd -P) || echo; done"#) else { return nil }
+                let real = out.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                func at(_ i: Int, _ or: String) -> String { real.indices.contains(i) && real[i].hasPrefix("/") ? real[i] : or }
+                dir = SessionResolver.ompSessionDir(cwd: at(0, n.cwd), sessions: home + "/.omp/agent/sessions", home: at(1, home), tmp: at(2, "/tmp"))
+                first = #"head -n 2 "$f" | grep -v -m 1 '^{"type":"title"' | head -c 65536"#
+            } else {
+                dir = SessionResolver.piSessionDir(cwd: n.cwd, agentDir: home + "/.pi/agent")
+                first = #"head -n 1 "$f" | head -c 65536"#
+            }
             let line = "for f in " + Self.shellQuote(dir) + "/*.jsonl"
-                + #"; do [ -f "$f" ] || continue; printf '%s\t%s\t' "$f" "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f")"; head -n 1 "$f" | head -c 65536; echo; done"#
+                + #"; do [ -f "$f" ] || continue; printf '%s\t%s\t' "$f" "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f")"; "# + first + "; echo; done"
             guard let out = try? await exec(on: machine, line) else { return nil }
             let files: [(String, Date, Data)] = out.split(separator: "\n").compactMap { l in
                 let p = l.split(separator: "\t", maxSplits: 2)

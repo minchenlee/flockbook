@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Flockbook for Mac: oh-my-pi (omp) chats show their conversation. The app reads omp's logs in `~/.omp/agent/sessions/` (or `$PI_CODING_AGENT_DIR/sessions`) and knows omp by its program or its reported app name. omp's "/" commands, models and reply-box checks are not known yet.
+
 ### 🔒 Security
 
 ### 🐛 Bug Fixes

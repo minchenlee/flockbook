@@ -10,7 +10,7 @@ public enum EarlierLoadResult: Sendable, Equatable {
 /// Finds and tails an agent's JSONL session log (Claude Code, Codex, pi, …).
 public final class SessionLog: Sendable {
     public let sessionId: String
-    /// `Agent.kind`: "claude", "codex", "pi", "cursor", "grok", …
+    /// `Agent.kind`: "claude", "codex", "pi", "omp", "cursor", "grok", …
     public let agent: String
     public var isCodex: Bool { agent == "codex" }
     /// The host the agent runs on; nil: this Mac. A remote log is read through a local `RemoteLogMirror`.

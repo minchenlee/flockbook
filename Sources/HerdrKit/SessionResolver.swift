@@ -268,9 +268,11 @@ public actor SessionResolver {
                 n.pids.isEmpty ? Self.agentProcess(paneId: n.paneId, socketPath: socketPath, procs: procs)
                                : Self.hcAgentProcess(pids: n.pids, kind: n.kind, procs: procs)
             }
-            // Two pi in one cwd: each one's start splits the folder's files between them.
-            let piStarts: [(pane: String, cwd: String, start: Date)] = needs.filter { $0.kind == "pi" }.compactMap { n in
-                agentOf(n).map { (n.paneId, (n.cwd as NSString).standardizingPath, $0.start) }
+            // Two pi (or omp) in one cwd with one session folder: each one's start splits its files between them. Both
+            // count: two cwds can name one folder (/w/a-b, /w/a/b), one cwd can have two (omp's PI_CODING_AGENT_DIR).
+            let piStarts: [(pane: String, dir: String, cwd: String, start: Date)] = needs.filter { Self.piLike($0.kind) }.compactMap { n in
+                let cwd = (n.cwd as NSString).standardizingPath
+                return agentOf(n).map { (n.paneId, piDir(kind: n.kind, cwd: cwd, line: $0.line), cwd, $0.start) }
             }
             // Earliest agent first: it takes its file before a later one looks.
             let ordered = due.map { ($0, agentOf($0)) }
@@ -278,15 +280,15 @@ public actor SessionResolver {
             for (n, agent) in ordered {
                 // agy: /new or /resume swaps the presence lock in the same process, so every recheck reads it again.
                 if let old = cache[n.paneId], let path = old.path, old.pid != nil, old.pid == agent?.pid, !pidFileChanged(n, old),
-                   n.kind != "agy", n.kind != "pi" || FileManager.default.fileExists(atPath: path) {
+                   n.kind != "agy", !Self.piLike(n.kind) || FileManager.default.fileExists(atPath: path) {
                     cache[n.paneId]?.checked = now
                     cache[n.paneId]?.needPids = n.pids
                     continue
                 }
                 var taken = claimed
                 for (p, e) in cache where p != n.paneId { if let path = e.path { taken.insert(path) } }
-                let cwd = (n.cwd as NSString).standardizingPath
-                let rivals = piStarts.filter { $0.pane != n.paneId && $0.cwd == cwd }.map(\.start)
+                let mine = piStarts.first { $0.pane == n.paneId }
+                let rivals = piStarts.filter { $0.pane != n.paneId && $0.dir == mine?.dir && $0.cwd == mine?.cwd }.map(\.start)
                 let found = agent.map { find(n, agent: $0, procs: procs, claimed: taken, claimedCwd: claimedCwd, rivals: rivals) }
                 let claudeHC = !n.pids.isEmpty && n.kind == "claude"
                 // Unresolved: watch the agent's own file, where a new session id would most likely appear.
@@ -299,6 +301,16 @@ public actor SessionResolver {
         var out: [String: String] = [:]
         for n in needs { if let p = cache[n.paneId]?.path { out[n.paneId] = p } }
         return out
+    }
+
+    /// The session folder of a pi or omp agent (`line`: its process with the env) in `cwd`.
+    private func piDir(kind: String, cwd: String, line: String) -> String {
+        guard kind == "omp" else { return Self.piSessionDir(cwd: cwd, agentDir: piAgentDir) }
+        // omp resolves both from its own cwd (path.resolve)
+        func abs(_ p: String) -> String { p.hasPrefix("/") ? p : Self.lexical(cwd + "/" + p) }
+        let sessions = Self.envValue(line, "PI_CODING_AGENT_DIR").map { Self.dropSlashes(abs($0)) + "/sessions" } ?? ompSessionsDir
+        let tmp = Self.envValue(line, "TMPDIR").map(abs) ?? NSTemporaryDirectory()
+        return Self.ompSessionDir(cwd: Self.realPath(cwd), sessions: sessions, home: Self.realPath(home), tmp: Self.realPath(tmp))
     }
 
     private func pidFileStamp(_ pid: Int32) -> Date? {
@@ -330,8 +342,8 @@ public actor SessionResolver {
                   let p = SessionLog.locateGrok(sessionId: id, sessionsDir: sessions)?.path, !Self.isClaimed(p, claimed) else { return (nil, nil) }
             return (p, nil)
         }
-        if n.kind == "pi" {   // pi keeps no file open: its cwd's session folder
-            let dir = Self.piSessionDir(cwd: n.cwd, agentDir: piAgentDir)
+        if Self.piLike(n.kind) {   // pi and omp keep no file open: their cwd's session folder
+            let dir = piDir(kind: n.kind, cwd: n.cwd, line: agent.line)
             let files: [(String, Date, Data)] = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).compactMap { f in
                 guard f.hasSuffix(".jsonl") else { return nil }
                 let path = dir + "/" + f
@@ -470,6 +482,7 @@ public actor SessionResolver {
             case "codex": return p.hasPrefix(home + "/.codex/sessions/") && (p as NSString).lastPathComponent.hasPrefix("rollout-")
             case "cursor": return p.hasPrefix(home + "/.cursor/projects/") && p.contains("/agent-transcripts/")
             case "pi": return p.hasPrefix(home + "/.pi/")
+            case "omp": return p.hasPrefix(home + "/.omp/")
             default: return p.hasPrefix(home + "/.claude/projects/")
             }
         })
@@ -597,14 +610,62 @@ public actor SessionResolver {
         return agentDir + "/sessions/--" + String(c.map { "/\\:".contains($0) ? "-" : $0 }) + "--"
     }
 
-    /// omp's session folder for a cwd (omp session-paths.ts getDefaultSessionDirName).
-    public static func ompSessionDir(cwd: String, sessions: String, home: String, tmp: String) -> String { "" }
+    /// Agents that write pi's log: pi and its fork omp (oh-my-pi).
+    static func piLike(_ kind: String) -> Bool { kind == "pi" || kind == "omp" }
 
-    /// The value of `key` in an agent process's env (`ps -E`), if set and not empty.
-    static func envValue(_ procLine: String, _ key: String) -> String? { nil }
+    /// omp's session folder for a cwd (omp session-paths.ts getDefaultSessionDirName). All paths resolved already: the
+    /// temp root first (`-tmp-<rel>`), then home (`-<rel>`), else `--<absolute>--`; `/`, `\` and `:` become `-`.
+    public static func ompSessionDir(cwd: String, sessions: String, home: String, tmp: String) -> String {
+        func enc(_ s: some StringProtocol) -> String { String(s.map { "/\\:".contains($0) ? "-" : $0 }) }
+        func within(_ root: String) -> Substring? {
+            let root = dropSlashes(root)
+            if root.isEmpty { return nil }
+            if cwd == root { return "" }
+            guard cwd.hasPrefix(root), let c = cwd.dropFirst(root.count).first, c == "/" || c == "\\" else { return nil }
+            return cwd.dropFirst(root.count + 1)
+        }
+        let name: String
+        if let rel = within(tmp) {
+            name = rel.isEmpty ? "-tmp" : "-tmp-" + enc(rel)
+        } else if let rel = within(home) {
+            name = "-" + enc(rel)
+        } else {
+            name = "--" + enc(cwd.first == "/" || cwd.first == "\\" ? cwd.dropFirst() : cwd[...]) + "--"
+        }
+        return sessions + "/" + name
+    }
+
+    /// The value of `key` in an agent process's env (`ps -E`), if set and not empty. `ps` joins the env with spaces, so
+    /// a value runs to the next ` NAME=` (a path with spaces stays whole).
+    static func envValue(_ procLine: String, _ key: String) -> String? {
+        let s = " " + procLine + " "
+        guard let at = s.range(of: " \(key)=") else { return nil }
+        var rest = s[at.upperBound...]
+        if let next = rest.firstMatch(of: /\ [A-Za-z_][A-Za-z0-9_]*=/) { rest = rest[..<next.range.lowerBound] }
+        let value = String(rest).replacing(/\s+$/, with: "")
+        return value.isEmpty ? nil : value
+    }
 
     /// The path with its links resolved, as Node's realpath; as given when it cannot be resolved.
-    static func realPath(_ p: String) -> String { p }
+    static func realPath(_ p: String) -> String {
+        guard let r = realpath(p, nil) else { return dropSlashes(p) }
+        defer { free(r) }
+        return String(cString: r)
+    }
+
+    /// The path without the slashes at its end.
+    static func dropSlashes(_ p: String) -> String {
+        var s = Substring(p)
+        while s.last == "/" || s.last == "\\" { s = s.dropLast() }
+        return String(s)
+    }
+
+    /// An absolute path without `.`, `..` and empty parts; links are not resolved.
+    static func lexical(_ p: String) -> String {
+        var parts: [Substring] = []
+        for c in p.split(separator: "/") where c != "." { if c == ".." { _ = parts.popLast() } else { parts.append(c) } }
+        return "/" + parts.joined(separator: "/")
+    }
 
     /// pi's file among `(path, mtime, first line)`: a `session` header with this cwd, started or written at or after
     /// `after` (2 s slack; a resumed session is an older file pi writes to), not claimed; the newest by mtime (pi's
@@ -617,8 +678,15 @@ public actor SessionResolver {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return files.filter { path, mtime, data in
-            let nl = data.firstIndex(of: 0x0A) ?? data.endIndex
-            guard let o = try? JSONSerialization.jsonObject(with: data[..<nl]) as? [String: Any], o["type"] as? String == "session",
+            // omp writes a fixed-width `title` slot before the header
+            var rest = data[...], header: [String: Any]?
+            for _ in 0..<2 {
+                let nl = rest.firstIndex(of: 0x0A) ?? rest.endIndex
+                guard let o = try? JSONSerialization.jsonObject(with: rest[..<nl]) as? [String: Any] else { return false }
+                if o["type"] as? String != "title" { header = o; break }
+                rest = rest[(nl < rest.endIndex ? rest.index(after: nl) : nl)...]
+            }
+            guard let o = header, o["type"] as? String == "session",
                   let c = o["cwd"] as? String, (c as NSString).standardizingPath == want else { return false }
             let started = (o["timestamp"] as? String).flatMap { iso.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
             if let t = started, later.contains(where: { t >= $0 }) { return false }
