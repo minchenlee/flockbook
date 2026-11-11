@@ -211,6 +211,10 @@ impl PaneScreen for HcClient {
     fn send_text(&self, text: &str, pane_id: &str) -> Result<(), HerdrError> {
         self.send(text, pane_id)
     }
+
+    fn can_type(&self, text: &str) -> bool {
+        text.chars().all(keys::typeable)
+    }
 }
 
 #[cfg(test)]

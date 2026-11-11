@@ -15,6 +15,18 @@ pub const CLAUDE_KEY_LINES: [&str; 4] = [
     "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel",
 ];
 
+re!(editor_re, r"^(Enter to select · (?:↑/↓|Tab/Arrow keys) to navigate · ctrl\+g to edit in )[^·]+?( · Esc to cancel)$");
+
+/// One of Claude's key lines (spacing aside). The "ctrl+g" part names the person's own editor ($VISUAL/$EDITOR):
+/// "edit in Vim", "edit in VS Code" (seen live 2026-11-11, 2.1.322) and so on; any name counts as that line.
+pub fn claude_key_line(line: &str) -> bool {
+    let s = spacing_aside(line);
+    if CLAUDE_KEY_LINES.contains(&s.as_str()) {
+        return true;
+    }
+    editor_re().captures(&s).is_some_and(|m| CLAUDE_KEY_LINES.contains(&format!("{}Vim{}", &m[1], &m[2]).as_str()))
+}
+
 /// The text with every whitespace and newline scalar dropped.
 pub fn bare(s: &str) -> String {
     s.chars().filter(|c| !is_ws_nl(*c)).collect()
@@ -80,6 +92,18 @@ impl Run {
 }
 
 re!(row_re, r"^(❯ |  )(\d+)\.(?: |$)");
+
+/// Claude Code 2.1.322 draws a long question (about 90 characters or more) as a block quote: "│ " in front of
+/// every line of its text, wrapped lines too. The bar is drawing, not text. `lines`: the picker's lines between
+/// the tab bar and the first row. When every line with text there starts with "│", returns them without it;
+/// otherwise (a short question, or a "│" that is part of the text) unchanged.
+pub fn drop_quote_bar<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let text: Vec<&&str> = lines.iter().filter(|l| !trim_ws(l).is_empty()).collect();
+    if text.is_empty() || !text.iter().all(|l| trim_ws(l).starts_with('│')) {
+        return lines.to_vec();
+    }
+    lines.iter().map(|l| { let t = trim_ws(l); if t.is_empty() { *l } else { &t['│'.len_utf8()..] } }).collect()
+}
 re!(submit_re, r"^(?:❯|\s)\s*Submit\s*$");
 
 /// The rows read so far in `claude_exact`: which region lines are rows (or Submit), and where the current row's
@@ -135,7 +159,7 @@ pub fn claude_exact(
     let n = want.options.len();
     let lines: Vec<&str> = screen.split('\n').collect();
     let Some(foot) = lines.iter().rposition(|l| !trim_ws(l).is_empty()) else { return false };
-    if !CLAUDE_KEY_LINES.contains(&spacing_aside(lines[foot]).as_str()) {
+    if !claude_key_line(lines[foot]) {
         return false;
     }
     let Some(sep) = lines[..foot].iter().rposition(|l| {
@@ -160,7 +184,11 @@ pub fn claude_exact(
     // read from lines, never from the dropped-whitespace text: a row is a line of its own in Claude's
     // two-column focus slot ("❯ " or "  ", then "N."), Submit a line of its own; a mark or a number anywhere
     // else is text. Every row-like line must be one of the rows read (free text cannot hide or add a row).
-    let region: Vec<&str> = lines[head + 1..sep].to_vec();
+    let mut region: Vec<&str> = lines[head + 1..sep].to_vec();
+    // The question text's lines (above the first row) without a block-quote bar (2.1.322, long questions).
+    let first_row = region.iter().position(|l| row_re().is_match(l)).unwrap_or(region.len());
+    let unquoted = drop_quote_bar(&region[..first_row]);
+    region.splice(..first_row, unquoted);
     let mut chars: Vec<String> = vec![];
     let mut starts: HashMap<usize, usize> = HashMap::new();
     for (i, l) in region.iter().enumerate() {
@@ -297,7 +325,12 @@ pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], scre
     // line (a mark inside a label is text).
     let mut chars: Vec<String> = vec![];
     let mut starts: HashSet<usize> = HashSet::new();
-    for l in &lines[title + 1..] {
+    // 2.1.322 draws a long question's "● text" lines with "│ " in front, as in the picker (drop_quote_bar): the
+    // bar is drawing. Only above "Ready to submit your answers?"; the rows below are checked as they are.
+    let ready = lines.iter().rposition(|l| trim_ws(l) == "Ready to submit your answers?").unwrap_or(lines.len());
+    for (i, l) in lines.iter().enumerate().skip(title + 1) {
+        let t = trim_ws(l);
+        let l: &str = if i < ready && t.starts_with('│') { &t['│'.len_utf8()..] } else { l };
         let b = bare(l);
         if !b.is_empty() {
             starts.insert(chars.len());

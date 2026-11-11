@@ -1156,6 +1156,10 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             text.push(t.to_string());
         }
     }
+    // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line has it.
+    if !text.is_empty() && text.iter().all(|t| t.starts_with('│')) {
+        text = text.iter().map(|t| trim_ws(&t['│'.len_utf8()..]).to_string()).collect();
+    }
     // The last row is the "Other" row.
     if !closed || options.pop().is_none() {
         return None;
@@ -1227,6 +1231,11 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         return screen.send_text(&message_text(q, answers), pane_id); // the composer path: text + Enter
     }
     let steps = steps(q, answers)?;
+    // Typed answers go key by key: refused before any key when the backend cannot type one of their characters.
+    if let Some(bad) = answers.iter().filter_map(other_text).find(|t| !screen.can_type(t)) {
+        let shown: String = bad.chars().filter(|c| !screen.can_type(&c.to_string())).collect::<BTreeSet<char>>().into_iter().collect();
+        return Err(unsupported(format!("the typed answer has characters Herdr cannot type yet ({shown}): answer in the terminal")));
+    }
     // `gate` (a remote device): before every key, the same agent, the exact question the key is for on screen
     // (its text, options, the request's headers; the review screen for the last key), input allowed.
     let any = |s: &str| shows_any(q, s);
