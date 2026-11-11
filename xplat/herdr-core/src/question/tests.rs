@@ -2119,8 +2119,11 @@ fn claude_hook_exact_quote_bar() {
     let own = format!("│ {long}");
     let own_q = hooked("toolu_bar3", json!([{"question": own,"header":"Final try","multiSelect":false,"options":[
         {"label":"Moved + notice","description":"It's in Orbit now and the notice showed."},{"label":"Didn't move","description":"It's still in greenhouse."}]}]));
-    assert!(ex(&own_q, 0, &screen(&own), None, FieldFocus::Auto, None), "quote bar: a long text's own │, not quoted, matches as it is");
-    assert!(ex(&own_q, 0, &screen(&format!("│ {own}")), None, FieldFocus::Auto, None), "quote bar: a long text's own │, quoted");
+    // "│ long" on screen is also `long` behind the bar (2.1.322): which question it is cannot be told, so a long
+    // text's own "│" is refused (answer in the terminal), never a match for two requests.
+    assert!(!ex(&own_q, 0, &screen(&own), None, FieldFocus::Auto, None), "quote bar: a long text's own │, not quoted: ambiguous, refused");
+    assert!(!ex(&own_q, 0, &screen(&format!("│ {own}")), None, FieldFocus::Auto, None), "quote bar: a long text's own │, quoted: refused");
+    assert!(ex(&q, 0, &screen(&own), None, FieldFocus::Auto, None), "quote bar: the same screen is the plain long question");
     assert!(!ex(&q, 0, &screen(&format!("│ │ {long}")), None, FieldFocus::Auto, None), "quote bar: one bar is drawing, the second is text");
 }
 
