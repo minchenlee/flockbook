@@ -487,6 +487,45 @@ fn omp_session() {
     assert_eq!(got.get("hc:t9"), Some(&other), "agent dir from the process env, folder from the real cwd");
 }
 
+#[test]
+fn omp_env_values_with_spaces() {
+    let line = "omp --x PI_CODING_AGENT_DIR=/data/omp profiles/work TMPDIR=/t/my tmp HC_TERMINAL_ID=t1";
+    assert_eq!(env_value(line, "PI_CODING_AGENT_DIR").as_deref(), Some("/data/omp profiles/work"), "a value runs to the next NAME=");
+    assert_eq!(env_value(line, "TMPDIR").as_deref(), Some("/t/my tmp"));
+    assert_eq!(env_value(line, "HC_TERMINAL_ID").as_deref(), Some("t1"), "the last value runs to the end");
+    assert_eq!(env_value("omp PI_CODING_AGENT_DIR= HOME=/h", "PI_CODING_AGENT_DIR"), None, "empty is unset");
+    assert_eq!(env_value("omp XPI_CODING_AGENT_DIR=/a", "PI_CODING_AGENT_DIR"), None, "whole names only");
+}
+
+#[test]
+fn omp_two_in_one_cwd_apart() {
+    // Two omp in one cwd with their own PI_CODING_AGENT_DIR: different folders, so no rivals.
+    let (_t, base) = tmp();
+    let cwd = "/w/omp-two";
+    let a0 = Utc::now() - Duration::seconds(900);
+    let b0 = a0 + Duration::seconds(300);
+    let file = |agent: &str, id: &str, started: Date| {
+        let dir = format!("{base}/{agent}/sessions/--w-omp-two--");
+        fs::create_dir_all(&dir).unwrap();
+        let p = format!("{dir}/{id}.jsonl");
+        fs::write(&p, pi_head(id, started, cwd) + "\n").unwrap();
+        set_mtime(&p, started + Duration::seconds(10));
+        p
+    };
+    // A's /new after B started: a header later than B's start, in A's own folder.
+    let fa = file("a", "a", b0 + Duration::seconds(100));
+    let fb = file("b", "b", b0 + Duration::seconds(1));
+    let procs = vec![
+        proc_(950_001, 1, a0, &format!("omp PI_CODING_AGENT_DIR={base}/a HC_TERMINAL_ID=ta")),
+        proc_(950_002, 1, b0, &format!("omp PI_CODING_AGENT_DIR={base}/b HC_TERMINAL_ID=tb")),
+    ];
+    let na = Need::new("hc:ta", "omp", cwd, vec![950_001]);
+    let nb = Need::new("hc:tb", "omp", cwd, vec![950_002]);
+    let mut r = resolver(|r| r.omp_sessions_dir = format!("{base}/default/sessions"));
+    let got = r.resolve_with(&[na, nb], &set(&[]), &HashMap::new(), Some(&procs));
+    assert!(got.get("hc:ta") == Some(&fa) && got.get("hc:tb") == Some(&fb), "each omp reads its own folder ({got:?})");
+}
+
 // MARK: checksGrok (resolver part)
 
 #[test]

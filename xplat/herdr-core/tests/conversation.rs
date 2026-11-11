@@ -299,6 +299,26 @@ fn omp_cleared_leaf() {
     let mut lines = ol[..9].to_vec();
     lines.push(r#"{"type":"message","id":"b2","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","activeLeafId":null,"message":{"role":"assistant","content":[{"type":"text","text":"Hidden."}],"timestamp":1}}"#.into());
     assert!(!describe(&parse(&lines)).iter().any(|d| d.contains("Hidden")), "omp: an entry with a cleared leaf is not shown");
+
+    // The shown branch goes too, with an open tool call; the next root starts a new list.
+    let mut lines = ol[..9].to_vec();
+    lines.push(r#"{"type":"message","id":"a4","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c9","name":"bash","arguments":{"command":"make"}}],"timestamp":1}}"#.into());
+    assert_eq!(describe(&parse(&lines)).last().map(String::as_str), Some("perm:make"), "omp: the open call before the clear");
+    lines.push(r#"{"type":"label","id":"z1","parentId":"a4","timestamp":"2026-11-10T07:00:00.000Z","activeLeafId":null,"targetId":"a4"}"#.into());
+    let mut p = ConversationParser::new();
+    for l in &lines {
+        p.feed(l);
+    }
+    assert!(p.items().is_empty() && !p.has_open_tool_use(), "omp: a cleared leaf clears the shown items ({:?})", describe(&p.items()));
+    lines.push(r#"{"type":"message","id":"u9","parentId":null,"timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Fresh start."}],"timestamp":1}}"#.into());
+    assert_eq!(describe(&parse(&lines)), ["user:Fresh start."], "omp: the next root is shown alone");
+    // The tree is kept: an entry on the old branch shows it again.
+    lines.push(r#"{"type":"message","id":"u8","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Back."}],"timestamp":1}}"#.into());
+    assert_eq!(
+        describe(&parse(&lines)),
+        ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two.", "user:Back."],
+        "omp: the old branch can be rebuilt"
+    );
 }
 
 #[test]
