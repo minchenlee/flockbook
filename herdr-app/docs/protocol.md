@@ -232,7 +232,7 @@ into PNG). Pastes older than a day in that folder are removed; other files never
 
 | Field | Meaning |
 |---|---|
-| `agent` | The agent kind: `claude`, `codex`, `pi`, `cursor`, `grok`, … |
+| `agent` | The agent kind: `claude`, `codex`, `pi`, `omp`, `cursor`, `grok`, … |
 | `path` | The session log, or `null` when none was found yet (then `splice` has `count` 0). |
 | `start`, `size` | The byte range read: from `start` (a line start) to `size`. |
 | `cursor` | Opaque. Pass it back as `--cursor` on the next `feed` for this terminal. |

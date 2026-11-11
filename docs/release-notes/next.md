@@ -5,6 +5,8 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Herdr app mod and phone page: oh-my-pi (omp) chats show their conversation. The helper reads omp's logs in `~/.omp/agent/sessions/` (or `$PI_CODING_AGENT_DIR/sessions`) and knows omp by its program or its reported app name. omp's "/" commands, models and reply-box checks are not known yet.
+
 - Herdr app mod: Settings → General → Chat → Text size sets the chat's messages, code boxes and tables to Small (14 px), Default (16 px) or Large (18 px), without zooming the rest of Herdr; ⌥⌘- and ⌥⌘= step through them and ⌥⌘0 resets. Row heights follow the size.
 
 - Mac app: type "/" in the reply box of a Claude Code, Codex, pi or Antigravity CLI (agy) chat to see its commands, as in the Herdr app mod: ↑ ↓ or the wheel move through them 8 at a time ("4–11 of 20"), Tab, Enter or a click completes the name, Esc closes; after `/model `, `/effort ` or `/thinking ` the list offers the values with their names. A command that opens a screen in the terminal (`/model`, `/status`) is not sent alone, and a message is not sent when the agent's own input box already has text in it: the reply box keeps your text and says why.

@@ -102,6 +102,7 @@ fn known_kind(w: &str) -> Option<&'static str> {
         "claude" => "claude",
         "codex" => "codex",
         "pi" => "pi",
+        "omp" => "omp",
         "cursor-agent" | "cursor" => "cursor",
         "gemini" => "gemini",
         "opencode" => "opencode",
@@ -125,7 +126,8 @@ pub fn kind_of_argv(argv: &[String]) -> Option<String> {
     words.iter().take(2).find_map(|w| known_kind(w)).map(String::from)
 }
 
-/// Agent kind from the foreground process, then the start argv; last, agy's 7501 `app` name.
+/// Agent kind from the foreground process, then the start argv; last, the 7501 `app` name of agy or omp (a launcher
+/// can show a shell in front of omp).
 pub fn kind(t: &Term) -> Option<String> {
     let mut fg = vec![t.fg_name.clone().unwrap_or_default()];
     fg.extend(t.fg_argv.iter().cloned());
@@ -134,10 +136,10 @@ pub fn kind(t: &Term) -> Option<String> {
             return Some(k);
         }
     }
-    if t.status_app.as_deref() == Some("antigravity") {
-        Some("agy".into())
-    } else {
-        None
+    match t.status_app.as_deref() {
+        Some("antigravity") => Some("agy".into()),
+        Some("omp") => Some("omp".into()),
+        _ => None,
     }
 }
 
