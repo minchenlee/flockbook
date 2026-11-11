@@ -49,7 +49,7 @@ To look first: download `Flockbook-herdr-mod-<version>.zip` from the [latest rel
 
 The install never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. An older Flockbook that nobody changed (a gallery copy, an older zip) is upgraded in place. [herdr-app/README.md](herdr-app/README.md) has the details, and [herdr-app/RECIPE.md](herdr-app/RECIPE.md) describes every part of the mod.
 
-**Status: preview.** Built and tried on macOS; the helper also runs on Linux (x86_64 and arm64), where the + file dialog is off (drop files or paste an image instead). Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi, oh-my-pi (omp) and Antigravity CLI (agy).
+**Status: preview.** Built and tried on macOS; the helper also runs on Linux (x86_64 and arm64), where the + file dialog is off (drop files or paste an image instead). Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi, oh-my-pi (omp) and Antigravity CLI (agy). omp needs version 18.9 or later: older omp does not report its status (OSC 7501), so Herdr does not list it as an agent and its tab shows the terminal (run `omp update`).
 
 ## Flockbook for Mac
 
