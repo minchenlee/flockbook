@@ -268,7 +268,10 @@ def scenario(r):
     yield step("send t1 another kind", "send", "--terminal", "t1", "--text", "hi", "--expect-kind", "codex", *C)
     yield step("send t1 another log", "send", "--terminal", "t1", "--text", "hi", "--expect-path", "/elsewhere.jsonl", *C)
     yield step("send t1 empty text", "send", "--terminal", "t1", "--text", "", *C)
-    yield step("send t1", "send", "--terminal", "t1", "--text", "hello — ✓", "--expect-kind", "claude", "--expect-path", t1_log, *C)
+    # A send looks the log up again, never the cached one, and the fake core gives no log to find: the log the cache
+    # names is refused (no proof of a new conversation either), and a send with no log shown goes out.
+    yield step("send t1 cached log", "send", "--terminal", "t1", "--text", "hi", "--expect-kind", "claude", "--expect-path", t1_log, *C)
+    yield step("send t1", "send", "--terminal", "t1", "--text", "hello — ✓", "--expect-kind", "claude", *C)
     # A Claude picker with two questions (read from the screen): the card shows the first, one unread; --all walks the
     # picker with left/right (navigation only) and comes back; the answer picks Blue, then toggles Cheese and Basil.
     r.write_state(r.set_status("t3", "blocked", "question"), {}, pickers={"t3": picker(TWO_QUESTIONS)})
@@ -339,6 +342,7 @@ EXPECT = {
     "approve t20 again while held": ("answered", []),
     "send t1 another kind": ("changed", []),
     "send t1 another log": ("changed", []),
+    "send t1 cached log": ("changed", []),
     "send t1": ("sent", [("terminal.send", "t1", "hello — ✓")]),
     "send t1 --file (local)": ("sent", [("terminal.send", "t1", "look at '{work}/shot one.png'")]),
     "approve t4 (no identity)": ("no-identity", []),

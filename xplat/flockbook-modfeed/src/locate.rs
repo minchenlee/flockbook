@@ -123,13 +123,31 @@ fn absolute(v: Option<&String>, kind: &str) -> Option<String> {
     session_log::locate(kind, v, session_log::default_dir(kind)).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// For a send: the log looked up now, never the cached one (`/clear` gives the same agent a new log and writes no
+/// `continued-in`), and the entry the cache had for this terminal before (`was`). The cache is written again, so the
+/// next `feed` reads the log found now.
+pub fn recheck(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Result<(Found, Option<Entry>), Failure> {
+    let was = pane(ws, terminal).and_then(|p| read_cache(cache_path).entries.get(&p.terminal_id).cloned());
+    look(terminal, ws, resolver, cache_path, now_s, false).map(|f| (f, was))
+}
+
+/// The cached entry `was` is this pane's agent process (same kind and processes), and it showed `path`: a log the
+/// agent wrote. Proof that another log now is a new conversation of the same agent, not another agent.
+pub fn same_agent(was: &Entry, pane: &Pane, kind: &str, path: &str) -> bool {
+    was.kind == kind && !was.pids.is_empty() && was.pids == pane.process_ids && latest(was.path.clone(), kind).as_deref() == Some(path)
+}
+
 /// Finds the log for `terminal`. On a cache miss it resolves every local agent pane in one pass, so two panes never
 /// get the same log, and caches them all.
 pub fn find(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Result<Found, Failure> {
+    look(terminal, ws, resolver, cache_path, now_s, true)
+}
+
+fn look(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64, use_cache: bool) -> Result<Found, Failure> {
     let pane = pane(ws, terminal).cloned().ok_or_else(|| Failure::NoTerminal(terminal.into()))?;
     let kind = pane.agent.as_ref().map(|a| a.kind.clone()).ok_or_else(|| Failure::NotAgent(terminal.into()))?;
     let cache = read_cache(cache_path);
-    if let Some(e) = cache.entries.get(&pane.terminal_id) {
+    if let Some(e) = cache.entries.get(&pane.terminal_id).filter(|_| use_cache) {
         if fresh(Some(e), &pane, &kind, now_s) {
             let path = latest(e.path.clone(), &kind);
             return Ok(Found { pane, path, cached: true });

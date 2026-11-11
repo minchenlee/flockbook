@@ -10,6 +10,7 @@
 //   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
 //   flockbook-modfeed paste-image --dir <folder>   (the clipboard's image as a PNG there; path null when none)
 //   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>] [--cache <file>]
+//                            (send looks the log up again and writes the cache)
 import Foundation
 import HerdrKit
 import ModFeedKit
@@ -54,9 +55,15 @@ case "feed", "status", "card", "approve", "answer", "send":
     let client = HCClient(session: session, callTimeout: 8, sendTimeout: 22)
     do { ws = try await client.snapshot() } catch { fail("core", "herdr-core: \(error)") }
     let found: FeedLocate.Found
+    var was: FeedLocate.Entry?
     do {
-        found = try await FeedLocate.find(terminal: terminal, workspaces: ws,
-                                          resolver: SessionResolver(socketPath: session.socketPath), cacheURL: cacheURL)
+        let resolver = SessionResolver(socketPath: session.socketPath)
+        // A send looks the log up again: the chat's log may be a conversation the agent left (`/clear`).
+        if cmd == "send" {
+            (found, was) = try await FeedLocate.recheck(terminal: terminal, workspaces: ws, resolver: resolver, cacheURL: cacheURL)
+        } else {
+            found = try await FeedLocate.find(terminal: terminal, workspaces: ws, resolver: resolver, cacheURL: cacheURL)
+        }
     } catch let e as FeedLocate.Failure {
         if case .noTerminal = e { fail("no-terminal", e.description) } else { fail("not-agent", e.description) }
     } catch { fail("locate", "\(error)") }
@@ -85,7 +92,7 @@ case "feed", "status", "card", "approve", "answer", "send":
         guard let text = opt("--text"), !text.isEmpty else { fail("usage", "send needs --text <s>") }
         let files = args.indices.filter { args[$0] == "--file" && args.indices.contains($0 + 1) }.map { args[$0 + 1] }
         out.emit(await FeedCards.send(pane: found.pane, client: client, text: text, files: files, log: url,
-                                      expectKind: opt("--expect-kind"), expectPath: opt("--expect-path")))
+                                      expectKind: opt("--expect-kind"), expectPath: opt("--expect-path"), was: was))
         finish(ok: true)
     default: break
     }
