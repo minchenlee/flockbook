@@ -474,6 +474,19 @@ pub fn picker_region(agent: &str, screen: &str) -> Option<String> {
     }
 }
 
+/// `picker_region` holds `s`. For Claude also with the 2.1.322 quote bar ("│" at a line start) dropped: a long
+/// question wrapped inside its needle has the bar between the two parts. A presence check only; the keys are
+/// gated by the exact checks.
+pub(crate) fn picker_has(agent: &str, screen: &str, s: &str) -> bool {
+    if picker_region(agent, screen).is_some_and(|r| r.contains(s)) {
+        return true;
+    }
+    agent == "claude" && {
+        let unbarred: Vec<&str> = screen.split('\n').map(|l| trim_ws(l).strip_prefix('│').unwrap_or(l)).collect();
+        picker_region(agent, &unbarred.join("\n")).is_some_and(|r| r.contains(s))
+    }
+}
+
 /// Where Claude's focus must be for the next key (`shows`). `Auto`: from `other` (None: off the Other row;
 /// "": on it, anywhere for multiSelect; text: on it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -762,7 +775,7 @@ pub fn shows_review(q: &QuestionRequest, screen: &str, answers: Option<&[Questio
     if !region.contains("Review your answers") {
         return false;
     }
-    q.headers.iter().all(|h| region.contains(h.as_str())) && q.questions.iter().all(|x| region.contains(&flat(&x.text)))
+    q.headers.iter().all(|h| region.contains(h.as_str())) && q.questions.iter().all(|x| picker_has(&q.agent, screen, &flat(&x.text)))
 }
 
 pub fn picker_shown(q: &QuestionRequest, screen: &str) -> bool {
@@ -771,8 +784,8 @@ pub fn picker_shown(q: &QuestionRequest, screen: &str) -> bool {
 
 /// The picker is open and shows the first question.
 pub fn screen_shows(q: &QuestionRequest, screen: &str) -> bool {
-    let (Some(first), Some(region)) = (q.questions.first(), picker_region(&q.agent, screen)) else { return false };
-    region.contains(&needle(first))
+    let Some(first) = q.questions.first() else { return false };
+    picker_has(&q.agent, screen, &needle(first))
 }
 
 /// The key sequence for a picker question. Errs with `Unsupported` before anything is sent.
@@ -1156,6 +1169,14 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             text.push(t.to_string());
         }
     }
+    // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line has it
+    // and the text without it is long (claude_exact::QUOTE_MIN); a short text's own "│" stays.
+    if !text.is_empty() && text.iter().all(|t| t.starts_with('│')) {
+        let unquoted: Vec<String> = text.iter().map(|t| trim_ws(&t['│'.len_utf8()..]).to_string()).collect();
+        if gcount(&unquoted.join(" ")) >= claude_exact::QUOTE_MIN {
+            text = unquoted;
+        }
+    }
     // The last row is the "Other" row.
     if !closed || options.pop().is_none() {
         return None;
@@ -1227,6 +1248,11 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         return screen.send_text(&message_text(q, answers), pane_id); // the composer path: text + Enter
     }
     let steps = steps(q, answers)?;
+    // Typed answers go key by key: refused before any key when the backend cannot type one of their characters.
+    if let Some(bad) = answers.iter().filter_map(other_text).find(|t| !screen.can_type(t)) {
+        let shown: String = bad.chars().filter(|c| !screen.can_type(&c.to_string())).collect::<BTreeSet<char>>().into_iter().collect();
+        return Err(unsupported(format!("the typed answer has characters Herdr cannot type yet ({shown}): answer in the terminal")));
+    }
     // `gate` (a remote device): before every key, the same agent, the exact question the key is for on screen
     // (its text, options, the request's headers; the review screen for the last key), input allowed.
     let any = |s: &str| shows_any(q, s);
@@ -1335,7 +1361,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
                 focus = FieldFocus::Auto;
                 row = None;
                 checked.clear();
-                if !wait_screen(screen, pane_id, 3000, |x| picker_region(&q.agent, x).is_some_and(|r| r.contains(s.as_str())))? {
+                if !wait_screen(screen, pane_id, 3000, |x| picker_has(&q.agent, x, s))? {
                     return Err(stuck(s.clone()));
                 }
             }
