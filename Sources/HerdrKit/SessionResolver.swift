@@ -309,7 +309,7 @@ public actor SessionResolver {
         // omp resolves both from its own cwd (path.resolve)
         func abs(_ p: String) -> String { p.hasPrefix("/") ? p : Self.lexical(cwd + "/" + p) }
         let sessions = Self.envValue(line, "PI_CODING_AGENT_DIR").map { Self.dropSlashes(abs($0)) + "/sessions" } ?? ompSessionsDir
-        let tmp = Self.envValue(line, "TMPDIR").map(abs) ?? NSTemporaryDirectory()
+        let tmp = Self.ompTempRoot(line, cwd: cwd)
         return Self.ompSessionDir(cwd: Self.realPath(cwd), sessions: sessions, home: Self.realPath(home), tmp: Self.realPath(tmp))
     }
 
@@ -646,8 +646,13 @@ public actor SessionResolver {
         return value.isEmpty ? nil : value
     }
 
-    /// omp's temp root (os.tmpdir()), from its process line with the env.
-    static func ompTempRoot(_ procLine: String, cwd: String) -> String { NSTemporaryDirectory() }
+    /// omp's temp root from its own env (`procLine`), as Bun's (Node's) os.tmpdir() on Unix: TMPDIR, TMP, TEMP, else
+    /// /tmp. A slash at the end is dropped; a relative one is under `cwd` (path.resolve). Never this app's own.
+    static func ompTempRoot(_ procLine: String, cwd: String) -> String {
+        var t = envValue(procLine, "TMPDIR") ?? envValue(procLine, "TMP") ?? envValue(procLine, "TEMP") ?? "/tmp"
+        if t.count > 1 { t = dropSlashes(t) }
+        return t.hasPrefix("/") ? t : lexical(cwd + "/" + t)
+    }
 
     /// The path with its links resolved, as Node's realpath; as given when it cannot be resolved.
     static func realPath(_ p: String) -> String {

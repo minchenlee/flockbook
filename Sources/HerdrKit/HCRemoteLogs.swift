@@ -147,7 +147,7 @@ extension HCClient {
                 // omp's default root, the folder named from the real cwd, home and temp root there. `ps` there gives no
                 // env, so an omp with its own PI_CODING_AGENT_DIR or TMPDIR is not found.
                 let q = Self.shellQuote(n.cwd)
-                guard let out = try? await exec(on: machine, "for d in \(q) " + #""$HOME" "${TMPDIR:-/tmp}"; do (cd "$d" 2>/dev/null && pwd -P) || echo; done"#) else { return nil }
+                guard let out = try? await exec(on: machine, "for d in \(q) " + #""$HOME" "${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"; do (cd "$d" 2>/dev/null && pwd -P) || echo; done"#) else { return nil }
                 let real = out.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                 func at(_ i: Int, _ or: String) -> String { real.indices.contains(i) && real[i].hasPrefix("/") ? real[i] : or }
                 dir = SessionResolver.ompSessionDir(cwd: at(0, n.cwd), sessions: home + "/.omp/agent/sessions", home: at(1, home), tmp: at(2, "/tmp"))

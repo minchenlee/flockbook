@@ -152,7 +152,7 @@ pi entries form a tree (`id`/`parentId`). The conversation is the branch that en
 - Not shown: `session`, `model_change`, `thinking_level_change`, `session_info`, `custom` (e.g. worked-for, permission-gate decisions), `context_edit`, the system prompt, images in user messages.
 
 omp (a pi fork) writes pi's tree, read by the same parser. What differs (the helper has the same rules, `xplat/herdr-core`):
-- The folder: the cwd, home and temp root are resolved first (realpath); under the temp root `-tmp-<rel>`, else under home `-<rel>`, else `--<absolute path>--`, with `/`, `\` and `:` as `-`. The root is `$PI_CODING_AGENT_DIR/sessions` from the omp process's env (a relative one is under its cwd), else `~/.omp/agent/sessions`. On another machine only the default root is looked in (`ps` there gives no env).
+- The folder: the cwd, home and temp root are resolved first (realpath); under the temp root `-tmp-<rel>`, else under home `-<rel>`, else `--<absolute path>--`, with `/`, `\` and `:` as `-`. The temp root is omp's own: `TMPDIR`, `TMP`, `TEMP` from its env, else `/tmp`. The root is `$PI_CODING_AGENT_DIR/sessions` from the omp process's env (a relative one is under its cwd), else `~/.omp/agent/sessions`. On another machine only the default root is looked in (`ps` there gives no env).
 - A `title` line can come before the `session` header.
 - `activeLeafId` on an entry: the shown leaf after it. Another leaf: the entry is kept in the tree and not shown (late usage, a background result). `null`: nothing is shown until the next entry, which shows its own branch.
 - A `custom_message` that starts with `<system-notice>` is not a status row.
