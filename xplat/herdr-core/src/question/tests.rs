@@ -1327,7 +1327,8 @@ fn claude_hook_review3() {
     // The picker on question 2 (Swift's sim is left there by the first check): no Left either.
     live.set(&at1);
     let r = answer_question(&live, "w1:p1", &q, &[ans(&[0]), ans(&[1])], Some(&gate(&agent, yes())));
-    assert!(is_gate_stop(&r) && live.mark() == 0, "r3 P2: questions alike, picker on question 2 -> no Left");
+    // The same agent, the screen never proves question 1 (issue #11 item 1: a screen stop, not another agent).
+    assert!(r == Err(HerdrError::ScreenStop { keys_sent: false }) && live.mark() == 0, "r3 P2: questions alike, picker on question 2 -> no Left ({r:?})");
     let ok = Sim::new(vec![simq("Spaced", "Deploy A?", &[("Yes", "go"), ("No", "stop")], false), simq("Joined", "Deploy B?", &[("Yes", "go"), ("No", "stop")], false)]);
     let mut q2 = q.clone();
     q2.questions[0].text = "Deploy A?".into();
@@ -1844,8 +1845,8 @@ fn hub_review7_codex() {
     let r = answer_question(&live, "w1:p1", &q, &[other(&[], "ham and eggs")], Some(&g));
     let sent = live.sent_or_text(n);
     assert!(
-        !sent.contains(&"Tab".to_string()) && !sent.contains(&"text".to_string()) && is_gate_stop(&r),
-        "r14 codex: focus not on the Other row -> no Tab, no text ({sent:?})"
+        !sent.contains(&"Tab".to_string()) && !sent.contains(&"text".to_string()) && r == Err(HerdrError::ScreenStop { keys_sent: true }),
+        "r14 codex: focus not on the Other row -> no Tab, no text; a screen stop after the Down keys ({sent:?}, {r:?})"
     );
     // The whole notes answer, the focus moving as Codex moves it.
     live.set(&base);

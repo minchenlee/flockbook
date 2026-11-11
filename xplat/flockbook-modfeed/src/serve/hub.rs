@@ -334,7 +334,7 @@ fn done_reply(re: &str, lines: &[Value]) -> Value {
     let msg = d["message"].as_str();
     match d["result"].as_str().unwrap_or("") {
         "sent" => ok(re),
-        "changed" => fail(re, "stale", msg.unwrap_or("The prompt changed. Nothing was sent.")),
+        "changed" | "screen_changed" => fail(re, "stale", msg.unwrap_or("The prompt changed. Nothing was sent.")),
         "answered" => fail(re, "stale", msg.unwrap_or("This prompt was answered already. Nothing was sent.")),
         "unconfirmed" => fail(re, "failed", "herdr-core did not answer in time. It may still arrive: check before sending again."),
         _ => fail(re, "failed", msg.unwrap_or("It did not go out.")),
