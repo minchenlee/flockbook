@@ -2162,3 +2162,56 @@ fn claude_review_quote_bar() {
     assert!(!claude_review_exact(&q, &a, &review(" │ ● This is a deliberately long first question so the picker draws its text with a side bar, which colour?")), "review: other text behind the bar");
     assert!(!claude_review_exact(&q, &[ans(&[0]), other(&[0, 2], "Olives Please")], &review(" │ ● This is a deliberately long first question so the picker draws its text with a side bar, which size?")), "review: another pick");
 }
+
+#[test]
+fn claude_quote_bar_only_on_long_questions() {
+    // Claude 2.1.322 draws the bar only for a long question (about 90 characters on). A short question shown as
+    // "│ text" is that text itself: it is another question than "text", never the same one drawn with a bar.
+    let opts = json!([{"label":"Yes","description":"y"},{"label":"No","description":"n"}]);
+    let q = hooked("toolu_short", json!([{"question":"starts with a bar?","header":"Bar","multiSelect":false,"options":opts}]));
+    let screen = |text: &str| sw(&format!(r#"
+    ❯ the prompt
+    ────────────────────────────────────────────────────────────────
+     ☐ Bar
+
+    {text}
+
+    ❯ 1. Yes
+         y
+      2. No
+         n
+      3. Type something.
+    ────────────────────────────────────────────────────────────────
+      4. Chat about this
+
+    Enter to select · ↑/↓ to navigate · Esc to cancel
+    "#));
+    assert!(ex(&q, 0, &screen("starts with a bar?"), None, FieldFocus::Auto, None), "short question, plain: matches");
+    assert!(!ex(&q, 0, &screen("│ starts with a bar?"), None, FieldFocus::Auto, None), "short question behind a bar is another question's text: no match");
+    let p = claude_parse(&screen("│ starts with a bar?")).expect("parse");
+    assert_eq!(p.question.text, "│ starts with a bar?", "parse keeps a short question's own bar");
+}
+
+#[test]
+fn claude_review_bar_only_in_question_text() {
+    // Options A, B and "│B"; the review wraps the picks so "│B" starts a line. That bar is the label's own text.
+    let q = hooked("toolu_rv", json!([
+        {"question":"This is a deliberately long first question so the picker draws its text with a side bar, which size?","header":"Size","multiSelect":true,"options":[{"label":"A","description":"a"},{"label":"B","description":"b"},{"label":"│B","description":"c"}]}]));
+    let review = sw(r#"
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Size  ✔ Submit  →
+
+    Review your answers
+
+     │ ● This is a deliberately long first question so the picker draws its text with a side bar, which size?
+       → A,
+       │B
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "#);
+    assert!(claude_review_exact(&q, &[ans(&[0, 2])], &review), "picks A and │B: the wrapped │B is the label");
+    assert!(!claude_review_exact(&q, &[ans(&[0, 1])], &review), "picks A and B: the screen shows │B, not B");
+}
