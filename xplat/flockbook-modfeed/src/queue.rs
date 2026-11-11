@@ -596,11 +596,18 @@ fn claude_box(lines: &[String]) -> Vec<String> {
     box_rows(&lines[a + 1..b], '❯')
 }
 
-/// Codex: the last row that starts with "› ", and the rows under it down to the footer.
+/// Codex: the last row that starts with "› ", and the rows under it down to the footer. A newer footer has a
+/// status line with no "% left" (model · folder · thread title, after a blank line): that line is the footer's.
 fn codex_box(lines: &[String]) -> Vec<String> {
     let Some(i) = lines.iter().rposition(|l| l.starts_with("› ")) else { return vec![] };
     let Some(end) = lines[i + 1..].iter().position(|l| l.contains("% left") || l.contains("? for shortcuts")) else { return vec![] };
-    box_rows(&lines[i..i + 1 + end], '›')
+    let mut rows = &lines[i..i + 1 + end];
+    if let [.., blank, status] = rows {
+        if rows.len() > 2 && trim(blank).is_empty() && status.starts_with("  ") && status.contains(" · ") {
+            rows = &rows[..rows.len() - 2];
+        }
+    }
+    box_rows(rows, '›')
 }
 
 fn box_rows(lines: &[String], mark: char) -> Vec<String> {
@@ -785,6 +792,11 @@ mod box_tests {
         assert_eq!(box_has_text("codex", &codex("› hi there")), Some(true));
         assert_eq!(box_has_text("codex", &codex("› /")), Some(true));
         assert_eq!(box_has_text("codex", "nothing"), None);
+        // A newer Codex footer: a blank line, then model · folder · thread title (no "% left"), then the shortcuts.
+        let titled = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · ~/src/app · Fix the login form · Main [default]\n  ← for agents · ? for shortcuts\n");
+        assert_eq!(box_has_text("codex", &titled("› Ask Codex to do anything")), Some(false));
+        assert_eq!(box_has_text("codex", &titled("› hi there")), Some(true));
+        assert_eq!(box_has_text("codex", &titled("› first line\n  second line")), Some(true));
     }
 
     #[test]
