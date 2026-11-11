@@ -4,6 +4,7 @@
 pub mod client;
 pub mod keys;
 pub mod mapper;
+pub mod observe;
 pub mod session;
 
 pub use client::HcClient;

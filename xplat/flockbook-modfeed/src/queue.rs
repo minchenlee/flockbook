@@ -687,6 +687,13 @@ pub fn box_has_text(kind: &str, screen: &str, claude_suggests: bool) -> Option<b
     Some(rows.iter().any(|r| !trim(r).is_empty()))
 }
 
+/// Whether Claude Code's box row in `paint` (a terminal's first paint, from a watch-only attach) holds only a dim
+/// prompt suggestion that reads `text`: every character after "❯ " is dim, they read `text`, and the cursor stands at
+/// the box's start. Typed text is not dim and the cursor stands after it. Any doubt: false (the send is refused).
+pub fn claude_suggestion_in_paint(_paint: &[u8], _text: &str) -> bool {
+    false
+}
+
 /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
 /// first row (a dialog, a menu): `None`.
 fn ruled(lines: &[String], mark: Option<char>) -> Option<Vec<String>> {
@@ -783,6 +790,33 @@ mod box_tests {
         assert_eq!(c("❯\u{a0}/sta"), Some(true));
         assert_eq!(c("❯\u{a0}"), Some(false));
         assert_eq!(c("❯\u{a0}Try \"fix typecheck errors\""), Some(false));
+    }
+
+    // A first paint as Claude Code 2.1.322 gives it (spike 11-12, redacted): rule, box row, rule, footer; the cursor
+    // last. Its empty-box placeholder is dim (SGR 2) with the cursor at the box start; typed text has a colour and
+    // the cursor after it.
+    fn paint(row: &str, cursor_col: u32) -> Vec<u8> {
+        let rule = "─".repeat(40);
+        format!("\x1b[2J\x1b[1;1H● Done.\x1b[3;1H\x1b[38;2;136;136;136m{rule}\x1b[0m\x1b[4;1H{row}\x1b[5;1H{rule}\x1b[6;3H\x1b[2m? for shortcuts\x1b[0m\x1b[4;{cursor_col}H").into_bytes()
+    }
+    const DIM: &str = "❯\u{a0}\x1b[0m\x1b[2m/clear\x1b[0m";
+    const TYPED: &str = "❯\u{a0}\x1b[0m\x1b[38;2;177;185;249m/clear\x1b[0m";
+
+    #[test]
+    fn suggestion_in_paint() {
+        let s = super::claude_suggestion_in_paint;
+        assert!(s(&paint(DIM, 3), "/clear"), "dim, cursor at the box start: a suggestion");
+        assert!(!s(&paint(TYPED, 9), "/clear"), "typed: a colour, cursor after it");
+        assert!(!s(&paint(TYPED, 3), "/clear"), "not dim, wherever the cursor is");
+        assert!(!s(&paint(DIM, 9), "/clear"), "dim but the cursor after it: no proof");
+        assert!(!s(&paint(DIM, 3), "/compact"), "another text than the screen's");
+        assert!(!s(&paint("❯\u{a0}\x1b[2m/cl\x1b[22mear", 3), "/clear"), "only part dim");
+        assert!(!s(&paint("❯\u{a0}\x1b[38;2;2;2;2m/clear\x1b[0m", 3), "/clear"), "a truecolor 2 is not dim");
+        assert!(!s(&paint("❯\u{a0}\x1b[38;5;2m/clear\x1b[0m", 3), "/clear"), "a 256-colour 2 is not dim");
+        assert!(s(&paint("❯\u{a0}\x1b[0m\x1b[38;2;1;2;3;2m/clear\x1b[0m", 3), "/clear"), "dim after a truecolor");
+        assert!(!s(b"", "/clear"), "no paint");
+        assert!(!s(&paint("hello", 3), "/clear"), "no box row");
+        assert!(!s(&paint(DIM, 3), ""), "nothing to match");
     }
 
     #[test]
