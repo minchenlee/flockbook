@@ -1025,6 +1025,9 @@ mod tests {
     fn replies() {
         assert_eq!(done_reply("c1", &[json!({"type": "done", "result": "sent"})]), ok("c1"));
         assert_eq!(done_reply("c1", &[json!({"type": "done", "result": "changed"})])["error"]["code"], "stale");
+        // The question on screen changed while answering (same agent): stale too, with the helper's note.
+        let r = done_reply("c1", &[json!({"type": "done", "result": "screen_changed", "message": "check the terminal"})]);
+        assert!(r["error"]["code"] == "stale" && r["error"]["message"] == "check the terminal", "{r}");
         assert_eq!(done_reply("c1", &[json!({"type": "error", "code": "no-terminal", "message": "x"})])["error"]["code"], "notFound");
         assert_eq!(input_problem("a\u{1b}[2J", 100).as_deref(), Some("Text with control character U+001B."));
         assert!(input_problem("line\n\tok", 100).is_none());

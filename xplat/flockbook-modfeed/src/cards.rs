@@ -106,6 +106,10 @@ pub fn refused(pane: &Pane) -> Done {
         no_identity()
     }
 }
+/// An answer the key gate stopped (stub: every stop as `refused`).
+pub fn answer_stop(pane: &Pane, _e: &HerdrError) -> Done {
+    refused(pane)
+}
 pub fn already_answered() -> Done {
     Done::new("answered", Some("this approval was already answered; waiting for the agent to move on"))
 }
@@ -316,7 +320,7 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
     match r {
         Ok(Some(d)) => d,
         Ok(None) => Done::new("sent", None),
-        Err(HerdrError::KeyGateStop) => refused(pane),
+        Err(e @ (HerdrError::KeyGateStop | HerdrError::ScreenStop { .. })) => answer_stop(pane, &e),
         Err(HerdrError::Question(QuestionFailure::NotOnScreen)) => Done::new("changed", Some("the question is not on screen")),
         Err(e) => Done::new("failed", Some(&e.to_string())),
     }

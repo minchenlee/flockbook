@@ -128,11 +128,17 @@ struct Live {
     screen: RefCell<String>,
     inputs: RefCell<Vec<Input>>,
     on_input: RefCell<Option<OnInput>>,
+    /// A slow render: the screen shown after this many more reads.
+    later: RefCell<Option<(usize, String)>>,
 }
 
 impl Live {
     fn new(pane: Pane, screen: &str) -> Live {
-        Live { panes: RefCell::new(vec![pane]), screen: RefCell::new(screen.into()), inputs: RefCell::new(vec![]), on_input: RefCell::new(None) }
+        Live { panes: RefCell::new(vec![pane]), screen: RefCell::new(screen.into()), inputs: RefCell::new(vec![]), on_input: RefCell::new(None), later: RefCell::new(None) }
+    }
+    /// Shows `s` only after `reads` more screen reads (the TUI renders slowly on a busy machine).
+    fn set_later(&self, reads: usize, s: &str) {
+        *self.later.borrow_mut() = Some((reads, s.into()));
     }
     fn set(&self, s: &str) {
         *self.screen.borrow_mut() = s.into();
@@ -236,6 +242,16 @@ impl PaneScreen for Live {
         }])
     }
     fn visible_text(&self, _pane_id: &str) -> Result<String, HerdrError> {
+        let mut later = self.later.borrow_mut();
+        if let Some((n, s)) = later.as_mut() {
+            if *n == 0 {
+                *self.screen.borrow_mut() = std::mem::take(s);
+                *later = None;
+            } else {
+                *n -= 1;
+            }
+        }
+        drop(later);
         Ok(self.get())
     }
     fn respond(&self, _pane_id: &str, allow: bool) -> Result<(), HerdrError> {
@@ -1105,6 +1121,70 @@ fn claude_hook_answer() {
     let err = answer_question(&live, "w1:p1", &two, &answers, Some(&g));
     live.off();
     assert!(live.sent(n0) == ["2"] && err.is_err(), "hookB answer: another request after question 1 -> stops, nothing more sent ({:?})", live.sent(n0));
+}
+
+/// Issue #11 item 1: a gated answer (the sidecar, a paired device) on a busy machine. Each key's render comes after
+/// 16 reads (2.4 s at 150 ms; the old wait gave up after 1.5 s): the gate waits for the exact screen and sends every key. The same agent with another
+/// question on screen stops with `ScreenStop` (keys sent so far told); another agent is still `KeyGateStop`.
+#[test]
+fn claude_hook_slow_render() {
+    let two = two_record();
+    let agent = tui_agent("claude", Some("sess-1"));
+    let live = Live::new(tui_pane(agent.clone()), "");
+    let g = gate(&agent, yes());
+    let two_sim = || {
+        Rc::new(RefCell::new(Sim::new(vec![
+            simq("Size", "Which size?", &[("Small", "small one"), ("Large", "big one")], false),
+            simq("Tops", "Which toppings?", &[("Cheese", "yellow"), ("Ham", "pink"), ("Egg", "")], true),
+        ])))
+    };
+    let s = two_sim();
+    live.set(&s.borrow().render());
+    let s2 = s.clone();
+    live.on(move |i, l| {
+        s2.borrow_mut().input(i);
+        l.set("");
+        l.set_later(16, &s2.borrow().render());
+    });
+    let n = live.mark();
+    let err = answer_question(&live, "w1:p1", &two, &[ans(&[1]), ans(&[0, 2])], Some(&g));
+    live.off();
+    assert!(err.is_ok() && live.sent(n) == ["2", "1", "3", "Tab", "1"] && s.borrow().done, "slow render: every key goes ({:?}, {err:?})", live.sent(n));
+
+    // The same agent, and after question 1 another request opens: stopped, and the keys already in are told.
+    let s = two_sim();
+    let swap = Rc::new(RefCell::new(Sim::new(vec![
+        simq("Size", "Which size?", &[("Small", "small one"), ("Large", "big one")], false),
+        simq("Tops", "Which toppings?", &[("Cheese", "yellow"), ("Ham", "pink"), ("Bacon", "")], true),
+    ])));
+    swap.borrow_mut().at = 1;
+    swap.borrow_mut().single.insert(0, 1);
+    live.set(&s.borrow().render());
+    let (s2, sw2) = (s.clone(), swap.clone());
+    live.on(move |i, l| {
+        s2.borrow_mut().input(i);
+        let screen = if s2.borrow().at == 1 { sw2.borrow().render() } else { s2.borrow().render() };
+        l.set(&screen);
+    });
+    let n = live.mark();
+    let err = answer_question(&live, "w1:p1", &two, &[ans(&[1]), ans(&[0, 2])], Some(&g));
+    live.off();
+    assert!(live.sent(n) == ["2"] && err == Err(HerdrError::ScreenStop { keys_sent: true }), "another question, same agent: ScreenStop after a key ({:?}, {err:?})", live.sent(n));
+
+    // Another agent (another session) after question 1: KeyGateStop, as before.
+    let s = two_sim();
+    live.set(&s.borrow().render());
+    let s2 = s.clone();
+    live.on(move |i, l| {
+        s2.borrow_mut().input(i);
+        l.set(&s2.borrow().render());
+        l.set_agent(tui_agent("claude", Some("sess-2")));
+    });
+    let n = live.mark();
+    let err = answer_question(&live, "w1:p1", &two, &[ans(&[1]), ans(&[0, 2])], Some(&g));
+    live.off();
+    live.set_agent(agent.clone());
+    assert!(live.sent(n) == ["2"] && is_gate_stop(&err), "another agent: KeyGateStop ({:?}, {err:?})", live.sent(n));
 }
 
 /// checksClaudeHookReview1: rows hidden in free text, row columns, an ambiguous review refused before any key.
