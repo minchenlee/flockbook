@@ -436,6 +436,18 @@ fn omp_session_folder_names() {
     );
     assert_eq!(d("/home/u/a:b\\c", "/home/u", "/tmp"), "/s/-a-b-c", "':' and '\\' become '-'");
     assert_eq!(d("/home/user2/x", "/home/u", "/tmp"), "/s/--home-user2-x--", "a sibling of home is not under home");
+    // Windows: `\` separates too (path.relative); the drive's ':' becomes '-'.
+    assert_eq!(d(r"C:\Users\u\src\app", r"C:\Users\u", r"C:\T"), "/s/-src-app", "Windows: under home");
+    assert_eq!(d(r"C:\T\x", r"C:\Users\u", r"C:\T"), "/s/-tmp-x", "Windows: under the temp root");
+    assert_eq!(d(r"D:\w\x", r"C:\Users\u", r"C:\T"), "/s/--D--w-x--", "Windows: elsewhere");
+}
+
+#[test]
+fn verbatim_prefix_dropped() {
+    // Windows canonicalize gives \\?\C:\...; Node's realpath gives C:\...
+    assert_eq!(strip_verbatim(r"\\?\C:\Users\u"), r"C:\Users\u");
+    assert_eq!(strip_verbatim(r"\\?\UNC\srv\share\a"), r"\\srv\share\a");
+    assert_eq!(strip_verbatim("/home/u"), "/home/u");
 }
 
 #[test]
@@ -476,9 +488,9 @@ fn omp_session() {
     // PI_CODING_AGENT_DIR in the process env moves the root; a cwd in the temp root gets the -tmp- name.
     let (_w, work) = tmp();
     let real = fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
-    let base = last_path_component(&real).to_string();
+    let base = Path::new(&real).file_name().unwrap().to_string_lossy().into_owned();
     let moved = agent_dir.clone() + "/moved";
-    let other = write(&format!("{moved}/sessions/-tmp-{base}"), "2026-11-10T07-35-44-761Z_b", &real);
+    let other = write(&format!("{moved}/sessions/-tmp-{base}"), "2026-11-10T07-35-44-761Z_b", &work);
     let line = format!("bun /usr/local/bin/omp PI_CODING_AGENT_DIR={moved} HC_TERMINAL_ID=t9");
     let procs = vec![proc_(940_002, 1, start, &line)];
     let need = Need::new("hc:t9", "omp", &work, vec![940_002]);
@@ -528,10 +540,10 @@ fn omp_relative_agent_dir() {
     let start = Utc::now() - Duration::seconds(600);
     let (_w, work) = tmp();
     let real = fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
-    let dir = format!("{work}/.omp-agent/sessions/-tmp-{}", last_path_component(&real));
+    let dir = format!("{work}/.omp-agent/sessions/-tmp-{}", Path::new(&real).file_name().unwrap().to_string_lossy());
     fs::create_dir_all(&dir).unwrap();
     let p = format!("{dir}/2026-11-10T07-35-44-761Z_c.jsonl");
-    fs::write(&p, pi_head("c", start + Duration::seconds(3), &real) + "\n").unwrap();
+    fs::write(&p, pi_head("c", start + Duration::seconds(3), &work) + "\n").unwrap();
     set_mtime(&p, start + Duration::seconds(60));
     let procs = vec![proc_(970_001, 1, start, "omp PI_CODING_AGENT_DIR=./.omp-agent HC_TERMINAL_ID=t3")];
     let need = Need::new("hc:t3", "omp", &work, vec![970_001]);

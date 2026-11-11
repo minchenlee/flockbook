@@ -1268,22 +1268,34 @@ fn pi_like(kind: &str) -> bool {
 
 /// The path with its links resolved, as Node's realpath; as given when it cannot be resolved.
 fn real_path(p: &str) -> String {
-    std::fs::canonicalize(p).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| p.trim_end_matches('/').to_string())
+    std::fs::canonicalize(p)
+        .map(|r| strip_verbatim(&r.to_string_lossy()))
+        .unwrap_or_else(|_| p.trim_end_matches(['/', '\\']).to_string())
+}
+
+/// A Windows path without the `\\?\` prefix `canonicalize` adds (`\\?\C:\a` → `C:\a`, `\\?\UNC\s\x` → `\\s\x`),
+/// as Node's realpath gives it.
+fn strip_verbatim(p: &str) -> String {
+    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    p.strip_prefix(r"\\?\").unwrap_or(p).to_string()
 }
 
 /// omp's session folder for a cwd (omp session-paths.ts getDefaultSessionDirName). All paths resolved already: the
 /// temp root first (`-tmp-<rel>`), then home (`-<rel>`), else `--<absolute>--`; `/`, `\` and `:` become `-`.
 pub fn omp_session_dir(cwd: &str, sessions: &str, home: &str, tmp: &str) -> String {
     let enc = |s: &str| -> String { s.chars().map(|ch| if "/\\:".contains(ch) { '-' } else { ch }).collect() };
+    // Windows: `\` separates too, as in path.relative.
     let within = |root: &str| -> Option<String> {
-        let root = root.trim_end_matches('/');
+        let root = root.trim_end_matches(['/', '\\']);
         if root.is_empty() {
             return None;
         }
         if cwd == root {
             return Some(String::new());
         }
-        cwd.strip_prefix(root).and_then(|r| r.strip_prefix('/')).map(str::to_string)
+        cwd.strip_prefix(root).and_then(|r| r.strip_prefix(['/', '\\'])).map(str::to_string)
     };
     let name = if let Some(rel) = within(tmp) {
         if rel.is_empty() { "-tmp".to_string() } else { format!("-tmp-{}", enc(&rel)) }
