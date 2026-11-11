@@ -463,6 +463,53 @@ fn omp_title_line_first() {
     assert_eq!(pi_pick(&lines, "/r/w", start, &[], |_| false), Some("/r/a.jsonl".into()), "the session header after a title slot");
 }
 
+/// The test's temp root in an agent's env, under the name omp reads first on this OS.
+fn tmp_env() -> String {
+    let t = std::env::temp_dir().to_string_lossy().into_owned();
+    if cfg!(windows) { format!("TEMP={t}") } else { format!("TMPDIR={t}") }
+}
+
+#[test]
+fn omp_temp_root_from_env() {
+    // omp's os.tmpdir() reads its own env (Bun, as Node), not ours.
+    #[cfg(unix)]
+    {
+        assert_eq!(omp_tmp("omp TMPDIR=/a TMP=/b TEMP=/c"), "/a", "TMPDIR first");
+        assert_eq!(omp_tmp("omp TMP=/b TEMP=/c"), "/b", "then TMP");
+        assert_eq!(omp_tmp("omp TEMP=/c HOME=/h"), "/c", "then TEMP");
+        assert_eq!(omp_tmp("omp HOME=/h"), "/tmp", "else /tmp, not Flockbook's own temp folder");
+        assert_eq!(omp_tmp("omp TMPDIR=/a/"), "/a", "no trailing '/'");
+    }
+    #[cfg(windows)]
+    {
+        assert_eq!(omp_tmp(r"omp TMP=C:\b TEMP=C:\a"), r"C:\a", "TEMP first");
+        assert_eq!(omp_tmp(r"omp TMP=C:\b"), r"C:\b", "then TMP");
+        assert_eq!(omp_tmp(r"omp SystemRoot=C:\Windows"), r"C:\Windows\temp", "else the Windows folder's temp");
+    }
+}
+
+/// `env -u TMPDIR omp` in a folder under /tmp: omp names it -tmp-<name>, whatever Flockbook's TMPDIR is.
+#[cfg(unix)] // /tmp is omp's last temp root only on Unix
+#[test]
+fn omp_without_tmpdir_uses_tmp() {
+    let start = Utc::now() - Duration::seconds(600);
+    let (_t, agent_dir) = tmp();
+    let work = tempfile::Builder::new().prefix("omp-t").tempdir_in("/tmp").unwrap();
+    let work = work.path().to_string_lossy().into_owned();
+    let name = Path::new(&work).file_name().unwrap().to_string_lossy().into_owned();
+    let dir = format!("{agent_dir}/sessions/-tmp-{name}");
+    fs::create_dir_all(&dir).unwrap();
+    let p = format!("{dir}/2026-11-10T07-35-44-761Z_d.jsonl");
+    fs::write(&p, pi_head("d", start + Duration::seconds(3), &work) + "\n").unwrap();
+    set_mtime(&p, start + Duration::seconds(60));
+    let line = format!("omp PI_CODING_AGENT_DIR={agent_dir} HOME=/h HC_TERMINAL_ID=t4");
+    let procs = vec![proc_(980_001, 1, start, &line)];
+    let need = Need::new("hc:t4", "omp", &work, vec![980_001]);
+    let mut r = resolver(|_| {});
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(got.get("hc:t4"), Some(&p), "folder from /tmp (dir {})", r.pi_dir("omp", &work, &line));
+}
+
 #[test]
 fn omp_session() {
     let (_t, agent_dir) = tmp();
@@ -492,7 +539,7 @@ fn omp_session() {
     let base = Path::new(&real).file_name().unwrap().to_string_lossy().into_owned();
     let moved = agent_dir.clone() + "/moved";
     let other = write(&format!("{moved}/sessions/-tmp-{base}"), "2026-11-10T07-35-44-761Z_b", &work);
-    let line = format!("bun /usr/local/bin/omp PI_CODING_AGENT_DIR={moved} HC_TERMINAL_ID=t9");
+    let line = format!("bun /usr/local/bin/omp PI_CODING_AGENT_DIR={moved} {} HC_TERMINAL_ID=t9", tmp_env());
     let procs = vec![proc_(940_002, 1, start, &line)];
     let need = Need::new("hc:t9", "omp", &work, vec![940_002]);
     let mut r = resolver(|r| r.omp_sessions_dir = root.clone());
@@ -553,7 +600,8 @@ fn omp_relative_agent_dir() {
     let p = format!("{dir}/2026-11-10T07-35-44-761Z_c.jsonl");
     fs::write(&p, pi_head("c", start + Duration::seconds(3), &work) + "\n").unwrap();
     set_mtime(&p, start + Duration::seconds(60));
-    let procs = vec![proc_(970_001, 1, start, "omp PI_CODING_AGENT_DIR=./.omp-agent HC_TERMINAL_ID=t3")];
+    let line = format!("omp PI_CODING_AGENT_DIR=./.omp-agent {} HC_TERMINAL_ID=t3", tmp_env());
+    let procs = vec![proc_(970_001, 1, start, &line)];
     let need = Need::new("hc:t3", "omp", &work, vec![970_001]);
     let mut r = resolver(|r| r.omp_sessions_dir = "/nonexistent/sessions".into());
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
@@ -563,7 +611,7 @@ fn omp_relative_agent_dir() {
         got.get("hc:t3").is_some_and(same),
         "{:?} is not {p}: a relative agent dir under the agent's cwd (dir {})",
         got.get("hc:t3"),
-        r.pi_dir("omp", &work, "omp PI_CODING_AGENT_DIR=./.omp-agent")
+        r.pi_dir("omp", &work, &line)
     );
 }
 
