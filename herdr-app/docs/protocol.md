@@ -454,6 +454,12 @@ two rules (a mode's note "… (shift+tab to cycle)" is empty); Grok Build, "│ 
 agent, a screen it cannot read, or a screen where the box is not found (a dialog, a menu): it sends as before, so a
 doubt never blocks a message (but then the text may still go after what is in the box).
 
+Claude Code's suggestion can itself be a command ("/clear"), and then it reads like a typed one. With prompt
+suggestions on, a box of one row holding only "/word" with no command list in the two lines above the box (a typed
+"/" shows that list) is taken for the suggestion (queue.rs `suggested_slash`): `send` presses ctrl+e ctrl+u to clear
+that line (a dim suggestion is untouched; a "/word" typed and closed with Esc goes), reads the screen again, and
+types the text only when the box is down to one row (`box_one_line`); else `box_not_empty`.
+
 `approve` reads the screen again right before the keys and sends only while the box on screen is
 still `request` (the app's `respondIfOpen`). Claude and agy: `--allow` sends `1` (allow once),
 `--deny` sends Esc. Grok: Enter on "Yes, proceed", or Down then Enter on "No, reject", each key

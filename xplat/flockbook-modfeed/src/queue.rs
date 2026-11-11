@@ -687,14 +687,59 @@ pub fn box_has_text(kind: &str, screen: &str, claude_suggests: bool) -> Option<b
     Some(rows.iter().any(|r| !trim(r).is_empty()))
 }
 
-/// Claude Code's suggested command in its box (not yet: always None).
-pub fn suggested_slash(_screen: &str) -> Option<String> {
-    None
+/// Claude Code with prompt suggestions on can suggest a command ("/clear"), dim in the empty box; the screen's text
+/// has no dim, so `box_has_text` counts it as typed and every send stopped at `box_not_empty`. A really typed "/…"
+/// shows Claude Code's command list right above the box, so a box of one row holding only "/word", with no list row
+/// in the two lines above the box, is taken for the suggestion: that word. Else None (anything else in the box, a
+/// list above it, no box). A typed "/word" closed with Esc looks the same; `send` clears that line too.
+pub fn suggested_slash(screen: &str) -> Option<String> {
+    let lines = lines_of(screen);
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| is_rule(&lines[i])).collect();
+    let [.., top, _] = rules[..] else { return None };
+    let rows = ruled(&lines, Some('❯'))?;
+    if rows.iter().skip(1).any(|r| !trim(r).is_empty()) {
+        return None;
+    }
+    let word = trim(rows.first()?).to_string();
+    let name = word.strip_prefix('/')?;
+    if name.is_empty() || !name.chars().all(command_char) {
+        return None;
+    }
+    if lines[top.saturating_sub(2)..top].iter().any(|l| is_command_row(l)) {
+        return None;
+    }
+    Some(word)
 }
 
-/// Claude Code's box holds one row only (not yet: always false).
-pub fn box_one_line(_screen: &str) -> bool {
-    false
+/// Claude Code's box holds one row only. Right after ctrl+e ctrl+u cleared that row, whatever still stands on it is
+/// not typed (its placeholder, a suggestion); a typed second row would still be there.
+pub fn box_one_line(screen: &str) -> bool {
+    ruled(&lines_of(screen), Some('❯')).is_some_and(|rows| !rows.iter().skip(1).any(|r| !trim(r).is_empty()))
+}
+
+fn command_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | ':' | '.' | '-')
+}
+
+/// A row of Claude Code's command list: an optional "❯ " (the picked row), "/name", two or more spaces, then its
+/// description.
+fn is_command_row(line: &str) -> bool {
+    let l = line.replace('\u{a0}', " ");
+    let mut s = l.trim_start();
+    if let Some(rest) = s.strip_prefix('❯') {
+        if !rest.starts_with(char::is_whitespace) {
+            return false;
+        }
+        s = rest.trim_start();
+    }
+    let Some(rest) = s.strip_prefix('/') else { return false };
+    let name = rest.chars().take_while(|&c| command_char(c)).count();
+    if name == 0 {
+        return false;
+    }
+    let after: String = rest.chars().skip(name).collect();
+    let gap = after.chars().take_while(|c| *c == ' ').count();
+    gap >= 2 && after.chars().nth(gap).is_some_and(|c| !c.is_whitespace())
 }
 
 /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
