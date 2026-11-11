@@ -70,6 +70,13 @@ public enum FeedLocate {
         if rename(tmp.path, url.path) != 0 { try? FileManager.default.removeItem(at: tmp) }
     }
 
+    /// As `find`, for a send: the cached entry it had (`was`), and the log looked up again now (stub: as `find`).
+    public static func recheck(terminal: String, workspaces ws: [Workspace], resolver: SessionResolver, cacheURL: URL?,
+                               now: Date = Date()) async throws -> (found: Found, was: Entry?) {
+        let was = pane(ws, terminal: terminal).flatMap { readCache(cacheURL).entries[$0.terminalId] }
+        return (try await find(terminal: terminal, workspaces: ws, resolver: resolver, cacheURL: cacheURL, now: now), was)
+    }
+
     /// Finds the log for `terminal`. On a cache miss it resolves every local agent pane in one pass (one `ps`), so two
     /// panes never get the same log, and caches them all.
     public static func find(terminal: String, workspaces ws: [Workspace], resolver: SessionResolver, cacheURL: URL?,

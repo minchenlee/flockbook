@@ -180,9 +180,10 @@ public enum FeedCards {
         }
     }
 
-    /// The composer: the text, with each file in `files` named in it (`HCClient.deliver`).
+    /// The composer: the text, with each file in `files` named in it (`HCClient.deliver`). `was`: the locate cache
+    /// entry this terminal had before the send looked its log up again.
     public static func send(pane: Pane, client: HCClient, text: String, files: [String], log: URL? = nil,
-                            expectKind: String? = nil, expectPath: String? = nil) async -> Done {
+                            expectKind: String? = nil, expectPath: String? = nil, was: FeedLocate.Entry? = nil) async -> Done {
         // The agent the owner was reading (the kind and the log the mod's last feed showed): another agent, or a new
         // conversation, in this terminal now gets nothing.
         if let k = expectKind, k != pane.agent?.kind { return agentChanged }

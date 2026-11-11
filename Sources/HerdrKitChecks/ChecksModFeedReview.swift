@@ -218,4 +218,40 @@ func checksModFeedReview() async throws {
           "review1 #6: another agent or another log than the one shown: nothing typed (\(wrongKind), \(wrongLog))")
     let same = await FeedCards.send(pane: p5, client: hc, text: "hi", files: [], log: shownLog, expectKind: "claude", expectPath: shownLog.path)
     check(same.result == "sent" && sends() == s6 + 1, "review1 #6: the agent and log shown: sent (\(same))")
+
+    // 7. A send after /clear (issue #11, item 3): the same agent process now writes a new log and no `continued-in`.
+    // The send looks the log up again (never the fresh cached one), writes the cache so the feed moves at once, and
+    // says "new conversation"; nothing is sent. Another process, or no proof, is refused as before.
+    fake.terminals = [FakeHC.terminal("t6", status: "idle")]
+    let ws7 = try await hc.snapshot()
+    let p7 = FeedLocate.pane(ws7, terminal: "t6")!
+    let clearedLog = dir.appendingPathComponent("cleared.jsonl"), freshLog = dir.appendingPathComponent("fresh.jsonl")
+    try "{}\n".write(to: clearedLog, atomically: true, encoding: .utf8)
+    try "{}\n".write(to: freshLog, atomically: true, encoding: .utf8)
+    let cache7 = dir.appendingPathComponent("locate7/cache.json")
+    let now7 = Date()
+    var c7 = FeedLocate.Cache()
+    c7.entries[p7.terminalId] = FeedLocate.Entry(kind: "claude", cwd: p7.cwd, pids: p7.processIds, path: clearedLog.path, checked: now7.timeIntervalSince1970)
+    FeedLocate.writeCache(c7, to: cache7)
+    let (found7, was7) = try await FeedLocate.recheck(terminal: "t6", workspaces: ws7, resolver: SessionResolver(socketPath: "/nonexistent.sock"),
+                                                     cacheURL: cache7, now: now7.addingTimeInterval(1))
+    check(!found7.cached && was7?.path == clearedLog.path, "review1 #7: a send looks the log up again and gives the old entry (\(found7.cached), \(was7?.path ?? "nil"))")
+    let e7 = FeedLocate.readCache(cache7).entries[p7.terminalId]
+    check(e7 != nil && e7?.path != clearedLog.path && e7?.checked == now7.addingTimeInterval(1).timeIntervalSince1970,
+          "review1 #7: the cache no longer holds the old log (\(String(describing: e7)))")
+    let s7 = sends()
+    let fresh7 = await FeedCards.send(pane: p7, client: hc, text: "hi", files: [], log: freshLog, expectKind: "claude", expectPath: clearedLog.path, was: was7)
+    check(fresh7.result == "changed" && fresh7.message?.contains("new conversation") == true && fresh7.message?.contains("another agent") != true,
+          "review1 #7: same process, another log: a new conversation (\(fresh7))")
+    var otherProc = was7 ?? FeedLocate.Entry(kind: "claude", cwd: "", pids: [], path: nil, checked: 0)
+    otherProc.pids = [9999]
+    var elsewhere = was7 ?? otherProc
+    elsewhere.path = dir.appendingPathComponent("third.jsonl").path
+    for (what, w, k) in [("another process", otherProc, "claude"), ("no proof", elsewhere, "claude"), ("another kind", was7 ?? otherProc, "codex")] {
+        let d = await FeedCards.send(pane: p7, client: hc, text: "hi", files: [], log: freshLog, expectKind: k, expectPath: clearedLog.path, was: w)
+        check(d.result == "changed" && d.message?.contains("another agent") == true, "review1 #7: \(what): refused as before (\(d))")
+    }
+    let none7 = await FeedCards.send(pane: p7, client: hc, text: "hi", files: [], log: freshLog, expectKind: "claude", expectPath: clearedLog.path)
+    check(none7.message?.contains("another agent") == true, "review1 #7: no entry: refused as before (\(none7))")
+    check(sends() == s7, "review1 #7: nothing sent in any case")
 }
