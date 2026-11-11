@@ -687,6 +687,16 @@ pub fn box_has_text(kind: &str, screen: &str, claude_suggests: bool) -> Option<b
     Some(rows.iter().any(|r| !trim(r).is_empty()))
 }
 
+/// Claude Code's suggested command in its box (not yet: always None).
+pub fn suggested_slash(_screen: &str) -> Option<String> {
+    None
+}
+
+/// Claude Code's box holds one row only (not yet: always false).
+pub fn box_one_line(_screen: &str) -> bool {
+    false
+}
+
 /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
 /// first row (a dialog, a menu): `None`.
 fn ruled(lines: &[String], mark: Option<char>) -> Option<Vec<String>> {
@@ -828,5 +838,40 @@ mod box_tests {
     #[test]
     fn others_are_not_read() {
         assert_eq!(box_has_text("cursor-agent", "❯ hi"), None);
+    }
+
+    /// Claude Code's suggestion can be a command ("/clear"), dim in the empty box. A typed "/…" shows the command list
+    /// right above the box; a lone "/word" with no list above it is taken for the suggestion.
+    #[test]
+    fn suggested_command() {
+        let s = super::suggested_slash;
+        let list = "  ❯ /clear        Start a new session with empty context\n    /claude-api   Build apps\n";
+        assert_eq!(s(&claude("❯\u{a0}/clear")), Some("/clear".into()), "the dim suggestion");
+        assert_eq!(s(&claude("❯ /compact")), Some("/compact".into()));
+        assert_eq!(s(&claude("❯\u{a0}/plugin:do-thing")), Some("/plugin:do-thing".into()), "a plugin command");
+        assert_eq!(s(&format!("{list}{RULE}\n❯\u{a0}/cl\n{RULE}\n  ~/proj\n")), None, "typed: its list is above the box");
+        let plugin_list = "    /claude-md-management:revise-claude-md        (claude-md-management) Update\n";
+        assert_eq!(s(&format!("{plugin_list}{RULE}\n❯\u{a0}/cla\n{RULE}\n  ~/proj\n")), None, "a plugin's row in the list");
+        assert_eq!(s(&claude("❯\u{a0}/model opus")), None, "a command with a value is typed");
+        assert_eq!(s(&claude("❯\u{a0}/clear\n  more text")), None, "two rows");
+        assert_eq!(s(&claude("❯\u{a0}/")), None, "a bare slash is typed");
+        assert_eq!(s(&claude("❯\u{a0}Try \"fix typecheck errors\"")), None);
+        assert_eq!(s(&claude("❯\u{a0}")), None);
+        assert_eq!(s(&claude("❯\u{a0}run the tests")), None, "not a command");
+        assert_eq!(s(&claude(" Do you want to proceed?\n ❯ 1. Yes")), None, "a dialog: not the box");
+        assert_eq!(s("no box here"), None);
+    }
+
+    /// After ctrl+e ctrl+u cleared the box's line, whatever still stands on it is not typed (its placeholder, a
+    /// suggestion); a second row would be typed text that is still there.
+    #[test]
+    fn box_of_one_row() {
+        let one = super::box_one_line;
+        assert!(one(&claude("❯\u{a0}")));
+        assert!(one(&claude("❯\u{a0}Try \"x\"")));
+        assert!(one(&claude("❯\u{a0}/clear")), "the suggestion again");
+        assert!(!one(&claude("❯\u{a0}\n  second line")), "a typed second row is left");
+        assert!(!one(&claude(" Do you want to proceed?\n ❯ 1. Yes")), "a dialog");
+        assert!(!one("no box"));
     }
 }

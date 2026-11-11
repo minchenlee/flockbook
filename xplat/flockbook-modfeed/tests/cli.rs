@@ -7,11 +7,16 @@ use serde_json::Value;
 use std::process::Command;
 
 fn run(sock: &str, args: &[&str]) -> Vec<Value> {
+    run_in(sock, args, "/nonexistent-home")
+}
+
+/// `run` with HOME at `home` (its ~/.claude/settings.json).
+fn run_in(sock: &str, args: &[&str], home: &str) -> Vec<Value> {
     let out = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed"))
         .args(args)
         .env_clear()
         .env("HC_SOCKET", sock)
-        .env("HOME", "/nonexistent-home")
+        .env("HOME", home)
         .output()
         .unwrap();
     assert!(out.status.success(), "exit code 0 always");
@@ -139,4 +144,59 @@ fn send_refuses_when_the_agents_box_has_text() {
     fake.clear_screen("t1");
     assert_ne!(send()["result"], "box_not_empty", "no screen: it goes as before");
     assert!(fake.calls("terminal.send").len() > typed);
+}
+
+/// Claude Code's dim prompt suggestion can be a command ("/clear"), which reads like a typed one. A lone "/word" with
+/// no command list above the box (a typed "/" shows the list): `send` clears the line (ctrl+e ctrl+u), reads the box
+/// again and sends when it is down to one row. A command list above, a box still holding text after the keys, or
+/// prompt suggestions turned off: `box_not_empty`, as before.
+#[test]
+fn send_types_over_a_suggested_command() {
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    let rule = "─".repeat(40);
+    let screen = |above: &str, row: &str| format!("● Done.\n{above}\n{rule}\n{row}\n{rule}\n  ~/proj\n");
+    let send_in = |home: &str| -> Value {
+        run_in(&fake.path, &["send", "--terminal", "t1", "--text", "run the tests"], home).into_iter().find(|l| l["type"] == "done").unwrap()
+    };
+    let send = || send_in("/nonexistent-home");
+    // ctrl+e ctrl+u leaves the box with its suggestion again (still dim, one row).
+    let after = screen("", "❯\u{a0}/clear");
+    fake.on_keys(Some(std::sync::Arc::new(move |a, k, st| {
+        if a == "t1" && k == ["ctrl+e", "ctrl+u"] {
+            st.screens.insert("t1".into(), after.clone());
+        }
+    })));
+
+    fake.set_screen("t1", &screen("", "❯\u{a0}/clear"));
+    assert_eq!(send()["result"], "sent");
+    assert_eq!(fake.keys(), vec![vec!["ctrl+e".to_string(), "ctrl+u".to_string()]], "the line was cleared first");
+    assert_eq!(fake.calls("terminal.send").len(), 1, "then the text went");
+
+    // Typed: the command list stands above the box. Nothing is touched.
+    fake.set_screen("t1", &screen("  ❯ /clear        Start a new session with empty context", "❯\u{a0}/cl"));
+    assert_eq!(send()["result"], "box_not_empty");
+    assert_eq!(fake.keys().len(), 1, "no keys");
+    assert_eq!(fake.calls("terminal.send").len(), 1, "nothing typed");
+
+    // After the keys the box still has a second row (typed text): nothing is sent.
+    let left = screen("", "❯\u{a0}\n  second line");
+    fake.on_keys(Some(std::sync::Arc::new(move |a, _k, st| {
+        if a == "t1" {
+            st.screens.insert("t1".into(), left.clone());
+        }
+    })));
+    fake.set_screen("t1", &screen("", "❯\u{a0}/clear"));
+    assert_eq!(send()["result"], "box_not_empty");
+    assert_eq!(fake.keys().len(), 2, "the keys went");
+    assert_eq!(fake.calls("terminal.send").len(), 1, "the text did not");
+
+    // Prompt suggestions off: a "/word" in the box is typed. Nothing is touched.
+    let home = std::env::temp_dir().join(format!("flockbook-cli-nosuggest-{}", std::process::id()));
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(home.join(".claude/settings.json"), r#"{"promptSuggestionEnabled": false}"#).unwrap();
+    fake.set_screen("t1", &screen("", "❯\u{a0}/clear"));
+    assert_eq!(send_in(home.to_str().unwrap())["result"], "box_not_empty");
+    assert_eq!(fake.keys().len(), 2, "no keys");
+    let _ = std::fs::remove_dir_all(&home);
 }
