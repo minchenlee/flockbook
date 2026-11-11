@@ -64,17 +64,22 @@ public enum HCMapper {
 
     /// Agent programs Flockbook knows, by executable name. Anything else with no status report is a plain shell pane.
     static let knownKinds: [String: String] = [
-        "claude": "claude", "codex": "codex", "pi": "pi", "cursor-agent": "cursor", "cursor": "cursor",
+        "claude": "claude", "codex": "codex", "pi": "pi", "omp": "omp", "cursor-agent": "cursor", "cursor": "cursor",
         "gemini": "gemini", "opencode": "opencode", "amp": "amp", "grok": "grok",
         "agy": "agy", "antigravity": "agy",   // agy's 7501 `app` (what `hc ls` prints as agent) is "antigravity"
     ]
     static let wrappers: Set<String> = ["node", "bun", "deno", "python", "python3", "env", "npx", "bunx"]
 
     /// Agent kind from the foreground process (what runs now), then the start argv. Interpreters (`node …/codex`)
-    /// are looked through: their first non-flag argument names the program. Last, agy's 7501 `app` name (only that one).
+    /// are looked through: their first non-flag argument names the program. Last, the 7501 `app` name of agy or omp
+    /// (a launcher can show a shell in front of omp); only those two.
     static func kind(_ t: Term) -> String? {
         for argv in [[t.fgName ?? ""] + t.fgArgv, t.argv] { if let k = kind(argv: argv) { return k } }
-        return t.statusApp == "antigravity" ? "agy" : nil   // agy's own 7501 name (verified), when the processes say nothing
+        switch t.statusApp {
+        case "antigravity": return "agy"   // agy's own 7501 name (verified), when the processes say nothing
+        case "omp": return "omp"
+        default: return nil
+        }
     }
 
     /// The agent kind one command line names, if any.

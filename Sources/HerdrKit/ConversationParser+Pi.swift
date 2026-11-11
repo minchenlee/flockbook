@@ -2,7 +2,9 @@ import Foundation
 
 /// pi (`~/.pi/agent/sessions/<cwd-slug>/<time>_<uuid>.jsonl`). Entries form a tree by `id`/`parentId`; the shown
 /// conversation is the branch that ends at the newest entry. Lines are fed in file order; when an entry hangs off an
-/// earlier entry (an edited or retried turn), the items are rebuilt from that branch.
+/// earlier entry (an edited or retried turn), the items are rebuilt from that branch. omp (oh-my-pi, a pi fork) writes
+/// the same tree with more entry types, a `title` slot before the header, and `activeLeafId` on an entry written off
+/// the shown branch (late usage, a background result): the shown branch stays at that leaf.
 struct PiState: Sendable {
     var parent: [String: String] = [:]   // entry id -> parent id ("" = root)
     var lines: [String: String] = [:]    // entry id -> line, only for entries that render
@@ -12,13 +14,31 @@ struct PiState: Sendable {
 }
 
 extension ConversationParser {
+    /// pi's entry types, then omp's (session-entries.ts).
     static let piTypes: Set<String> = ["session", "message", "model_change", "thinking_level_change", "custom", "custom_message",
-                                       "session_info", "compaction", "context_edit", "branch_summary"]
+                                       "session_info", "compaction", "context_edit", "branch_summary",
+                                       "title", "title_change", "model_usage", "service_tier_change", "label", "session_init",
+                                       "reset_boundary", "mode_change", "ttsr_injection", "credential_pin"]
 
     mutating func feedPi(_ o: [String: Any], line: String, offset: UInt64?) {
-        guard o["type"] as? String != "session", let id = o["id"] as? String else { return }   // header: not in the tree
+        // The header is not in the tree; omp's title slot has no id.
+        guard o["type"] as? String != "session", let id = o["id"] as? String else { return }
         let parent = o["parentId"] as? String
-        if !pi.replaying, let parent, let last = pi.last, parent != last, pi.parent[parent] != nil { rebuildPi(upTo: parent) }
+        // omp: the leaf after this entry (absent: the entry; null: cleared). Replayed entries are on the branch.
+        let leaf: String? = o["activeLeafId"].map { $0 as? String } ?? id
+        if !pi.replaying, leaf != id {
+            pi.parent[id] = parent ?? ""
+            if Self.piRenders(o) { pi.lines[id] = line; pi.offsets[id] = offset }
+            if let leaf {
+                // Else the shown leaf, or one omp no longer has: the branch stays.
+                if pi.last != leaf, pi.parent[leaf] != nil { rebuildPi(upTo: leaf) }
+            } else {
+                clearPi()
+            }
+            return
+        }
+        // An entry off the shown leaf (an edited turn, or the first one after omp cleared the leaf): its branch.
+        if !pi.replaying, let parent, pi.last != parent, pi.parent[parent] != nil { rebuildPi(upTo: parent) }
         pi.parent[id] = parent ?? ""
         pi.last = id
         if !pi.replaying, Self.piRenders(o) { pi.lines[id] = line; pi.offsets[id] = offset }
@@ -31,6 +51,14 @@ extension ConversationParser {
         case "compaction", "custom_message": true
         default: false
         }
+    }
+
+    /// omp cleared the leaf: nothing is shown, the tree stays for a later branch.
+    private mutating func clearPi() {
+        var fresh = ConversationParser()
+        fresh.pi = pi
+        fresh.pi.last = nil
+        self = fresh
     }
 
     /// Items become the branch from the root to `leaf` (replayed from the kept lines).
@@ -55,6 +83,7 @@ extension ConversationParser {
         case "custom_message":   // extension notices shown in pi's TUI (e.g. a background subagent finished)
             guard o["display"] as? Bool == true else { return }
             let text = Self.resultText(o["content"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.hasPrefix("<system-notice>") { return }   // omp: a background result handed to the model, not a notice
             guard let first = text.split(whereSeparator: \.isNewline).first else { return }
             flush()
             done.append(ConversationItem(id: id, kind: .status(String(first.prefix(160))), timestamp: lineTS))
