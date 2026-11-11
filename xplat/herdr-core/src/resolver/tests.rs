@@ -498,6 +498,49 @@ fn omp_env_values_with_spaces() {
 }
 
 #[test]
+fn pi_folder_shared_by_two_cwds() {
+    // /w/a-b and /w/a/b both name the folder --w-a-b--: the two pi are not rivals.
+    let (_t, agent_dir) = tmp();
+    let dir = pi_session_dir("/w/a-b", &agent_dir);
+    assert_eq!(dir, pi_session_dir("/w/a/b", &agent_dir));
+    fs::create_dir_all(&dir).unwrap();
+    let a0 = Utc::now() - Duration::seconds(900);
+    let b0 = a0 + Duration::seconds(300);
+    let file = |id: &str, started: Date, cwd: &str| {
+        let p = format!("{dir}/{id}.jsonl");
+        fs::write(&p, pi_head(id, started, cwd) + "\n").unwrap();
+        set_mtime(&p, started + Duration::seconds(10));
+        p
+    };
+    let fa = file("a", b0 + Duration::seconds(100), "/w/a-b");
+    let fb = file("b", b0 + Duration::seconds(1), "/w/a/b");
+    let procs = vec![proc_(960_001, 1, a0, "node pi"), proc_(960_002, 1, b0, "node pi")];
+    let na = Need::new("hc:ta", "pi", "/w/a-b", vec![960_001]);
+    let nb = Need::new("hc:tb", "pi", "/w/a/b", vec![960_002]);
+    let mut r = resolver(|r| r.pi_agent_dir = agent_dir.clone());
+    let got = r.resolve_with(&[na, nb], &set(&[]), &HashMap::new(), Some(&procs));
+    assert!(got.get("hc:ta") == Some(&fa) && got.get("hc:tb") == Some(&fb), "each pi keeps its own cwd's file ({got:?})");
+}
+
+#[test]
+fn omp_relative_agent_dir() {
+    // PI_CODING_AGENT_DIR=./.omp-agent is resolved from omp's cwd, as omp's path.resolve does.
+    let start = Utc::now() - Duration::seconds(600);
+    let (_w, work) = tmp();
+    let real = fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
+    let dir = format!("{work}/.omp-agent/sessions/-tmp-{}", last_path_component(&real));
+    fs::create_dir_all(&dir).unwrap();
+    let p = format!("{dir}/2026-11-10T07-35-44-761Z_c.jsonl");
+    fs::write(&p, pi_head("c", start + Duration::seconds(3), &real) + "\n").unwrap();
+    set_mtime(&p, start + Duration::seconds(60));
+    let procs = vec![proc_(970_001, 1, start, "omp PI_CODING_AGENT_DIR=./.omp-agent HC_TERMINAL_ID=t3")];
+    let need = Need::new("hc:t3", "omp", &work, vec![970_001]);
+    let mut r = resolver(|r| r.omp_sessions_dir = "/nonexistent/sessions".into());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(got.get("hc:t3"), Some(&p), "a relative agent dir under the agent's cwd");
+}
+
+#[test]
 fn omp_two_in_one_cwd_apart() {
     // Two omp in one cwd with their own PI_CODING_AGENT_DIR: different folders, so no rivals.
     let (_t, base) = tmp();

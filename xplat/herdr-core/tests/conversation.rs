@@ -319,6 +319,16 @@ fn omp_cleared_leaf() {
         ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two.", "user:Back."],
         "omp: the old branch can be rebuilt"
     );
+
+    // Cleared, then the old branch goes on at once (no new root first): its history comes back.
+    let mut lines = ol[..9].to_vec();
+    lines.push(r#"{"type":"label","id":"z2","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","activeLeafId":null,"targetId":"a3"}"#.into());
+    lines.push(r#"{"type":"message","id":"u7","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Go on."}],"timestamp":1}}"#.into());
+    assert_eq!(
+        describe(&parse(&lines)),
+        ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two.", "user:Go on."],
+        "omp: an entry on the old branch right after a clear rebuilds it"
+    );
 }
 
 #[test]
