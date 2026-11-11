@@ -55,7 +55,7 @@ The install never overwrites what you have: if a layout, mod or theme called flo
 
 A native macOS app (macOS 15 or later) with the same reading view, outside the Herdr app. It also has remote access from your phone over Tailscale, phone notifications, queued messages and an embedded terminal.
 
-**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.12.0)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
+**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.13.0)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/conversation-dark.png">
