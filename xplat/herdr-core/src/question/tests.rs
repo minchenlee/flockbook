@@ -250,6 +250,10 @@ impl PaneScreen for Live {
     fn send_text(&self, text: &str, _pane_id: &str) -> Result<(), HerdrError> {
         self.input(Input::Text(text.into()))
     }
+    // As hc: key names type only some characters (crate::hc::keys::typeable).
+    fn can_type(&self, text: &str) -> bool {
+        text.chars().all(crate::hc::keys::typeable)
+    }
     fn pause(&self, _ms: u64) {}
 }
 
@@ -1040,6 +1044,8 @@ fn claude_hook_answer() {
     let (keys, err) = run_sim(s.clone(), &live, &q, &[ans(&[1])], &g);
     assert!(err.is_ok() && keys == ["2"] && s.borrow().done && s.borrow().single.get(&0) == Some(&1), "hookB answer: single pick -> '2' ({keys:?}, {err:?})");
     let s = color_sim();
+    let (keys, err) = run_sim(s.clone(), &live, &q, &[other(&[], "Green typed!")], &g);
+    assert!(keys.is_empty() && matches!(&err, Err(HerdrError::Question(QuestionFailure::Unsupported(m))) if m.contains("cannot type")), "hc cannot type '!': refused before any key, {keys:?} {err:?}");
     let (keys, err) = run_sim(s.clone(), &live, &q, &[other(&[], "Green typed")], &g);
     assert!(
         err.is_ok() && keys == ["3", "Green typed", "Enter"] && s.borrow().done && s.borrow().typed[0].as_deref() == Some("Green typed"),
@@ -2039,4 +2045,120 @@ fn screen_ids_and_text() {
     assert_eq!(answered(vec![None, None]), QuestionState::Answered(None));
     assert_eq!(answered(vec![Some("a".into()), None]), QuestionState::Answered(Some(vec!["a".into(), "".into()])));
     assert!(steps(&request("t", "claude", vec![question("", "Q?", vec![opt("A")], false)]), &[other(&[], "zero\u{200B}width")]).is_err(), "Cf is a control character");
+}
+
+/// Claude Code 2.1.322: a long question's text drawn as a block quote ("│ " before each of its lines, wrapped
+/// lines too; seen live 2026-11-11 from about 90 characters on). The bar is drawing, not text.
+#[test]
+fn claude_hook_exact_quote_bar() {
+    let long = "The throwaway \"Greenhouse badge test\" is back in greenhouse (last tab). Did it move to Orbit?";
+    let q = hooked(
+        "toolu_bar",
+        json!([{"question": long,"header":"Final try","multiSelect":false,"options":[
+            {"label":"Moved + notice","description":"It's in Orbit now and the notice showed."},
+            {"label":"Didn't move","description":"It's still in greenhouse."}]}]),
+    );
+    let screen = |text: &str| sw(&format!(r#"
+    ❯ the prompt
+    ────────────────────────────────────────────────────────────────
+     ☐ Final try
+
+    {text}
+
+    ❯ 1. Moved + notice
+         It's in Orbit now and the notice showed.
+      2. Didn't move
+         It's still in greenhouse.
+      3. Type something.
+    ────────────────────────────────────────────────────────────────
+      4. Chat about this
+
+    Enter to select · ↑/↓ to navigate · Esc to cancel
+    "#));
+    let e = |s: &str| ex(&q, 0, s, None, FieldFocus::Auto, None);
+    let one = screen(&format!("│ {long}"));
+    let wrapped = screen("│ The throwaway \"Greenhouse badge test\" is back in greenhouse\n    │ (last tab). Did it move to Orbit?");
+    assert!(e(&screen(long)), "quote bar: the plain rendering still matches");
+    assert!(e(&one), "quote bar: one barred line matches");
+    assert!(e(&wrapped), "quote bar: every wrapped line barred matches");
+    assert!(shows_plain(&q, 0, &one), "quote bar: shows() uses the same exact compare");
+    let half = screen("│ The throwaway \"Greenhouse badge test\" is back in greenhouse\n    (last tab). Did it move to Orbit?");
+    assert!(!e(&half), "quote bar: a bar on some lines only is text, not drawing -> no match");
+    assert!(!e(&screen(&format!("│ {}", long.replace("Orbit?", "orbit?")))), "quote bar: other text behind the bar -> no match");
+    assert!(!e(&one.replace("  2. Didn't move", "❯ 2. Didn't move")), "quote bar: two focus marks -> no match");
+    let barred_q = hooked("toolu_bar2", json!([{"question": "│ starts with a bar?","header":"Final try","multiSelect":false,"options":[
+        {"label":"Moved + notice","description":"It's in Orbit now and the notice showed."},{"label":"Didn't move","description":"It's still in greenhouse."}]}]));
+    assert!(ex(&barred_q, 0, &screen("│ │ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a text that starts with │, quoted");
+    assert!(!ex(&barred_q, 0, &screen("│ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a short text that itself starts with │ looks quoted: refused (safe), never a wrong key");
+    let p = claude_parse(&wrapped).expect("parse");
+    assert_eq!(p.question.text, long, "quote bar: the screen parse drops the bar too");
+}
+
+/// Claude Code names the person's editor in the key line ("ctrl+g to edit in VS Code"): the same line as "Vim".
+#[test]
+fn claude_key_line_any_editor() {
+    for l in [
+        "Enter to select · ↑/↓ to navigate · Esc to cancel",
+        "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel",
+        "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in VS Code · Esc to cancel",
+        "  Enter to select  ·  ↑/↓ to navigate · ctrl+g to edit in Sublime Text · Esc to cancel",
+    ] {
+        assert!(claude_key_line(l), "key line: {l}");
+    }
+    for l in [
+        "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in · Esc to cancel",
+        "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel now",
+        "Enter to select · ctrl+g to edit in Vim · Esc to cancel",
+        "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in A · B · Esc to cancel",
+    ] {
+        assert!(!claude_key_line(l), "not a key line: {l}");
+    }
+    let q = color_record();
+    let single = sw(r#"
+    ────────────────────────────────────────────────────────────────
+     ☐ Color
+
+    Pick a color?
+
+      1. Red (Recommended)
+         warm and a long description that should wrap on a narrow terminal screen for sure because it is long
+      2. Blue
+         cool
+    ❯ 3. Type something.
+    ────────────────────────────────────────────────────────────────
+      4. Chat about this
+
+    Enter to select · ↑/↓ to navigate · ctrl+g to edit in VS Code · Esc to cancel
+    "#);
+    assert!(ex(&q, 0, &single, Some(""), FieldFocus::Auto, None), "key line: the Other row with VS Code named matches");
+}
+
+/// 2.1.322: the review screen draws a long question's "● text" with the block-quote bar too (live 2026-11-11).
+#[test]
+fn claude_review_quote_bar() {
+    let q = hooked("toolu_rb", json!([
+        {"question":"This is a deliberately long first question so the picker draws its text with a side bar, which size?","header":"Size","multiSelect":false,"options":[{"label":"Small","description":"s"},{"label":"Large","description":"l"}]},
+        {"question":"Which toppings?","header":"Tops","multiSelect":true,"options":[{"label":"Cheese","description":"y"},{"label":"Ham","description":"p"},{"label":"Egg","description":"r"}]}]));
+    let a = [ans(&[1]), other(&[0, 2], "Olives Please")];
+    let review = |first: &str| sw(&format!(r#"
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Size  ☒ Tops  ✔ Submit  →
+
+    Review your answers
+
+    {first}
+       → Large
+     ● Which toppings?
+       → Cheese, Egg, Olives Please
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "#));
+    assert!(claude_review_exact(&q, &a, &review(" ● This is a deliberately long first question so the picker draws its text with a side bar, which size?")), "review: plain");
+    assert!(claude_review_exact(&q, &a, &review(" │ ● This is a deliberately long first question so the picker draws its text with a side bar, which size?")), "review: barred");
+    assert!(claude_review_exact(&q, &a, &review(" │ ● This is a deliberately long first question so the picker\n     │ draws its text with a side bar, which size?")), "review: barred and wrapped");
+    assert!(!claude_review_exact(&q, &a, &review(" │ ● This is a deliberately long first question so the picker draws its text with a side bar, which colour?")), "review: other text behind the bar");
+    assert!(!claude_review_exact(&q, &[ans(&[0]), other(&[0, 2], "Olives Please")], &review(" │ ● This is a deliberately long first question so the picker draws its text with a side bar, which size?")), "review: another pick");
 }
