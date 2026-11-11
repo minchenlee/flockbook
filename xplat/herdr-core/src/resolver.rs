@@ -439,12 +439,14 @@ impl SessionResolver {
                     hc_agent_process(&n.pids, &n.kind, procs)
                 }
             };
-            // Two pi (or omp) with one session folder: each one's start splits the folder's files between them.
-            let pi_starts: Vec<(String, String, Date)> = needs
+            // Two pi (or omp) in one cwd with one session folder: each one's start splits its files between them. Both
+            // count: two cwds can name one folder (/w/a-b, /w/a/b), one cwd can have two (omp's PI_CODING_AGENT_DIR).
+            let pi_starts: Vec<(String, (String, String), Date)> = needs
                 .iter()
                 .filter(|n| pi_like(&n.kind))
                 .filter_map(|n| {
-                    agent_of(n).map(|a| (n.pane_id.clone(), self.pi_dir(&n.kind, &standardize_path(&n.cwd), &a.line), a.start))
+                    let cwd = standardize_path(&n.cwd);
+                    agent_of(n).map(|a| (n.pane_id.clone(), (self.pi_dir(&n.kind, &cwd, &a.line), cwd), a.start))
                 })
                 .collect();
             // Earliest agent first: it takes its file before a later one looks.
@@ -527,10 +529,12 @@ impl SessionResolver {
         if kind != "omp" {
             return pi_session_dir(cwd, &self.pi_agent_dir);
         }
+        // omp resolves both from its own cwd (path.resolve)
+        let abs = |p: String| if is_abs_path(&p) { p } else { standardize_path(&format!("{cwd}/{p}")) };
         let sessions = env_value(line, "PI_CODING_AGENT_DIR")
-            .map(|d| d.trim_end_matches('/').to_string() + "/sessions")
+            .map(|d| abs(d).trim_end_matches('/').to_string() + "/sessions")
             .unwrap_or_else(|| self.omp_sessions_dir.clone());
-        let tmp = env_value(line, "TMPDIR").unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
+        let tmp = env_value(line, "TMPDIR").map(abs).unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
         omp_session_dir(&real_path(cwd), &sessions, &real_path(&self.home), &real_path(&tmp))
     }
 

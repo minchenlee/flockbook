@@ -94,9 +94,10 @@ impl ConversationParser {
             }
             return;
         }
+        // An entry off the shown leaf (an edited turn, or the first one after omp cleared the leaf): its branch.
         if !self.pi.replaying {
-            if let (Some(parent), Some(last)) = (parent, self.pi.last.as_deref()) {
-                if parent != last && self.pi.parent.contains_key(parent) {
+            if let Some(parent) = parent {
+                if self.pi.last.as_deref() != Some(parent) && self.pi.parent.contains_key(parent) {
                     self.rebuild_pi(parent);
                 }
             }
