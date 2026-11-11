@@ -256,6 +256,19 @@ mod tests {
     }
 
     #[test]
+    fn omp_kind() {
+        let t = Term::parse(&json!({"address":"t5","argv":["/usr/local/bin/omp"],"pid":20,"created_ms":7})).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("omp"));
+        assert_eq!(process(&t, Some("omp")).as_deref(), Some("20@7"));
+        let t = Term::parse(&json!({"address":"t6","argv":["bun","/opt/omp/bin/omp"],"pid":21})).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("omp"), "through an interpreter");
+        // A launcher shows a shell in front: omp by its 7501 app name.
+        let t = Term::parse(&json!({"address":"t7","argv":["launch"],"pid":22,"foreground":{"name":"fish","pid":23},"status":{"state":"idle","app":"omp"}})).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("omp"));
+        assert_eq!(process(&t, Some("omp")), None, "keys still need the omp process itself");
+    }
+
+    #[test]
     fn panes_and_errors() {
         let terms = vec![
             json!({"address":"t1","argv":["zsh"],"cwd":"/w"}),

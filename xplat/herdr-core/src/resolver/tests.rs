@@ -418,6 +418,75 @@ fn hc_resolver_new_program() {
     assert_eq!(again.get("hc:t7"), Some(&two), "a new pid in the pane -> its log at once, not the old one");
 }
 
+// omp (oh-my-pi, a pi fork): pi's files under ~/.omp/agent/sessions, folders named by session-paths.ts.
+
+#[test]
+fn omp_session_folder_names() {
+    let d = |cwd: &str, home: &str, tmp: &str| omp_session_dir(cwd, "/s", home, tmp);
+    assert_eq!(d("/home/u/src/app", "/home/u", "/tmp"), "/s/-src-app", "under home: '-' + the path from home");
+    assert_eq!(d("/home/u", "/home/u", "/tmp"), "/s/-", "home itself");
+    assert_eq!(d("/tmp/x/y", "/home/u", "/tmp"), "/s/-tmp-x-y", "under the temp root: '-tmp-' + the path from it");
+    assert_eq!(d("/tmp", "/home/u", "/tmp"), "/s/-tmp", "the temp root itself");
+    assert_eq!(d("/home/u/.t/a", "/home/u", "/home/u/.t"), "/s/-tmp-a", "the temp root wins when it is inside home");
+    assert_eq!(d("/srv/app", "/home/u", "/tmp"), "/s/--srv-app--", "elsewhere: the absolute path in '--'");
+    assert_eq!(
+        d("/private/tmp/app", "/home/u", "/private/var/folders/ab/T"),
+        "/s/--private-tmp-app--",
+        "macOS: /tmp is /private/tmp, outside TMPDIR"
+    );
+    assert_eq!(d("/home/u/a:b\\c", "/home/u", "/tmp"), "/s/-a-b-c", "':' and '\\' become '-'");
+    assert_eq!(d("/home/user2/x", "/home/u", "/tmp"), "/s/--home-user2-x--", "a sibling of home is not under home");
+}
+
+#[test]
+fn omp_title_line_first() {
+    let start = Utc::now() - Duration::seconds(600);
+    let s = |n: i64| start + Duration::seconds(n);
+    let title = r#"{"type":"title","v":1,"title":"Fix the build","source":"auto","updatedAt":"2026-11-10T07:35:44.761Z","pad":"    "}"#;
+    let lines = vec![
+        ("/r/a.jsonl".to_string(), s(50), format!("{title}\n{}\n", pi_head("a", s(2), "/r/w")).into_bytes()),
+        ("/r/b.jsonl".to_string(), s(80), format!("{title}\n").into_bytes()),
+    ];
+    assert_eq!(pi_pick(&lines, "/r/w", start, &[], |_| false), Some("/r/a.jsonl".into()), "the session header after a title slot");
+}
+
+#[test]
+fn omp_session() {
+    let (_t, agent_dir) = tmp();
+    let start = Utc::now() - Duration::seconds(600);
+    let write = |dir: &str, name: &str, cwd: &str| {
+        fs::create_dir_all(dir).unwrap();
+        let p = format!("{dir}/{name}.jsonl");
+        let title = r#"{"type":"title","v":1,"title":"t","source":"auto","updatedAt":"2026-11-10T07:35:44.761Z","pad":"  "}"#;
+        fs::write(&p, format!("{title}\n{}\n", pi_head(name, start + Duration::seconds(3), cwd))).unwrap();
+        set_mtime(&p, start + Duration::seconds(60));
+        p
+    };
+    // A cwd outside home and temp, sessions under the default root.
+    let cwd = "/w/omp-proj";
+    let root = agent_dir.clone() + "/default/sessions";
+    let mine = write(&format!("{root}/--w-omp-proj--"), "2026-11-10T07-35-44-761Z_a", cwd);
+    write(&agent_dir.clone(), "decoy", cwd);
+    let procs = vec![proc_(940_001, 1, start, "omp HC_TERMINAL_ID=t8")];
+    let need = Need::new("hc:t8", "omp", cwd, vec![940_001]);
+    let mut r = resolver(|r| r.omp_sessions_dir = root.clone());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(got.get("hc:t8"), Some(&mine), "omp's file in its cwd's folder");
+
+    // PI_CODING_AGENT_DIR in the process env moves the root; a cwd in the temp root gets the -tmp- name.
+    let (_w, work) = tmp();
+    let real = fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
+    let base = last_path_component(&real).to_string();
+    let moved = agent_dir.clone() + "/moved";
+    let other = write(&format!("{moved}/sessions/-tmp-{base}"), "2026-11-10T07-35-44-761Z_b", &real);
+    let line = format!("bun /usr/local/bin/omp PI_CODING_AGENT_DIR={moved} HC_TERMINAL_ID=t9");
+    let procs = vec![proc_(940_002, 1, start, &line)];
+    let need = Need::new("hc:t9", "omp", &work, vec![940_002]);
+    let mut r = resolver(|r| r.omp_sessions_dir = root.clone());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(got.get("hc:t9"), Some(&other), "agent dir from the process env, folder from the real cwd");
+}
+
 // MARK: checksGrok (resolver part)
 
 #[test]
