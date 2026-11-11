@@ -334,7 +334,7 @@ fn done_reply(re: &str, lines: &[Value]) -> Value {
     let msg = d["message"].as_str();
     match d["result"].as_str().unwrap_or("") {
         "sent" => ok(re),
-        "changed" => fail(re, "stale", msg.unwrap_or("The prompt changed. Nothing was sent.")),
+        "changed" | "screen_changed" => fail(re, "stale", msg.unwrap_or("The prompt changed. Nothing was sent.")),
         "answered" => fail(re, "stale", msg.unwrap_or("This prompt was answered already. Nothing was sent.")),
         "unconfirmed" => fail(re, "failed", "herdr-core did not answer in time. It may still arrive: check before sending again."),
         _ => fail(re, "failed", msg.unwrap_or("It did not go out.")),
@@ -1025,6 +1025,9 @@ mod tests {
     fn replies() {
         assert_eq!(done_reply("c1", &[json!({"type": "done", "result": "sent"})]), ok("c1"));
         assert_eq!(done_reply("c1", &[json!({"type": "done", "result": "changed"})])["error"]["code"], "stale");
+        // The question on screen changed while answering (same agent): stale too, with the helper's note.
+        let r = done_reply("c1", &[json!({"type": "done", "result": "screen_changed", "message": "check the terminal"})]);
+        assert!(r["error"]["code"] == "stale" && r["error"]["message"] == "check the terminal", "{r}");
         assert_eq!(done_reply("c1", &[json!({"type": "error", "code": "no-terminal", "message": "x"})])["error"]["code"], "notFound");
         assert_eq!(input_problem("a\u{1b}[2J", 100).as_deref(), Some("Text with control character U+001B."));
         assert!(input_problem("line\n\tok", 100).is_none());

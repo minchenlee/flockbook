@@ -7,7 +7,7 @@
 //! spaces and tabs only (never newlines), `count`/`prefix` count grapheme clusters.
 
 use crate::error::{HerdrError, QuestionFailure};
-use crate::keygate::{gated, gated_keys, KeyGate};
+use crate::keygate::{fresh_agent, gated, passes, KeyGate};
 use crate::model::*;
 use crate::screen::PaneScreen;
 use serde_json::{Map, Value};
@@ -1217,6 +1217,41 @@ fn wait_screen<S: PaneScreen + ?Sized>(screen: &S, pane_id: &str, timeout_ms: u6
     }
 }
 
+/// How long a gated answer key waits for its exact screen (the render of the key before it) before it stops. A busy
+/// machine renders slower than the 1.5 s the checks used to give.
+const KEY_WAIT_MS: u64 = 5000;
+
+/// The gate before one key of an answer. A gate with a screen check first waits (up to `KEY_WAIT_MS`) for `ok`, so a
+/// slow render is waited for and not taken for a change; then the full check runs on a fresh read right before the
+/// key, as `gated`. A stop names its cause: the agent or the input level changed (`KeyGateStop`, as before), or the
+/// same agent shows another screen (`ScreenStop`, with `sent`: keys of this answer went in before).
+fn answer_gated<S: PaneScreen + ?Sized>(screen: &S, gate: Option<&KeyGate>, pane_id: &str, ok: &dyn Fn(&str) -> bool, sent: bool) -> Result<(), HerdrError> {
+    let Some(g) = gate else { return Ok(()) };
+    let _ = wait_screen(screen, pane_id, KEY_WAIT_MS, ok); // read-only; a failed read stops below
+    if passes(screen, Some(g), pane_id, Some(ok), None) {
+        return Ok(());
+    }
+    let same_agent = g.agent.as_ref().is_none_or(|a| fresh_agent(screen, a, pane_id).is_some());
+    let allowed = g.allowed.as_ref().is_none_or(|f| f());
+    Err(if same_agent && allowed { HerdrError::ScreenStop { keys_sent: sent } } else { HerdrError::KeyGateStop })
+}
+
+/// Named keys of an answer, each behind `answer_gated` (one key per call, so no committing key rides in a batch past
+/// a check). No gate: one call. `sent` is set once a key went.
+fn answer_keys<S: PaneScreen + ?Sized>(screen: &S, keys: &[String], gate: Option<&KeyGate>, pane_id: &str, ok: &dyn Fn(&str) -> bool, sent: &mut bool) -> Result<(), HerdrError> {
+    if gate.is_none() {
+        screen.send_named_keys(keys, pane_id)?;
+        *sent = true;
+        return Ok(());
+    }
+    for k in keys {
+        answer_gated(screen, gate, pane_id, ok, *sent)?;
+        screen.send_named_keys(std::slice::from_ref(k), pane_id)?;
+        *sent = true;
+    }
+    Ok(())
+}
+
 /// Answers a pending question in `pane_id`, one `QuestionAnswer` per question.
 /// Picker: (1) checks the picker with the first question is on screen (Claude: another question of this request
 /// is moved back with Left; anything else errs with `NotOnScreen`, nothing sent),
@@ -1264,6 +1299,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         ));
     }
     let now = screen.visible_text(pane_id)?;
+    let mut sent = false; // a key of this answer went in
     if !screen_shows(q, &now) {
         // Claude: the user may have moved the picker to a later question of THIS request; go back to question 1.
         let back = q.agent == "claude"
@@ -1272,7 +1308,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         if !back {
             return Err(not_on_screen());
         }
-        gated_keys(screen, &vec!["Left".to_string(); q.questions.len() - 1], gate, pane_id, Some(&any))?;
+        answer_keys(screen, &vec!["Left".to_string(); q.questions.len() - 1], gate, pane_id, &any, &mut sent)?;
         if !wait_screen(screen, pane_id, 2000, |s| screen_shows(q, s))? {
             return Err(stuck("back to question 1"));
         }
@@ -1303,7 +1339,9 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
                 shows(q, k, s, in_row.as_deref(), f, fr, ck.as_ref())
             }
         };
-        if hooked && step.sends_keys() {
+        // No gate: no check runs, but the render of the last key is still waited for a moment (with a gate,
+        // `answer_gated` waits for the exact screen).
+        if hooked && gate.is_none() && step.sends_keys() {
             let _ = wait_screen(screen, pane_id, 1500, same)?;
         }
         // Grok and agy on the Mac (no gate): the exact question before each key too, not only its first words.
@@ -1312,8 +1350,9 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         }
         match step {
             Step::Text(s) => {
-                gated(screen, gate, pane_id, Some(&same))?;
+                answer_gated(screen, gate, pane_id, &same, sent)?;
                 screen.send_keys(s.as_bytes(), pane_id)?; // typed as is: no Enter, not as a paste
+                sent = true;
                 // By step purpose, not by text (the typed text may equal a digit): Claude's first text step for
                 // "Other" is its digit, which opens the row; the next text step is the typed text.
                 let typed = if k < answers.len() { other_text(&answers[k]) } else { None };
@@ -1335,7 +1374,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
                 }
             }
             Step::Keys(ks) => {
-                gated_keys(screen, ks, gate, pane_id, Some(&same))?;
+                answer_keys(screen, ks, gate, pane_id, &same, &mut sent)?;
                 let multi_other = q.agent == "claude" && other_open && at < q.questions.len() && q.questions[at].multi_select;
                 if multi_other && !typed_in && ks.iter().all(|x| x == "Down") {
                     focus = FieldFocus::Other; // now on the row

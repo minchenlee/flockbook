@@ -106,6 +106,20 @@ pub fn refused(pane: &Pane) -> Done {
         no_identity()
     }
 }
+/// An answer the key gate stopped. Another agent, or no identity: as `refused`. The same agent with another screen
+/// (a render that never came, or another question): its own result, and "nothing was sent" only when no key went.
+pub fn answer_stop(pane: &Pane, e: &HerdrError) -> Done {
+    match e {
+        HerdrError::ScreenStop { keys_sent: false } => {
+            Done::new("screen_changed", Some("The question on screen changed before the answer went in. Nothing was sent."))
+        }
+        HerdrError::ScreenStop { keys_sent: true } => Done::new(
+            "screen_changed",
+            Some("The question on screen changed while answering. Some keys may already be in: check the terminal."),
+        ),
+        _ => refused(pane),
+    }
+}
 pub fn already_answered() -> Done {
     Done::new("answered", Some("this approval was already answered; waiting for the agent to move on"))
 }
@@ -316,7 +330,7 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
     match r {
         Ok(Some(d)) => d,
         Ok(None) => Done::new("sent", None),
-        Err(HerdrError::KeyGateStop) => refused(pane),
+        Err(e @ (HerdrError::KeyGateStop | HerdrError::ScreenStop { .. })) => answer_stop(pane, &e),
         Err(HerdrError::Question(QuestionFailure::NotOnScreen)) => Done::new("changed", Some("the question is not on screen")),
         Err(e) => Done::new("failed", Some(&e.to_string())),
     }
