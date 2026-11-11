@@ -2092,6 +2092,36 @@ fn claude_hook_exact_quote_bar() {
     assert!(ex(&barred_q, 0, &screen("│ starts with a bar?"), None, FieldFocus::Auto, None), "quote bar: a short text that itself starts with │ is that text");
     let p = claude_parse(&wrapped).expect("parse");
     assert_eq!(p.question.text, long, "quote bar: the screen parse drops the bar too");
+    // A narrow pane wraps inside the first 24 characters (the needle): the bar between them is drawing too.
+    let narrow = screen("│ The throwaway\n    │ \"Greenhouse badge test\" is back in\n    │ greenhouse (last tab). Did it move to\n    │ Orbit?");
+    assert!(e(&narrow), "quote bar: a narrow wrap matches");
+    assert!(screen_shows(&q, &narrow), "quote bar: the entry check finds the needle across a barred wrap");
+    let parsed = request("screen-1", "claude", vec![claude_parse(&narrow).expect("parse").question]);
+    assert!(screen_shows(&parsed, &narrow), "quote bar: a screen-derived question's needle is found too");
+    let review = sw(r#"
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Final try  ✔ Submit  →
+
+    Review your answers
+
+     │ ● The throwaway
+     │ "Greenhouse badge test" is back in greenhouse (last tab). Did it move to Orbit?
+       → Moved + notice
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "#);
+    let parsed_long = request("screen-2", "claude", vec![question("Final try", long, vec![], false)]);
+    assert!(shows_review(&parsed_long, &review, None), "quote bar: a screen-derived review across a barred wrap");
+    // A long question whose own text starts with "│", drawn without the quote bar (before 2.1.322) and with it.
+    let own = format!("│ {long}");
+    let own_q = hooked("toolu_bar3", json!([{"question": own,"header":"Final try","multiSelect":false,"options":[
+        {"label":"Moved + notice","description":"It's in Orbit now and the notice showed."},{"label":"Didn't move","description":"It's still in greenhouse."}]}]));
+    assert!(ex(&own_q, 0, &screen(&own), None, FieldFocus::Auto, None), "quote bar: a long text's own │, not quoted, matches as it is");
+    assert!(ex(&own_q, 0, &screen(&format!("│ {own}")), None, FieldFocus::Auto, None), "quote bar: a long text's own │, quoted");
+    assert!(!ex(&q, 0, &screen(&format!("│ │ {long}")), None, FieldFocus::Auto, None), "quote bar: one bar is drawing, the second is text");
 }
 
 /// Claude Code names the person's editor in the key line ("ctrl+g to edit in VS Code"): the same line as "Vim".
