@@ -646,6 +646,9 @@ public actor SessionResolver {
         return value.isEmpty ? nil : value
     }
 
+    /// omp's temp root (os.tmpdir()), from its process line with the env.
+    static func ompTempRoot(_ procLine: String, cwd: String) -> String { NSTemporaryDirectory() }
+
     /// The path with its links resolved, as Node's realpath; as given when it cannot be resolved.
     static func realPath(_ p: String) -> String {
         guard let r = realpath(p, nil) else { return dropSlashes(p) }

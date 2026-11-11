@@ -82,15 +82,31 @@ private func ompHead(_ id: String, _ started: Date, _ cwd: String) -> String {
     let real = SessionResolver.realPath(work)
     let moved = base + "/moved"
     let other = write("\(moved)/sessions/-tmp-\((real as NSString).lastPathComponent)", "2026-11-10T07-35-44-761Z_b", cwd: work)
-    procs = [SessionResolver.Proc(pid: 940_002, ppid: 1, start: start, line: "bun /usr/local/bin/omp PI_CODING_AGENT_DIR=\(moved) HC_TERMINAL_ID=t9")]
+    procs = [SessionResolver.Proc(pid: 940_002, ppid: 1, start: start, line: "bun /usr/local/bin/omp PI_CODING_AGENT_DIR=\(moved) TMPDIR=\(NSTemporaryDirectory()) HC_TERMINAL_ID=t9")]
     got = await resolver(root).resolve([.init(paneId: "hc:t9", kind: "omp", cwd: work, pids: [940_002])], claimed: [], procs: procs)
     check(got["hc:t9"] == other, "omp: agent dir from the process env, folder from the real cwd (\(got), real cwd \(real))")
 
     // PI_CODING_AGENT_DIR=./.omp-agent is resolved from omp's cwd.
     let rel = write("\(work)/.omp-agent/sessions/-tmp-\((real as NSString).lastPathComponent)", "2026-11-10T07-35-44-761Z_c", cwd: work, title: false)
-    procs = [SessionResolver.Proc(pid: 970_001, ppid: 1, start: start, line: "omp PI_CODING_AGENT_DIR=./.omp-agent HC_TERMINAL_ID=t3")]
+    procs = [SessionResolver.Proc(pid: 970_001, ppid: 1, start: start, line: "omp PI_CODING_AGENT_DIR=./.omp-agent TMPDIR=\(NSTemporaryDirectory()) HC_TERMINAL_ID=t3")]
     got = await resolver("/nonexistent/sessions").resolve([.init(paneId: "hc:t3", kind: "omp", cwd: work, pids: [970_001])], claimed: [], procs: procs)
     check(got["hc:t3"] == rel, "omp: a relative agent dir under the agent's cwd (\(got))")
+
+    // The temp root is omp's own (os.tmpdir()): TMPDIR, then TMP, then TEMP from its env, last /tmp. Never this app's.
+    func tmpOf(_ env: String) -> String { SessionResolver.ompTempRoot("omp \(env)HC_TERMINAL_ID=t1", cwd: "/w") }
+    check(tmpOf("TMPDIR=/a TMP=/b TEMP=/c ") == "/a" && tmpOf("TMP=/b TEMP=/c ") == "/b" && tmpOf("TEMP=/c ") == "/c",
+          "omp temp root: TMPDIR, then TMP, then TEMP")
+    check(tmpOf("") == "/tmp" && tmpOf("TMPDIR= ") == "/tmp", "omp temp root: none set, /tmp (\(tmpOf("")))")
+    check(tmpOf("TMPDIR=t/x ") == "/w/t/x", "omp temp root: a relative one under the cwd")
+    check(tmpOf("TMPDIR=/a/b/ ") == "/a/b" && tmpOf("TMPDIR=/ ") == "/", "omp temp root: a slash at the end is dropped, not '/' itself")
+    // An omp started without TMPDIR in /tmp/<x>: the folder is -tmp-<x>.
+    let bare = SessionResolver.realPath("/tmp") + "/hkompt-\(UUID().uuidString)"
+    defer { try? fm.removeItem(atPath: bare) }
+    try fm.createDirectory(atPath: bare, withIntermediateDirectories: true)
+    let inTmp = write("\(root)/-tmp-\((bare as NSString).lastPathComponent)", "2026-11-10T07-35-44-761Z_d", cwd: bare)
+    procs = [SessionResolver.Proc(pid: 980_001, ppid: 1, start: start, line: "omp HOME=/home/u HC_TERMINAL_ID=t4")]
+    got = await resolver(root).resolve([.init(paneId: "hc:t4", kind: "omp", cwd: bare, pids: [980_001])], claimed: [], procs: procs)
+    check(got["hc:t4"] == inTmp, "omp: no TMPDIR in its env, the temp root is /tmp (\(got))")
 
     // Two omp in one cwd with their own PI_CODING_AGENT_DIR: different folders, so no rivals. A's /new after B
     // started: a header later than B's start, in A's own folder.
