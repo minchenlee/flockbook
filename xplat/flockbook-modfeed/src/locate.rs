@@ -123,6 +123,12 @@ fn absolute(v: Option<&String>, kind: &str) -> Option<String> {
     session_log::locate(kind, v, session_log::default_dir(kind)).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// As `find`, for a send: the cached entry it had (`was`), and the log looked up again now (stub: as `find`).
+pub fn recheck(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Result<(Found, Option<Entry>), Failure> {
+    let was = pane(ws, terminal).and_then(|p| read_cache(cache_path).entries.get(&p.terminal_id).cloned());
+    find(terminal, ws, resolver, cache_path, now_s).map(|f| (f, was))
+}
+
 /// Finds the log for `terminal`. On a cache miss it resolves every local agent pane in one pass, so two panes never
 /// get the same log, and caches them all.
 pub fn find(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Result<Found, Failure> {

@@ -318,8 +318,11 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
     }
 }
 
-/// The composer: the text, with each file in `files` named in it.
-pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: Option<&Path>, expect_kind: Option<&str>, expect_path: Option<&str>) -> Done {
+/// The composer: the text, with each file in `files` named in it. `was`: the locate cache entry this terminal had
+/// before the send looked its log up again.
+#[allow(clippy::too_many_arguments)]
+pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: Option<&Path>, expect_kind: Option<&str>, expect_path: Option<&str>, was: Option<&crate::locate::Entry>) -> Done {
+    let _ = was;
     // The agent the owner was reading: another agent, or a new conversation, in this terminal now gets nothing.
     if let Some(k) = expect_kind {
         if Some(k) != pane.agent.as_ref().map(|a| a.kind.as_str()) {

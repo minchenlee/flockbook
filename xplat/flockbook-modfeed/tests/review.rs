@@ -210,7 +210,7 @@ fn review1() {
     let (k5, s5) = (fake.keys().len(), sends());
     let r4 = cards::card(&p4, &hc, None, false, None).request.unwrap_or("x".into());
     let na = cards::approve(&p4, &hc, None, &r4, true, None);
-    let ns = cards::send(&p4, &hc, "hi", &[], None, None, None);
+    let ns = cards::send(&p4, &hc, "hi", &[], None, None, None, None);
     let nq = cards::answer(&p4, &hc, None, &r4, &[QuestionAnswer { picks: vec![0], other: None }]);
     assert!(fake.keys().len() == k5 && sends() == s5, "#5: no identity, nothing sent");
     for (what, d) in [("approve", &na), ("send", &ns)] {
@@ -225,9 +225,9 @@ fn review1() {
     let (shown_log, other_log) = (dir.join("shown.jsonl"), dir.join("other.jsonl"));
     let shown_s = shown_log.to_string_lossy().to_string();
     let s6 = sends();
-    let wrong_kind = cards::send(&p5, &hc, "hi", &[], Some(&shown_log), Some("codex"), Some(&shown_s));
-    let wrong_log = cards::send(&p5, &hc, "hi", &[], Some(&other_log), Some("claude"), Some(&shown_s));
+    let wrong_kind = cards::send(&p5, &hc, "hi", &[], Some(&shown_log), Some("codex"), Some(&shown_s), None);
+    let wrong_log = cards::send(&p5, &hc, "hi", &[], Some(&other_log), Some("claude"), Some(&shown_s), None);
     assert!(wrong_kind.result == "changed" && wrong_log.result == "changed" && sends() == s6, "#6: nothing typed");
-    let same = cards::send(&p5, &hc, "hi", &[], Some(&shown_log), Some("claude"), Some(&shown_s));
+    let same = cards::send(&p5, &hc, "hi", &[], Some(&shown_log), Some("claude"), Some(&shown_s), None);
     assert!(same.result == "sent" && sends() == s6 + 1, "#6: the agent and log shown: sent ({same:?})");
 }

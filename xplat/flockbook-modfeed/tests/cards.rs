@@ -140,7 +140,7 @@ fn cards_on_a_fake_core() {
     fake.set_terminals(vec![terminal("t1", &["codex"], Some(5151), Some("blocked"), Some("question"))]);
     let ga = cards::answer(&qpane, &hc, None, qc.request.as_deref().unwrap(), &[QuestionAnswer { picks: vec![1], other: None }]);
     assert!(ga.result == "changed" && ga.message.as_deref().unwrap().contains("agent") && fake.keys().len() == g0, "answer: gated ({ga:?})");
-    let gs = cards::send(&qpane, &hc, "hello", &[], None, None, None);
+    let gs = cards::send(&qpane, &hc, "hello", &[], None, None, None, None);
     assert!(gs.result == "changed" && gs.message.as_deref().unwrap().contains("agent") && sends() == s0, "send: gated ({gs:?})");
     fake.set_terminals(vec![claude("t1", "blocked", "permission")]);
     let apane = pane_of(&hc, "t1");
@@ -164,7 +164,7 @@ fn cards_on_a_fake_core() {
     assert_eq!(cards::parse_answers(r#"[{"picks":[],"other":"teal"}]"#), Some(vec![QuestionAnswer { picks: vec![], other: Some("teal".into()) }]));
     assert!(cards::parse_answers("{}").is_none() && cards::parse_answers(r#"[{"picks":"x"}]"#).is_none(), "bad JSON refused");
 
-    let sent = cards::send(&qpane, &hc, "hello", &[], None, None, None);
+    let sent = cards::send(&qpane, &hc, "hello", &[], None, None, None, None);
     let call = fake.calls("terminal.send").last().cloned().unwrap();
     assert!(sent.result == "sent" && call["text"] == "hello" && call["terminal"] == "t1", "send: terminal.send to the terminal ({sent:?})");
 }

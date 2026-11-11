@@ -209,7 +209,7 @@ pub fn run(argv: &[String]) -> String {
                     let Some(text) = opt("--text").filter(|t| !t.is_empty()) else { return r.fail("usage", "send needs --text <s>") };
                     let files: Vec<String> =
                         args.iter().enumerate().filter(|(i, a)| *a == "--file" && *i + 1 < args.len()).map(|(i, _)| args[i + 1].clone()).collect();
-                    let d = cards::send(&found.pane, &client, &text, &files, log, opt("--expect-kind").as_deref(), opt("--expect-path").as_deref());
+                    let d = cards::send(&found.pane, &client, &text, &files, log, opt("--expect-kind").as_deref(), opt("--expect-path").as_deref(), None);
                     r.out.emit(&d);
                     return r.finish(true);
                 }
@@ -292,7 +292,7 @@ pub fn keys(terminal: &str, cache: Option<&Path>, home: Option<&str>, keys: Keys
     let d = match keys {
         Keys::Approve { request, allow } => cards::approve(&found.pane, &client, log, &request, allow, cache),
         Keys::Answer { request, answers } => cards::answer(&found.pane, &client, log, &request, &answers),
-        Keys::Send { text, expect_kind, expect_path } => cards::send(&found.pane, &client, &text, &[], log, expect_kind.as_deref(), expect_path.as_deref()),
+        Keys::Send { text, expect_kind, expect_path } => cards::send(&found.pane, &client, &text, &[], log, expect_kind.as_deref(), expect_path.as_deref(), None),
     };
     serde_json::to_value(&d).unwrap_or_else(|_| json!({"type": "done", "result": "failed"}))
 }
