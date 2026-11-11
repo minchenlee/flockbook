@@ -191,10 +191,13 @@ pub fn claude_exact(
     let mut region: Vec<&str> = lines[head + 1..sep].to_vec();
     // The question text's lines (above the first row) without a block-quote bar (2.1.322, long questions).
     let first_row = region.iter().position(|l| row_re().is_match(l)).unwrap_or(region.len());
-    // As drawn when that is the text (a short question is never quoted; a long one's own "│" before 2.1.322),
-    // else, for a long question, without the bar.
-    let as_drawn = bare(&region[..first_row].concat()) == bare(&want.text);
-    if !as_drawn && gcount(&want.text) >= QUOTE_MIN {
+    // A short question is never quoted: its lines are checked as drawn. A long one without the bar. A long text
+    // that itself starts with "│" is refused: "│ text" on screen is also `text` behind the bar, so which
+    // question is shown cannot be told.
+    if gcount(&want.text) >= QUOTE_MIN {
+        if trim_ws(&want.text).starts_with('│') {
+            return false;
+        }
         let unquoted = drop_quote_bar(&region[..first_row]);
         region.splice(..first_row, unquoted);
     }
