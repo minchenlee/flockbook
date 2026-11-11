@@ -70,27 +70,41 @@ public enum FeedLocate {
         if rename(tmp.path, url.path) != 0 { try? FileManager.default.removeItem(at: tmp) }
     }
 
-    /// As `find`, for a send: the cached entry it had (`was`), and the log looked up again now (stub: as `find`).
+    /// For a send: the log looked up now, never the cached one (`/clear` gives the same agent a new log and writes no
+    /// `continued-in`), and the entry the cache had for this terminal before (`was`). The cache is written again, so
+    /// the next `feed` reads the log found now. Rust: `locate::recheck`.
     public static func recheck(terminal: String, workspaces ws: [Workspace], resolver: SessionResolver, cacheURL: URL?,
                                now: Date = Date()) async throws -> (found: Found, was: Entry?) {
         let was = pane(ws, terminal: terminal).flatMap { readCache(cacheURL).entries[$0.terminalId] }
-        return (try await find(terminal: terminal, workspaces: ws, resolver: resolver, cacheURL: cacheURL, now: now), was)
+        return (try await look(terminal: terminal, workspaces: ws, resolver: resolver, cacheURL: cacheURL, now: now, useCache: false), was)
+    }
+
+    /// The cached entry `was` is this pane's agent process (same kind and processes), and it showed `path`: a log the
+    /// agent wrote. Proof that another log now is a new conversation of the same agent, not another agent.
+    public static func sameAgent(_ was: Entry, pane: Pane, kind: String, path: String) -> Bool {
+        was.kind == kind && !was.pids.isEmpty && was.pids == pane.processIds && latest(was.path, kind: kind) == path
+    }
+
+    // Claude goes on in a new log and herdr keeps the old id: both paths follow `continued-in` (a cached path too,
+    // or the chat flips between the two logs until the next recheck).
+    static func latest(_ p: String?, kind: String) -> String? {
+        guard let p, kind == "claude" else { return p }
+        return SessionLog.continued(URL(fileURLWithPath: p)).path
     }
 
     /// Finds the log for `terminal`. On a cache miss it resolves every local agent pane in one pass (one `ps`), so two
     /// panes never get the same log, and caches them all.
     public static func find(terminal: String, workspaces ws: [Workspace], resolver: SessionResolver, cacheURL: URL?,
                             now: Date = Date()) async throws -> Found {
+        try await look(terminal: terminal, workspaces: ws, resolver: resolver, cacheURL: cacheURL, now: now, useCache: true)
+    }
+
+    static func look(terminal: String, workspaces ws: [Workspace], resolver: SessionResolver, cacheURL: URL?,
+                     now: Date, useCache: Bool) async throws -> Found {
         guard let pane = pane(ws, terminal: terminal) else { throw Failure.noTerminal(terminal) }
         guard let kind = pane.agent?.kind else { throw Failure.notAgent(terminal) }
         var cache = readCache(cacheURL)
-        // Claude goes on in a new log and herdr keeps the old id: both paths follow `continued-in` (a cached path too,
-        // or the chat flips between the two logs until the next recheck).
-        func latest(_ p: String?, kind: String) -> String? {
-            guard let p, kind == "claude" else { return p }
-            return SessionLog.continued(URL(fileURLWithPath: p)).path
-        }
-        if let e = cache.entries[pane.terminalId], fresh(e, for: pane, kind: kind, now: now) {
+        if useCache, let e = cache.entries[pane.terminalId], fresh(e, for: pane, kind: kind, now: now) {
             return Found(pane: pane, path: latest(e.path, kind: kind), cached: true)
         }
         let agents = ws.flatMap(\.tabs).flatMap(\.panes).filter { $0.agent != nil && !$0.terminalId.contains("/") }

@@ -27,6 +27,8 @@ public enum FeedCards {
     /// and session, or for hc the same program), and the picker the expected question. No agent: fail closed.
     static func gate(_ pane: Pane) -> KeyGate { KeyGate(agent: pane.agent, allowed: { pane.agent != nil }) }
     static let agentChanged = Done(result: "changed", message: "another agent is in this pane now; nothing was sent")
+    /// The same agent, in another log: the mod shows the new one. Rust: `cards::new_conversation`.
+    static let newConversation = Done(result: "changed", message: "the agent started a new conversation; the chat now shows it; nothing was sent")
     static let noIdentity = Done(result: "no-identity", message: "Flockbook cannot tell this agent from another program in this terminal, so it sends nothing. Use the terminal.")
     /// Why the gate said no: the agent changed, or it has no identity to check (hc: no process; TUI: no session id),
     /// which no retry fixes.
@@ -187,7 +189,12 @@ public enum FeedCards {
         // The agent the owner was reading (the kind and the log the mod's last feed showed): another agent, or a new
         // conversation, in this terminal now gets nothing.
         if let k = expectKind, k != pane.agent?.kind { return agentChanged }
-        if let p = expectPath, p != log?.path { return Done(result: "changed", message: "another agent or conversation is in this pane now; nothing was sent") }
+        if let p = expectPath, p != log?.path {
+            // The same agent process wrote the log the chat showed (`/clear`, `/resume`): a new conversation. Still
+            // nothing is sent: the text was written for the conversation the chat showed.
+            if let w = was, FeedLocate.sameAgent(w, pane: pane, kind: pane.agent?.kind ?? "", path: p) { return newConversation }
+            return Done(result: "changed", message: "another agent or conversation is in this pane now; nothing was sent")
+        }
         guard await client.passes(gate(pane), paneId: pane.id) else { return refused(pane) }
         let r = files.isEmpty ? await client.deliver(text: text, to: pane.id) : await client.deliver(text: text, to: pane.id, files: files)
         switch r {
