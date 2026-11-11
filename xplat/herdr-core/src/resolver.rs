@@ -534,7 +534,7 @@ impl SessionResolver {
         let sessions = env_value(line, "PI_CODING_AGENT_DIR")
             .map(|d| abs(d).trim_end_matches('/').to_string() + "/sessions")
             .unwrap_or_else(|| self.omp_sessions_dir.clone());
-        let tmp = env_value(line, "TMPDIR").map(abs).unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
+        let tmp = abs(omp_tmp(line));
         omp_session_dir(&real_path(cwd), &sessions, &real_path(&self.home), &real_path(&tmp))
     }
 
@@ -1259,6 +1259,20 @@ pub fn pi_session_dir(cwd: &str, agent_dir: &str) -> String {
     let c = cwd.strip_prefix('/').or_else(|| cwd.strip_prefix('\\')).unwrap_or(cwd);
     let mapped: String = c.chars().map(|ch| if "/\\:".contains(ch) { '-' } else { ch }).collect();
     format!("{agent_dir}/sessions/--{mapped}--")
+}
+
+/// omp's temp root from its own env, as Bun's (Node's) os.tmpdir(): TMPDIR, TMP, TEMP, else /tmp; on Windows TEMP,
+/// TMP, else `%SystemRoot%\temp`. A trailing separator is dropped.
+fn omp_tmp(line: &str) -> String {
+    let get = |k: &str| env_value(line, k);
+    let t = if cfg!(windows) {
+        get("TEMP").or_else(|| get("TMP")).unwrap_or_else(|| {
+            get("SystemRoot").or_else(|| get("windir")).unwrap_or_else(|| r"C:\Windows".into()) + r"\temp"
+        })
+    } else {
+        get("TMPDIR").or_else(|| get("TMP")).or_else(|| get("TEMP")).unwrap_or_else(|| "/tmp".into())
+    };
+    if t.len() > 1 && !t.ends_with(":\\") { t.trim_end_matches(['/', '\\']).to_string() } else { t }
 }
 
 /// Agents that write pi's log: pi and its fork omp (oh-my-pi).
