@@ -359,6 +359,11 @@ func checksAgentBox() {
     func codex(_ row: String) -> String { "• Ran ls\n\n\(row)\n\n  GPT-6.1-Sol high · Context 100% left · 0 in\n  ← for agents · ? for shortcuts\n" }
     check(box("codex", codex("› Ask Codex to do anything")) == false && box("codex", codex("› hi there")) == true && box("codex", codex("› /")) == true
           && box("codex", "nothing") == nil, "box codex")
+    // A newer Codex footer: a blank line, then model · folder · thread title (no "% left"), then the shortcuts.
+    func titled(_ row: String) -> String { "• Ran ls\n\n\(row)\n\n  GPT-6.1-Sol high · ~/src/app · Fix the login form · Main [default]\n  ← for agents · ? for shortcuts\n" }
+    check(box("codex", titled("› Ask Codex to do anything")) == false, "box codex, footer with no \"% left\": the empty box is empty")
+    check(box("codex", titled("› hi there")) == true, "box codex, footer with no \"% left\": one line of text")
+    check(box("codex", titled("› first line\n  second line")) == true, "box codex, footer with no \"% left\": two lines of text")
 
     func pi(_ row: String) -> String { "\(rule)\n\(rule)\n\(row)\n\(rule)\n~/proj  ⎇main\n" }
     check(box("pi", pi("")) == false && box("pi", pi("hi there")) == true && box("pi", pi("\nsecond")) == true && box("pi", "no rules") == nil, "box pi")
