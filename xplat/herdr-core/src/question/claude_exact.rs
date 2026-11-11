@@ -191,10 +191,13 @@ pub fn claude_exact(
     let mut region: Vec<&str> = lines[head + 1..sep].to_vec();
     // The question text's lines (above the first row) without a block-quote bar (2.1.322, long questions).
     let first_row = region.iter().position(|l| row_re().is_match(l)).unwrap_or(region.len());
-    // A short question is never drawn with the bar: there a leading "│" is text and stays.
-    let unquoted =
-        if gcount(&want.text) >= QUOTE_MIN { drop_quote_bar(&region[..first_row]) } else { region[..first_row].to_vec() };
-    region.splice(..first_row, unquoted);
+    // As drawn when that is the text (a short question is never quoted; a long one's own "│" before 2.1.322),
+    // else, for a long question, without the bar.
+    let as_drawn = bare(&region[..first_row].concat()) == bare(&want.text);
+    if !as_drawn && gcount(&want.text) >= QUOTE_MIN {
+        let unquoted = drop_quote_bar(&region[..first_row]);
+        region.splice(..first_row, unquoted);
+    }
     let mut chars: Vec<String> = vec![];
     let mut starts: HashMap<usize, usize> = HashMap::new();
     for (i, l) in region.iter().enumerate() {
