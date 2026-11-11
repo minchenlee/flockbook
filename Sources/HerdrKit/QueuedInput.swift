@@ -520,11 +520,17 @@ public enum QueuePull {
     }
 
     /// Codex: the last row that starts with "› ", and the rows under it down to the footer (the line with the model's
-    /// "% left" or "? for shortcuts").
+    /// "% left" or "? for shortcuts"). A newer footer has a status line with no "% left" (model · folder · thread
+    /// title, after a blank line): that line is the footer's. Rust: `codex_box` in queue.rs.
     static func codexBox(_ lines: [String]) -> [String] {
         guard let i = lines.lastIndex(where: { $0.hasPrefix("› ") }) else { return [] }
         guard let end = lines[(i + 1)...].firstIndex(where: { $0.contains("% left") || $0.contains("? for shortcuts") }) else { return [] }
-        return rows(Array(lines[i..<end]), mark: "›")
+        var box = lines[i..<end]
+        if box.count > 2, let status = box.last, status.hasPrefix("  "), status.contains(" · "),
+           SlashCommands.trim(box[box.endIndex - 2]).isEmpty {
+            box = box.dropLast(2)
+        }
+        return rows(Array(box), mark: "›")
     }
 
     static func rows(_ lines: [String], mark: Character) -> [String] {
