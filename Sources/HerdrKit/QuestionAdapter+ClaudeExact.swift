@@ -191,7 +191,9 @@ extension QuestionAdapter {
     public static let reviewLabels = "The terminal's review screen could not show which options were picked (an option with a comma or a ● or → mark, or two options alike). Answer in the terminal."
     public static let reviewOwn = "Your own answer has a comma, a ● or → mark, or is the same as an option, so the terminal's review screen could not show it. Change it, or answer in the terminal."
     public static func reviewNote(_ q: QuestionRequest, answers: [QuestionAnswer]) -> String? {
-        nil
+        if q.unread > 0 { return nil }
+        if reviewBlocked(q, answers: []) { return reviewLabels }
+        return reviewBlocked(q, answers: answers) ? reviewOwn : nil
     }
 
     /// Why `reviewBlocked` refuses (`Failure.unsupported`).

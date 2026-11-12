@@ -131,6 +131,8 @@ struct QuestionCard: View {
     var onLoadAll: () async throws -> QuestionRequest? = { nil }
     /// Tests: the answers in progress after each change.
     var onFlow: ((QuestionFlow) -> Void)? = nil
+    /// Opens the pane's terminal ("Answer in terminal" when the review could not show the answers).
+    var onOpenTerminal: () -> Void = {}
     @State private var flow: QuestionFlow
     @State private var sent = false
     @State private var busy = false
@@ -145,9 +147,9 @@ struct QuestionCard: View {
     init(model: QuestionRequest, agentName: String, canSend: Bool = false, maxHeight: CGFloat = .infinity,
          onSend: @escaping ([QuestionAnswer]) async throws -> Void = { _ in },
          onLoadAll: @escaping () async throws -> QuestionRequest? = { nil },
-         onFlow: ((QuestionFlow) -> Void)? = nil) {
+         onFlow: ((QuestionFlow) -> Void)? = nil, onOpenTerminal: @escaping () -> Void = {}) {
         self.model = model; self.agentName = agentName; self.canSend = canSend; self.maxHeight = maxHeight; self.onSend = onSend; self.onLoadAll = onLoadAll
-        self.onFlow = onFlow
+        self.onFlow = onFlow; self.onOpenTerminal = onOpenTerminal
         _flow = State(initialValue: QuestionFlow(model.questions, headers: model.headers))
     }
 
@@ -283,11 +285,25 @@ struct QuestionCard: View {
         .id(flow.step)   // a fresh field per question
     }
 
+    /// `answerQuestion` would refuse these answers before any key: the terminal's review screen could not show them
+    /// (`QuestionAdapter.reviewNote`, the same rule). Said from the first question, checked again as "Other" text changes.
+    /// None until every question is read.
+    private var reviewNote: String? {
+        guard flow.questions.count >= flow.total else { return nil }
+        var q = model
+        q.questions = flow.questions; q.headers = []
+        return QuestionAdapter.reviewNote(q, answers: flow.values())
+    }
+
     private func foot(_ q: QuestionRequest.Question) -> some View {
-        HStack(spacing: 8) {
+        let note = canSend ? reviewNote : nil
+        return HStack(spacing: 8) {
             if let problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            } else if let note {
+                Label(note, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
             } else if !canSend {
                 HStack(spacing: 4) {
                     Text("Answer in the terminal")
@@ -301,10 +317,11 @@ struct QuestionCard: View {
             }
             Spacer(minLength: 8)
             if busy { Spinner() }
+            if note != nil { Button("Answer in terminal") { onOpenTerminal() } }
             if flow.step > 0 { Button("Back") { flow.back(); focus = .card } }
             Button(flow.isLast ? (flow.total > 1 ? "Send Answers" : "Send") : "Next") { returnKey() }
                 .buttonStyle(.borderedProminent)
-                .disabled(busy || !flow.valid || (flow.isLast && !canSend))
+                .disabled(busy || !flow.valid || (flow.isLast && (!canSend || note != nil)))
         }
         .controlSize(.regular)
     }
@@ -339,6 +356,7 @@ struct QuestionCard: View {
             }
             return
         }
+        guard !(flow.isLast && reviewNote != nil) else { return }
         guard flow.advance(), canSend else { return }
         busy = true; problem = nil
         Task {

@@ -325,6 +325,26 @@ extension ContentTests {
         step("second try sends and the card says Sent (\(tries) tries)", tries == 2 && elabels2.contains { $0.hasPrefix("Sent.") })
         ewin.orderOut(nil)
 
+        // The terminal's review screen could not show the picks (a hooked multi-select with a comma label): the card says so
+        // from the start, offers the terminal, and Return sends nothing (issue #11 item 4; QuestionAdapter.reviewNote).
+        var blockedSent: [QuestionAnswer]?, opened = 0
+        let commaQ = QuestionRequest(toolUseId: "toolu_rb", questions: [
+            .init(header: "Colors", text: "Which colors?", options: [.init(label: "Red, green"), .init(label: "Blue")], multiSelect: true),
+        ])
+        let (rwin, rhost) = window(
+            ZStack {
+                WindowSurface(glass: .off)
+                QuestionCard(model: commaQ, agentName: agent, canSend: true, onSend: { blockedSent = $0 }, onOpenTerminal: { opened += 1 }).inputColumn()
+            }, NSSize(width: 1200, height: 420))
+        try? await Task.sleep(for: .seconds(1.2))
+        let rlabels = await axLabels(rhost)
+        step("review blocked: the reason and Answer in terminal from the start",
+             rlabels.contains { $0.hasPrefix("The terminal's review screen could not show") } && rlabels.contains("Answer in terminal"))
+        capture(rwin, to: "\(dir)/question-review-blocked.png")
+        await digit(rwin, 2); await returnKey(rwin)
+        step("review blocked: 2 and Return send nothing (\(blockedSent.map { "\($0.map(\.picks))" } ?? "nothing"))", blockedSent == nil)
+        rwin.orderOut(nil)
+
         // Sending on: the card hands over the values and steps aside.
         var sent: [QuestionAnswer]?
         let (swin, _) = window(scene(items(single("q-send")), canSend: true, onSend: { sent = $0 }), NSSize(width: 1200, height: 760))
