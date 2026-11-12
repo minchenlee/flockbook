@@ -68,4 +68,15 @@ import Foundation
     check(!QuestionAdapter.reviewBlocked(codex, answers: []), "reviewBlocked: another agent -> fine")
     var message = two("A B", "AB", false); message.delivery = .message
     check(!QuestionAdapter.reviewBlocked(message, answers: []), "reviewBlocked: a message answer -> no review screen")
+
+    // reviewNote: what the card says before Send (the Herdr app mod's words). The labels first, then the own answer.
+    check(QuestionAdapter.reviewNote(two("x, y", "z", true), answers: []) == QuestionAdapter.reviewLabels, "reviewNote: a comma label -> blocked from the start")
+    check(QuestionAdapter.reviewNote(two("A B", "AB", false), answers: [own([], "fine"), pick([0])]) == QuestionAdapter.reviewLabels, "reviewNote: labels first, whatever is typed")
+    check(QuestionAdapter.reviewNote(two("A", "B", true), answers: []) == nil, "reviewNote: clean labels -> none")
+    check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "x, y"), pick([0])]) == QuestionAdapter.reviewOwn, "reviewNote: own answer with a comma")
+    check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "  B "), pick([0])]) == QuestionAdapter.reviewOwn, "reviewNote: own answer alike an option")
+    check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "olive"), pick([0])]) == nil, "reviewNote: a clean own answer -> none")
+    var unread = two("x, y", "z", true); unread.headers = ["One", "Two", "Three"]
+    check(QuestionAdapter.reviewNote(unread, answers: []) == nil, "reviewNote: questions unread -> none (the answer reads them first)")
+    check(QuestionAdapter.reviewLabels.hasSuffix("Answer in the terminal.") && QuestionAdapter.reviewOwn.hasSuffix("Change it, or answer in the terminal."), "reviewNote: the mod's words")
 }
