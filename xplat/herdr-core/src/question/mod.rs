@@ -1252,6 +1252,12 @@ fn answer_keys<S: PaneScreen + ?Sized>(screen: &S, keys: &[String], gate: Option
     Ok(())
 }
 
+/// The refusal `answer_question` makes before any key when the review screen cannot prove the answers (a hooked
+/// Claude picker with 2+ questions or a multi-choice last one, and `review_ambiguous`). A card shows it before Send.
+pub fn review_blocked(q: &QuestionRequest, answers: &[QuestionAnswer]) -> bool {
+    review_ambiguous(q, answers)
+}
+
 /// Answers a pending question in `pane_id`, one `QuestionAnswer` per question.
 /// Picker: (1) checks the picker with the first question is on screen (Claude: another question of this request
 /// is moved back with Left; anything else errs with `NotOnScreen`, nothing sent),

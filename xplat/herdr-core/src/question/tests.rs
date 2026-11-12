@@ -2372,3 +2372,39 @@ fn claude_review_bar_only_in_question_text() {
     assert!(claude_review_exact(&q, &[ans(&[0, 2])], &review), "picks A and │B: the wrapped │B is the label");
     assert!(!claude_review_exact(&q, &[ans(&[0, 1])], &review), "picks A and B: the screen shows │B, not B");
 }
+
+// `review_blocked`: the whole refusal `answer_question` makes before any key, so a card can show it first
+// (issue #11, item 4). Only a hooked Claude picker with 2+ questions or a multi-choice last one.
+#[test]
+fn review_blocked_is_the_answer_refusal() {
+    let two = |a: &str, b: &str, multi: bool| {
+        hooked(
+            "toolu_B",
+            json!([{"question":"First?","header":"One","multiSelect":multi,"options":[{"label":a,"description":""},{"label":b,"description":""}]},
+                {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
+        )
+    };
+    assert!(review_blocked(&two("A B", "AB", false), &[]), "two labels alike: blocked before any answer");
+    assert!(review_blocked(&two("x, y", "z", true), &[]), "multi choice, a comma label: blocked");
+    assert!(!review_blocked(&two("x, y", "z", false), &[]), "single choice, a comma label: fine");
+    assert!(!review_blocked(&two("A", "B", true), &[]), "clean labels: fine");
+    assert!(review_blocked(&two("A", "B", true), &[other(&[], "x, y"), ans(&[0])]), "own answer with a comma (multi): blocked");
+    assert!(review_blocked(&two("A", "B", false), &[other(&[], "B"), ans(&[0])]), "own answer alike a label: blocked");
+    assert!(!review_blocked(&two("A", "B", false), &[other(&[], "later, maybe"), ans(&[0])]), "own answer with a comma (single): fine");
+    // One single-choice question: its review is not checked, so nothing is refused.
+    let one = hooked("toolu_1", json!([{"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]}]));
+    assert!(!review_blocked(&one, &[]), "one single-choice question: fine");
+    let mut one_multi = one.clone();
+    one_multi.questions[0].multi_select = true;
+    assert!(review_blocked(&one_multi, &[]), "one multi-choice question: checked");
+    // Read from the screen, not hooked: no review check.
+    let mut screen = two("A B", "AB", false);
+    screen.tool_use_id = "screen-1".into();
+    assert!(!review_blocked(&screen, &[]), "screen question: fine");
+    let mut codex = two("A B", "AB", false);
+    codex.agent = "codex".into();
+    assert!(!review_blocked(&codex, &[]), "another agent: fine");
+    let mut message = two("A B", "AB", false);
+    message.delivery = Delivery::Message;
+    assert!(!review_blocked(&message, &[]), "a message answer: no review screen");
+}
