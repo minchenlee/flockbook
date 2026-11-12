@@ -4,7 +4,7 @@ import { div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { theme, layout, window, settings, openOverlay, run, setAgentOrder, nextCommand, shared, setShared } from "herdr";
 import { openMenu, tabItems } from "./menu.js";
-import { spaceAgents, spaceTabs, activeTab, currentAgent, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
+import { spaceAgents, spaceTabs, activeTab, currentTerminal, tabLabel, screenFor, showTab, closeTab, openTerminal, showNeeds, icon, tabAgents, shownScreen,
   SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
 import { loadConfig, pollUpdate, updateDot, stepTextSize } from "./config.js";
 import { dragger, dropPlace } from "./drag.js";
@@ -44,7 +44,7 @@ const KEY_CMD = "flockbook.command";   // the last key command and when, so two 
 // Keys bound to "flockbook.<command>" in keys.json.
 export function command(c) {
   const tabs = spaceTabs(), tab = activeTab(), i = tabs.findIndex((x) => x.id === tab?.id);
-  if (c === "terminal") return openTerminal(currentAgent());
+  if (c === "terminal") return openTerminal(currentTerminal());
   if (c === "needs") return showNeeds();
   if (c === "sidebar") return toggleSidebar();
   if (c === "overview") return showOverview();
@@ -98,7 +98,7 @@ export function syncScreen(owner) {
 export function topBar(t, over = false) {
   setAgentOrder(spaceAgents().map((a) => a.address));
   const tabs = spaceTabs();
-  const cur = currentAgent();
+  const cur = currentTerminal();
   const side = sidebarShown();
   // While the sidebar is hidden, the sidebar button sits right of the window buttons; while it
   // shows, the button is in the sidebar (side.js) and the bar starts at its edge.

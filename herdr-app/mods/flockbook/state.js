@@ -1,6 +1,6 @@
 // What every view agrees on: the agent shown in the chat, and the screen in the stack.
 // Kept in shared() so the copies of this mod (one per layout block) see the same value.
-import { agents, focused, shared, setShared, run, spaces, openOverlay, closeOverlay, appHome, readTextFile } from "herdr";
+import { agents, panes, focused, shared, setShared, run, spaces, openOverlay, closeOverlay, appHome, readTextFile } from "herdr";
 import { loadConfig, updateSeen } from "./config.js";
 
 export const KEY_AGENT = "flockbook.agent";
@@ -109,6 +109,20 @@ export function currentAgent() {
   return list.find((a) => a.address === picked)
     ?? list.find((a) => f && (a.address === f.agent || a.address === f.terminal))
     ?? list[0] ?? null;
+}
+
+// What the Terminal button and ctrl-` open: the chat's agent; on a tab with no agent, the tab's focused terminal
+// pane, else its first. An agent that stopped reporting its status (issue #11, item 5: Claude Code after a new
+// session id) leaves its tab with no agent while it still runs there. Null for a tab with no terminal pane.
+export function currentTerminal() {
+  const a = currentAgent();
+  if (a) return a;
+  const tab = activeTab();
+  if (!tab) return null;
+  const list = (panes() ?? []).filter((p) => p.tab === tab.id && p.terminal);
+  const f = focused();
+  const p = list.find((x) => x.focused) ?? list.find((x) => f && x.terminal === f.terminal) ?? list[0];
+  return p ? { address: p.terminal, tab: p.tab, tab_name: tab.named ? tab.name : null, program: p.program, app: p.app } : null;
 }
 
 // A tab's label: its name when someone named it, else its agent's name, else its number ("3").

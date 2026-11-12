@@ -151,9 +151,35 @@ test("ctrl-` / Terminal toggles: a second press closes the window; Close forgets
   assert.equal(fake.shared["flockbook.terminal"], null);
 });
 
-test("a shell tab: no Terminal button", () => {
+test("a tab with no agent and no panes: no Terminal button", () => {
   fake.spaces[0].tabs.forEach((x) => { x.active = x.id === "tb-sh"; });
+  fake.panes = [{ pane: "p-m", terminal: null, mod: "flockbook", tab: "tb-sh", title: "Flockbook", focused: true }];
+  assert.equal(byId(new TopView(fakeCx()).render(fakeCx()), "terminal"), null, "a mod pane is not a terminal");
+  fake.panes = [];
   assert.equal(byId(new TopView(fakeCx()).render(fakeCx()), "terminal"), null);
+});
+
+// Issue #11, item 5: an agent that stopped reporting its status (hc lists it as zsh) leaves a tab with no agent.
+// The Terminal button and ctrl-` then open the tab's focused terminal, else its first one.
+test("a tab with no agent: Terminal and ctrl-` open its focused terminal, else its first", () => {
+  fake.spaces[0].tabs.forEach((x) => { x.active = x.id === "tb-sh"; });
+  const zsh = { key: "zsh", name: "zsh", icon: "icons/zsh.svg", tint: true, agent: false, shell: true };
+  const pane = (p, terminal, focused) => ({ pane: p, terminal, tab: "tb-sh", title: "", cwd: "/w/app", branch: "main", status: null, app: null, program: zsh, focused, zoomed: false, movable: true });
+  fake.panes = [{ pane: "p-m", terminal: null, mod: "flockbook", tab: "tb-sh", title: "Flockbook", focused: false },
+    pane("p-s1", "s1", false), pane("p-s2", "s2", true), { ...pane("p-x", "t1", true), tab: "tb-t1" }];
+  const top = new TopView(fakeCx());
+  const el = top.render(fakeCx());
+  assert.ok(byId(el, "terminal"), "the button shows");
+  byId(el, "terminal")._h.on_click({}, fakeCx());
+  assert.deepEqual(log.overlays.at(-1).layout.children[1].content, { terminal: "s2" }, "the button: the focused pane");
+  fake.shared["flockbook.terminal"] = null;
+  top.command("terminal");
+  assert.deepEqual(log.overlays.at(-1).layout.children[1].content, { terminal: "s2" }, "ctrl-`: the same terminal");
+  fake.shared["flockbook.terminal"] = null;
+  fake.panes[2].focused = false;
+  top.command("terminal");
+  assert.deepEqual(log.overlays.at(-1).layout.children[1].content, { terminal: "s1" }, "none focused: the first terminal pane");
+  assert.deepEqual(log.overlays.at(-1).layout.children[0].content.props, { view: "termbar", terminal: "s1", name: "zsh" });
 });
 
 // Tab drag. Each pill is 80 px wide, 10 px apart, from x = 100: tb-t1, tb-t2, tb-t3, tb-sh.
