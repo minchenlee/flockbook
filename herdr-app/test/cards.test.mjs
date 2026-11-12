@@ -262,3 +262,53 @@ test("another press was being handled at the same moment: it says press again, a
   byId(el, "card-allow")._h.on_click({}, cx); await cx.settle();
   assert.equal(acts.length, n + 2, "the second press goes to the sidecar");
 });
+
+// Issue #11, item 4: the sidecar's `blocked` (the rule `answer` refuses with) shows from the start: Send off, the
+// reason, and a button that opens the terminal.
+const LABELS = "The terminal's review screen could not show which options were picked (an option with a comma or a ● or → mark, or two options alike). Answer in the terminal.";
+const OWN = "Your own answer has a comma, a ● or → mark, or is the same as an option, so the terminal's review screen could not show it. Change it, or answer in the terminal.";
+
+test("a question the review cannot show: Send off from the start, the reason, and Answer in terminal", async () => {
+  cardNow = { ...question, blocked: LABELS };
+  const cx = fakeCx(); const c = new Cards(cx); await c.poll(cx, "t1", true);
+  let el = c.view("t1", T);
+  assert.match(textOf(byId(el, "card-blocked")), /review screen could not show/, "said on the first question already");
+  byId(el, "card-q0-o1")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send is off");
+  assert.equal(c.key_down({ key: "enter", modifiers: {} }, cx, "t1"), false, "Enter sends nothing");
+  await cx.settle();
+  assert.equal(acts.length, 0, "nothing went to the sidecar");
+  byId(el, "card-terminal")._h.on_click({}, cx); await cx.settle();
+  assert.equal(log.overlays.length, 1, "the terminal opens");
+  assert.match(JSON.stringify(log.overlays[0]), /"terminal":"t1"/);
+});
+
+test("an own answer the review cannot show: checked again as it changes, Send off until it is fine", async () => {
+  cardNow = question;
+  const cards = [];
+  fake.exec = (_c, args) => {
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    cards.push(args);
+    const i = args.indexOf("--answers");
+    const a = i < 0 ? [] : JSON.parse(args[i + 1]);
+    return jl(header("card"), a.some((x) => (x.other ?? "").includes(",")) ? { ...question, blocked: OWN } : question, end);
+  };
+  const cx = fakeCx(); const c = new Cards(cx); await c.poll(cx, "t1", true);
+  assert.ok(!cards[0].includes("--answers"), "nothing typed yet: the labels only");
+  byId(c.view("t1", T), "card-q0-o1")._h.on_click({}, cx);
+  c.view("t1", T);
+  const type = async (text) => { c.others[1].set_value(text); c.others[1]._h.change({}, cx); await c.poll(cx, "t1", true); };
+  await type("x, y");
+  const last = () => JSON.parse(cards.at(-1)[cards.at(-1).indexOf("--answers") + 1]);
+  assert.deepEqual(last(), [{ picks: [1] }, { picks: [], other: "x, y" }], "a change reads the card again at once, with the answers so far");
+  let el = c.view("t1", T);
+  assert.match(textOf(byId(el, "card-blocked")), /Change it, or answer in the terminal/);
+  assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send is off");
+  await type("olive");
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-blocked"), null, "fine now");
+  assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send is on");
+  assert.equal(c.others[1].value(), "olive", "the typed text stays");
+});

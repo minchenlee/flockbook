@@ -42,6 +42,10 @@ pub struct Card {
     /// An approval this sidecar already answered that is still on screen: no buttons.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answered: Option<bool>,
+    /// Question: why `answer` would refuse these answers before any key (`review_note`). The mod turns Send off and
+    /// shows this with a button that opens the terminal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<String>,
 }
 
 impl Card {
@@ -201,8 +205,32 @@ pub fn look<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>)
     (None, read)
 }
 
+/// The card's `blocked` line (`question::review_blocked`, the rule `answer` refuses with): Some when the terminal's
+/// review screen could not show these answers. The labels alone, or the person's own answer. None while questions
+/// are unread: `answer` reads them first, and the rule needs them all.
+pub const REVIEW_LABELS: &str = "The terminal's review screen could not show which options were picked (an option with a comma or a ● or → mark, or two options alike). Answer in the terminal.";
+pub const REVIEW_OWN: &str = "Your own answer has a comma, a ● or → mark, or is the same as an option, so the terminal's review screen could not show it. Change it, or answer in the terminal.";
+
+pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<String> {
+    if q.unread() > 0 {
+        return None;
+    }
+    if question::review_blocked(q, &[]) {
+        Some(REVIEW_LABELS.into())
+    } else if question::review_blocked(q, answers) {
+        Some(REVIEW_OWN.into())
+    } else {
+        None
+    }
+}
+
 /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click).
 pub fn card<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>) -> Card {
+    card_with(pane, screen, log, all, cache, &[])
+}
+
+/// `card`, with the answers the mod has so far (`card --answers`): `blocked` covers the person's own answers too.
+pub fn card_with<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>, answers: &[QuestionAnswer]) -> Card {
     let (mut now, read) = look(pane, screen, log);
     if all {
         if let Some(Current::Question(q)) = &now {
@@ -245,6 +273,7 @@ pub fn card<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>,
                 request: Some(q.tool_use_id.clone()),
                 question: row.question,
                 unread: Some(q.unread()),
+                blocked: review_note(&q, answers),
                 ..Default::default()
             }
         }
@@ -398,5 +427,42 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
         DeliveryOutcome::Sent => Done::new("sent", None),
         DeliveryOutcome::Unconfirmed => Done::new("unconfirmed", Some("no answer in time; the text may still arrive")),
         DeliveryOutcome::Failed => Done::new("failed", Some("herdr-core did not take the text")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn hooked(questions: Value) -> QuestionRequest {
+        let mut q = question::claude("toolu_R", json!({ "questions": questions }).as_object().unwrap()).unwrap();
+        q.headers = vec![];
+        q
+    }
+    fn two(a: &str, b: &str) -> QuestionRequest {
+        hooked(json!([{"question":"First?","header":"One","multiSelect":true,"options":[{"label":a,"description":""},{"label":b,"description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]))
+    }
+    fn own(text: &str) -> Vec<QuestionAnswer> {
+        vec![QuestionAnswer { picks: vec![], other: Some(text.into()) }, QuestionAnswer::default()]
+    }
+
+    // Issue #11, item 4: the card says so before Send, with the rule `answer` refuses with.
+    #[test]
+    fn review_note_before_send() {
+        assert_eq!(review_note(&two("x, y", "z"), &[]).as_deref(), Some(REVIEW_LABELS), "a comma label: blocked from the start");
+        assert_eq!(review_note(&two("A B", "AB"), &own("fine")).as_deref(), Some(REVIEW_LABELS), "labels first, whatever is typed");
+        assert_eq!(review_note(&two("A", "B"), &[]), None, "clean labels: Send stays on");
+        assert_eq!(review_note(&two("A", "B"), &own("x, y")).as_deref(), Some(REVIEW_OWN), "own answer with a comma");
+        assert_eq!(review_note(&two("A", "B"), &own("  B ")).as_deref(), Some(REVIEW_OWN), "own answer alike an option");
+        assert_eq!(review_note(&two("A", "B"), &own("olive")), None, "a clean own answer");
+        // It is the answer's refusal: the same answers, the same verdict.
+        for (q, a) in [(two("x, y", "z"), vec![]), (two("A", "B"), own("x, y")), (two("A", "B"), own("olive"))] {
+            assert_eq!(review_note(&q, &a).is_some(), question::review_blocked(&q, &a));
+        }
+        let mut unread = two("x, y", "z");
+        unread.headers = vec!["One".into(), "Two".into(), "Three".into()];
+        assert_eq!(review_note(&unread, &[]), None, "questions unread: answer reads them first");
     }
 }

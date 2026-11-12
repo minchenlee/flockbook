@@ -1252,6 +1252,19 @@ fn answer_keys<S: PaneScreen + ?Sized>(screen: &S, keys: &[String], gate: Option
     Ok(())
 }
 
+/// Why `review_blocked` refuses (`QuestionFailure::Unsupported`).
+pub const REVIEW_BLOCKED: &str = "the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)";
+
+/// The refusal `answer_question` makes before any key when the review screen cannot prove the answers (a hooked
+/// Claude picker with 2+ questions or a multi-choice last one, and `review_ambiguous`). A card shows it before Send.
+pub fn review_blocked(q: &QuestionRequest, answers: &[QuestionAnswer]) -> bool {
+    let hooked = q.agent == "claude" && !q.tool_use_id.starts_with("screen-");
+    q.delivery == Delivery::Picker
+        && hooked
+        && (q.questions.len() > 1 || q.questions.last().is_some_and(|x| x.multi_select))
+        && review_ambiguous(q, answers)
+}
+
 /// Answers a pending question in `pane_id`, one `QuestionAnswer` per question.
 /// Picker: (1) checks the picker with the first question is on screen (Claude: another question of this request
 /// is moved back with Left; anything else errs with `NotOnScreen`, nothing sent),
@@ -1293,10 +1306,8 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
     let any = |s: &str| shows_any(q, s);
     // A hooked request whose review cannot prove the answers: refused before any key (the Left below too).
     let hooked = q.agent == "claude" && !q.tool_use_id.starts_with("screen-");
-    if hooked && (q.questions.len() > 1 || q.questions.last().is_some_and(|x| x.multi_select)) && review_ambiguous(q, answers) {
-        return Err(unsupported(
-            "the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)",
-        ));
+    if review_blocked(q, answers) {
+        return Err(unsupported(REVIEW_BLOCKED));
     }
     let now = screen.visible_text(pane_id)?;
     let mut sent = false; // a key of this answer went in
