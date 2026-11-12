@@ -1293,15 +1293,58 @@ fn claude_hook_review2() {
     // P3: an ambiguous review with the picker on question 2: refused before the Left that goes back to question 1.
     let amb = req(
         "toolu_Q",
-        json!([{"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A, B","description":""},{"label":"A","description":""}]},
+        json!([{"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]},
             {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
     );
-    let mut sim = Sim::new(vec![simq("One", "First?", &[("A, B", ""), ("A", "")], false), simq("Two", "Second?", &[("C", ""), ("D", "")], false)]);
+    let mut sim = Sim::new(vec![simq("One", "First?", &[("A B", ""), ("AB", "")], false), simq("Two", "Second?", &[("C", ""), ("D", "")], false)]);
     sim.at = 1;
     let agent = tui_agent("claude", Some("sess-2"));
     let live = Live::new(tui_pane(agent.clone()), &sim.render());
     let r = answer_question(&live, "w1:p1", &amb, &[ans(&[0]), ans(&[0])], Some(&gate(&agent, yes())));
     assert!(r.is_err() && live.mark() == 0, "r2 P3: ambiguous review, picker on question 2 -> refused before any key (no Left)");
+}
+
+// A single-choice question's review line shows ONE answer (a label or the Other text), never picks joined by
+// commas, so a comma in its labels or Other text cannot make two answers look alike there. ("Yes, apply it" /
+// "No / not yet" is the usual yes-no question; refusing it sent every such card to the terminal.)
+#[test]
+fn claude_review_comma_single_choice() {
+    let q = hooked(
+        "toolu_C",
+        json!([{"question":"Remind you?","header":"Nudge","multiSelect":false,"options":[{"label":"Yes, remind me Dec 28","description":"a"},{"label":"No / not yet","description":"b"}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
+    );
+    let want = [ans(&[0]), ans(&[1])];
+    assert!(!review_ambiguous(&q, &want), "single choice: a comma in a label is not ambiguous");
+    assert!(!review_ambiguous(&q, &[other(&[], "Later, in January"), ans(&[1])]), "single choice: Other text with a comma is not ambiguous");
+    assert!(review_ambiguous(&q, &[other(&[], "No / not yet"), ans(&[1])]), "single choice: Other text alike a label is still ambiguous");
+    let review = sw(r#"
+    ←  ☒ Nudge  ☒ Two  ✔ Submit  →
+
+    Review your answers
+
+     ● Remind you?
+       → Yes, remind me Dec 28
+     ● Second?
+       → D
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "#);
+    assert!(claude_review_exact(&q, &want, &review), "single choice: the review of a comma label matches");
+    assert!(!claude_review_exact(&q, &[ans(&[1]), ans(&[1])], &review), "single choice: another pick -> no match");
+    assert!(!claude_review_exact(&q, &want, &review.replace("→ Yes, remind me Dec 28", "→ No / not yet")), "single choice: another answer shown -> no match");
+    let own = review.replace("→ Yes, remind me Dec 28", "→ Later, in January");
+    assert!(claude_review_exact(&q, &[other(&[], "Later, in January"), ans(&[1])], &own), "single choice: Other text with a comma matches");
+    // Multi-choice keeps the rule: its picks ARE joined by commas.
+    let multi = hooked(
+        "toolu_M2",
+        json!([{"question":"Which?","header":"Many","multiSelect":true,"options":[{"label":"Yes, remind me","description":""},{"label":"Yes","description":""},{"label":"remind me","description":""}]}]),
+    );
+    assert!(review_ambiguous(&multi, &[ans(&[0])]), "multi choice: a comma in a label is still ambiguous");
+    assert!(review_ambiguous(&multi, &[other(&[1], "x, y")]), "multi choice: Other text with a comma is still ambiguous");
 }
 
 #[test]
