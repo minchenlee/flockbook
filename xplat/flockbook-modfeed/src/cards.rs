@@ -212,8 +212,16 @@ pub const REVIEW_LABELS: &str = "The terminal's review screen could not show whi
 pub const REVIEW_OWN: &str = "Your own answer has a comma, a ● or → mark, or is the same as an option, so the terminal's review screen could not show it. Change it, or answer in the terminal.";
 
 pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<String> {
-    let _ = (q, answers);
-    None
+    if q.unread() > 0 {
+        return None;
+    }
+    if question::review_blocked(q, &[]) {
+        Some(REVIEW_LABELS.into())
+    } else if question::review_blocked(q, answers) {
+        Some(REVIEW_OWN.into())
+    } else {
+        None
+    }
 }
 
 /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click).

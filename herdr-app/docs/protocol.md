@@ -45,7 +45,7 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `version` | — | `version` |
 | `feed` | `--terminal <addr>` `[--cursor <c>]` `[--cache <file>]` `[--pictures]` | `log`, then `unchanged`, or `splice` and `row`s |
 | `status` | `--terminal <addr>` `[--cache <file>]` | `status` |
-| `card` | `--terminal <addr>` `[--cache <file>]` | `card` |
+| `card` | `--terminal <addr>` `[--answers <json>]` `[--cache <file>]` | `card` |
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` `[--cache <file>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one; nothing is sent. Its message says "new conversation" when the same agent process wrote the expected log, e.g. after `/clear`. With `--cache` the log is looked up again and written to the cache, so the next `feed` reads it) |
@@ -352,6 +352,7 @@ as blocked, and for a pending `question` row.
 | `answered` | Approval: `true` when this prompt was answered already (by any view) and is still drawn. The mod shows no buttons. |
 | `question` | Question: the same object as in a `question` row. |
 | `unread` | Question: how many more questions exist than the card shows (Claude shows one at a time). `answer` reads them itself. |
+| `blocked` | Question: why `answer` would refuse before any key, because the terminal's review screen could not show the answers (a hooked Claude question set: an option with a comma or a `●`/`→` mark, two options alike, or such an own answer). `card --answers` (the `answer` format, the answers so far) also checks the own answers. Missing while `unread` > 0. The mod turns Send off and shows it with a button that opens the terminal. |
 
 An approval card appears only when the screen shows the prompt ("Do you want …?" with "1. Yes").
 A running tool is not an approval.

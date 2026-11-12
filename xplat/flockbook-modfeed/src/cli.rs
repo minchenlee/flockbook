@@ -4,7 +4,8 @@
 //!   flockbook-modfeed feed   --terminal <addr> [--cursor <c>] [--cache <file>]
 //!   flockbook-modfeed feed   --terminal <addr> --before <start> --path <log>   (older rows; no cache change)
 //!   flockbook-modfeed status --terminal <addr> [--cache <file>]
-//!   flockbook-modfeed card   --terminal <addr> [--all] [--cache <file>]   (--all: load every question; sends keys)
+//!   flockbook-modfeed card   --terminal <addr> [--all] [--answers <json>] [--cache <file>]   (--all: load every question; sends keys;
+//!                            --answers: the answers so far, for the `blocked` line)
 //!   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
 //!   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
 //!   flockbook-modfeed queue  --terminal <addr> [--cache <file>]   (the agent's own queue: one `queued` line; read only)
@@ -186,7 +187,9 @@ pub fn run(argv: &[String]) -> String {
                         return r.finish(true);
                     }
                 "card" => {
-                    let c = cards::card(&found.pane, &client, log, has("--all"), cache_url);
+                    // `--answers` (optional): the picks and own answers so far, for `blocked`. Unreadable: the labels only.
+                    let answers = opt("--answers").and_then(|a| cards::parse_answers(&a)).unwrap_or_default();
+                    let c = cards::card_with(&found.pane, &client, log, has("--all"), cache_url, &answers);
                     r.out.emit(&c);
                     return r.finish(true);
                 }
