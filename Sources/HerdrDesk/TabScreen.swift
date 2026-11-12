@@ -179,7 +179,9 @@ extension PaneView {
             QuestionCard(model: q, agentName: agent.name, canSend: Self.canAnswer(q, writes: model.writesEnabled),
                          maxHeight: Self.cardHeight(pane: paneFrame.height, label: labelShown),
                          onSend: { try await answer(q, $0) },
-                         onLoadAll: { try await loadAllQuestions() })
+                         onLoadAll: { try await loadAllQuestions() },
+                         // The sheet shows the tab's focused pane: this one.
+                         onOpenTerminal: { if let tab { model.focus(pane, in: tab) }; model.showTerminal = true })
                 .id(q.toolUseId)   // fresh answers per question
                 .inputColumn()
         } else if let r = ApprovalProbe.injected.flatMap({ agent.status == .blocked ? $0 : nil }) ?? model.cardInComposer(pane) {
