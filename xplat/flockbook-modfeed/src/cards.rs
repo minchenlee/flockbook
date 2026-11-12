@@ -383,8 +383,14 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
     let suggests = kind == "claude" && claude_suggests(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref());
     if let Ok(screen) = client.visible_text(&pane.id) {
-        if crate::queue::box_has_text(kind, &screen, suggests) == Some(true) && !(suggests && dim_suggestion(client, &pane.id, &screen)) {
-            return box_not_empty();
+        if crate::queue::box_has_text(kind, &screen, suggests) == Some(true) {
+            if !(suggests && dim_suggestion(client, &pane.id, &screen)) {
+                return box_not_empty();
+            }
+            // The look took up to LOOK_LIMIT: another agent may have come in meanwhile. Gate again before typing.
+            if !keygate::passes(client, Some(&gate(pane)), &pane.id, None, None) {
+                return refused(pane);
+            }
         }
     }
     let r = if files.is_empty() { client.deliver(text, &pane.id) } else { client.deliver_files(text, &pane.id, files) };

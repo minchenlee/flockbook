@@ -47,7 +47,12 @@ fn look(sock: &mut dyn Transport, terminal: &str, end: Instant, buf: &mut Vec<u8
             buf.drain(..=nl);
             break line;
         }
-        fill(sock, buf, end)?;
+        // One step with nothing is not the end: wait up to the limit, as for the paint.
+        match fill(sock, buf, end) {
+            Ok(()) => {}
+            Err(HerdrError::Timeout(_)) if Instant::now() < end => {}
+            Err(e) => return Err(e),
+        }
     };
     let o: Value = serde_json::from_slice(&line).map_err(|e| HerdrError::Protocol(format!("hello: {e}")))?;
     if o["result"]["framed"] != true {
