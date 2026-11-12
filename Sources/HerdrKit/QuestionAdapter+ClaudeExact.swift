@@ -176,20 +176,27 @@ extension QuestionAdapter {
     /// The review screen cannot prove the hub's answers: a shown label with a comma or a review mark (● →), two
     /// labels alike once whitespace is dropped, a question text with a review mark, or Other text with a comma, a
     /// review mark or alike a label. Then two answer sets look the same there, so the last key would go blind; the
-    /// answer is refused before any key.
+    /// answer is refused before any key. The comma counts only in a multi-choice question: a single-choice one's
+    /// review line shows one answer (a label or the Other text), never picks joined by commas.
     /// The refusal `answerQuestion` makes before any key when the review screen cannot prove the answers. A card
     /// shows it before Send.
     static func reviewBlocked(_ q: QuestionRequest, answers: [QuestionAnswer]) -> Bool {
-        reviewAmbiguous(q, answers: answers)
+        let hooked = q.agent == "claude" && !q.toolUseId.hasPrefix("screen-")
+        return q.delivery == .picker && hooked && (q.questions.count > 1 || q.questions.last?.multiSelect == true)
+            && reviewAmbiguous(q, answers: answers)
     }
+
+    /// Why `reviewBlocked` refuses (`Failure.unsupported`).
+    static let reviewBlockedWhy = "the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)"
 
     static func reviewAmbiguous(_ q: QuestionRequest, answers: [QuestionAnswer]) -> Bool {
         let marks: (String) -> Bool = { $0.contains("●") || $0.contains("→") }
         for (k, question) in q.questions.enumerated() {
+            let comma: (String) -> Bool = { question.multiSelect && $0.contains(",") }
             let alts = question.options.map { Set(shownLabels($0)) }
             let all = alts.flatMap { $0 }
-            if marks(question.text) || all.contains(where: { $0.contains(",") || marks($0) }) || Set(all).count != all.count { return true }
-            if answers.indices.contains(k), let o = otherText(answers[k]).map(bare), o.contains(",") || marks(o) || all.contains(o) { return true }
+            if marks(question.text) || all.contains(where: { comma($0) || marks($0) }) || Set(all).count != all.count { return true }
+            if answers.indices.contains(k), let o = otherText(answers[k]).map(bare), comma(o) || marks(o) || all.contains(o) { return true }
         }
         return false
     }

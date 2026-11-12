@@ -76,8 +76,9 @@ import Foundation
     check(!QuestionAdapter.claudeExact(rev, question: 0, screen: delTrue, other: nil, focus: .any, checks: nil), "r2 P2: the other way round -> no match")
 
     // P3 (4): an ambiguous review with the picker on question 2: refused before the Left that goes back to question 1.
-    let amb = req("toolu_Q", #"{"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A, B","description":""},{"label":"A","description":""}]},{"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}"#)
-    let sim = ClaudePickerSim([.init(header: "One", text: "First?", options: [("A, B", ""), ("A", "")], multi: false),
+    // Two labels alike once spaces go (a single-choice comma is not ambiguous since PR #14).
+    let amb = req("toolu_Q", #"{"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]},{"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}"#)
+    let sim = ClaudePickerSim([.init(header: "One", text: "First?", options: [("A B", ""), ("AB", "")], multi: false),
                                .init(header: "Two", text: "Second?", options: [("C", ""), ("D", "")], multi: false)])
     sim.at = 1
     let fake = FakeHerdr(path: NSTemporaryDirectory() + "hkB2-\(getpid()).sock")

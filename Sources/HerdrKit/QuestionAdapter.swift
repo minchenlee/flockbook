@@ -633,8 +633,8 @@ extension PaneScreen {
         let any: @Sendable (String) -> Bool = { QuestionAdapter.showsAny(q, screen: $0) }
         // A hooked request whose review cannot prove the answers: refused before any key (the Left below too).
         let hooked = q.agent == "claude" && !q.toolUseId.hasPrefix("screen-")
-        if hooked, q.questions.count > 1 || q.questions.last?.multiSelect == true, QuestionAdapter.reviewAmbiguous(q, answers: answers) {
-            throw QuestionAdapter.Failure.unsupported("the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)")
+        if QuestionAdapter.reviewBlocked(q, answers: answers) {
+            throw QuestionAdapter.Failure.unsupported(QuestionAdapter.reviewBlockedWhy)
         }
         let screen = try await visibleText(paneId: paneId)
         if !QuestionAdapter.screenShows(q, screen: screen) {
