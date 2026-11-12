@@ -96,12 +96,13 @@ fn look(sock: &mut dyn Transport, terminal: &str, end: Instant, buf: &mut Vec<u8
                 _ => {}
             }
         }
+        // Bytes left in `buf` are a frame still coming (a redraw, maybe of typed text): not quiet, and not done.
         let now = Instant::now();
-        if !paint.is_empty() && now.duration_since(last) >= QUIET {
+        if !paint.is_empty() && buf.is_empty() && now.duration_since(last) >= QUIET {
             return Ok(paint);
         }
         if now >= end {
-            return if paint.is_empty() { Err(HerdrError::Timeout("first paint".into())) } else { Ok(paint) };
+            return if paint.is_empty() || !buf.is_empty() { Err(HerdrError::Timeout("first paint".into())) } else { Ok(paint) };
         }
         match fill(sock, buf, end) {
             Ok(()) | Err(HerdrError::Timeout(_)) => {}
