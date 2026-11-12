@@ -40,7 +40,7 @@ export async function call(cmd, args = []) {
 }
 
 // The commands this sidecar has (its `version` line), asked once. A failed ask is asked again next time.
-// The Swift sidecar and older helpers have fewer: the mod hides what a missing command would do.
+// Older helpers have fewer: the mod hides what a missing command would do.
 let known = null;
 export function hasCommand(name) {
   if (!known) {

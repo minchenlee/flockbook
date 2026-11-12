@@ -38,7 +38,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       skip: ${{ steps.check.outputs.skip }}
-      sidecar: ${{ steps.paths.outputs.sidecar }}
       app: ${{ steps.paths.outputs.app }}
       native: ${{ steps.only.outputs.native }}
       native_run: ${{ steps.only.outputs.native_run }}
@@ -58,33 +57,22 @@ jobs:
           fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
 
-      # Whether the sidecar parity runs (in the build job): only when a file that one of the two sidecars is made
-      # from changed. A manual run with only= or macos15_only skips it. An API error or a long list runs it.
       - id: paths
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-          ONLY: ${{ inputs.only }}
-          M15: ${{ inputs.macos15_only }}
         run: |
-          sidecar=1
           # Whether the macOS app jobs run: only when a file the Mac app is built or tested from changed (Swift
           # sources and tests, the web page it serves, its scripts, this workflow). The Herdr app mod, the Rust
           # helpers (xplat.yml and helpers.yml test them), docs and the site skip them. A manual run always runs them.
           app=1
-          if [ "$EVENT" = workflow_dispatch ]; then
-            if [ -n "$ONLY" ] || [ "$M15" = true ]; then sidecar=0; fi
-          else
+          if [ "$EVENT" != workflow_dispatch ]; then
             # A new branch's first push has no "before": compare with main (the branch's fork point from it).
             if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then BASE=main; fi
             if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[].filename'); then
               n=$(printf '%s\n' "$files" | grep -c . || true)
-              if [ "$n" -lt 300 ] && ! printf '%s\n' "$files" | grep -Eq \
-                '^(xplat/(flockbook-modfeed|herdr-core)/|xplat/Cargo\.(toml|lock)$|Sources/(HerdrKit|ModFeedKit|flockbook-modfeed)/|scripts/modfeed-parity/|Tests/HerdrKitTests/Fixtures/|Package\.(swift|resolved)$|\.github/workflows/ci\.yml$)'; then
-                sidecar=0
-              fi
               app_files=$(printf '%s\n' "$files" | grep -E '^(Sources/|Tests/|web/|Package\.(swift|resolved)$|scripts/|\.github/workflows/ci\.yml$)' \
                 | grep -Ev '^scripts/(helper-release\.mjs|known-files\.mjs|package-mod\.sh|install-from-release\.sh)$' || true)
               if [ "$n" -gt 0 ] && [ "$n" -lt 300 ] && [ -z "$app_files" ]; then
@@ -93,7 +81,6 @@ jobs:
               fi
             fi
           fi
-          echo "sidecar=$sidecar" >> "$GITHUB_OUTPUT"
           echo "app=$app" >> "$GITHUB_OUTPUT"
 
       # `only` split in two: the phone page's checks (scripts/web-test.mjs sections, in the build job) and the app's
@@ -176,35 +163,6 @@ jobs:
             node scripts/web-test.mjs --only "$section" || failed="$failed $section"
           done
           if [ -n "$failed" ]; then echo "::error title=Phone page checks failed::$failed"; exit 1; fi
-
-      # Parity: the Swift and the Rust flockbook-modfeed on the same synthetic fixtures and a fake herdr-core
-      # (scripts/modfeed-parity). Every command's output and the keys and text it sent must match, and some steps
-      # have a fixed expected result. In this job, so the run keeps 5 macOS jobs at most; only when a sidecar file
-      # changed (gate). The Rust tests run in xplat.yml.
-      - uses: dtolnay/rust-toolchain@stable
-        if: ${{ needs.gate.outputs.sidecar == '1' }}
-      - uses: Swatinem/rust-cache@v2
-        if: ${{ needs.gate.outputs.sidecar == '1' }}
-        with:
-          workspaces: xplat -> target
-          key: parity
-      - name: Sidecar parity (Swift vs Rust)
-        if: ${{ needs.gate.outputs.sidecar == '1' }}
-        run: |
-          cargo build --locked --manifest-path xplat/Cargo.toml -p flockbook-modfeed
-          python3 scripts/modfeed-parity/parity.py \
-            --a "$(swift build --show-bin-path)/flockbook-modfeed" \
-            --b xplat/target/debug/flockbook-modfeed \
-            --report build/modfeed-parity.json
-      - name: Upload the parity report
-        if: ${{ always() && needs.gate.outputs.sidecar == '1' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: modfeed-parity-${{ github.run_id }}
-          retention-days: 14
-          overwrite: true
-          if-no-files-found: warn
-          path: build/modfeed-parity.json
 
   # The Herdr app mod's Node tests (fake gpui-kit, gpui-base and herdr modules; no app, no network).
   mod:

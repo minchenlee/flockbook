@@ -16,3 +16,4 @@ One short line: what this release is about.
 - Question cards: a comma in an option name of a single-choice question (such as "Yes, apply it") no longer sends the answer to the terminal. Only multi-select questions refuse a comma, because the review screen joins picks with commas. Thanks to @ianjamila (#14).
 
 ### ⚙️ Changes
+- The Swift `flockbook-modfeed` sidecar is retired. The Rust helper, which releases already ship, is the only one; the CI parity check between the two is gone.

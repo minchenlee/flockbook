@@ -1,4 +1,4 @@
-//! Swift: `ChecksModFeedReview.swift` (the claim race part). Two sidecars that press Allow at the same moment: only
+//! Two sidecars that press Allow at the same moment: only
 //! one claim wins, and a claim file that another run is still writing is never removed.
 
 use modfeedkit::answered::{Claim, FeedAnswered};

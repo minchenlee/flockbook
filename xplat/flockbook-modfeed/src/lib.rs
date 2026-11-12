@@ -1,4 +1,4 @@
-//! ModFeedKit in Rust: the herdr-app mod's sidecar (contract: the mod's docs/protocol.md).
+//! The herdr-app mod's sidecar (contract: the mod's docs/protocol.md).
 
 pub mod answered;
 pub mod cards;

@@ -1,4 +1,4 @@
-//! Swift: `ChecksModFeedCards.swift`. The sidecar's cards on a fake herdr-core: read the card, then keys only for the
+//! The sidecar's cards on a fake herdr-core: read the card, then keys only for the
 //! same request; every key gated.
 #![cfg(unix)]
 
