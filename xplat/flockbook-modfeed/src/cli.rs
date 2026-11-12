@@ -1,4 +1,4 @@
-//! Swift: `Sources/flockbook-modfeed/main.swift`. The commands; returns the whole answer as text.
+//! The commands; returns the whole answer as text.
 //!
 //!   flockbook-modfeed version
 //!   flockbook-modfeed feed   --terminal <addr> [--cursor <c>] [--cache <file>]
@@ -244,7 +244,7 @@ pub fn run(argv: &[String]) -> String {
                 Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
             }
         }
-        // The Swift sidecar's text (parity): `queue` is serve's own, not offered to the mod.
+        // `queue` is serve's own, not offered to the mod.
         _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send"),
     }
 }

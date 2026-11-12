@@ -157,7 +157,7 @@ Signed builds update themselves: once an hour Flockbook checks for a new release
 scripts/bundle.sh    # builds build/Flockbook.app (ad-hoc signed)
 scripts/package.sh   # dist/Flockbook-<version>.zip and .dmg
 scripts/test-update.sh build/update-test   # headless auto-update check with a throwaway key
-swift build -c release --product flockbook-modfeed   # the Herdr app mod's helper
+(cd xplat && cargo build --release -p flockbook-modfeed)   # the Herdr app mod's helper
 VERSION=0.7.0 scripts/package-mod.sh   # dist/Flockbook-herdr-mod-<version>.zip
 ```
 

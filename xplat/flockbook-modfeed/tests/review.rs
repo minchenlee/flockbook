@@ -1,4 +1,4 @@
-//! Swift: `ChecksModFeedReview.swift`. An approval binds to the box on screen, never to a lagging log's call; one
+//! An approval binds to the box on screen, never to a lagging log's call; one
 //! answer per prompt; continued logs; paste cleanup; no identity; send bound to the agent shown.
 #![cfg(unix)]
 

@@ -14,3 +14,4 @@ One short line: what this release is about.
 - Answers to Claude Code questions go through again on the hc backend: long questions (drawn with a "│" bar since Claude Code 2.1.322), an "edit in <your editor>" key line, and typed answers with capitals. An answer hc can't type is refused before any key, with a note to answer in the terminal.
 
 ### ⚙️ Changes
+- The Swift `flockbook-modfeed` sidecar is retired. The Rust helper, which releases already ship, is the only one; the CI parity check between the two is gone.

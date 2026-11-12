@@ -9,7 +9,6 @@ let package = Package(
         .executable(name: "HerdrDesk", targets: ["HerdrDesk"]),
         .executable(name: "flockbook-notify", targets: ["flockbook-notify"]),
         .executable(name: "flockbook-statusline", targets: ["flockbook-statusline"]),
-        .executable(name: "flockbook-modfeed", targets: ["flockbook-modfeed"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.9.0"),
@@ -28,12 +27,9 @@ let package = Package(
             // Sparkle.framework sits in Contents/Frameworks of the app bundle (scripts/bundle.sh).
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
-        .executableTarget(name: "HerdrKitChecks", dependencies: ["HerdrKit", "ModFeedKit"]),
+        .executableTarget(name: "HerdrKitChecks", dependencies: ["HerdrKit"]),
         .executableTarget(name: "flockbook-notify", dependencies: ["HerdrKit"]),
         .executableTarget(name: "flockbook-statusline", dependencies: ["HerdrKit"]),
-        // The herdr-app mod's sidecar (JSON Lines on stdout). ModFeedKit holds its logic, so the checks can test it.
-        .target(name: "ModFeedKit", dependencies: ["HerdrKit"]),
-        .executableTarget(name: "flockbook-modfeed", dependencies: ["HerdrKit", "ModFeedKit"]),
         .testTarget(
             name: "HerdrKitTests",
             dependencies: ["HerdrKit"],

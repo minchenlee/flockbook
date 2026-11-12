@@ -2,8 +2,8 @@
 
 The Flockbook mod draws the screens. A sidecar program reads the agents' session logs and talks to
 herdr-core. This file is the contract between them. Any sidecar that prints these lines works with
-the mod, whatever language it is written in (the first one is Swift, `flockbook-modfeed` in the
-Flockbook repo).
+the mod, whatever language it is written in (the one in the Flockbook repo is Rust,
+`xplat/flockbook-modfeed`).
 
 ## Rules
 
@@ -79,8 +79,7 @@ exactly as given.
 Its lines come back unchanged, so `header`, `end` and everything between are the helper's there.
 The helper there keeps its own cache (`"$HOME"/.cache/flockbook/cache.json` there); this computer's
 `--cache` is not passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
-text names that copy. Only one level: `a/b/t7` is `bad_terminal`. The Swift sidecar does not do
-this: it answers `not-agent` for these terminals.
+text names that copy. Only one level: `a/b/t7` is `bad_terminal`.
 
 The helper there must be this same version (`protocol` and `sidecar` both). It is never put on
 another machine without the user's yes:

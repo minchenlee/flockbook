@@ -1,4 +1,4 @@
-//! Rust only (the Swift sidecar skips terminals on other machines). A terminal `m/tN` on another machine: the helper
+//! A terminal `m/tN` on another machine: the helper
 //! runs the same command there with `machine.exec` and gives its lines back as they are. Installing that helper:
 //! only after the user said yes (the sha256 shown on the card), checked here and there. Two fake cores: this one
 //! (`here`) and the machine's (`there`); `machine.exec` runs the command on this computer in the machine's home.

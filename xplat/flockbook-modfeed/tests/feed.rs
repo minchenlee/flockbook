@@ -1,4 +1,4 @@
-//! Swift: `ChecksModFeed.swift`. Rows, footers, the tail reader, the incremental feed, status tags, locate.
+//! Rows, footers, the tail reader, the incremental feed, status tags, locate.
 
 use chrono::{TimeZone, Utc};
 use herdr_core::util::Date;
