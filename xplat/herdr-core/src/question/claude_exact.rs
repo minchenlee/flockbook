@@ -403,17 +403,19 @@ pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], scre
 /// The review screen cannot prove the hub's answers: a shown label with a comma or a review mark (● →), two
 /// labels alike once whitespace is dropped, a question text with a review mark, or Other text with a comma, a
 /// review mark or alike a label. Then two answer sets look the same there, so the last key would go blind; the
-/// answer is refused before any key.
+/// answer is refused before any key. The comma counts only in a multi-choice question: a single-choice one's
+/// review line shows one answer (a label or the Other text), never picks joined by commas.
 pub fn review_ambiguous(q: &QuestionRequest, answers: &[QuestionAnswer]) -> bool {
     let marks = |s: &str| s.contains('●') || s.contains('→');
     for (k, question) in q.questions.iter().enumerate() {
+        let comma = |s: &str| question.multi_select && s.contains(',');
         let all: Vec<String> = question.options.iter().flat_map(|o| shown_labels(o).into_iter().collect::<BTreeSet<_>>()).collect();
         let unique: HashSet<&String> = all.iter().collect();
-        if marks(&question.text) || all.iter().any(|x| x.contains(',') || marks(x)) || unique.len() != all.len() {
+        if marks(&question.text) || all.iter().any(|x| comma(x) || marks(x)) || unique.len() != all.len() {
             return true;
         }
         if let Some(o) = answers.get(k).and_then(other_text).map(|o| bare(&o)) {
-            if o.contains(',') || marks(&o) || all.contains(&o) {
+            if comma(&o) || marks(&o) || all.contains(&o) {
                 return true;
             }
         }
