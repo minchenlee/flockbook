@@ -177,6 +177,12 @@ extension QuestionAdapter {
     /// labels alike once whitespace is dropped, a question text with a review mark, or Other text with a comma, a
     /// review mark or alike a label. Then two answer sets look the same there, so the last key would go blind; the
     /// answer is refused before any key.
+    /// The refusal `answerQuestion` makes before any key when the review screen cannot prove the answers. A card
+    /// shows it before Send.
+    static func reviewBlocked(_ q: QuestionRequest, answers: [QuestionAnswer]) -> Bool {
+        reviewAmbiguous(q, answers: answers)
+    }
+
     static func reviewAmbiguous(_ q: QuestionRequest, answers: [QuestionAnswer]) -> Bool {
         let marks: (String) -> Bool = { $0.contains("●") || $0.contains("→") }
         for (k, question) in q.questions.enumerated() {
