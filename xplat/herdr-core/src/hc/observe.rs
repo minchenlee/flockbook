@@ -167,6 +167,8 @@ mod tests {
     #[derive(Clone)]
     enum Answer {
         Paint(Vec<u8>),
+        /// A paint, then a redraw whose frame comes in two parts, the second this late.
+        Redraw(Vec<u8>, Vec<u8>, Duration),
         Refuse,
         Silent,
     }
@@ -213,6 +215,14 @@ mod tests {
                         _ => json!({"jsonrpc": "2.0", "id": o["id"], "result": {"channel": 7, "terminal": {"cols": 120, "rows": 40}}}),
                     };
                     w.write_all(&frame(0, DATA, reply.to_string().as_bytes())).unwrap();
+                    if let Answer::Redraw(a, b, late) = &answer {
+                        w.write_all(&frame(7, DATA, a)).unwrap();
+                        let f = frame(7, DATA, b);
+                        let (x, y) = f.split_at(f.len() / 2);
+                        w.write_all(x).unwrap();
+                        std::thread::sleep(*late);
+                        let _ = w.write_all(y);
+                    }
                     if let Answer::Paint(b) = &answer {
                         // In two parts, as a big paint can come.
                         let (a, z) = b.split_at(b.len() / 2);
@@ -250,6 +260,19 @@ mod tests {
         let (_d, path, _) = fake_slow(Answer::Paint(paint.clone()), Duration::from_millis(120));
         let p = first_paint(&UnixConnector { path }, "t1", Duration::from_millis(500));
         assert_eq!(p.ok(), Some(paint), "the hello may take more than one read step; the limit is 500 ms");
+    }
+
+    #[test]
+    fn a_frame_not_all_here_is_never_quiet() {
+        let (dim, typed) = (b"dim suggestion".to_vec(), b" then typed".to_vec());
+        // The rest comes after the limit: no paint (the send is refused), never the old one.
+        let (_d, path, _) = fake(Answer::Redraw(dim.clone(), typed.clone(), Duration::from_millis(900)));
+        let p = first_paint(&UnixConnector { path }, "t1", Duration::from_millis(500));
+        assert!(p.is_err(), "a frame still coming at the limit: an error ({p:?})");
+        // The rest comes in time: the paint with the redraw.
+        let (_d, path, _) = fake(Answer::Redraw(dim.clone(), typed.clone(), Duration::from_millis(250)));
+        let p = first_paint(&UnixConnector { path }, "t1", Duration::from_millis(500));
+        assert_eq!(p.ok(), Some([dim, typed].concat()), "waits for the whole frame");
     }
 
     #[test]
