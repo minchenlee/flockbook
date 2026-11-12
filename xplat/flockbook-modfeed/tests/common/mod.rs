@@ -37,6 +37,13 @@ pub struct State {
     pub docs: HashMap<String, Value>,
     /// What `machine.list` gives (`machines`).
     pub machine_list: Vec<Value>,
+    /// The first paint a watch-only `terminal.attach` gives (framed mode), by address; none: the attach is answered
+    /// and then nothing comes.
+    pub paints: HashMap<String, Vec<u8>>,
+    /// `terminal.attach` answers with an error.
+    pub attach_refused: bool,
+    /// The terminals `terminal.list` gives once an attach has been answered (another agent came in meanwhile).
+    pub after_attach: Option<Vec<Value>>,
 }
 
 pub struct FakeHc {
@@ -115,6 +122,12 @@ impl FakeHc {
     pub fn add_machine(&self, name: &str, home: &std::path::Path, sock: &str) {
         self.state.lock().unwrap().machines.insert(name.into(), (home.to_path_buf(), sock.into()));
     }
+    pub fn set_paint(&self, addr: &str, paint: &[u8]) {
+        self.state.lock().unwrap().paints.insert(addr.into(), paint.into());
+    }
+    pub fn refuse_attach(&self, yes: bool) {
+        self.state.lock().unwrap().attach_refused = yes;
+    }
     pub fn calls(&self, method: &str) -> Vec<Value> {
         self.state.lock().unwrap().calls.iter().filter(|(m, _)| m == method).map(|(_, p)| p.clone()).collect()
     }
@@ -178,6 +191,11 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
         let reply = |r: Value| json!({"jsonrpc": "2.0", "id": id, "result": r});
         let err = |msg: String| json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": msg, "data": {"kind": "not_found"}}});
         let a = p["terminal"].as_str().unwrap_or("").to_string();
+        if m == "hello" && p["framed"] == true {
+            st.lock().unwrap().calls.push((m.clone(), p.clone()));
+            let _ = s.write_all(format!("{}\n", json!({"jsonrpc": "2.0", "id": id, "result": {"framed": true}})).as_bytes());
+            return serve_framed(s, reader, st);
+        }
         let out = {
             let mut g = st.lock().unwrap();
             g.calls.push((m.clone(), p.clone()));
@@ -265,6 +283,53 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
                 std::thread::sleep(std::time::Duration::from_secs(60));
                 return;
             }
+        }
+    }
+}
+
+fn frame(ch: u32, kind: u8, p: &[u8]) -> Vec<u8> {
+    let mut f = ch.to_le_bytes().to_vec();
+    f.push(kind);
+    f.extend_from_slice(&(p.len() as u32).to_le_bytes());
+    f.extend_from_slice(p);
+    f
+}
+
+/// Framed mode: only `terminal.attach` (the channel's first paint). Every frame but a channel-0 call is recorded as
+/// ("frame", {channel, kind}), so a check can see that a watcher sent no keys and no resize.
+fn serve_framed(mut s: std::os::unix::net::UnixStream, mut r: BufReader<std::os::unix::net::UnixStream>, st: Arc<Mutex<State>>) {
+    use std::io::Read;
+    loop {
+        let mut h = [0u8; 9];
+        if r.read_exact(&mut h).is_err() {
+            return;
+        }
+        let ch = u32::from_le_bytes(h[0..4].try_into().unwrap());
+        let n = u32::from_le_bytes(h[5..9].try_into().unwrap()) as usize;
+        let mut p = vec![0u8; n];
+        if r.read_exact(&mut p).is_err() {
+            return;
+        }
+        let mut g = st.lock().unwrap();
+        if ch != 0 || h[4] != 0 {
+            g.calls.push(("frame".into(), json!({"channel": ch, "kind": h[4]})));
+            continue;
+        }
+        let o: Value = serde_json::from_slice(&p).unwrap();
+        g.calls.push((o["method"].as_str().unwrap_or("").into(), o["params"].clone()));
+        if o["method"] != "terminal.attach" || g.attach_refused {
+            let e = json!({"jsonrpc": "2.0", "id": o["id"], "error": {"code": -32000, "message": "refused", "data": {"kind": "not_found"}}});
+            let _ = s.write_all(&frame(0, 0, e.to_string().as_bytes()));
+            continue;
+        }
+        let a = o["params"]["terminal"].as_str().unwrap_or("").to_string();
+        let ok = json!({"jsonrpc": "2.0", "id": o["id"], "result": {"channel": 3, "terminal": {"cols": 80, "rows": 24}}});
+        let _ = s.write_all(&frame(0, 0, ok.to_string().as_bytes()));
+        if let Some(paint) = g.paints.get(&a) {
+            let _ = s.write_all(&frame(3, 0, paint));
+        }
+        if let Some(t) = g.after_attach.take() {
+            g.terminals = t;
         }
     }
 }

@@ -687,6 +687,131 @@ pub fn box_has_text(kind: &str, screen: &str, claude_suggests: bool) -> Option<b
     Some(rows.iter().any(|r| !trim(r).is_empty()))
 }
 
+/// Claude Code's box when it is one row starting with "/" (with prompt suggestions on, `box_has_text` counts it as
+/// text, and it may be a dim suggestion): that row, trimmed.
+pub fn claude_slash_row(screen: &str) -> Option<String> {
+    let rows = ruled(&lines_of(screen), Some('❯'))?;
+    match &rows[..] {
+        [r] if r.trim_start().starts_with('/') => Some(trim(r).to_string()),
+        _ => None,
+    }
+}
+
+/// Whether Claude Code's box row in `paint` (a terminal's first paint, from a watch-only attach) holds only a dim
+/// prompt suggestion that reads `text`: every character after "❯ " is dim, they read `text`, and the cursor stands at
+/// the box's start. Typed text is not dim and the cursor stands after it. Any doubt: false (the send is refused).
+pub fn claude_suggestion_in_paint(paint: &[u8], text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+    let (cells, cursor) = paint_cells(&String::from_utf8_lossy(paint));
+    // The box row: the last row whose first visible character is "❯".
+    let mut rows: Vec<u32> = cells.keys().map(|&(r, _)| r).collect();
+    rows.dedup();
+    let Some((row, mark)) = rows.into_iter().rev().find_map(|r| {
+        let (&(_, c), &(ch, _)) = cells.range((r, 0)..(r + 1, 0)).find(|(_, &(c, _))| c != ' ' && c != '\u{a0}')?;
+        (ch == '❯').then_some((r, c))
+    }) else {
+        return false;
+    };
+    if cursor != (row, mark + 2) {
+        return false;
+    }
+    let after: Vec<&(char, bool)> = cells.range((row, mark + 2)..(row + 1, 0)).map(|(_, v)| v).collect();
+    let shown: String = after.iter().map(|(c, _)| if *c == '\u{a0}' { ' ' } else { *c }).collect();
+    shown.trim() == text && after.iter().all(|(c, dim)| *dim || c.is_whitespace())
+}
+
+/// Cells by (row, col): the character and whether it is dim.
+type Cells = std::collections::BTreeMap<(u32, u32), (char, bool)>;
+
+/// A small VT reading of a paint: each written cell (row, col, 1-based) with its character and whether it is dim
+/// (SGR 2, off with 22 or 0), and the cursor at the end. Wide characters count one column: a paint with them gets a
+/// cursor that does not match, which reads as doubt.
+fn paint_cells(s: &str) -> (Cells, (u32, u32)) {
+    let mut cells = std::collections::BTreeMap::new();
+    let (mut row, mut col, mut dim) = (1u32, 1u32, false);
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '\x1b' => match it.next() {
+                Some('[') => {
+                    let mut params = String::new();
+                    let mut fin = None;
+                    for c in it.by_ref() {
+                        if ('\x40'..='\x7e').contains(&c) {
+                            fin = Some(c);
+                            break;
+                        }
+                        params.push(c);
+                    }
+                    let private = params.starts_with(['?', '>', '<', '=']);
+                    let nums: Vec<u32> = params.split(';').map(|p| p.parse().unwrap_or(0)).collect();
+                    let n = |i: usize| nums.get(i).copied().filter(|&v| v > 0).unwrap_or(1);
+                    match fin {
+                        _ if private => {}
+                        Some('H') | Some('f') => (row, col) = (n(0), n(1)),
+                        Some('A') => row = row.saturating_sub(n(0)).max(1),
+                        Some('B') => row += n(0),
+                        Some('C') => col += n(0),
+                        Some('D') => col = col.saturating_sub(n(0)).max(1),
+                        Some('G') => col = n(0),
+                        Some('d') => row = n(0),
+                        Some('K') => match nums[0] {
+                            0 => cells.retain(|&(r, c), _| r != row || c < col),
+                            1 => cells.retain(|&(r, c), _| r != row || c > col),
+                            _ => cells.retain(|&(r, _), _| r != row),
+                        },
+                        Some('J') if nums[0] == 2 || nums[0] == 3 => cells.clear(),
+                        Some('m') => {
+                            let ps: Vec<&str> = params.split(';').collect();
+                            let mut i = 0;
+                            while i < ps.len() {
+                                match ps[i] {
+                                    "" | "0" => dim = false,
+                                    "2" => dim = true,
+                                    "22" => dim = false,
+                                    // A colour's own numbers: "2;r;g;b" or "5;n" (a "2" there is not dim).
+                                    "38" | "48" | "58" => match ps.get(i + 1) {
+                                        Some(&"2") => i += 4,
+                                        Some(&"5") => i += 2,
+                                        _ => {}
+                                    },
+                                    _ => {}
+                                }
+                                i += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // OSC: up to BEL or ST.
+                Some(']') => {
+                    while let Some(c) = it.next() {
+                        if c == '\x07' || (c == '\x1b' && it.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                }
+                Some('(') | Some(')') => {
+                    it.next();
+                }
+                _ => {}
+            },
+            '\r' => col = 1,
+            '\n' => row += 1,
+            '\x08' => col = col.saturating_sub(1).max(1),
+            c if (c as u32) < 0x20 || c == '\x7f' => {}
+            c => {
+                cells.insert((row, col), (c, dim));
+                col += 1;
+            }
+        }
+    }
+    (cells, (row, col))
+}
+
 /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
 /// first row (a dialog, a menu): `None`.
 fn ruled(lines: &[String], mark: Option<char>) -> Option<Vec<String>> {
@@ -783,6 +908,33 @@ mod box_tests {
         assert_eq!(c("❯\u{a0}/sta"), Some(true));
         assert_eq!(c("❯\u{a0}"), Some(false));
         assert_eq!(c("❯\u{a0}Try \"fix typecheck errors\""), Some(false));
+    }
+
+    // A first paint as Claude Code 2.1.322 gives it (spike 11-12, redacted): rule, box row, rule, footer; the cursor
+    // last. Its empty-box placeholder is dim (SGR 2) with the cursor at the box start; typed text has a colour and
+    // the cursor after it.
+    fn paint(row: &str, cursor_col: u32) -> Vec<u8> {
+        let rule = "─".repeat(40);
+        format!("\x1b[2J\x1b[1;1H● Done.\x1b[3;1H\x1b[38;2;136;136;136m{rule}\x1b[0m\x1b[4;1H{row}\x1b[5;1H{rule}\x1b[6;3H\x1b[2m? for shortcuts\x1b[0m\x1b[4;{cursor_col}H").into_bytes()
+    }
+    const DIM: &str = "❯\u{a0}\x1b[0m\x1b[2m/clear\x1b[0m";
+    const TYPED: &str = "❯\u{a0}\x1b[0m\x1b[38;2;177;185;249m/clear\x1b[0m";
+
+    #[test]
+    fn suggestion_in_paint() {
+        let s = super::claude_suggestion_in_paint;
+        assert!(s(&paint(DIM, 3), "/clear"), "dim, cursor at the box start: a suggestion");
+        assert!(!s(&paint(TYPED, 9), "/clear"), "typed: a colour, cursor after it");
+        assert!(!s(&paint(TYPED, 3), "/clear"), "not dim, wherever the cursor is");
+        assert!(!s(&paint(DIM, 9), "/clear"), "dim but the cursor after it: no proof");
+        assert!(!s(&paint(DIM, 3), "/compact"), "another text than the screen's");
+        assert!(!s(&paint("❯\u{a0}\x1b[2m/cl\x1b[22mear", 3), "/clear"), "only part dim");
+        assert!(!s(&paint("❯\u{a0}\x1b[38;2;2;2;2m/clear\x1b[0m", 3), "/clear"), "a truecolor 2 is not dim");
+        assert!(!s(&paint("❯\u{a0}\x1b[38;5;2m/clear\x1b[0m", 3), "/clear"), "a 256-colour 2 is not dim");
+        assert!(s(&paint("❯\u{a0}\x1b[0m\x1b[38;2;1;2;3;2m/clear\x1b[0m", 3), "/clear"), "dim after a truecolor");
+        assert!(!s(b"", "/clear"), "no paint");
+        assert!(!s(&paint("hello", 3), "/clear"), "no box row");
+        assert!(!s(&paint(DIM, 3), ""), "nothing to match");
     }
 
     #[test]

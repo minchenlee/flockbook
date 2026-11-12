@@ -9,6 +9,7 @@ One short line: what this release is about.
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
+- Chat (Herdr app, Claude Code): a dim "/" prompt suggestion in an empty box no longer stops a send with "The agent's box has text in it". The sidecar looks once at the screen's attributes: dim text with the cursor at the box start is a suggestion. Text you typed still stops the send. Tested on the dim empty-box placeholder; a real "/" suggestion was not seen in testing, and if one is not dim the send is refused as before.
 - Question cards: on a busy machine, an answer no longer stops with "Another agent is in this pane now" while the same agent is there. Each key waits longer for the question to show, and a real screen change says so, with "check the terminal" when some keys already went in.
 - Chat: a message sent right after `/clear` no longer says "Another agent is in this pane now". It says the agent started a new conversation, and the chat shows the new one at once.
 - Answers to Claude Code questions go through again on the hc backend: long questions (drawn with a "│" bar since Claude Code 2.1.322), an "edit in <your editor>" key line, and typed answers with capitals. An answer hc can't type is refused before any key, with a note to answer in the terminal.

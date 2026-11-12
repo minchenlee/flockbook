@@ -94,6 +94,17 @@ pub fn claude_suggests(home: Option<&Path>) -> bool {
     v.and_then(|v| v["promptSuggestionEnabled"].as_bool()).unwrap_or(true)
 }
 
+/// How long `send` looks at a pane's first paint for a dim suggestion.
+pub const LOOK_LIMIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Claude Code's box shows "/…" that may be its dim prompt suggestion, not typed text (issue #11, item 2). One
+/// watch-only look at the first paint (no keys, no resize; detached at once, `LOOK_LIMIT` at most): true only when it
+/// reads the same text, all dim, with the cursor at the box start. Any error or doubt: false (refused as before).
+fn dim_suggestion(client: &HcClient, pane_id: &str, screen: &str) -> bool {
+    let Some(text) = crate::queue::claude_slash_row(screen) else { return false };
+    client.first_paint(pane_id, LOOK_LIMIT).is_ok_and(|p| crate::queue::claude_suggestion_in_paint(&p, &text))
+}
+
 pub const BOX_NOT_EMPTY: &str = "The agent's box has text in it. Clear it in the terminal first. Nothing was sent.";
 pub fn box_not_empty() -> Done {
     Done::new("box_not_empty", Some(BOX_NOT_EMPTY))
@@ -371,8 +382,16 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     // not read, or no screen: it goes as before.
     let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
     let suggests = kind == "claude" && claude_suggests(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref());
-    if client.visible_text(&pane.id).ok().and_then(|s| crate::queue::box_has_text(kind, &s, suggests)) == Some(true) {
-        return box_not_empty();
+    if let Ok(screen) = client.visible_text(&pane.id) {
+        if crate::queue::box_has_text(kind, &screen, suggests) == Some(true) {
+            if !(suggests && dim_suggestion(client, &pane.id, &screen)) {
+                return box_not_empty();
+            }
+            // The look took up to LOOK_LIMIT: another agent may have come in meanwhile. Gate again before typing.
+            if !keygate::passes(client, Some(&gate(pane)), &pane.id, None, None) {
+                return refused(pane);
+            }
+        }
     }
     let r = if files.is_empty() { client.deliver(text, &pane.id) } else { client.deliver_files(text, &pane.id, files) };
     match r {

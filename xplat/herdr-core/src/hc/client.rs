@@ -98,6 +98,12 @@ impl HcClient {
         }
     }
 
+    /// The pane's first paint (attributes and cursor), through a watch-only attach that ends at `limit` at the
+    /// latest. See `observe`.
+    pub fn first_paint(&self, pane_id: &str, limit: Duration) -> Result<Vec<u8>, HerdrError> {
+        super::observe::first_paint(self.connector.as_ref(), &Self::address(pane_id)?, limit)
+    }
+
     fn address(pane_id: &str) -> Result<String, HerdrError> {
         mapper::address_from_pane_id(pane_id)
             .filter(|a| !a.is_empty())
