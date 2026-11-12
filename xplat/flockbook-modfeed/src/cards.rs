@@ -336,6 +336,18 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
     }
 }
 
+/// Clears the line Claude Code's box shows (ctrl+e ctrl+u: a typed "/word" goes, a dim suggestion is untouched) and
+/// reads the box again: true when it is down to one row, so the text pastes over any dim text and nothing typed is
+/// left in front of it. Tested live on Claude Code 2.1: a typed "/clear" closed with Esc, then a send, gave "/clear…"
+/// as one unknown command without this.
+fn clear_box_line(client: &HcClient, pane_id: &str) -> bool {
+    if client.send_named_keys(&["ctrl+e".to_string(), "ctrl+u".to_string()], pane_id).is_err() {
+        return false;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    client.visible_text(pane_id).ok().is_some_and(|s| crate::queue::box_one_line(&s))
+}
+
 /// The composer: the text, with each file in `files` named in it. `was`: the locate cache entry this terminal had
 /// before the send looked its log up again.
 #[allow(clippy::too_many_arguments)]
@@ -371,8 +383,14 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     // not read, or no screen: it goes as before.
     let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
     let suggests = kind == "claude" && claude_suggests(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref());
-    if client.visible_text(&pane.id).ok().and_then(|s| crate::queue::box_has_text(kind, &s, suggests)) == Some(true) {
-        return box_not_empty();
+    let screen = client.visible_text(&pane.id).ok();
+    if screen.as_deref().and_then(|s| crate::queue::box_has_text(kind, s, suggests)) == Some(true) {
+        // Claude Code's dim suggestion can be a command ("/clear"): read as typed, it stopped every send. A lone
+        // "/word" with no command list above the box is taken for it; its line is cleared and the text goes.
+        let suggestion = suggests && screen.as_deref().and_then(crate::queue::suggested_slash).is_some();
+        if !suggestion || !clear_box_line(client, &pane.id) {
+            return box_not_empty();
+        }
     }
     let r = if files.is_empty() { client.deliver(text, &pane.id) } else { client.deliver_files(text, &pane.id, files) };
     match r {

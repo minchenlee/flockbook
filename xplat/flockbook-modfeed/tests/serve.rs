@@ -262,7 +262,9 @@ fn socket_reads_and_keys_go_with_post() {
     assert_eq!(fake.calls("terminal.send").len(), sends);
     // Text already in the agent's box: refused, with the reason; the page keeps its text.
     let rule = "─".repeat(40);
-    fake.set_screen("t1", &format!("● Done.\n\n{rule}\n❯\u{a0}/sta\n{rule}\n  ~/proj\n"));
+    // A typed "/sta" shows Claude Code's command list right above the box (a lone "/word" without it is taken for
+    // its dim suggestion and typed over: cli.rs send_types_over_a_suggested_command).
+    fake.set_screen("t1", &format!("● Done.\n  ❯ /status        Show Claude Code status\n{rule}\n❯\u{a0}/sta\n{rule}\n  ~/proj\n"));
     let (_, body) = api(srv.port, &[], &json!({"v": 1, "id": "p6", "type": "send", "pane": id, "text": "hello", "agent": "claude"}));
     let r: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(r[0]["ok"], false, "{r}");
