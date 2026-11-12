@@ -58,7 +58,9 @@ export const forgetCommands = () => { known = null; };
 export const feed = (terminal, cursor) => call("feed", ["--terminal", terminal, "--cache", cachePath(), ...(cursor ? ["--cursor", cursor] : [])]);
 export const older = (terminal, before, path) => call("feed", ["--terminal", terminal, "--before", String(before), "--path", path]);
 export const status = (terminal) => call("status", ["--terminal", terminal, "--cache", cachePath()]);
-export const card = (terminal, all = false) => call("card", ["--terminal", terminal, ...(all ? ["--all"] : []), "--cache", cachePath()]);
+// `answers` (the `answer` format, the answers so far): the card's `blocked` also checks the own answers.
+export const card = (terminal, all = false, answers = null) => call("card", ["--terminal", terminal, ...(all ? ["--all"] : []),
+  ...(answers ? ["--answers", JSON.stringify(answers)] : []), "--cache", cachePath()]);
 export const approve = (terminal, request, allow) => call("approve", ["--terminal", terminal, "--request", request, allow ? "--allow" : "--deny", "--cache", cachePath()]);
 export const answer = (terminal, request, answers) => call("answer", ["--terminal", terminal, "--request", request, "--answers", JSON.stringify(answers), "--cache", cachePath()]);
 // Only after the user pressed Install on the card; `sha256` is the one the card showed.

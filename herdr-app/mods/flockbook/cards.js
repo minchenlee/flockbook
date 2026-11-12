@@ -4,8 +4,8 @@
 // walks the picker's tabs (`card --all`).
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
-import { shared, setShared } from "herdr";
-import { icon } from "./state.js";
+import { shared, setShared, agents } from "herdr";
+import { icon, openTerminal, KEY_TERM } from "./state.js";
 import * as sidecar from "./sidecar.js";
 
 export const CARD_MS = 1500;
@@ -30,6 +30,18 @@ export function answersFor(question, picks, others) {
     out.push(other ? { picks: p, other } : { picks: p });
   }
   return out.length ? out : null;
+}
+
+// The answers so far, for `card --answers` (the sidecar checks the own answers against the review rule). Null
+// while no own answer is typed: then the card's labels alone decide.
+export function draftFor(question, picks, others) {
+  const qs = question?.questions ?? [];
+  if (!qs.some((_q, i) => (others.get(i) ?? "").trim())) return null;
+  return qs.map((_q, i) => {
+    const p = [...(picks.get(i) ?? [])].sort((a, b) => a - b);
+    const other = (others.get(i) ?? "").trim();
+    return other ? { picks: p, other } : { picks: p };
+  });
 }
 
 export const MAX_QUESTIONS = 4;
@@ -58,6 +70,8 @@ export class Cards {
         const e = this.byAgent.get(this.address); if (!e) return;
         const was = Boolean((e.others.get(qi) ?? "").trim());
         e.others.set(qi, input.value());
+        // The card's `blocked` may change with it: the next poll reads it again at once.
+        if (e.card?.kind === "question") e.at = 0;
         if (was !== Boolean(input.value().trim())) cx.notify();
       });
       return input;
@@ -86,7 +100,7 @@ export class Cards {
     if (e.busy || e.sending || (!force && Date.now() - e.at < CARD_MS)) return;
     e.busy = true; e.at = Date.now();
     try {
-      const r = await sidecar.card(address);
+      const r = await sidecar.card(address, false, e.card?.kind === "question" ? draftFor(e.card.question, e.picks, e.others) : null);
       const line = r.error ? null : r.lines.find((l) => l.type === "card");
       let card = line && line.kind ? line : null;
       // The screen shows one question at a time; keep the full set read with "Show all".
@@ -139,7 +153,7 @@ export class Cards {
         if (!answered(en, step)) return false;
         en.step = step + 1; cx.notify(); return true;
       }
-      if (answersFor(c.question, en.picks, en.others)) { cx.spawn((cx) => this.answer(cx, address)); return true; }
+      if (!c.blocked && answersFor(c.question, en.picks, en.others)) { cx.spawn((cx) => this.answer(cx, address)); return true; }
       return false;
     }
     if (n === null) return false;
@@ -209,6 +223,12 @@ export class Cards {
     const head = (text) => h_flex().gap(8).items_center()
       .child(div().size(8).flex_none().rounded(4).bg(t.blocked))
       .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child(text));
+    // The terminal window for this agent (one at a time: an open one closes first).
+    const toTerminal = async () => {
+      const a = (agents() ?? []).find((x) => x.address === address) ?? { address };
+      if (shared(KEY_TERM)) openTerminal(null);
+      openTerminal(a);
+    };
     const tail = () => e.note ? div().id(`${id}-note`).text_size(12).text_color(t.blocked).child(e.note) : null;
 
     if (c.kind === "approval") {
@@ -266,6 +286,10 @@ export class Cards {
         .when((qq.options ?? []).length < 9, (el) => el.child(hint((qq.options ?? []).length + 1))));
       box.child(sec);
     });
+    // The terminal's review screen could not show these answers: `answer` would refuse, so Send is off from the start.
+    if (c.blocked && !(c.unread > 0)) box.child(h_flex().id(`${id}-blocked`).gap(10).items_center()
+      .child(div().flex_1().min_w(0).text_size(12).text_color(t.blocked).child(c.blocked))
+      .child(button("terminal", "Answer in terminal", false, toTerminal)));
     if (c.unread > 0) {
       const total = q.questions.length + c.unread;
       box.child(h_flex().gap(10).items_center()
@@ -273,7 +297,7 @@ export class Cards {
         .child(div().text_size(12.5).text_color(t.muted)
           .child(`${c.unread} more question${c.unread === 1 ? " follows" : "s follow"}. Answer them all here, then send.`)));
     } else {
-      const ready = Boolean(answersFor(q, e.picks, e.others));
+      const ready = !c.blocked && Boolean(answersFor(q, e.picks, e.others));
       const last = step >= count - 1;
       // The hint on the left; Back, then Next or Send answer at the right end.
       box.child(h_flex().gap(10).items_center()
