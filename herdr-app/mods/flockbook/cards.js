@@ -20,19 +20,20 @@ export function wanted(agent, rows) {
   return Boolean(last && (last.perm?.state === "pending" || last.question?.state === "pending"));
 }
 
-// Single-choice: non-empty own answer overrides any option pick (matches claude_steps).
-const answerItem = (q, picks, others, i) => {
+// Claude single-choice: non-empty own answer overrides any option pick (matches claude_steps).
+const answerItem = (q, picks, others, i, otherWins) => {
   const other = (others.get(i) ?? "").trim();
-  const p = !q?.multi && other ? [] : [...(picks.get(i) ?? [])].sort((a, b) => a - b);
+  const p = otherWins && !q?.multi && other ? [] : [...(picks.get(i) ?? [])].sort((a, b) => a - b);
   return other ? { picks: p, other } : { picks: p };
 };
 
 // The answers `answer --answers` takes, from the picks and "other" texts. Null while one is empty.
 export function answersFor(question, picks, others) {
   const qs = question?.questions ?? [];
+  const otherWins = question?.agent === "claude";
   const out = [];
   for (let i = 0; i < qs.length; i++) {
-    const item = answerItem(qs[i], picks, others, i);
+    const item = answerItem(qs[i], picks, others, i, otherWins);
     if (!item.picks.length && !item.other) return null;
     out.push(item);
   }
@@ -43,8 +44,9 @@ export function answersFor(question, picks, others) {
 // while no own answer is typed: then the card's labels alone decide.
 export function draftFor(question, picks, others) {
   const qs = question?.questions ?? [];
+  const otherWins = question?.agent === "claude";
   if (!qs.some((_q, i) => (picks.get(i)?.size ?? 0) > 0 || (others.get(i) ?? "").trim())) return null;
-  return qs.map((q, i) => answerItem(q, picks, others, i));
+  return qs.map((q, i) => answerItem(q, picks, others, i, otherWins));
 }
 
 export const MAX_QUESTIONS = 4;
@@ -274,12 +276,13 @@ export class Cards {
     q.questions.forEach((qq, qi) => {
       if (qi !== step) return;
       const picks = e.picks.get(qi) ?? new Set();
+      const claude = q.agent === "claude";
       const own = Boolean((e.others.get(qi) ?? "").trim());
       const sec = v_flex().gap(6);
       if (qq.header) sec.child(div().text_size(11.5).text_color(t.muted).child(qq.header));
       sec.child(div().text_size(13.5).text_color(t.foreground).child(qq.text || ""));
       (qq.options ?? []).forEach((o, oi) => {
-        const on = picks.has(oi) && (Boolean(qq.multi) || !own);
+        const on = picks.has(oi) && (Boolean(qq.multi) || !claude || !own);
         sec.child(h_flex().id(`${id}-q${qi}-o${oi}`).px(10).py(7).gap(10).items_center().rounded(8)
           .bg(on ? t.selected : t.background).border(1).border_color(on ? t.accent : t.border).hover((s) => s.bg(on ? t.selected : t.hover))
           .on_click((_e, cx) => { this.pick(e, q.questions, qi, oi); cx.notify(); })
