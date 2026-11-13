@@ -295,4 +295,33 @@ mod tests {
         let _ = mapper::workspaces_with(&[term("a", 100), term("b", 200)], &batch_check);
         assert_eq!(batch_src.reads(), 2, "pruned address b reads again when returning");
     }
+
+    #[test]
+    fn positive_cache_invalidates_on_new_status_ms() {
+        let start = t0();
+        let status_ms = start.timestamp_millis() + 2000;
+        let src = Arc::new(CountingSource::new(vec![
+            proc_(500, 1, start, "secretspec run -- claude"),
+            proc_(501, 500, start, "claude"),
+        ]));
+        let (clock, now) = fake_clock();
+        let check = TreeCheck::with_hooks(src.clone(), now, Arc::new(|_| true));
+
+        assert_eq!(check.agent_under(&ask("t1", 500, status_ms)), Some(501));
+        assert_eq!(src.reads(), 1);
+
+        // Within YES_TTL, a second same-kind child appears at the same depth and status_ms advances.
+        *clock.lock().unwrap() = Duration::from_secs(2);
+        src.set(vec![
+            proc_(500, 1, start, "secretspec run -- claude"),
+            proc_(501, 500, start, "claude"),
+            proc_(502, 500, start, "claude"),
+        ]);
+        assert_eq!(
+            check.agent_under(&ask("t1", 500, status_ms + 500)),
+            None,
+            "new status_ms must re-check tree and fail closed on ambiguity"
+        );
+        assert_eq!(src.reads(), 2);
+    }
 }
