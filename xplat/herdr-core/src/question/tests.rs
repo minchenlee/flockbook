@@ -2836,9 +2836,75 @@ fn claude_review_vertical_bar_fail_closed_red() {
 fn claude_review_variant_cap_keeps_full_answer_red() {
     use super::claude_exact::review_collision;
 
-    assert_eq!(RECOMMENDED_SUFFIXES.len(), 6, "3 recommended picks exceed cap=64 right on item 3");
+    assert_eq!(RECOMMENDED_SUFFIXES.len(), 6, "2 recommended picks produce 36 variants <= cap=64");
     let mut q = hooked(
-        "toolu_r3_cap64",
+        "toolu_r4_under_cap64",
+        json!([
+            {
+                "question": "Features?",
+                "header": "Features",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Opt1", "description": ""},
+                    {"label": "Opt2", "description": ""},
+                    {"label": "→ D", "description": ""}
+                ]
+            },
+            {
+                "question": "Confirm?",
+                "header": "Confirm",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Yes", "description": ""},
+                    {"label": "No", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for i in 0..2 {
+        q.questions[0].options[i].recommended = true;
+    }
+    let answers = [ans(&[0, 1, 2]), ans(&[0])];
+
+    assert_eq!(
+        review_collision(&q, &answers),
+        None,
+        "2 recommended picks + → D gives 36 <= 64 bodies with no collision"
+    );
+
+    let review = sw(
+        "
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Features  ☒ Confirm  ✔ Submit  →
+
+    Review your answers
+
+     ● Features?
+       → Opt1 (Recommended), Opt2 (Recommended), → D
+     ● Confirm?
+       → Yes
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    ",
+    );
+    assert!(
+        claude_review_exact(&q, &answers, &review),
+        "matching review screen under cap=64 passes claude_review_exact"
+    );
+}
+
+#[test]
+fn claude_review_variant_and_tuple_caps_fail_closed() {
+    use super::claude_exact::review_collision;
+
+    assert_eq!(RECOMMENDED_SUFFIXES.len(), 6, "3 recommended picks produce 216 > cap=64");
+
+    // 1) 3 recommended picks + → D exceeds 64-body cap -> must fail closed with Some(Picks).
+    let mut over_64 = hooked(
+        "toolu_r4_over_cap64",
         json!([
             {
                 "question": "Features?",
@@ -2863,38 +2929,84 @@ fn claude_review_variant_cap_keeps_full_answer_red() {
         ]),
     );
     for i in 0..3 {
-        q.questions[0].options[i].recommended = true;
+        over_64.questions[0].options[i].recommended = true;
     }
-    let answers = [ans(&[0, 1, 2, 3]), ans(&[0])];
-
-    // Before the fix, cap=64 returned after the 3rd pick, dropping ", → D", so dp_cross_collides
-    // matched [0, 1, 2] and falsely reported Some(CollisionKind::Picks).
     assert_eq!(
-        review_collision(&q, &answers),
-        None,
-        "hitting raw_body_variants_for cap=64 must still append later items and give None"
+        review_collision(&over_64, &[ans(&[0, 1, 2, 3]), ans(&[0])]),
+        Some(CollisionKind::Picks),
+        "exceeding 64 raw body variants must fail closed"
     );
 
-    let review = sw(
-        "
-    ────────────────────────────────────────────────────────────────
-    ←  ☒ Features  ☒ Confirm  ✔ Submit  →
-
-    Review your answers
-
-     ● Features?
-       → Opt1 (Recommended), Opt2 (Recommended), Opt3 (Recommended), → D
-     ● Confirm?
-       → Yes
-
-    Ready to submit your answers?
-
-    ❯ 1. Submit answers
-      2. Cancel
-    ",
+    // 2) Codex round-4 counterexample: 3 recommended picks with a synthetic label matching
+    // suffix combination #216 (beyond cap=64) must fail closed with Some(Picks).
+    let mut codex_r4 = hooked(
+        "toolu_r4_codex_ex",
+        json!([
+            {
+                "question": "Pick features?",
+                "header": "Pick",
+                "multiSelect": true,
+                "options": [
+                    {"label": "A", "description": ""},
+                    {"label": "B", "description": ""},
+                    {"label": "C", "description": ""},
+                    {"label": "A(推薦),B(推薦),C(推薦)", "description": ""},
+                    {"label": "→", "description": ""}
+                ]
+            },
+            {
+                "question": "Confirm?",
+                "header": "Confirm",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Yes", "description": ""},
+                    {"label": "No", "description": ""}
+                ]
+            }
+        ]),
     );
-    assert!(
-        claude_review_exact(&q, &answers, &review),
-        "matching review screen with all 4 picks passes claude_review_exact"
+    for i in 0..3 {
+        codex_r4.questions[0].options[i].recommended = true;
+    }
+    assert_eq!(
+        review_collision(&codex_r4, &[ans(&[0, 1, 2]), ans(&[0])]),
+        Some(CollisionKind::Picks),
+        "hidden collision beyond raw_body_variants_for cap=64 must fail closed"
+    );
+
+    // 3) Per-question bodies under 64 (36 each), but 36 * 36 = 1296 > 256 cross-question tuples -> Some(Picks).
+    let mut over_256 = hooked(
+        "toolu_r4_over_cap256",
+        json!([
+            {
+                "question": "Q1?",
+                "header": "Q1",
+                "multiSelect": true,
+                "options": [
+                    {"label": "P1", "description": ""},
+                    {"label": "P2", "description": ""},
+                    {"label": "→", "description": ""}
+                ]
+            },
+            {
+                "question": "Q2?",
+                "header": "Q2",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Q1", "description": ""},
+                    {"label": "Q2", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for qq in &mut over_256.questions {
+        for i in 0..2 {
+            qq.options[i].recommended = true;
+        }
+    }
+    assert_eq!(
+        review_collision(&over_256, &[ans(&[0, 1]), ans(&[0, 1])]),
+        Some(CollisionKind::Picks),
+        "exceeding 256 cross-question tuples must fail closed"
     );
 }
