@@ -126,8 +126,18 @@ pub fn kind_of_argv(argv: &[String]) -> Option<String> {
     words.iter().take(2).find_map(|w| known_kind(w)).map(String::from)
 }
 
-/// Agent kind from the foreground process, then the start argv; last, the 7501 `app` name of agy or omp (a launcher
-/// can show a shell in front of omp).
+/// Agent kind reported by OSC 7501 `status.app`, for agents with live evidence.
+pub fn kind_from_app(app: Option<&str>) -> Option<&'static str> {
+    match app {
+        Some("claude-code") => Some("claude"),
+        Some("codex") => Some("codex"),
+        Some("antigravity") => Some("agy"),
+        Some("omp") => Some("omp"),
+        _ => None,
+    }
+}
+
+/// Agent kind from the foreground process, then the start argv; last, the 7501 `app` name.
 pub fn kind(t: &Term) -> Option<String> {
     let mut fg = vec![t.fg_name.clone().unwrap_or_default()];
     fg.extend(t.fg_argv.iter().cloned());
@@ -136,11 +146,7 @@ pub fn kind(t: &Term) -> Option<String> {
             return Some(k);
         }
     }
-    match t.status_app.as_deref() {
-        Some("antigravity") => Some("agy".into()),
-        Some("omp") => Some("omp".into()),
-        _ => None,
-    }
+    kind_from_app(t.status_app.as_deref()).map(String::from)
 }
 
 /// The agent's process for a key gate: the foreground pid when the foreground program is the agent; with no
