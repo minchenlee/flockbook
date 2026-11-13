@@ -454,7 +454,7 @@ fn cand_parts(question: &Question, cand: &Cand, form: Form) -> Option<Vec<Vec<St
         let opt = question.options.get(p)?;
         let mut alts = vec![];
         for s in shown_labels(opt) {
-            if s.is_empty() || s.contains('"') {
+            if s.is_empty() || s.contains('"') || s.contains('│') {
                 return None;
             }
             push_unique(&mut alts, quote_if_comma(s, question.multi_select, form));
@@ -462,7 +462,7 @@ fn cand_parts(question: &Question, cand: &Cand, form: Form) -> Option<Vec<Vec<St
         parts.push(alts);
     }
     if let Some(o) = &cand.other {
-        if o.is_empty() || o.contains('"') {
+        if o.is_empty() || o.contains('"') || o.contains('│') {
             return None;
         }
         let mut alts = vec![o.clone()];
@@ -511,12 +511,13 @@ fn canonical_cand(a: &QuestionAnswer) -> Option<Cand> {
 }
 
 fn validate_question_caps(q: &Question) -> bool {
-    if q.options.len() > MAX_REVIEW_OPTIONS || bare(&q.text).is_empty() {
+    let qt = bare(&q.text);
+    if q.options.len() > MAX_REVIEW_OPTIONS || qt.is_empty() || qt.contains('│') {
         return false;
     }
     q.options.iter().all(|o| {
         let labels = shown_labels(o);
-        !labels.is_empty() && labels.iter().all(|s| !s.is_empty() && !s.contains('"'))
+        !labels.is_empty() && labels.iter().all(|s| !s.is_empty() && !s.contains('"') && !s.contains('│'))
     })
 }
 
@@ -530,7 +531,7 @@ fn validate_answer_caps(q: &Question, a: &QuestionAnswer) -> Result<(), Collisio
     }
     if let Some(o) = has_other {
         let b = bare(&o);
-        if b.is_empty() || b.contains('"') {
+        if b.is_empty() || b.contains('"') || b.contains('│') {
             return Err(CollisionKind::Own);
         }
     }

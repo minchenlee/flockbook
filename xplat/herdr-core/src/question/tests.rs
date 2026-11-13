@@ -2376,7 +2376,9 @@ fn claude_review_bar_only_in_question_text() {
     ❯ 1. Submit answers
       2. Cancel
     "#);
-    assert!(claude_review_exact(&q, &[ans(&[0, 2])], &review), "picks A and │B: the wrapped │B is the label");
+    // Fail closed: any option label containing '│' is refused before any key and in review matching.
+    assert_eq!(super::claude_exact::review_collision(&q, &[]), Some(super::claude_exact::CollisionKind::Labels));
+    assert!(!claude_review_exact(&q, &[ans(&[0, 2])], &review), "option containing '│' fails closed");
     assert!(!claude_review_exact(&q, &[ans(&[0, 1])], &review), "picks A and B: the screen shows │B, not B");
 }
 
@@ -2575,7 +2577,7 @@ fn review_exact_screen_cases_red() {
     assert!(claude_review_exact(&q_xy, &[other(&[], "x, y")], &rv("☒ H", " ● Q?\n       → \"x, y\"")));
     assert!(review_blocked(&q_clean, &[other(&[0], "B")]), "#8: A + Other('B') collides with [A, B]");
 
-    // #9: Wrapped │B regression & screen- spoof rejection
+    // #9: Wrapped │B fails closed on screen- (labels containing '│' are refused)
     let mut screen_bar = hooked(
         "screen-rvbar",
         json!([{"question":"This is a deliberately long first question so the picker draws its text with a side bar, which size?","header":"Size","multiSelect":true,"options":[{"label":"A","description":"a"},{"label":"B","description":"b"},{"label":"│B","description":"c"}]}]),
@@ -2585,7 +2587,8 @@ fn review_exact_screen_cases_red() {
         "☒ Size",
         " │ ● This is a deliberately long first question so the picker draws its text with a side bar, which size?\n       → A,\n       │B",
     );
-    assert!(shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 2])])), "#9: wrapped │B matches on screen-");
+    assert_eq!(review_collision(&screen_bar, &[]), Some(CollisionKind::Labels), "#9: '│' in option label refused pre-flight on screen-");
+    assert!(!shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 2])])), "#9: '│B' fails closed in review matching");
     assert!(!shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 1])])), "#9: wrapped │B does not match B");
     assert!(!shows_review(&screen_bar, &bar_review, None), "#9: screen- spoof without answers never matches");
     assert!(!shows_review(&screen_bar, &bar_review.replace("│B", "B"), Some(&[ans(&[0, 2])])), "#9: wrong picks rejected on screen-");
@@ -2678,8 +2681,8 @@ fn claude_review_wrapped_bar_dot_in_answer_red() {
         "P1: wrapped answer '│●B' must not match wrong pick '●B'"
     );
     assert!(
-        claude_review_exact(&q, &[ans(&[0, 1])], &review),
-        "P1: wrapped answer '│●B' must still match exact pick '│●B'"
+        !claude_review_exact(&q, &[ans(&[0, 1])], &review),
+        "P1: fail closed whenever an option label contains '│'"
     );
 
     // Multi-question variant: Q1 has wrapped answer "│●B", Q2 is long (>= 80 cols) and quote-barred.
@@ -2717,8 +2720,8 @@ fn claude_review_wrapped_bar_dot_in_answer_red() {
         "P1 multi-q: wrapped answer '│●B' must not match wrong pick '●B'"
     );
     assert!(
-        claude_review_exact(&two_q, &[ans(&[0, 1]), ans(&[0])], &review_two),
-        "P1 multi-q: exact '│●B' + barred long Q2 must still match"
+        !claude_review_exact(&two_q, &[ans(&[0, 1]), ans(&[0])], &review_two),
+        "P1 multi-q: fail closed whenever an option label contains '│'"
     );
 }
 
@@ -2817,4 +2820,14 @@ fn claude_review_vertical_bar_fail_closed_red() {
         !claude_review_exact(&clean_q, &[other(&[], "bad │ own"), ans(&[0])], &own_bar_review),
         "Other text with '│' fails closed in claude_review_exact"
     );
+
+    // Recommended variant containing '│' must also be refused before any key.
+    let mut rec_bar = hooked(
+        "toolu_rec_bar",
+        json!([
+            {"question": "Q?", "header": "H", "multiSelect": true, "options": [{"label": "│Choice", "description": ""}, {"label": "Plain", "description": ""}]}
+        ]),
+    );
+    rec_bar.questions[0].options[0].recommended = true;
+    assert_eq!(review_collision(&rec_bar, &[]), Some(CollisionKind::Labels), "recommended option with '│' fails closed");
 }
