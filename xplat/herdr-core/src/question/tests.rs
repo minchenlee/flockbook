@@ -2633,3 +2633,91 @@ fn review_exact_screen_cases_red() {
     assert_eq!(review_collision(&q_xy, &[other(&[], "x, y")]), Some(CollisionKind::Own));
     assert_eq!(review_collision(&cross_q, &[ans(&[0]), ans(&[0])]), Some(CollisionKind::Picks));
 }
+
+#[test]
+fn claude_review_wrapped_bar_dot_in_answer_red() {
+    let rv = |tabs: &str, body: &str| {
+        sw(&format!(
+            "
+    ────────────────────────────────────────────────────────────────
+    ←  {tabs}  ✔ Submit  →
+
+    Review your answers
+
+    {body}
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "
+        ))
+    };
+
+    // Codex P1: wrapped multi-select answer line starts with "│●" (for label "│●B" alongside "●B").
+    // Must not re-enable `barred` inside an answer and strip the label's own '│'.
+    let q = hooked(
+        "toolu_p1_bar_dot",
+        json!([{
+            "question": "Pick options?",
+            "header": "Pick",
+            "multiSelect": true,
+            "options": [
+                {"label": "Long first pick that wraps onto the next line", "description": ""},
+                {"label": "│●B", "description": ""},
+                {"label": "●B", "description": ""}
+            ]
+        }]),
+    );
+    let review = rv(
+        "☒ Pick",
+        " ● Pick options?\n       → Long first pick that wraps onto the next line,\n       │●B",
+    );
+    assert!(
+        !claude_review_exact(&q, &[ans(&[0, 2])], &review),
+        "P1: wrapped answer '│●B' must not match wrong pick '●B'"
+    );
+    assert!(
+        claude_review_exact(&q, &[ans(&[0, 1])], &review),
+        "P1: wrapped answer '│●B' must still match exact pick '│●B'"
+    );
+
+    // Multi-question variant: Q1 has wrapped answer "│●B", Q2 is long (>= 80 cols) and quote-barred.
+    let q2_long = "This is a deliberately long second question so the picker draws its text with a side bar, which mode?";
+    let two_q = hooked(
+        "toolu_p1_bar_dot_2",
+        json!([
+            {
+                "question": "Pick options?",
+                "header": "Pick",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Long first pick that wraps onto the next line", "description": ""},
+                    {"label": "│●B", "description": ""},
+                    {"label": "●B", "description": ""}
+                ]
+            },
+            {
+                "question": q2_long,
+                "header": "Mode",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Safe", "description": ""},
+                    {"label": "Fast", "description": ""}
+                ]
+            }
+        ]),
+    );
+    let review_two = rv(
+        "☒ Pick  ☒ Mode",
+        &format!(" ● Pick options?\n       → Long first pick that wraps onto the next line,\n       │●B\n     │ ● {q2_long}\n       → Safe"),
+    );
+    assert!(
+        !claude_review_exact(&two_q, &[ans(&[0, 2]), ans(&[0])], &review_two),
+        "P1 multi-q: wrapped answer '│●B' must not match wrong pick '●B'"
+    );
+    assert!(
+        claude_review_exact(&two_q, &[ans(&[0, 1]), ans(&[0])], &review_two),
+        "P1 multi-q: exact '│●B' + barred long Q2 must still match"
+    );
+}
