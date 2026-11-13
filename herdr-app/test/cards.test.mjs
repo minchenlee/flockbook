@@ -379,3 +379,92 @@ test("review-screen stop: when act fails and poll drops card to null, a read-onl
   await c.poll(cx, "t1", false);
   assert.equal(c.view("t1", T), null);
 });
+
+test("Show all screen- card re-checks blocked on kept full question set without --all keys", async () => {
+  const yesNoQ = {
+    toolUseId: "screen-yesno",
+    agent: "claude",
+    delivery: "picker",
+    state: "pending",
+    questions: [
+      {
+        id: "Q1?",
+        header: "One",
+        text: "Q1?",
+        multi: false,
+        options: [
+          { label: "Yes", detail: "", recommended: false },
+          { label: "Yes", detail: "", recommended: false },
+          { label: "No", detail: "", recommended: false },
+        ],
+      },
+      {
+        id: "Q2?",
+        header: "Two",
+        text: "Q2?",
+        multi: false,
+        options: [
+          { label: "A", detail: "", recommended: false },
+          { label: "B", detail: "", recommended: false },
+        ],
+      },
+    ],
+  };
+  const firstScreen = {
+    type: "card",
+    kind: "question",
+    request: "screen-yesno",
+    unread: 1,
+    question: { ...yesNoQ, questions: yesNoQ.questions.slice(0, 1) },
+  };
+  const fullScreen = {
+    type: "card",
+    kind: "question",
+    request: "screen-yesno",
+    unread: 0,
+    question: yesNoQ,
+    blocked: LABELS,
+  };
+  let alls = 0;
+  const pollArgs = [];
+  fake.exec = (_c, args) => {
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    if (args.includes("--all")) {
+      alls += 1;
+      return jl(header("card"), fullScreen, end);
+    }
+    pollArgs.push(args);
+    const qi = args.indexOf("--question");
+    if (qi >= 0) {
+      const passedQ = JSON.parse(args[qi + 1]);
+      const ai = args.indexOf("--answers");
+      const a = ai >= 0 ? JSON.parse(args[ai + 1]) : [];
+      const blocked = a[0]?.picks?.includes(2) ? undefined : LABELS;
+      return jl(header("card"), { ...fullScreen, question: passedQ, ...(blocked ? { blocked } : {}) }, end);
+    }
+    return jl(header("card"), firstScreen, end);
+  };
+
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-all")._h.on_click({}, cx); await cx.settle();
+  assert.equal(alls, 1);
+  assert.notEqual(byId(c.view("t1", T), "card-blocked"), null, "initial colliding labels block Send");
+
+  // Pick unique "No" (option 2) on Q1 and "A" (option 0) on Q2; non-forced poll updates blocked without --all.
+  byId(c.view("t1", T), "card-q0-o2")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  await c.poll(cx, "t1", true);
+  assert.equal(alls, 1, "no extra --all key presses on poll");
+  let el = c.view("t1", T);
+  assert.equal(byId(el, "card-blocked"), null, "picking unique 'No' clears blocked on Show all card");
+  assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send answer enables once blocked clears");
+
+  // Switching back to colliding "Yes" (option 0) re-blocks without --all.
+  byId(el, "card-q0-o0")._h.on_click({}, cx);
+  await c.poll(cx, "t1", true);
+  assert.equal(alls, 1, "still no --all key presses");
+  el = c.view("t1", T);
+  assert.notEqual(byId(el, "card-blocked"), null, "picking colliding 'Yes' restores blocked");
+  assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send answer disables again");
+});
