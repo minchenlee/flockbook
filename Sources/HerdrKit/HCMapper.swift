@@ -95,7 +95,7 @@ public enum HCMapper {
     /// The agent's process, for a paired device's key gate: the foreground pid when the foreground program is the agent;
     /// with no foreground read, the terminal's pid only when the terminal's own program is the agent. Anything else
     /// (a shell, a child of the agent in front, no pid): nil, so paired keys fail closed.
-    static func process(_ t: Term, kind k: String?) -> String? {
+    static func process(_ t: Term, kind k: String?, check: HCAgentCheck = NoAgentCheck()) -> String? {
         guard let k else { return nil }
         let hasForeground = t.fgPid != nil || t.fgName != nil || !t.fgArgv.isEmpty
         let pid = hasForeground ? (kind(argv: [t.fgName ?? ""] + t.fgArgv) == k ? t.fgPid : nil)
@@ -151,7 +151,8 @@ public enum HCMapper {
     /// `terminals`: `terminal.list` records. `appDoc`: the `herdr-app` document value, any shape (parsed defensively).
     /// `machineDocs`: each other machine's `herdr-app` document (`doc.get {on}`), in the order to show them. Its ids
     /// are local to that machine; they are shown qualified (`box/sp1`), after this machine's (mirror.rs qualify).
-    public static func workspaces(terminals: [[String: Any]], appDoc: Any?, machineDocs: [(String, Any?)] = []) -> [Workspace] {
+    public static func workspaces(terminals: [[String: Any]], appDoc: Any?, machineDocs: [(String, Any?)] = [],
+                                  check: HCAgentCheck = NoAgentCheck()) -> [Workspace] {
         // Per machine prefix ("" here, "box/" there): names, and the document when it parses (space, tab and pane
         // order, Flockbook's pane names).
         var namesBy: [String: AppDocNames] = ["": AppDocNames(appDoc)]

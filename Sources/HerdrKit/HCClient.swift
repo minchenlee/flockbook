@@ -52,6 +52,9 @@ public actor HCClient {
     /// Seconds `terminal.send` waits: the core answers only after nobody typed for ~3 s and the program went `working`.
     public let sendTimeout: TimeInterval
 
+    var wrapperCheck: HCAgentCheck = NoAgentCheck()
+    public func setWrapperCheck(_ c: HCAgentCheck) { wrapperCheck = c }
+
     public init(session: HCSession, callTimeout: TimeInterval = 10, sendTimeout: TimeInterval = 60) {
         self.session = session; self.callTimeout = callTimeout; self.sendTimeout = sendTimeout
     }

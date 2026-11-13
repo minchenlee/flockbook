@@ -40,8 +40,10 @@ public actor SessionResolver {
         public var cwd: String
         /// hc panes: process ids to start from (foreground first). Empty for TUI panes (found by `HERDR_PANE_ID`).
         public var pids: [Int32]
-        public init(paneId: String, kind: String, cwd: String, pids: [Int32] = []) {
-            self.paneId = paneId; self.kind = kind; self.cwd = cwd; self.pids = pids
+        /// hc panes: the agent's key identity (`Agent.process`).
+        public var process: String?
+        public init(paneId: String, kind: String, cwd: String, pids: [Int32] = [], process: String? = nil) {
+            self.paneId = paneId; self.kind = kind; self.cwd = cwd; self.pids = pids; self.process = process
         }
     }
 
@@ -403,6 +405,8 @@ public actor SessionResolver {
 
     /// hc: the agent process of a terminal from its pids (foreground first, then the terminal's own process).
     /// A pid that runs the agent itself wins; else the newest process in their trees that does.
+    public static func agentInTree(root: Int32, kind: String, procs: [Proc], tieNewest: Bool) -> Proc? { nil }
+
     public static func hcAgentProcess(pids: [Int32], kind: String, procs: [Proc]) -> Proc? {
         let byPid = Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
         for pid in pids { if let p = byPid[pid], runs(p, kind: kind) { return p } }
