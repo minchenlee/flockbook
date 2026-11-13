@@ -760,13 +760,13 @@ fn single_question_collides(q: &Question, a: Option<&QuestionAnswer>) -> Option<
     }
 }
 
-fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Vec<String> {
+fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Option<Vec<String>> {
     let mut item_alts: Vec<Vec<String>> = vec![];
     let mut picks = a.picks.clone();
     picks.sort_unstable();
     picks.dedup();
     for p in picks {
-        let Some(opt) = q.options.get(p) else { return vec![] };
+        let opt = q.options.get(p)?;
         let alts = if opt.recommended {
             RECOMMENDED_SUFFIXES
                 .iter()
@@ -796,7 +796,7 @@ fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Vec<St
     let mut acc = vec![String::new()];
     for (j, alts) in item_alts.iter().enumerate() {
         let mut next = vec![];
-        'step: for cur in &acc {
+        for cur in &acc {
             for alt in alts {
                 let mut s = cur.clone();
                 if j > 0 {
@@ -804,16 +804,16 @@ fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Vec<St
                 }
                 s.push_str(alt);
                 if !next.contains(&s) {
+                    if next.len() >= cap {
+                        return None;
+                    }
                     next.push(s);
-                }
-                if next.len() >= cap {
-                    break 'step;
                 }
             }
         }
         acc = next;
     }
-    acc
+    Some(acc)
 }
 
 fn push_rendered_lines(raw: &str, out: &mut String, starts: &mut HashSet<usize>) {
@@ -834,10 +834,9 @@ fn dp_cross_collides(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<
         let (cands, Some(ci)) = cands_for_question(qq, Some(&answers[k]))? else { return Some(CollisionKind::Picks) };
         cands_per_q.push(cands);
         chosen_idx.push(ci);
-        let bodies = raw_body_variants_for(qq, &answers[k], 64);
-        if bodies.is_empty() {
+        let Some(bodies) = raw_body_variants_for(qq, &answers[k], 64).filter(|b| !b.is_empty()) else {
             return Some(CollisionKind::Picks);
-        }
+        };
         per_q_bodies.push(bodies);
     }
 
@@ -846,15 +845,12 @@ fn dp_cross_collides(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<
         let mut next = vec![];
         for t in &tuples {
             for i in 0..bs.len() {
+                if next.len() >= 256 {
+                    return Some(CollisionKind::Picks);
+                }
                 let mut nt = t.clone();
                 nt.push(i);
                 next.push(nt);
-                if next.len() >= 256 {
-                    break;
-                }
-            }
-            if next.len() >= 256 {
-                break;
             }
         }
         tuples = next;
