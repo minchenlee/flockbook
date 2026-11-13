@@ -852,12 +852,46 @@ fn runs(p: &Proc, kind: &str) -> bool {
 
 /// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. At a tie in depth: `None` when
 /// `tie_newest` is false (key gate fails closed), or the newest by start time when true (feed resolution).
-pub fn agent_in_tree(_root: i32, _kind: &str, _procs: &[Proc], _tie_newest: bool) -> Option<Proc> {
+pub fn agent_in_tree(root: i32, kind: &str, procs: &[Proc], tie_newest: bool) -> Option<Proc> {
+    let mut children: HashMap<i32, Vec<&Proc>> = HashMap::new();
+    for p in procs {
+        children.entry(p.ppid).or_default().push(p);
+    }
+    let mut seen: HashSet<i32> = HashSet::from([root]);
+    let mut frontier: Vec<i32> = vec![root];
+    while !frontier.is_empty() {
+        let mut next: Vec<i32> = vec![];
+        let mut matches: Vec<&Proc> = vec![];
+        for parent in frontier {
+            if let Some(kids) = children.get(&parent) {
+                for &k in kids {
+                    if !seen.insert(k.pid) {
+                        continue;
+                    }
+                    if runs(k, kind) {
+                        matches.push(k);
+                    }
+                    next.push(k.pid);
+                }
+            }
+        }
+        if !matches.is_empty() {
+            if matches.len() == 1 {
+                return Some(matches[0].clone());
+            }
+            return if tie_newest {
+                max_by_first(matches, |a, b| a.start < b.start).cloned()
+            } else {
+                None
+            };
+        }
+        frontier = next;
+    }
     None
 }
 
 /// hc: the agent process of a terminal from its pids (foreground first, then the terminal's own process). A pid that
-/// runs the agent itself wins; else the newest process in their trees that does.
+/// runs the agent itself wins; else the nearest process in their trees that does (newest on a tie in depth).
 pub fn hc_agent_process(pids: &[i32], kind: &str, procs: &[Proc]) -> Option<Proc> {
     let mut by_pid: HashMap<i32, &Proc> = HashMap::new();
     for p in procs {
@@ -870,8 +904,7 @@ pub fn hc_agent_process(pids: &[i32], kind: &str, procs: &[Proc]) -> Option<Proc
             }
         }
     }
-    let tree: HashSet<i32> = pids.iter().flat_map(|p| subtree(*p, procs)).collect();
-    max_by_first(procs.iter().filter(|p| tree.contains(&p.pid) && runs(p, kind)), |a, b| a.start < b.start).cloned()
+    pids.iter().find_map(|&pid| agent_in_tree(pid, kind, procs, true))
 }
 
 /// Claude Code writes `<claude dir>/<pid>.json` with `pid`, `sessionId` and `procStart` (UTC, `ps lstart` format).
