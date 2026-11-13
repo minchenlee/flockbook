@@ -243,13 +243,7 @@ fn ordered<T>(items: Vec<T>, order: &[String], key: impl Fn(&T) -> String) -> Ve
 
 /// `terms`: `terminal.list` records. `app_doc`: this machine's `herdr-app` value. `machine_docs`: each other
 /// machine's, in the order to show them.
-pub fn workspaces_with(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Value)], _check: &dyn mapper::AgentCheck) -> Vec<Workspace> {
-    workspaces(terms, app_doc, machine_docs)
-}
-
-/// `terms`: `terminal.list` records. `app_doc`: this machine's `herdr-app` value. `machine_docs`: each other
-/// machine's, in the order to show them.
-pub fn workspaces(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Value)]) -> Vec<Workspace> {
+pub fn workspaces_with(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Value)], check: &dyn mapper::AgentCheck) -> Vec<Workspace> {
     let mut names: HashMap<String, Names> = HashMap::from([(String::new(), Names::of(app_doc))]);
     let mut docs: HashMap<String, Doc> = HashMap::new();
     if let Some(d) = Doc::parse(app_doc) {
@@ -262,7 +256,7 @@ pub fn workspaces(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Val
         }
     }
     // The panes as the sidecar maps them (live only), and each terminal's record for its labels and parent.
-    let panes: HashMap<String, Pane> = mapper::workspaces(terms).into_iter().flat_map(|w| w.tabs).flat_map(|t| t.panes).map(|p| (p.terminal_id.clone(), p)).collect();
+    let panes: HashMap<String, Pane> = mapper::workspaces_with(terms, check).into_iter().flat_map(|w| w.tabs).flat_map(|t| t.panes).map(|p| (p.terminal_id.clone(), p)).collect();
     let live: Vec<&Value> = terms.iter().filter(|t| t["address"].as_str().is_some_and(|a| panes.contains_key(a))).collect();
     let by_addr: HashMap<&str, &Value> = live.iter().rev().map(|t| (t["address"].as_str().unwrap_or(""), *t)).collect();
     let label = |t: &Value, k: &str| t["labels"][k].as_str().filter(|s| !s.is_empty()).map(String::from);
@@ -388,6 +382,11 @@ pub fn workspaces(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Val
     out
 }
 
+/// `workspaces_with` with [`mapper::NoAgentCheck`].
+pub fn workspaces(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Value)]) -> Vec<Workspace> {
+    workspaces_with(terms, app_doc, machine_docs, &mapper::NoAgentCheck)
+}
+
 /// The other machines' documents: the last read, when, and whether a read runs now.
 struct MachineDocs {
     docs: Vec<(String, Value)>,
@@ -484,7 +483,7 @@ pub fn snapshot(client: &HcClient, remote_never: bool) -> Result<Vec<Workspace>,
     let terms = list["terminals"].as_array().cloned().unwrap_or_default();
     // A document that cannot be read: names fall back to labels and folders.
     let app = client.call("doc.get", json!({"name": APP_DOC}), None).map(|r| r["value"].clone()).unwrap_or(Value::Null);
-    Ok(workspaces(&terms, &app, &if remote_never { vec![] } else { machine_docs() }))
+    Ok(workspaces_with(&terms, &app, &if remote_never { vec![] } else { machine_docs() }, client.wrapper_check()))
 }
 
 #[cfg(test)]

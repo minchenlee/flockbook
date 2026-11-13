@@ -21,6 +21,7 @@ pub struct HcClient {
     pub call_timeout: Duration,
     /// Seconds `terminal.send` waits: the core answers only after nobody typed for ~3 s and the program went `working`.
     pub send_timeout: Duration,
+    wrapper: Arc<TreeCheck>,
 }
 
 /// The `result` object (empty when null or not an object), or the error as `Server{code: kind}`.
@@ -78,15 +79,17 @@ impl HcClient {
             seq: Cell::new(0),
             call_timeout: Duration::from_secs(call_timeout_s),
             send_timeout: Duration::from_secs(send_timeout_s),
+            wrapper: Arc::new(TreeCheck::new()),
         }
     }
 
-    pub fn with_wrapper(self, _wrapper: Arc<TreeCheck>) -> HcClient {
+    pub fn with_wrapper(mut self, wrapper: Arc<TreeCheck>) -> HcClient {
+        self.wrapper = wrapper;
         self
     }
 
     pub fn wrapper_check(&self) -> &dyn mapper::AgentCheck {
-        &mapper::NoAgentCheck
+        self.wrapper.as_ref()
     }
 
     /// One plain-mode call on its own connection. Skips notifications until the reply with our id.
@@ -192,7 +195,7 @@ impl PaneScreen for HcClient {
     fn snapshot(&self) -> Result<Vec<Workspace>, HerdrError> {
         let list = self.call("terminal.list", json!({}), None)?;
         let terms = list.get("terminals").and_then(Value::as_array).cloned().unwrap_or_default();
-        Ok(mapper::workspaces(&terms))
+        Ok(mapper::workspaces_with(&terms, self.wrapper.as_ref()))
     }
 
     /// `terminal.read` with no history: the visible screen as text. Read-only.
