@@ -2,26 +2,42 @@
 
 use crate::hc::mapper::{AgentCheck, WrapperAsk};
 use crate::resolver::{self, Proc, ProcessSource};
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::cell::OnceCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[allow(dead_code)]
 const YES_TTL: Duration = Duration::from_secs(10);
-#[allow(dead_code)]
 const NO_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct YesKey {
+    fg_pid: i32,
+    created: i64,
+    kind: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NoKey {
+    fg_pid: i32,
+    created: i64,
+    kind: String,
+    status_ms: i64,
+}
+
+enum CacheEntry {
+    Yes { key: YesKey, agent_pid: i32, at: Instant },
+    No { key: NoKey, at: Instant },
+}
 
 /// Checks whether a wrapper terminal's foreground tree runs the expected agent (`W5`, `W6`), caching results per
 /// terminal address bounded by `kill(pid, 0)` and short TTLs.
 pub struct TreeCheck {
-    #[allow(dead_code)]
     source: Arc<dyn ProcessSource>,
-    #[allow(dead_code)]
     now: Arc<dyn Fn() -> Instant + Send + Sync>,
-    #[allow(dead_code)]
     alive: Arc<dyn Fn(i32) -> bool + Send + Sync>,
-    #[allow(dead_code)]
-    entries: Mutex<HashMap<String, ()>>,
+    entries: Mutex<HashMap<String, CacheEntry>>,
 }
 
 impl TreeCheck {
@@ -40,6 +56,66 @@ impl TreeCheck {
     ) -> Self {
         TreeCheck { source, now, alive, entries: Mutex::new(HashMap::new()) }
     }
+
+    fn lookup<'a>(&self, ask: &WrapperAsk, load_procs: impl FnOnce() -> Cow<'a, [Proc]>) -> Option<i32> {
+        let now = (self.now)();
+        let cached = {
+            let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+            match entries.get(&ask.address) {
+                Some(CacheEntry::Yes { key, agent_pid, at })
+                    if key.fg_pid == ask.fg_pid
+                        && key.created == ask.created
+                        && key.kind == ask.kind
+                        && now.saturating_duration_since(*at) <= YES_TTL
+                        && (self.alive)(*agent_pid) =>
+                {
+                    Some(Some(*agent_pid))
+                }
+                Some(CacheEntry::No { key, at })
+                    if key.fg_pid == ask.fg_pid
+                        && key.created == ask.created
+                        && key.kind == ask.kind
+                        && key.status_ms == ask.status_ms
+                        && now.saturating_duration_since(*at) <= NO_TTL =>
+                {
+                    Some(None)
+                }
+                _ => None,
+            }
+        };
+        if let Some(hit) = cached {
+            return hit;
+        }
+
+        let procs = load_procs();
+        let found = resolver::agent_in_tree(ask.fg_pid, &ask.kind, &procs, false)
+            .filter(|agent| ask.status_ms.saturating_add(1000) >= agent.start.timestamp_millis())
+            .map(|agent| agent.pid)
+            .filter(|&pid| pid > 0);
+
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(agent_pid) = found {
+            entries.insert(
+                ask.address.clone(),
+                CacheEntry::Yes {
+                    key: YesKey { fg_pid: ask.fg_pid, created: ask.created, kind: ask.kind.clone() },
+                    agent_pid,
+                    at: now,
+                },
+            );
+        } else if !procs.is_empty() {
+            entries.insert(
+                ask.address.clone(),
+                CacheEntry::No {
+                    key: NoKey { fg_pid: ask.fg_pid, created: ask.created, kind: ask.kind.clone(), status_ms: ask.status_ms },
+                    at: now,
+                },
+            );
+        } else {
+            entries.remove(&ask.address);
+        }
+        found
+    }
 }
 
 impl Default for TreeCheck {
@@ -48,9 +124,29 @@ impl Default for TreeCheck {
     }
 }
 
+struct TreeSnapshot<'a> {
+    tree: &'a TreeCheck,
+    procs: OnceCell<Vec<Proc>>,
+}
+
+impl AgentCheck for TreeSnapshot<'_> {
+    fn agent_under(&self, ask: &WrapperAsk) -> Option<i32> {
+        self.tree.lookup(ask, || Cow::Borrowed(self.procs.get_or_init(|| self.tree.source.processes()).as_slice()))
+    }
+}
+
 impl AgentCheck for TreeCheck {
-    fn agent_under(&self, _ask: &WrapperAsk) -> Option<i32> {
-        None
+    fn agent_under(&self, ask: &WrapperAsk) -> Option<i32> {
+        self.lookup(ask, || Cow::Owned(self.source.processes()))
+    }
+
+    fn snapshot(&self) -> Option<Box<dyn AgentCheck + '_>> {
+        Some(Box::new(TreeSnapshot { tree: self, procs: OnceCell::new() }))
+    }
+
+    fn prune(&self, live_addresses: &[&str]) {
+        let live: HashSet<&str> = live_addresses.iter().copied().collect();
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).retain(|addr, _| live.contains(addr.as_str()));
     }
 }
 
@@ -193,5 +289,10 @@ mod tests {
             panes.iter().map(|p| p.agent.as_ref().and_then(|a| a.process.as_deref())).collect::<Vec<_>>(),
             vec![Some("100/101@9"), Some("200/201@9"), Some("300/301@9")]
         );
+        // Pruning removes addresses dropped from the snapshot, so reappearing reads again.
+        let _ = mapper::workspaces_with(&[term("a", 100)], &batch_check);
+        assert_eq!(batch_src.reads(), 1);
+        let _ = mapper::workspaces_with(&[term("a", 100), term("b", 200)], &batch_check);
+        assert_eq!(batch_src.reads(), 2, "pruned address b reads again when returning");
     }
 }

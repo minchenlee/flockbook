@@ -186,23 +186,60 @@ impl AgentCheck for NoAgentCheck {
     }
 }
 
+const SHELLS: [&str; 14] = [
+    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "nu", "xonsh", "elvish", "pwsh", "powershell", "cmd",
+];
+
+fn is_shell_name(raw: &str) -> bool {
+    let base = last_path_component(raw);
+    let base = base.strip_prefix('-').unwrap_or(&base);
+    SHELLS.contains(&base)
+}
+
+fn foreground_is_shell(t: &Term) -> bool {
+    let fg0 = t.fg_argv.first().map(String::as_str).unwrap_or("");
+    let name = t.fg_name.as_deref().unwrap_or("");
+    if name.is_empty() && fg0.is_empty() {
+        return true;
+    }
+    (!name.is_empty() && is_shell_name(name)) || (!fg0.is_empty() && is_shell_name(fg0))
+}
+
 /// The agent's process for a key gate: the foreground pid when the foreground program is the agent; with no
 /// foreground read, the terminal's pid only when the terminal's own program is the agent; else, when a wrapper
 /// passes W1-W4 and `check` verifies W5-W6, `<fg_pid>/<agent_pid>@<created>`. Anything else: None, so keys fail closed.
-pub fn process_with(t: &Term, k: Option<&str>, _check: &dyn AgentCheck) -> Option<String> {
+pub fn process_with(t: &Term, k: Option<&str>, check: &dyn AgentCheck) -> Option<String> {
     let k = k?;
     let has_foreground = t.fg_pid.is_some() || t.fg_name.is_some() || !t.fg_argv.is_empty();
-    let pid = if has_foreground {
+    if has_foreground {
         let mut fg = vec![t.fg_name.clone().unwrap_or_default()];
         fg.extend(t.fg_argv.iter().cloned());
-        if kind_of_argv(&fg).as_deref() == Some(k) { t.fg_pid } else { None }
+        if kind_of_argv(&fg).as_deref() == Some(k) {
+            let pid = t.fg_pid.filter(|p| *p > 0)?;
+            return Some(format!("{pid}@{}", t.created));
+        }
     } else if kind_of_argv(&t.argv).as_deref() == Some(k) {
-        t.pid
+        let pid = t.pid.filter(|p| *p > 0)?;
+        return Some(format!("{pid}@{}", t.created));
     } else {
-        None
+        return None;
+    }
+
+    // Wrapper path (W1-W4): local terminal, status.app matches kind, fg_pid > 0 and status_ms present, non-shell foreground.
+    if kind_from_app(t.status_app.as_deref()) != Some(k) || t.address.contains('/') || foreground_is_shell(t) {
+        return None;
+    }
+    let fg_pid = t.fg_pid.filter(|&p| p > 0).and_then(|p| i32::try_from(p).ok())?;
+    let status_ms = t.status_ms?;
+    let ask = WrapperAsk {
+        address: t.address.clone(),
+        fg_pid,
+        created: t.created,
+        kind: k.into(),
+        status_ms,
     };
-    let pid = pid.filter(|p| *p > 0)?;
-    Some(format!("{pid}@{}", t.created))
+    let agent_pid = check.agent_under(&ask).filter(|&p| p > 0)?;
+    Some(format!("{fg_pid}/{agent_pid}@{}", t.created))
 }
 
 /// [`process_with`] with [`NoAgentCheck`] (direct paths only; wrapper paths fail closed).
