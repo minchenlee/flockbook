@@ -274,11 +274,12 @@ export class Cards {
     q.questions.forEach((qq, qi) => {
       if (qi !== step) return;
       const picks = e.picks.get(qi) ?? new Set();
+      const own = Boolean((e.others.get(qi) ?? "").trim());
       const sec = v_flex().gap(6);
       if (qq.header) sec.child(div().text_size(11.5).text_color(t.muted).child(qq.header));
       sec.child(div().text_size(13.5).text_color(t.foreground).child(qq.text || ""));
       (qq.options ?? []).forEach((o, oi) => {
-        const on = picks.has(oi);
+        const on = picks.has(oi) && (Boolean(qq.multi) || !own);
         sec.child(h_flex().id(`${id}-q${qi}-o${oi}`).px(10).py(7).gap(10).items_center().rounded(8)
           .bg(on ? t.selected : t.background).border(1).border_color(on ? t.accent : t.border).hover((s) => s.bg(on ? t.selected : t.hover))
           .on_click((_e, cx) => { this.pick(e, q.questions, qi, oi); cx.notify(); })
@@ -294,7 +295,6 @@ export class Cards {
       if (this.address !== address) { this.others.forEach((b, k) => b.set_value(e.others.get(k) ?? "")); this.address = address; }
       // Own answer: a row like the options. Clicks and keys stay in the text box: the card would
       // take the focus on a press and read 1-9 and Enter as picks.
-      const own = Boolean((e.others.get(qi) ?? "").trim());
       const keep = (_ev, cx) => cx.stop_propagation();
       if (input) sec.child(h_flex().id(`${id}-q${qi}-other`).px(10).py(7).gap(10).items_center().rounded(8)
         .bg(own ? t.selected : t.background).border(1).border_color(own ? t.accent : t.border)
