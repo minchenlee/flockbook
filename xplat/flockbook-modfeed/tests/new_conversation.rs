@@ -29,7 +29,7 @@ fn send_after_clear_is_a_new_conversation() {
     // The chat's feed cached the old log a moment ago, for this agent process.
     let cache = dir.join("cache.json");
     let mut c = locate::Cache::default();
-    c.entries.insert("t1".into(), locate::Entry { kind: "claude".into(), cwd: pane.cwd.clone(), pids: pane.process_ids.clone(), path: Some(old_s.clone()), checked: now_s });
+    c.entries.insert("t1".into(), locate::Entry { kind: "claude".into(), cwd: pane.cwd.clone(), pids: pane.process_ids.clone(), process: pane.agent.as_ref().and_then(|a| a.process.clone()), path: Some(old_s.clone()), checked: now_s });
     locate::write_cache(&c, Some(&cache));
 
     // The send looks the log up again (the cache is fresh, but a send never trusts it) and gives back the old entry.

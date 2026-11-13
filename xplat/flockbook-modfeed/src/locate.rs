@@ -15,6 +15,8 @@ pub struct Entry {
     pub cwd: String,
     pub pids: Vec<i32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub process: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub path: Option<String>,
     /// Seconds since 1970.
     pub checked: f64,
@@ -61,10 +63,14 @@ pub fn pane<'a>(ws: &'a [Workspace], terminal: &str) -> Option<&'a Pane> {
         .find(|p| p.terminal_id == terminal || p.id == terminal || p.id == format!("hc:{terminal}"))
 }
 
-/// The cache entry still holds: same agent kind and processes, checked lately, and its log is still there.
+fn pane_process(pane: &Pane) -> Option<&str> {
+    pane.agent.as_ref().and_then(|a| a.process.as_deref())
+}
+
+/// The cache entry still holds: same agent kind, processes, and resolved child identity, checked lately, and its log is still there.
 pub fn fresh(e: Option<&Entry>, pane: &Pane, kind: &str, now_s: f64) -> bool {
     let Some(e) = e else { return false };
-    if e.kind != kind || e.pids != pane.process_ids || now_s - e.checked >= RECHECK_S {
+    if e.kind != kind || e.pids != pane.process_ids || e.process.as_deref() != pane_process(pane) || now_s - e.checked >= RECHECK_S {
         return false;
     }
     e.path.as_ref().is_some_and(|p| Path::new(p).exists())
@@ -131,10 +137,10 @@ pub fn recheck(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver,
     look(terminal, ws, resolver, cache_path, now_s, false).map(|f| (f, was))
 }
 
-/// The cached entry `was` is this pane's agent process (same kind and processes), and it showed `path`: a log the
+/// The cached entry `was` is this pane's agent process (same kind, processes, and resolved child identity), and it showed `path`: a log the
 /// agent wrote. Proof that another log now is a new conversation of the same agent, not another agent.
 pub fn same_agent(was: &Entry, pane: &Pane, kind: &str, path: &str) -> bool {
-    was.kind == kind && !was.pids.is_empty() && was.pids == pane.process_ids && latest(was.path.clone(), kind).as_deref() == Some(path)
+    was.kind == kind && !was.pids.is_empty() && was.pids == pane.process_ids && was.process.as_deref() == pane_process(pane) && latest(was.path.clone(), kind).as_deref() == Some(path)
 }
 
 /// Finds the log for `terminal`. On a cache miss it resolves every local agent pane in one pass, so two panes never
@@ -164,7 +170,7 @@ fn look(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_
         let k = &p.agent.as_ref().unwrap().kind;
         next.entries.insert(
             p.terminal_id.clone(),
-            Entry { kind: k.clone(), cwd: p.cwd.clone(), pids: p.process_ids.clone(), path: latest(absolute(found.get(&p.id), k), k), checked: now_s },
+            Entry { kind: k.clone(), cwd: p.cwd.clone(), pids: p.process_ids.clone(), process: pane_process(p).map(String::from), path: latest(absolute(found.get(&p.id), k), k), checked: now_s },
         );
     }
     write_cache(&next, cache_path);

@@ -174,7 +174,7 @@ fn feed_splices() {
     let now_s = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
     let log = dir.path().join("sess-1.jsonl");
     std::fs::write(&log, t.join("\n") + "\n").unwrap();
-    let e = locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![42, 41], path: Some(log.to_string_lossy().into()), checked: now_s - 5.0 };
+    let e = locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![42, 41], process: None, path: Some(log.to_string_lossy().into()), checked: now_s - 5.0 };
     assert!(locate::fresh(Some(&e), &pane, "claude", now_s), "locate: fresh entry used");
     let mut other = e.clone();
     other.pids = vec![43, 41];
@@ -222,7 +222,7 @@ fn cache_times_read_back_exactly() {
     // A value CI read back one ulp off (as ...617) before serde_json's float_roundtrip.
     let dir = tempfile::tempdir().unwrap();
     let mut cache = locate::Cache::default();
-    cache.entries.insert("t7".into(), locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![1], path: None, checked: 1793722804.7949615 });
+    cache.entries.insert("t7".into(), locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![1], process: None, path: None, checked: 1793722804.7949615 });
     let cf = dir.path().join("cache.json");
     locate::write_cache(&cache, Some(&cf));
     assert_eq!(locate::read_cache(Some(&cf)), cache);
