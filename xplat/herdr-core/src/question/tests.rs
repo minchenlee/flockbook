@@ -2721,3 +2721,100 @@ fn claude_review_wrapped_bar_dot_in_answer_red() {
         "P1 multi-q: exact '│●B' + barred long Q2 must still match"
     );
 }
+
+#[test]
+fn claude_review_vertical_bar_fail_closed_red() {
+    use super::claude_exact::{review_collision, CollisionKind};
+
+    let rv = |tabs: &str, body: &str| {
+        sw(&format!(
+            "
+    ────────────────────────────────────────────────────────────────
+    ←  {tabs}  ✔ Submit  →
+
+    Review your answers
+
+    {body}
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "
+        ))
+    };
+
+    // Codex Round 2 P1: wrapped answer line has "│ ● <full long question>" followed by "→ ...".
+    // Must fail closed BEFORE any key (review_collision == Labels) and claude_review_exact == false.
+    let q_long = "This is a deliberately long question used to test quote bar stripping boundary on review screens";
+    let opt0_r2 = format!("Wrap,\n │ ● {q_long}\n → Tail");
+    let opt1_r2 = format!("Wrap,\n ● {q_long}\n → Tail");
+    let q_r2 = hooked(
+        "toolu_r2_p1",
+        json!([{
+            "question": q_long,
+            "header": "R2",
+            "multiSelect": true,
+            "options": [
+                {"label": opt0_r2, "description": ""},
+                {"label": opt1_r2, "description": ""}
+            ]
+        }]),
+    );
+    let review_r2 = rv(
+        "☒ R2",
+        &format!(" │ ● {q_long}\n       → Wrap,\n     │ ● {q_long}\n     → Tail"),
+    );
+    assert_eq!(review_collision(&q_r2, &[]), Some(CollisionKind::Labels), "R2: '│' in option label refused before any key");
+    assert!(!claude_review_exact(&q_r2, &[ans(&[1])], &review_r2), "R2: wrong option [1] must not match");
+    assert!(!claude_review_exact(&q_r2, &[ans(&[0])], &review_r2), "R2: option [0] with '│' must also fail closed");
+
+    // Round 1 example ("│●B" vs "●B") must also be refused before any key (fail closed).
+    let q_r1 = hooked(
+        "toolu_r1_fail_closed",
+        json!([{
+            "question": "Pick options?",
+            "header": "Pick",
+            "multiSelect": true,
+            "options": [
+                {"label": "Long first pick that wraps onto the next line", "description": ""},
+                {"label": "│●B", "description": ""},
+                {"label": "●B", "description": ""}
+            ]
+        }]),
+    );
+    let review_r1 = rv(
+        "☒ Pick",
+        " ● Pick options?\n       → Long first pick that wraps onto the next line,\n       │●B",
+    );
+    assert_eq!(review_collision(&q_r1, &[]), Some(CollisionKind::Labels), "R1: '│' in option label refused before any key");
+    assert!(!claude_review_exact(&q_r1, &[ans(&[0, 1])], &review_r1), "R1: '│' label fails closed");
+    assert!(!claude_review_exact(&q_r1, &[ans(&[0, 2])], &review_r1), "R1: wrong option rejected");
+
+    // Question text containing '│' -> Labels collision; Other containing '│' -> Own collision.
+    let q_text_bar = hooked(
+        "toolu_qbar",
+        json!([
+            {"question": "│ Q1?", "header": "One", "multiSelect": false, "options": [{"label":"A","description":""},{"label":"B","description":""}]},
+            {"question": "Q2?", "header": "Two", "multiSelect": false, "options": [{"label":"C","description":""},{"label":"D","description":""}]}
+        ]),
+    );
+    assert_eq!(review_collision(&q_text_bar, &[]), Some(CollisionKind::Labels), "question text with '│' refused before any key");
+    let clean_q = hooked(
+        "toolu_ownbar",
+        json!([
+            {"question": "Q1?", "header": "One", "multiSelect": false, "options": [{"label":"A","description":""},{"label":"B","description":""}]},
+            {"question": "Q2?", "header": "Two", "multiSelect": false, "options": [{"label":"C","description":""},{"label":"D","description":""}]}
+        ]),
+    );
+    assert_eq!(
+        review_collision(&clean_q, &[other(&[], "bad │ own"), ans(&[0])]),
+        Some(CollisionKind::Own),
+        "Other text with '│' refused before any key"
+    );
+    let own_bar_review = rv("☒ One  ☒ Two", " ● Q1?\n       → bad │ own\n     ● Q2?\n       → C");
+    assert!(
+        !claude_review_exact(&clean_q, &[other(&[], "bad │ own"), ans(&[0])], &own_bar_review),
+        "Other text with '│' fails closed in claude_review_exact"
+    );
+}
