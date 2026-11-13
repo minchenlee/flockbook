@@ -12,23 +12,26 @@ const YES_TTL: Duration = Duration::from_secs(10);
 const NO_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct YesKey {
-    fg_pid: i32,
-    created: i64,
-    kind: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NoKey {
+struct CacheKey {
     fg_pid: i32,
     created: i64,
     kind: String,
     status_ms: i64,
 }
 
+impl CacheKey {
+    fn of(ask: &WrapperAsk) -> Self {
+        CacheKey { fg_pid: ask.fg_pid, created: ask.created, kind: ask.kind.clone(), status_ms: ask.status_ms }
+    }
+
+    fn matches(&self, ask: &WrapperAsk) -> bool {
+        self.fg_pid == ask.fg_pid && self.created == ask.created && self.kind == ask.kind && self.status_ms == ask.status_ms
+    }
+}
+
 enum CacheEntry {
-    Yes { key: YesKey, agent_pid: i32, at: Instant },
-    No { key: NoKey, at: Instant },
+    Yes { key: CacheKey, agent_pid: i32, at: Instant },
+    No { key: CacheKey, at: Instant },
 }
 
 /// Checks whether a wrapper terminal's foreground tree runs the expected agent (`W5`, `W6`), caching results per
@@ -63,21 +66,11 @@ impl TreeCheck {
             let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
             match entries.get(&ask.address) {
                 Some(CacheEntry::Yes { key, agent_pid, at })
-                    if key.fg_pid == ask.fg_pid
-                        && key.created == ask.created
-                        && key.kind == ask.kind
-                        && now.saturating_duration_since(*at) <= YES_TTL
-                        && (self.alive)(*agent_pid) =>
+                    if key.matches(ask) && now.saturating_duration_since(*at) <= YES_TTL && (self.alive)(*agent_pid) =>
                 {
                     Some(Some(*agent_pid))
                 }
-                Some(CacheEntry::No { key, at })
-                    if key.fg_pid == ask.fg_pid
-                        && key.created == ask.created
-                        && key.kind == ask.kind
-                        && key.status_ms == ask.status_ms
-                        && now.saturating_duration_since(*at) <= NO_TTL =>
-                {
+                Some(CacheEntry::No { key, at }) if key.matches(ask) && now.saturating_duration_since(*at) <= NO_TTL => {
                     Some(None)
                 }
                 _ => None,
@@ -95,22 +88,9 @@ impl TreeCheck {
 
         let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(agent_pid) = found {
-            entries.insert(
-                ask.address.clone(),
-                CacheEntry::Yes {
-                    key: YesKey { fg_pid: ask.fg_pid, created: ask.created, kind: ask.kind.clone() },
-                    agent_pid,
-                    at: now,
-                },
-            );
+            entries.insert(ask.address.clone(), CacheEntry::Yes { key: CacheKey::of(ask), agent_pid, at: now });
         } else if !procs.is_empty() {
-            entries.insert(
-                ask.address.clone(),
-                CacheEntry::No {
-                    key: NoKey { fg_pid: ask.fg_pid, created: ask.created, kind: ask.kind.clone(), status_ms: ask.status_ms },
-                    at: now,
-                },
-            );
+            entries.insert(ask.address.clone(), CacheEntry::No { key: CacheKey::of(ask), at: now });
         } else {
             entries.remove(&ask.address);
         }
