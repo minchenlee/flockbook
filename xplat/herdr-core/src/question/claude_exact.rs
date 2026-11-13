@@ -93,8 +93,101 @@ impl Run {
 
 re!(row_re, r"^(❯ |  )(\d+)\.(?: |$)");
 
+/// Terminal display width of `s`: combining/control scalars = 0, East Asian Wide/Fullwidth/emoji = 2, others = 1.
+pub(crate) fn display_width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+fn char_width(c: char) -> usize {
+    let u = c as u32;
+    if is_control(c)
+        || matches!(
+            u,
+            0x0300..=0x036F
+                | 0x1160..=0x11FF
+                | 0x1AB0..=0x1AFF
+                | 0x1DC0..=0x1DFF
+                | 0x20D0..=0x20FF
+                | 0xFE00..=0xFE0F
+                | 0xFE20..=0xFE2F
+                | 0xE0100..=0xE01EF
+        )
+    {
+        return 0;
+    }
+    if matches!(
+        u,
+        0x1100..=0x115F
+            | 0x231A..=0x231B
+            | 0x2329..=0x232A
+            | 0x23E9..=0x23EC
+            | 0x23F0
+            | 0x23F3
+            | 0x25FD..=0x25FE
+            | 0x2614..=0x2615
+            | 0x2648..=0x2653
+            | 0x267F
+            | 0x2693
+            | 0x26A1
+            | 0x26AA..=0x26AB
+            | 0x26BD..=0x26BE
+            | 0x26C4..=0x26C5
+            | 0x26CE
+            | 0x26D4
+            | 0x26EA
+            | 0x26F2..=0x26F3
+            | 0x26F5
+            | 0x26FA
+            | 0x26FD
+            | 0x2705
+            | 0x270A..=0x270B
+            | 0x2728
+            | 0x274C
+            | 0x274E
+            | 0x2753..=0x2755
+            | 0x2757
+            | 0x2795..=0x2797
+            | 0x27B0
+            | 0x27BF
+            | 0x2B1B..=0x2B1C
+            | 0x2B50
+            | 0x2B55
+            | 0x2E80..=0x303E
+            | 0x3041..=0x3247
+            | 0x3250..=0x4DBF
+            | 0x4E00..=0xA4C6
+            | 0xA960..=0xA97C
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE10..=0xFE19
+            | 0xFE30..=0xFE6B
+            | 0xFF01..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x16FE0..=0x16FE4
+            | 0x16FF0..=0x16FF1
+            | 0x17000..=0x18CD5
+            | 0x18D00..=0x18D08
+            | 0x1AFF0..=0x1B2FB
+            | 0x1F004
+            | 0x1F0CF
+            | 0x1F18E
+            | 0x1F191..=0x1F19A
+            | 0x1F1E6..=0x1F1FF
+            | 0x1F200..=0x1F2FF
+            | 0x1F300..=0x1F64F
+            | 0x1F680..=0x1F6FF
+            | 0x1F900..=0x1F9FF
+            | 0x1FA70..=0x1FAFF
+            | 0x20000..=0x2FFFD
+            | 0x30000..=0x3FFFD
+    ) {
+        return 2;
+    }
+    1
+}
+
 /// The shortest question text Claude Code 2.1.322 draws behind a block-quote bar (it starts at about 90
-/// characters). A shorter text that starts with "│" is that text itself.
+/// terminal columns). A shorter text that starts with "│" is that text itself.
 pub(crate) const QUOTE_MIN: usize = 80;
 
 /// Claude Code 2.1.322 draws a long question (about 90 characters or more) as a block quote: "│ " in front of
@@ -194,7 +287,7 @@ pub fn claude_exact(
     // A short question is never quoted: its lines are checked as drawn. A long one without the bar. A long text
     // that itself starts with "│" is refused: "│ text" on screen is also `text` behind the bar, so which
     // question is shown cannot be told.
-    if gcount(&want.text) >= QUOTE_MIN {
+    if display_width(&want.text) >= QUOTE_MIN {
         if trim_ws(&want.text).starts_with('│') {
             return false;
         }
@@ -315,15 +408,557 @@ pub fn review_parts(question: &Question, a: &QuestionAnswer) -> Vec<Vec<String>>
     out
 }
 
-/// Claude's review screen of the hooked request `q` with the hub's `answers`, exactly: the tab bar, "Review your
-/// answers", per question "● text" and "→ answer", "Ready to submit your answers?", then "1. Submit answers" and
-/// "2. Cancel" with one focus mark. The last key ("1") goes only here.
+pub const MAX_REVIEW_OPTIONS: usize = 8;
+
+/// Why `review_collision` blocked a pre-flight question card / answer set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollisionKind {
+    Labels,
+    Picks,
+    Own,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Form {
+    Quoted,
+    Unquoted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Cand {
+    picks: Vec<usize>,
+    other: Option<String>,
+}
+
+fn has_marks(s: &str) -> bool {
+    s.contains('●') || s.contains('→')
+}
+
+fn push_unique(out: &mut Vec<String>, s: String) {
+    if !out.contains(&s) {
+        out.push(s);
+    }
+}
+
+fn quote_if_comma(s: String, multi: bool, form: Form) -> String {
+    if multi && form == Form::Quoted && s.contains(',') {
+        format!("\"{s}\"")
+    } else {
+        s
+    }
+}
+
+fn cand_parts(question: &Question, cand: &Cand, form: Form) -> Option<Vec<Vec<String>>> {
+    let mut parts = Vec::with_capacity(cand.picks.len() + usize::from(cand.other.is_some()));
+    for &p in &cand.picks {
+        let opt = question.options.get(p)?;
+        let mut alts = vec![];
+        for s in shown_labels(opt) {
+            if s.is_empty() || s.contains('"') {
+                return None;
+            }
+            push_unique(&mut alts, quote_if_comma(s, question.multi_select, form));
+        }
+        parts.push(alts);
+    }
+    if let Some(o) = &cand.other {
+        if o.is_empty() || o.contains('"') {
+            return None;
+        }
+        let mut alts = vec![o.clone()];
+        if question.multi_select && form == Form::Quoted && o.contains(',') {
+            push_unique(&mut alts, format!("\"{o}\""));
+        }
+        parts.push(alts);
+    }
+    Some(parts)
+}
+
+fn cand_variants(question: &Question, other_bare: Option<&str>) -> Vec<Cand> {
+    let n = question.options.len();
+    let mut out = vec![];
+    if question.multi_select {
+        for mask in 1usize..(1usize << n) {
+            let picks: Vec<usize> = (0..n).filter(|i| (mask & (1 << i)) != 0).collect();
+            out.push(Cand { picks, other: None });
+        }
+        if let Some(o) = other_bare {
+            for mask in 0usize..(1usize << n) {
+                let picks: Vec<usize> = (0..n).filter(|i| (mask & (1 << i)) != 0).collect();
+                out.push(Cand { picks, other: Some(o.to_string()) });
+            }
+        }
+    } else {
+        for p in 0..n {
+            out.push(Cand { picks: vec![p], other: None });
+        }
+        if let Some(o) = other_bare {
+            out.push(Cand { picks: vec![], other: Some(o.to_string()) });
+        }
+    }
+    out
+}
+
+fn canonical_cand(a: &QuestionAnswer) -> Option<Cand> {
+    let mut picks = a.picks.clone();
+    picks.sort_unstable();
+    picks.dedup();
+    let other = other_text(a).map(|s| bare(&s));
+    if picks.is_empty() && other.is_none() {
+        return None;
+    }
+    Some(Cand { picks, other })
+}
+
+fn validate_question_caps(q: &Question) -> bool {
+    if q.options.len() > MAX_REVIEW_OPTIONS || bare(&q.text).is_empty() {
+        return false;
+    }
+    q.options.iter().all(|o| {
+        let labels = shown_labels(o);
+        !labels.is_empty() && labels.iter().all(|s| !s.is_empty() && !s.contains('"'))
+    })
+}
+
+fn validate_answer_caps(q: &Question, a: &QuestionAnswer) -> Result<(), CollisionKind> {
+    if a.picks.iter().any(|&p| p >= q.options.len()) {
+        return Err(CollisionKind::Picks);
+    }
+    let has_other = other_text(a);
+    if !q.multi_select && a.picks.len() + usize::from(has_other.is_some()) > 1 {
+        return Err(CollisionKind::Picks);
+    }
+    if let Some(o) = has_other {
+        let b = bare(&o);
+        if b.is_empty() || b.contains('"') {
+            return Err(CollisionKind::Own);
+        }
+    }
+    Ok(())
+}
+
+/// Match `parts[0] , parts[1] , ...` starting at `tail`, returning all matched byte lengths.
+fn match_parts_at(tail: &str, parts: &[Vec<String>]) -> Vec<usize> {
+    let mut offsets = vec![0usize];
+    for (j, alts) in parts.iter().enumerate() {
+        if j > 0 {
+            let mut next = vec![];
+            for off in offsets {
+                if tail.get(off..).is_some_and(|t| t.starts_with(',')) && !next.contains(&(off + 1)) {
+                    next.push(off + 1);
+                }
+            }
+            offsets = next;
+        }
+        let mut next = vec![];
+        for off in offsets {
+            let Some(rest) = tail.get(off..) else { continue };
+            for alt in alts {
+                if rest.starts_with(alt.as_str()) {
+                    let end = off + alt.len();
+                    if !next.contains(&end) {
+                        next.push(end);
+                    }
+                }
+            }
+        }
+        if next.is_empty() {
+            return vec![];
+        }
+        offsets = next;
+    }
+    offsets
+}
+
+fn to_tokens<'a>(parts: &'a [Vec<String>], comma: &'a [String]) -> Vec<&'a [String]> {
+    let mut t = Vec::with_capacity(parts.len() * 2);
+    for (i, p) in parts.iter().enumerate() {
+        if i > 0 {
+            t.push(comma);
+        }
+        t.push(p.as_slice());
+    }
+    t
+}
+
+/// Exact language intersection `L(p1) ∩ L(p2) != ∅` where items in each list are joined by `","`.
+fn parts_intersect(p1: &[Vec<String>], p2: &[Vec<String>]) -> bool {
+    let comma = [",".to_string()];
+    let t1 = to_tokens(p1, &comma);
+    let t2 = to_tokens(p2, &comma);
+    let mut visited: HashSet<(usize, usize, usize, usize, usize, usize)> = HashSet::new();
+    let mut stack = vec![];
+    for a1 in 0..t1.first().map_or(0, |s| s.len()) {
+        for a2 in 0..t2.first().map_or(0, |s| s.len()) {
+            stack.push((0usize, a1, 0usize, 0usize, a2, 0usize));
+        }
+    }
+    while let Some(st @ (i1, a1, o1, i2, a2, o2)) = stack.pop() {
+        if !visited.insert(st) {
+            continue;
+        }
+        let s1 = t1[i1][a1].as_bytes();
+        let s2 = t2[i2][a2].as_bytes();
+        let rem1 = &s1[o1..];
+        let rem2 = &s2[o2..];
+        let common = rem1.len().min(rem2.len());
+        if rem1[..common] != rem2[..common] {
+            continue;
+        }
+        let done1 = common == rem1.len();
+        let done2 = common == rem2.len();
+        let ni1 = if done1 { i1 + 1 } else { i1 };
+        let ni2 = if done2 { i2 + 1 } else { i2 };
+        if ni1 == t1.len() && ni2 == t2.len() {
+            return true;
+        }
+        if ni1 == t1.len() || ni2 == t2.len() {
+            continue;
+        }
+        let a1_range = if done1 { 0..t1[ni1].len() } else { a1..a1 + 1 };
+        let a2_range = if done2 { 0..t2[ni2].len() } else { a2..a2 + 1 };
+        let no1 = if done1 { 0 } else { o1 + common };
+        let no2 = if done2 { 0 } else { o2 + common };
+        for na1 in a1_range {
+            for na2 in a2_range.clone() {
+                stack.push((ni1, na1, no1, ni2, na2, no2));
+            }
+        }
+    }
+    false
+}
+
+/// Run line-start-anchored DP over `body_str` for one `Form`. Returns `(chosen_matched, other_matched)`.
+fn dp_form(
+    q: &QuestionRequest,
+    body_str: &str,
+    body_starts: &HashSet<usize>,
+    cands_per_q: &[Vec<Cand>],
+    chosen_idx: &[usize],
+    form: Form,
+) -> (bool, bool) {
+    let mut chosen_pos: HashSet<usize> = HashSet::from([0]);
+    let mut other_pos: HashSet<usize> = HashSet::new();
+
+    for (k, cands) in cands_per_q.iter().enumerate() {
+        let mut next_chosen: HashSet<usize> = HashSet::new();
+        let mut next_other: HashSet<usize> = HashSet::new();
+        let qtext = bare(&q.questions[k].text);
+        let mut positions: Vec<usize> = chosen_pos.iter().chain(other_pos.iter()).copied().collect();
+        positions.sort_unstable();
+        positions.dedup();
+
+        for pos in positions {
+            let from_chosen = chosen_pos.contains(&pos);
+            let from_other = other_pos.contains(&pos);
+            if !body_starts.contains(&pos) || !body_str[pos..].starts_with('●') {
+                continue;
+            }
+            let after_dot = pos + '●'.len_utf8();
+            if !body_str[after_dot..].starts_with(&qtext) {
+                continue;
+            }
+            let arrow_pos = after_dot + qtext.len();
+            if !body_starts.contains(&arrow_pos) || !body_str[arrow_pos..].starts_with('→') {
+                continue;
+            }
+            let ans_start = arrow_pos + '→'.len_utf8();
+            let tail = &body_str[ans_start..];
+            for (ci, cand) in cands.iter().enumerate() {
+                let Some(parts) = cand_parts(&q.questions[k], cand, form) else { continue };
+                for clen in match_parts_at(tail, &parts) {
+                    let end_pos = ans_start + clen;
+                    if ci == chosen_idx[k] && from_chosen {
+                        next_chosen.insert(end_pos);
+                    }
+                    if ci != chosen_idx[k] || from_other {
+                        next_other.insert(end_pos);
+                    }
+                }
+            }
+        }
+        chosen_pos = next_chosen;
+        other_pos = next_other;
+        if chosen_pos.is_empty() && other_pos.is_empty() {
+            return (false, false);
+        }
+    }
+    (chosen_pos.contains(&body_str.len()), other_pos.contains(&body_str.len()))
+}
+
+fn cands_for_question(q: &Question, a: Option<&QuestionAnswer>) -> Option<(Vec<Cand>, Option<usize>)> {
+    let chosen = a.and_then(canonical_cand);
+    let other_bare = chosen.as_ref().and_then(|c| c.other.as_deref());
+    let cands = cand_variants(q, other_bare);
+    let chosen_idx = match &chosen {
+        None => None,
+        Some(c) => Some(cands.iter().position(|x| x == c)?),
+    };
+    Some((cands, chosen_idx))
+}
+
+fn single_question_collides(q: &Question, a: Option<&QuestionAnswer>) -> Option<CollisionKind> {
+    let (cands, chosen_idx) = cands_for_question(q, a)?;
+    match chosen_idx {
+        None => {
+            for (i, c1) in cands.iter().enumerate() {
+                let p1 = cand_parts(q, c1, Form::Quoted)?;
+                for (j, c2) in cands.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    let p2q = cand_parts(q, c2, Form::Quoted)?;
+                    let p2u = cand_parts(q, c2, Form::Unquoted)?;
+                    if parts_intersect(&p1, &p2q) || parts_intersect(&p1, &p2u) {
+                        return Some(CollisionKind::Labels);
+                    }
+                }
+            }
+            None
+        }
+        Some(ci) => {
+            let c1 = &cands[ci];
+            let p1 = cand_parts(q, c1, Form::Quoted)?;
+            let mut collides = false;
+            for (j, c2) in cands.iter().enumerate() {
+                if j == ci {
+                    continue;
+                }
+                let p2q = cand_parts(q, c2, Form::Quoted)?;
+                let p2u = cand_parts(q, c2, Form::Unquoted)?;
+                if parts_intersect(&p1, &p2q) || parts_intersect(&p1, &p2u) {
+                    collides = true;
+                    break;
+                }
+            }
+            if !collides {
+                return None;
+            }
+            if c1.other.is_none() {
+                return Some(CollisionKind::Picks);
+            }
+            if c1.picks.is_empty() {
+                return Some(CollisionKind::Own);
+            }
+            // Multi-select with both picks and Other: classify as Picks if picks alone already collide.
+            let picks_only = Cand { picks: c1.picks.clone(), other: None };
+            if let Some(p_only_q) = cand_parts(q, &picks_only, Form::Quoted) {
+                for c2 in cand_variants(q, None) {
+                    if c2.picks == c1.picks {
+                        continue;
+                    }
+                    if let (Some(p2q), Some(p2u)) = (cand_parts(q, &c2, Form::Quoted), cand_parts(q, &c2, Form::Unquoted)) {
+                        if parts_intersect(&p_only_q, &p2q) || parts_intersect(&p_only_q, &p2u) {
+                            return Some(CollisionKind::Picks);
+                        }
+                    }
+                }
+            }
+            Some(CollisionKind::Own)
+        }
+    }
+}
+
+fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Vec<String> {
+    let mut item_alts: Vec<Vec<String>> = vec![];
+    let mut picks = a.picks.clone();
+    picks.sort_unstable();
+    picks.dedup();
+    for p in picks {
+        let Some(opt) = q.options.get(p) else { return vec![] };
+        let alts = if opt.recommended {
+            RECOMMENDED_SUFFIXES
+                .iter()
+                .map(|suf| {
+                    let s = format!("{}{}", opt.label, suf);
+                    if q.multi_select && s.contains(',') {
+                        format!("\"{s}\"")
+                    } else {
+                        s
+                    }
+                })
+                .collect()
+        } else if q.multi_select && opt.label.contains(',') {
+            vec![format!("\"{}\"", opt.label)]
+        } else {
+            vec![opt.label.clone()]
+        };
+        item_alts.push(alts);
+    }
+    if let Some(o) = other_text(a) {
+        let mut alts = vec![o.clone()];
+        if q.multi_select && o.contains(',') {
+            push_unique(&mut alts, format!("\"{o}\""));
+        }
+        item_alts.push(alts);
+    }
+    let mut acc = vec![String::new()];
+    for (j, alts) in item_alts.iter().enumerate() {
+        let mut next = vec![];
+        for cur in &acc {
+            for alt in alts {
+                let mut s = cur.clone();
+                if j > 0 {
+                    s.push(',');
+                }
+                s.push_str(alt);
+                if !next.contains(&s) {
+                    next.push(s);
+                }
+                if next.len() >= cap {
+                    return next;
+                }
+            }
+        }
+        acc = next;
+    }
+    acc
+}
+
+fn push_rendered_lines(raw: &str, out: &mut String, starts: &mut HashSet<usize>) {
+    for l in raw.split('\n') {
+        let b = bare(l);
+        if !b.is_empty() {
+            starts.insert(out.len());
+            out.push_str(&b);
+        }
+    }
+}
+
+fn dp_cross_collides(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<CollisionKind> {
+    let mut cands_per_q = vec![];
+    let mut chosen_idx = vec![];
+    let mut per_q_bodies = vec![];
+    for (k, qq) in q.questions.iter().enumerate() {
+        let (cands, Some(ci)) = cands_for_question(qq, Some(&answers[k]))? else { return Some(CollisionKind::Picks) };
+        cands_per_q.push(cands);
+        chosen_idx.push(ci);
+        let bodies = raw_body_variants_for(qq, &answers[k], 64);
+        if bodies.is_empty() {
+            return Some(CollisionKind::Picks);
+        }
+        per_q_bodies.push(bodies);
+    }
+
+    let mut tuples: Vec<Vec<usize>> = vec![vec![]];
+    for bs in &per_q_bodies {
+        let mut next = vec![];
+        for t in &tuples {
+            for i in 0..bs.len() {
+                let mut nt = t.clone();
+                nt.push(i);
+                next.push(nt);
+                if next.len() >= 256 {
+                    break;
+                }
+            }
+            if next.len() >= 256 {
+                break;
+            }
+        }
+        tuples = next;
+    }
+
+    for tuple in tuples {
+        let mut body_str = String::new();
+        let mut body_starts = HashSet::new();
+        for (k, qq) in q.questions.iter().enumerate() {
+            push_rendered_lines(&format!("● {}", qq.text), &mut body_str, &mut body_starts);
+            push_rendered_lines(&format!("→ {}", per_q_bodies[k][tuple[k]]), &mut body_str, &mut body_starts);
+        }
+        let (_, other_q) = dp_form(q, &body_str, &body_starts, &cands_per_q, &chosen_idx, Form::Quoted);
+        let (_, other_u) = dp_form(q, &body_str, &body_starts, &cands_per_q, &chosen_idx, Form::Unquoted);
+        if other_q || other_u {
+            let own = answers.iter().filter_map(other_text).any(|o| has_marks(&o))
+                || q.questions.iter().zip(answers).any(|(qq, a)| single_question_collides(qq, Some(a)) == Some(CollisionKind::Own));
+            return Some(if own { CollisionKind::Own } else { CollisionKind::Picks });
+        }
+    }
+    None
+}
+
+/// Structured pre-flight collision check over both `Form::Quoted` and `Form::Unquoted`, supporting empty,
+/// partial, and complete `answers`. Returns `None` iff every allowed body variant uniquely identifies the choice.
+pub fn review_collision(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<CollisionKind> {
+    if !(q.agent == "claude"
+        && !q.questions.is_empty()
+        && q.delivery == Delivery::Picker
+        && (q.questions.len() > 1 || q.questions.last().is_some_and(|x| x.multi_select)))
+    {
+        return None;
+    }
+    for qq in &q.questions {
+        if !validate_question_caps(qq) {
+            return Some(CollisionKind::Labels);
+        }
+    }
+    for (k, a) in answers.iter().enumerate() {
+        let Some(qq) = q.questions.get(k) else { break };
+        if let Err(kind) = validate_answer_caps(qq, a) {
+            return Some(kind);
+        }
+    }
+
+    let is_answered = |k: usize| answers.get(k).is_some_and(|a| !a.picks.is_empty() || other_text(a).is_some());
+    let any_unanswered = (0..q.questions.len()).any(|k| !is_answered(k));
+    let has_cross_marks = q.questions.len() > 1
+        && q.questions.iter().enumerate().any(|(k, qq)| {
+            has_marks(&qq.text)
+                || qq.options.iter().any(|o| has_marks(&o.label))
+                || answers.get(k).and_then(other_text).is_some_and(|o| has_marks(&o))
+        });
+
+    if any_unanswered {
+        for (k, qq) in q.questions.iter().enumerate() {
+            if is_answered(k) {
+                if let Some(kind) = single_question_collides(qq, Some(&answers[k])) {
+                    return Some(kind);
+                }
+            }
+        }
+        if has_cross_marks {
+            let own_marks = answers.iter().filter_map(other_text).any(|o| has_marks(&o));
+            let label_marks = q.questions.iter().any(|qq| has_marks(&qq.text) || qq.options.iter().any(|o| has_marks(&o.label)));
+            if label_marks {
+                return Some(CollisionKind::Labels);
+            }
+            if own_marks {
+                return Some(CollisionKind::Own);
+            }
+        }
+        for (k, qq) in q.questions.iter().enumerate() {
+            if !is_answered(k) {
+                if let Some(kind) = single_question_collides(qq, None) {
+                    return Some(kind);
+                }
+            }
+        }
+        return None;
+    }
+
+    if !has_cross_marks {
+        for (k, qq) in q.questions.iter().enumerate() {
+            if let Some(kind) = single_question_collides(qq, Some(&answers[k])) {
+                return Some(kind);
+            }
+        }
+        return None;
+    }
+
+    dp_cross_collides(q, answers)
+}
+
+/// Claude's review screen of `q` with `answers`, enforcing line-start anchors and unique joint solution
+/// `S_valid = Solutions(Quoted) ∪ Solutions(Unquoted) == {A_chosen}`.
 pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], screen: &str) -> bool {
     if !(q.agent == "claude"
-        && !q.tool_use_id.starts_with("screen-")
+        && !q.questions.is_empty()
         && answers.len() == q.questions.len()
-        && !review_ambiguous(q, answers)
-        && q.questions.iter().zip(answers).all(|(k, a)| a.picks.iter().all(|&p| p < k.options.len())))
+        && q.questions.iter().all(validate_question_caps)
+        && q.questions
+            .iter()
+            .zip(answers)
+            .all(|(k, a)| (!a.picks.is_empty() || other_text(a).is_some()) && validate_answer_caps(k, a).is_ok()))
     {
         return false;
     }
@@ -333,92 +968,77 @@ pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], scre
     if !claude_bar(q, lines[head]) {
         return false;
     }
-    // Whitespace dropped, with where each line starts: "●", "→", "Ready…" and the two rows must each start a
-    // line (a mark inside a label is text).
-    let mut chars: Vec<String> = vec![];
-    let mut starts: HashSet<usize> = HashSet::new();
-    // 2.1.322 draws a long question's "● text" lines with "│ " in front, as in the picker (drop_quote_bar): the
-    // bar is drawing. Only in a question's text: from a "│ ●" line to its "→" line. The "→" answer lines (a label
-    // can start with "│") and the rows below "Ready to submit your answers?" are checked as they are.
-    let ready = lines.iter().rposition(|l| trim_ws(l) == "Ready to submit your answers?").unwrap_or(lines.len());
+    let Some(ready) = lines.iter().rposition(|l| trim_ws(l) == "Ready to submit your answers?") else { return false };
+    if ready <= title {
+        return false;
+    }
+
+    // Preserve the `barred` state machine strictly: strip '│' ONLY between "│ ●" and "→", never on "→" or wrapped answers.
+    let mut body_str = String::new();
+    let mut body_starts: HashSet<usize> = HashSet::new();
     let mut barred = false;
-    for (i, l) in lines.iter().enumerate().skip(title + 1) {
+    for l in &lines[title + 1..ready] {
         let t = trim_ws(l);
         let mut l: &str = l;
-        if i < ready {
-            if let Some(rest) = t.strip_prefix('│') {
-                if trim_ws(rest).starts_with('●') {
-                    barred = true;
-                }
-                if barred {
-                    l = rest;
-                }
-            } else if t.starts_with('→') || t.starts_with('●') {
-                barred = false;
+        if let Some(rest) = t.strip_prefix('│') {
+            if trim_ws(rest).starts_with('●') {
+                barred = true;
             }
-            if trim_ws(l).starts_with('→') {
-                barred = false;
+            if barred {
+                l = rest;
             }
+        } else if t.starts_with('→') || t.starts_with('●') {
+            barred = false;
+        }
+        if trim_ws(l).starts_with('→') {
+            barred = false;
         }
         let b = bare(l);
         if !b.is_empty() {
-            starts.insert(chars.len());
-            chars.extend(b.graphemes(true).map(String::from));
+            body_starts.insert(body_str.len());
+            body_str.push_str(&b);
         }
     }
-    let mut run = Run { chars, pos: 0 };
-    let line = |run: &mut Run, lit: &str| starts.contains(&run.pos) && run.take(lit);
+
+    let mut fchars: Vec<String> = vec![];
+    let mut fstarts: HashSet<usize> = HashSet::new();
+    for l in &lines[ready..] {
+        let b = bare(l);
+        if !b.is_empty() {
+            fstarts.insert(fchars.len());
+            fchars.extend(b.graphemes(true).map(String::from));
+        }
+    }
+
+    let mut cands_per_q = vec![];
+    let mut chosen_idx = vec![];
     for (k, a) in q.questions.iter().zip(answers) {
-        if !(line(&mut run, "●") && run.take(&bare(&k.text)) && line(&mut run, "→")) {
-            return false;
-        }
-        for (j, alts) in review_parts(k, a).iter().enumerate() {
-            if j > 0 && !run.take(",") {
-                return false;
-            }
-            let fits: Vec<&String> = alts.iter().filter(|x| run.has(x)).collect();
-            if !(fits.len() == 1 && run.take(fits[0])) {
-                return false;
-            }
-        }
+        let Some((cands, Some(ci))) = cands_for_question(k, Some(a)) else { return false };
+        cands_per_q.push(cands);
+        chosen_idx.push(ci);
     }
-    if !line(&mut run, "Readytosubmityouranswers?") {
+
+    let (chosen_q, other_q) = dp_form(q, &body_str, &body_starts, &cands_per_q, &chosen_idx, Form::Quoted);
+    let (chosen_u, other_u) = dp_form(q, &body_str, &body_starts, &cands_per_q, &chosen_idx, Form::Unquoted);
+    if !((chosen_q || chosen_u) && !other_q && !other_u) {
+        return false;
+    }
+
+    let mut run = Run { chars: fchars, pos: 0 };
+    if !(fstarts.contains(&run.pos) && run.take("Readytosubmityouranswers?")) {
         return false;
     }
     let mut marks = 0;
-    let first = starts.contains(&run.pos);
+    let first = fstarts.contains(&run.pos);
     if run.take("❯") {
         marks += 1;
     }
     if !(first && run.take("1.Submitanswers")) {
         return false;
     }
-    let second = starts.contains(&run.pos);
+    let second = fstarts.contains(&run.pos);
     if run.take("❯") {
         marks += 1;
     }
     second && run.take("2.Cancel") && run.pos == run.chars.len() && marks == 1
-}
-
-/// The review screen cannot prove the hub's answers: a shown label with a comma or a review mark (● →), two
-/// labels alike once whitespace is dropped, a question text with a review mark, or Other text with a comma, a
-/// review mark or alike a label. Then two answer sets look the same there, so the last key would go blind; the
-/// answer is refused before any key. The comma counts only in a multi-choice question: a single-choice one's
-/// review line shows one answer (a label or the Other text), never picks joined by commas.
-pub fn review_ambiguous(q: &QuestionRequest, answers: &[QuestionAnswer]) -> bool {
-    let marks = |s: &str| s.contains('●') || s.contains('→');
-    for (k, question) in q.questions.iter().enumerate() {
-        let comma = |s: &str| question.multi_select && s.contains(',');
-        let all: Vec<String> = question.options.iter().flat_map(|o| shown_labels(o).into_iter().collect::<BTreeSet<_>>()).collect();
-        let unique: HashSet<&String> = all.iter().collect();
-        if marks(&question.text) || all.iter().any(|x| comma(x) || marks(x)) || unique.len() != all.len() {
-            return true;
-        }
-        if let Some(o) = answers.get(k).and_then(other_text).map(|o| bare(&o)) {
-            if comma(&o) || marks(&o) || all.contains(&o) {
-                return true;
-            }
-        }
-    }
-    false
 }

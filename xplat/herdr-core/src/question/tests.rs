@@ -1227,19 +1227,19 @@ fn claude_hook_review1() {
     assert!(!ex(&plain, 0, &good.replace("  2. DELETE", "   2. DELETE"), None, FieldFocus::Auto, None), "r1 P1: a row number outside the row column -> no match");
     assert!(!ex(&plain, 0, &good.replace("     k\n", "     k\n  7. x\n"), None, FieldFocus::Any, None), "r1 P1: a row-like line that is not a row -> no match");
     let comma = req(json!({"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A, B","description":""},{"label":"A","description":""},{"label":"B","description":""}]}));
-    assert!(review_ambiguous(&comma, &[ans(&[0])]), "r1 P2: a label with a comma -> the review cannot prove the picks");
+    assert_eq!(review_collision(&comma, &[]), Some(CollisionKind::Labels), "r1 P2: comma label with split siblings -> blocked");
+    assert_eq!(review_collision(&comma, &[ans(&[0])]), None, "r1 P2: quoted comma pick alone is unique");
+    assert_eq!(review_collision(&comma, &[ans(&[1, 2])]), Some(CollisionKind::Picks), "r1 P2: [A, B] with 'A, B' sibling -> blocked");
     let spaces = req(json!({"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]}));
-    assert!(review_ambiguous(&spaces, &[ans(&[0])]), "r1 P2: two labels alike without spaces -> ambiguous");
+    assert_eq!(review_collision(&spaces, &[ans(&[0])]), Some(CollisionKind::Picks), "r1 P2: two labels alike without spaces -> ambiguous");
     let clean = req(json!({"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A","description":""},{"label":"B","description":""}]}));
-    assert!(
-        review_ambiguous(&clean, &[other(&[0], "A")]) && review_ambiguous(&clean, &[other(&[], "x, y")]),
-        "r1 P2: Other text equal to a label, or with a comma -> ambiguous"
-    );
-    assert!(!review_ambiguous(&clean, &[other(&[0, 1], "olive")]), "r1 P2: distinct labels, no commas -> fine");
+    assert_eq!(review_collision(&clean, &[other(&[], "A")]), Some(CollisionKind::Own), "r1 P2: Other equal to label");
+    assert_eq!(review_collision(&clean, &[other(&[0], "B")]), Some(CollisionKind::Own), "r1 P2: pick + Other equal to sibling picks");
+    assert_eq!(review_collision(&clean, &[other(&[0, 1], "olive")]), None, "r1 P2: distinct labels -> fine");
     let agent = tui_agent("claude", Some("s"));
     let sim = Sim::new(vec![simq("H", "Pick?", &[("A, B", ""), ("A", ""), ("B", "")], true)]);
     let live = Live::new(tui_pane(agent.clone()), &sim.render());
-    let r = answer_question(&live, "w1:p1", &comma, &[ans(&[0])], Some(&gate(&agent, yes())));
+    let r = answer_question(&live, "w1:p1", &comma, &[ans(&[1, 2])], Some(&gate(&agent, yes())));
     assert!(r.is_err() && live.mark() == 0, "r1 P2: an ambiguous review -> refused before any key");
 }
 
@@ -1269,7 +1269,7 @@ fn claude_hook_review2() {
     ❯ 1. Submit answers
       2. Cancel
     "#);
-    assert!(review_ambiguous(&marks, &want), "r2 P2: a label with the review marks ● or → -> ambiguous");
+    assert_eq!(review_collision(&marks, &want), None, "r2 P2: inline marks without newlines cannot forge line-start anchors");
     assert!(!claude_review_exact(&marks, &want, &review), "r2 P2: the forged review does not match");
     let plain = req(
         "toolu_P",
@@ -1315,9 +1315,9 @@ fn claude_review_comma_single_choice() {
             {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
     );
     let want = [ans(&[0]), ans(&[1])];
-    assert!(!review_ambiguous(&q, &want), "single choice: a comma in a label is not ambiguous");
-    assert!(!review_ambiguous(&q, &[other(&[], "Later, in January"), ans(&[1])]), "single choice: Other text with a comma is not ambiguous");
-    assert!(review_ambiguous(&q, &[other(&[], "No / not yet"), ans(&[1])]), "single choice: Other text alike a label is still ambiguous");
+    assert_eq!(review_collision(&q, &want), None, "single choice: a comma in a label is not ambiguous");
+    assert_eq!(review_collision(&q, &[other(&[], "Later, in January"), ans(&[1])]), None, "single choice: Other text with a comma is not ambiguous");
+    assert_eq!(review_collision(&q, &[other(&[], "No / not yet"), ans(&[1])]), Some(CollisionKind::Own), "single choice: Other text alike a label is still ambiguous");
     let review = sw(r#"
     ←  ☒ Nudge  ☒ Two  ✔ Submit  →
 
@@ -1338,13 +1338,16 @@ fn claude_review_comma_single_choice() {
     assert!(!claude_review_exact(&q, &want, &review.replace("→ Yes, remind me Dec 28", "→ No / not yet")), "single choice: another answer shown -> no match");
     let own = review.replace("→ Yes, remind me Dec 28", "→ Later, in January");
     assert!(claude_review_exact(&q, &[other(&[], "Later, in January"), ans(&[1])], &own), "single choice: Other text with a comma matches");
-    // Multi-choice keeps the rule: its picks ARE joined by commas.
+    // Multi-choice checks exact collisions: [0] is quoted uniquely, while [1, 2] collides with unquoted [0].
     let multi = hooked(
         "toolu_M2",
         json!([{"question":"Which?","header":"Many","multiSelect":true,"options":[{"label":"Yes, remind me","description":""},{"label":"Yes","description":""},{"label":"remind me","description":""}]}]),
     );
-    assert!(review_ambiguous(&multi, &[ans(&[0])]), "multi choice: a comma in a label is still ambiguous");
-    assert!(review_ambiguous(&multi, &[other(&[1], "x, y")]), "multi choice: Other text with a comma is still ambiguous");
+    assert_eq!(review_collision(&multi, &[]), Some(CollisionKind::Labels), "multi choice: comma option + split siblings -> ambiguous initially");
+    assert_eq!(review_collision(&multi, &[ans(&[0])]), None, "multi choice: picking the quoted comma option alone is unique");
+    assert_eq!(review_collision(&multi, &[ans(&[1, 2])]), Some(CollisionKind::Picks), "multi choice: [Yes, remind me] collides with unquoted [0]");
+    assert_eq!(review_collision(&multi, &[other(&[1], "remind me")]), Some(CollisionKind::Own), "multi choice: Yes + Other('remind me') collides with [1, 2]");
+    assert_eq!(review_collision(&multi, &[other(&[1], "x, y")]), None, "multi choice: Other('x, y') has no colliding siblings");
 }
 
 #[test]
@@ -1471,9 +1474,12 @@ fn hub_review5_bind() {
     assert!(!shows_plain(&q, 0, &lookalike), "r5 bind: same text, another option -> not this question");
     assert!(!shows_plain(&q, 0, &color.replace("☐ Color", "☐ Hue")), "r5 bind: other headers -> not this request");
     assert!(shows_any(&q, &size) && !shows_any(&q, &lookalike), "r5 bind: any question of the request, exactly");
+    assert!(!shows_review(&q, &review, None), "r5 bind: Claude shows_review without answers returns false");
     assert!(
-        shows_review(&q, &review, None) && !shows_review(&q, &review.replace("Pick a size?", "Pick a shape?"), None) && !shows_review(&q, &color, None),
-        "r5 bind: the review screen lists every question of the request"
+        shows_review(&q, &review, Some(&[ans(&[0]), ans(&[0])]))
+            && !shows_review(&q, &review.replace("Pick a size?", "Pick a shape?"), Some(&[ans(&[0]), ans(&[0])]))
+            && !shows_review(&q, &color, Some(&[ans(&[0]), ans(&[0])])),
+        "r5 bind: the review screen matches with the exact answers"
     );
     let seen = tui_agent("claude", Some("s1"));
     let open = gate(&seen, yes());
@@ -2237,8 +2243,9 @@ fn claude_hook_exact_quote_bar() {
     ❯ 1. Submit answers
       2. Cancel
     "#);
-    let parsed_long = request("screen-2", "claude", vec![question("Final try", long, vec![], false)]);
-    assert!(shows_review(&parsed_long, &review, None), "quote bar: a screen-derived review across a barred wrap");
+    let parsed_long = request("screen-2", "claude", vec![question("Final try", long, vec![], true)]);
+    assert!(!shows_review(&parsed_long, &review, None), "quote bar: None returns false on Claude");
+    assert!(shows_review(&parsed_long, &review, Some(&[other(&[], "Moved + notice")])), "quote bar: a screen-derived review across a barred wrap");
     // A long question whose own text starts with "│", drawn without the quote bar (before 2.1.322) and with it.
     let own = format!("│ {long}");
     let own_q = hooked("toolu_bar3", json!([{"question": own,"header":"Final try","multiSelect":false,"options":[
@@ -2385,10 +2392,17 @@ fn review_blocked_is_the_answer_refusal() {
         )
     };
     assert!(review_blocked(&two("A B", "AB", false), &[]), "two labels alike: blocked before any answer");
-    assert!(review_blocked(&two("x, y", "z", true), &[]), "multi choice, a comma label: blocked");
+    assert!(!review_blocked(&two("x, y", "z", true), &[]), "multi choice, a comma label without split siblings: fine");
+    let three = hooked(
+        "toolu_3",
+        json!([{"question":"First?","header":"One","multiSelect":true,"options":[{"label":"x, y","description":""},{"label":"x","description":""},{"label":"y","description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
+    );
+    assert!(review_blocked(&three, &[]), "multi choice, comma label with split siblings: blocked");
     assert!(!review_blocked(&two("x, y", "z", false), &[]), "single choice, a comma label: fine");
     assert!(!review_blocked(&two("A", "B", true), &[]), "clean labels: fine");
-    assert!(review_blocked(&two("A", "B", true), &[other(&[], "x, y"), ans(&[0])]), "own answer with a comma (multi): blocked");
+    assert!(!review_blocked(&two("A", "B", true), &[other(&[], "x, y"), ans(&[0])]), "own answer with non-colliding comma (multi): fine");
+    assert!(review_blocked(&two("A", "B", true), &[other(&[], "A, B"), ans(&[0])]), "own answer colliding with [A, B] (multi): blocked");
     assert!(review_blocked(&two("A", "B", false), &[other(&[], "B"), ans(&[0])]), "own answer alike a label: blocked");
     assert!(!review_blocked(&two("A", "B", false), &[other(&[], "later, maybe"), ans(&[0])]), "own answer with a comma (single): fine");
     // One single-choice question: its review is not checked, so nothing is refused.
@@ -2397,10 +2411,10 @@ fn review_blocked_is_the_answer_refusal() {
     let mut one_multi = one.clone();
     one_multi.questions[0].multi_select = true;
     assert!(review_blocked(&one_multi, &[]), "one multi-choice question: checked");
-    // Read from the screen, not hooked: no review check.
+    // Read from the screen, not hooked: ALSO checked now (no screen- bypass).
     let mut screen = two("A B", "AB", false);
     screen.tool_use_id = "screen-1".into();
-    assert!(!review_blocked(&screen, &[]), "screen question: fine");
+    assert!(review_blocked(&screen, &[]), "screen question: blocked");
     let mut codex = two("A B", "AB", false);
     codex.agent = "codex".into();
     assert!(!review_blocked(&codex, &[]), "another agent: fine");
@@ -2495,13 +2509,20 @@ fn review_exact_screen_cases_red() {
     assert!(!claude_review_exact(&q_red, &[ans(&[0])], &unquoted_review), "#4: unquoted 'Red, Blue' is ambiguous -> false");
     assert!(!claude_review_exact(&q_red, &[ans(&[1, 2])], &unquoted_review), "#4: unquoted [Red, Blue] is ambiguous -> false");
 
-    // #3: Screen 3 — single-choice comma option
+    // #3: Screen 3 — single-choice comma option on a 2-question review screen
     let q_single = hooked(
         "toolu_S3",
-        json!([{"question":"Apply?","header":"Go","multiSelect":false,"options":[{"label":"Yes, apply it","description":""},{"label":"No","description":""}]}]),
+        json!([
+            {"question":"Apply?","header":"Go","multiSelect":false,"options":[{"label":"Yes, apply it","description":""},{"label":"No","description":""}]},
+            {"question":"Next?","header":"Step","multiSelect":false,"options":[{"label":"Done","description":""},{"label":"Skip","description":""}]}
+        ]),
     );
     assert!(!review_blocked(&q_single, &[]));
-    assert!(claude_review_exact(&q_single, &[ans(&[0])], &rv("☒ Go", " ● Apply?\n       → Yes, apply it")));
+    assert!(claude_review_exact(
+        &q_single,
+        &[ans(&[0]), ans(&[0])],
+        &rv("☒ Go  ☒ Step", " ● Apply?\n       → Yes, apply it\n     ● Next?\n       → Done")
+    ));
 
     // #5: 'A B' vs 'AB' on screen- request (no bypass)
     let mut screen_ab = hooked(
@@ -2567,7 +2588,7 @@ fn review_exact_screen_cases_red() {
     assert!(shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 2])])), "#9: wrapped │B matches on screen-");
     assert!(!shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 1])])), "#9: wrapped │B does not match B");
     assert!(!shows_review(&screen_bar, &bar_review, None), "#9: screen- spoof without answers never matches");
-    assert!(!shows_review(&screen_bar, &bar_review.replace("→ A,\n       │B", "→ A, B"), Some(&[ans(&[0, 2])])), "#9: wrong picks rejected on screen-");
+    assert!(!shows_review(&screen_bar, &bar_review.replace("│B", "B"), Some(&[ans(&[0, 2])])), "#9: wrong picks rejected on screen-");
 
     // #10: n_k > 8, scrolled/mismatched review, cross-question newline mark forgery, & Round 3 P2 conservative pre-flight
     let nine_opts: Vec<_> = (0..9).map(|i| json!({"label": format!("Opt{i}"), "description": ""})).collect();
@@ -2601,4 +2622,14 @@ fn review_exact_screen_cases_red() {
         review_blocked(&p2_req, &[ans(&[1, 2]), ans(&[0])]),
         "#10 Round 3 P2: [Red, Blue] stays conservatively blocked even when Q2 has a quoted comma"
     );
+    assert_eq!(
+        review_collision(&p2_req, &[ans(&[1, 2]), ans(&[0])]),
+        Some(CollisionKind::Picks),
+        "#10 Round 3 P2: conservative pre-flight reports CollisionKind::Picks"
+    );
+    assert_eq!(review_collision(&q_dup, &[]), Some(CollisionKind::Labels));
+    assert_eq!(review_collision(&q_dup, &[ans(&[0]), QuestionAnswer::default()]), Some(CollisionKind::Picks));
+    assert_eq!(review_collision(&q_dup, &[ans(&[2]), QuestionAnswer::default()]), None);
+    assert_eq!(review_collision(&q_xy, &[other(&[], "x, y")]), Some(CollisionKind::Own));
+    assert_eq!(review_collision(&cross_q, &[ans(&[0]), ans(&[0])]), Some(CollisionKind::Picks));
 }
