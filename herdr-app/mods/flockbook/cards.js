@@ -100,14 +100,17 @@ export class Cards {
     if (e.busy || e.sending || (!force && Date.now() - e.at < CARD_MS)) return;
     e.busy = true; e.at = Date.now();
     try {
-      const r = await sidecar.card(address, false, e.card?.kind === "question" ? draftFor(e.card.question, e.picks, e.others) : null);
+      const full = shared(KEY_FULL);
+      const fromFull = full?.address === address && full.card?.kind === "question" && !full.card.unread && (!e.card || e.card.request === full.card.request) ? full.card : null;
+      const kept = e.card?.kind === "question" && !e.card.unread && (fromFull || e.card.request?.startsWith("screen-")) ? e.card : fromFull;
+      const qSrc = kept ?? (e.card?.kind === "question" ? e.card : null);
+      const r = await sidecar.card(address, false, qSrc ? draftFor(qSrc.question, e.picks, e.others) : null, kept?.question ?? null);
       const line = r.error ? null : r.lines.find((l) => l.type === "card");
       let card = line && line.kind ? line : null;
       // The screen shows one question at a time; keep the full set read with "Show all".
-      if (card && e.card && card.request === e.card.request && card.unread > 0 && !e.card.unread) card = e.card;
-      // Another view read it in full already.
-      const full = shared(KEY_FULL);
-      if (card?.unread > 0 && full?.address === address && full.card?.request === card.request) card = full.card;
+      if (card && kept && card.request === kept.request && card.unread > 0) card = kept;
+      // Keep the shared full card updated too so another view sees the latest `blocked`.
+      if (card && !card.unread && full?.address === address && full.card?.request === card.request) setShared(KEY_FULL, { address, card });
       const fresh = card && card.request !== e.card?.request;
       if (JSON.stringify(card) !== JSON.stringify(e.card)) {
         if (card?.request !== e.card?.request) { e.picks = new Map(); e.others = new Map(); e.note = null; e.step = 0; if (this.address === address) this.others.forEach((i) => i.set_value("")); }

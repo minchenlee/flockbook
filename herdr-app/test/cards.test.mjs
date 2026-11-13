@@ -440,7 +440,8 @@ test("Show all screen- card re-checks blocked on kept full question set without 
       const ai = args.indexOf("--answers");
       const a = ai >= 0 ? JSON.parse(args[ai + 1]) : [];
       const blocked = a[0]?.picks?.includes(2) ? undefined : LABELS;
-      return jl(header("card"), { ...fullScreen, question: passedQ, ...(blocked ? { blocked } : {}) }, end);
+      const { blocked: _drop, ...baseFull } = fullScreen;
+      return jl(header("card"), { ...baseFull, question: passedQ, ...(blocked ? { blocked } : {}) }, end);
     }
     return jl(header("card"), firstScreen, end);
   };
@@ -460,8 +461,9 @@ test("Show all screen- card re-checks blocked on kept full question set without 
   assert.equal(byId(el, "card-blocked"), null, "picking unique 'No' clears blocked on Show all card");
   assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send answer enables once blocked clears");
 
-  // Switching back to colliding "Yes" (option 0) re-blocks without --all.
-  byId(el, "card-q0-o0")._h.on_click({}, cx);
+  // Go back to Q1 and switch to colliding "Yes" (option 0): re-blocks without --all.
+  byId(el, "card-back")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
   await c.poll(cx, "t1", true);
   assert.equal(alls, 1, "still no --all key presses");
   el = c.view("t1", T);

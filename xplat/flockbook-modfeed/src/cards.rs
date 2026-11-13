@@ -228,18 +228,38 @@ pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<St
 
 /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click).
 pub fn card<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>) -> Card {
-    card_with(pane, screen, log, all, cache, &[])
+    card_with_question(pane, screen, log, all, cache, &[], None)
 }
 
 /// `card`, with the answers the mod has so far (`card --answers`): `blocked` covers the person's own answers too.
 pub fn card_with<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>, answers: &[QuestionAnswer]) -> Card {
+    card_with_question(pane, screen, log, all, cache, answers, None)
+}
+
+/// `card`, optionally reusing a full question set kept from an earlier "Show all" (`--question`) so `blocked`
+/// can be re-evaluated against `answers` without sending keys to walk tabs again.
+pub fn card_with_question<S: PaneScreen + ?Sized>(
+    pane: &Pane,
+    screen: &S,
+    log: Option<&Path>,
+    all: bool,
+    cache: Option<&Path>,
+    answers: &[QuestionAnswer],
+    full: Option<&FeedQuestion>,
+) -> Card {
     let (mut now, read) = look(pane, screen, log);
     if all {
         if let Some(Current::Question(q)) = &now {
             if q.unread() > 0 {
-                if let Ok(Some(full)) = question::load_all_questions(screen, &pane.id, Some(&gate(pane)), Some(q)) {
-                    now = Some(Current::Question(full));
+                if let Ok(Some(full_q)) = question::load_all_questions(screen, &pane.id, Some(&gate(pane)), Some(q)) {
+                    now = Some(Current::Question(full_q));
                 }
+            }
+        }
+    } else if let (Some(Current::Question(q)), Some(fq)) = (&now, full) {
+        if q.unread() > 0 {
+            if let Some(restored) = restore_full_question(q, fq) {
+                now = Some(Current::Question(restored));
             }
         }
     }
@@ -346,6 +366,56 @@ pub fn parse_answers(json: &str) -> Option<Vec<QuestionAnswer>> {
         out.push(QuestionAnswer { picks, other });
     }
     Some(out)
+}
+
+pub fn parse_question(raw: &str) -> Option<FeedQuestion> {
+    serde_json::from_str::<FeedQuestion>(raw).ok()
+}
+
+fn restore_full_question(q: &QuestionRequest, fq: &FeedQuestion) -> Option<QuestionRequest> {
+    if fq.tool_use_id != q.tool_use_id || fq.questions.is_empty() || fq.questions.len() < q.questions.len() {
+        return None;
+    }
+    if !q.headers.is_empty() && !fq.questions.iter().map(|x| x.header.as_str()).eq(q.headers.iter().map(String::as_str)) {
+        return None;
+    }
+    let visible_matches = q.questions.iter().all(|vis| {
+        fq.questions.iter().any(|x| {
+            x.text == vis.text
+                && x.multi == vis.multi_select
+                && x.options.len() == vis.options.len()
+                && x.options.iter().zip(&vis.options).all(|(a, b)| a.label == b.label && a.recommended == b.recommended)
+        })
+    });
+    if !visible_matches {
+        return None;
+    }
+    Some(QuestionRequest {
+        tool_use_id: q.tool_use_id.clone(),
+        agent: q.agent.clone(),
+        delivery: q.delivery,
+        headers: if q.headers.is_empty() {
+            fq.questions.iter().map(|x| x.header.clone()).collect()
+        } else {
+            q.headers.clone()
+        },
+        state: q.state.clone(),
+        questions: fq
+            .questions
+            .iter()
+            .map(|x| Question {
+                id: if x.id.is_empty() { x.text.clone() } else { x.id.clone() },
+                header: x.header.clone(),
+                text: x.text.clone(),
+                options: x
+                    .options
+                    .iter()
+                    .map(|o| QOption { label: o.label.clone(), detail: o.detail.clone(), recommended: o.recommended })
+                    .collect(),
+                multi_select: x.multi,
+            })
+            .collect(),
+    })
 }
 
 pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, request: &str, answers: &[QuestionAnswer]) -> Done {
@@ -519,5 +589,84 @@ mod tests {
         assert_eq!(REVIEW_LABELS, "Two answers here would look identical on the review screen. Answer in the terminal.");
         assert_eq!(REVIEW_PICKS, "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.");
         assert_eq!(REVIEW_OWN, "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.");
+    }
+
+    #[test]
+    fn card_with_question_rechecks_blocked_without_keys() {
+        let pane = Pane {
+            id: "t1".into(),
+            terminal_id: "t1".into(),
+            cwd: "/tmp".into(),
+            agent: Some(Agent::new("t1", "claude", AgentStatus::Blocked)),
+            ..Default::default()
+        };
+        let screen_text = [
+            "←  ☐ One  ☐ Two  ✔ Submit  →",
+            "Q1?",
+            "❯ 1. Yes",
+            "  2. Yes",
+            "  3. No",
+            "  4. Type something.",
+            "────────────────────────",
+            "  5. Chat about this",
+            "",
+            "Enter to select · ↑/↓ to navigate · Esc to cancel",
+        ]
+        .join("\n");
+        let scr = herdr_core::fake::FakeScreen::new(vec![], vec![&screen_text]);
+
+        let first_only = card(&pane, &scr, None, false, None);
+        let reads_per_card = *scr.reads.borrow();
+        assert_eq!(first_only.unread, Some(1));
+        assert_eq!(first_only.blocked, None);
+        let req_id = first_only.request.clone().expect("screen request");
+        assert!(req_id.starts_with("screen-"));
+
+        let full_fq: FeedQuestion = serde_json::from_value(json!({
+            "toolUseId": req_id,
+            "agent": "claude",
+            "delivery": "picker",
+            "state": "pending",
+            "questions": [
+                {"id":"Q1?","header":"One","text":"Q1?","multi":false,"options":[{"label":"Yes"},{"label":"Yes"},{"label":"No"}]},
+                {"id":"Q2?","header":"Two","text":"Q2?","multi":false,"options":[{"label":"A"},{"label":"B"}]}
+            ]
+        }))
+        .unwrap();
+
+        let empty_pick = card_with_question(&pane, &scr, None, false, None, &[], Some(&full_fq));
+        assert_eq!(empty_pick.unread, Some(0));
+        assert_eq!(empty_pick.blocked.as_deref(), Some(REVIEW_LABELS));
+
+        let safe_pick = card_with_question(
+            &pane,
+            &scr,
+            None,
+            false,
+            None,
+            &[QuestionAnswer { picks: vec![2], other: None }, QuestionAnswer::default()],
+            Some(&full_fq),
+        );
+        assert_eq!(safe_pick.unread, Some(0));
+        assert_eq!(safe_pick.blocked, None, "unique 'No' clears blocked without sending keys");
+
+        let bad_pick = card_with_question(
+            &pane,
+            &scr,
+            None,
+            false,
+            None,
+            &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer::default()],
+            Some(&full_fq),
+        );
+        assert_eq!(bad_pick.blocked.as_deref(), Some(REVIEW_PICKS));
+
+        let mut wrong_id = full_fq.clone();
+        wrong_id.tool_use_id = "screen-other".into();
+        let ignored = card_with_question(&pane, &scr, None, false, None, &[], Some(&wrong_id));
+        assert_eq!(ignored.unread, Some(1), "mismatched request id falls back to screen");
+
+        assert!(scr.sent.borrow().is_empty(), "re-checking blocked sends zero keys");
+        assert_eq!(*scr.reads.borrow(), reads_per_card * 5, "no extra screen reads beyond look() per card call");
     }
 }
