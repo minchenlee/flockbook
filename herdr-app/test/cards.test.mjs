@@ -531,3 +531,38 @@ test("single-choice: picking an option then typing own answer sends picks: [] an
     [{ picks: [], other: "olive" }, { picks: [0] }],
   );
 });
+
+test("single-choice UI: option renders unselected while own answer is non-empty, restores when cleared; multi keeps both", async () => {
+  cardNow = question;
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+
+  // Pick Q0 option 0 (single-choice), go back to Q0, confirm selected.
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-back")._h.on_click({}, cx);
+  let el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o0")._a.bg, "#selected");
+
+  // Type own answer -> option row must not render selected, Other row renders selected, e.picks keeps 0.
+  c.others[0].set_value("olive"); c.others[0]._h.change({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o0")._a.bg, "#background", "old single-choice pick renders unselected while other is active");
+  assert.equal(byId(el, "card-q0-o0")._a.border_color, "#border");
+  assert.equal(byId(el, "card-q0-other")._a.bg, "#selected");
+  assert.ok(c.byAgent.get("t1").picks.get(0)?.has(0), "e.picks keeps the picked index");
+
+  // Clearing own answer restores the option row's selection from e.picks.
+  c.others[0].set_value(""); c.others[0]._h.change({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o0")._a.bg, "#selected", "clearing other restores single-choice pick highlight");
+  assert.equal(byId(el, "card-q0-other")._a.bg, "#background");
+
+  // Multi-choice Q1 still allows option + own answer simultaneously.
+  byId(el, "card-next")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  c.view("t1", T);
+  c.others[1].set_value("extra"); c.others[1]._h.change({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-q1-o0")._a.bg, "#selected", "multi-choice keeps option highlighted with other");
+  assert.equal(byId(el, "card-q1-other")._a.bg, "#selected");
+});
