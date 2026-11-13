@@ -973,31 +973,54 @@ pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], scre
         return false;
     }
 
-    // Preserve the `barred` state machine strictly: strip '│' ONLY between "│ ●" and "→", never on "→" or wrapped answers.
+    // Strip quote bars ONLY inside confirmed quote-barred question-text sections (from "│ ● <q.text>" up to
+    // the immediately following "→" line), never inside "→" answer continuations such as a wrapped "│●B".
+    let body_lines = &lines[title + 1..ready];
     let mut body_str = String::new();
     let mut body_starts: HashSet<usize> = HashSet::new();
-    let mut barred = false;
-    for l in &lines[title + 1..ready] {
-        let t = trim_ws(l);
-        let mut l: &str = l;
-        if let Some(rest) = t.strip_prefix('│') {
-            if trim_ws(rest).starts_with('●') {
-                barred = true;
+    let mut i = 0;
+    while i < body_lines.len() {
+        let t = trim_ws(body_lines[i]);
+        if let Some(first_rest) = t.strip_prefix('│') {
+            if trim_ws(first_rest).starts_with('●') {
+                let mut j = i;
+                let mut stripped_lines = Vec::new();
+                let mut stripped_bare = String::new();
+                while j < body_lines.len() {
+                    let Some(rj) = trim_ws(body_lines[j]).strip_prefix('│') else { break };
+                    if trim_ws(rj).starts_with('→') {
+                        break;
+                    }
+                    stripped_bare.push_str(&bare(rj));
+                    stripped_lines.push(rj);
+                    j += 1;
+                }
+                let next_is_arrow = body_lines[j..].iter().find(|l| !trim_ws(l).is_empty()).is_some_and(|l| trim_ws(l).starts_with('→'));
+                let is_quoted_question = next_is_arrow
+                    && q.questions.iter().any(|qq| {
+                        display_width(&qq.text) >= QUOTE_MIN
+                            && !trim_ws(&qq.text).starts_with('│')
+                            && stripped_bare == format!("●{}", bare(&qq.text))
+                    });
+                if is_quoted_question {
+                    for rj in stripped_lines {
+                        let b = bare(rj);
+                        if !b.is_empty() {
+                            body_starts.insert(body_str.len());
+                            body_str.push_str(&b);
+                        }
+                    }
+                    i = j;
+                    continue;
+                }
             }
-            if barred {
-                l = rest;
-            }
-        } else if t.starts_with('→') || t.starts_with('●') {
-            barred = false;
         }
-        if trim_ws(l).starts_with('→') {
-            barred = false;
-        }
-        let b = bare(l);
+        let b = bare(body_lines[i]);
         if !b.is_empty() {
             body_starts.insert(body_str.len());
             body_str.push_str(&b);
         }
+        i += 1;
     }
 
     let mut fchars: Vec<String> = vec![];
