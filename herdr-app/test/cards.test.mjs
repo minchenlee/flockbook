@@ -470,3 +470,64 @@ test("Show all screen- card re-checks blocked on kept full question set without 
   assert.notEqual(byId(el, "card-blocked"), null, "picking colliding 'Yes' restores blocked");
   assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send answer disables again");
 });
+
+test("single-choice: picking an option then typing own answer sends picks: [] and other without Picks collision", async () => {
+  const twoSingle = {
+    toolUseId: "screen-single-other",
+    agent: "claude",
+    delivery: "picker",
+    state: "pending",
+    questions: [
+      { id: "Q1?", header: "One", multi: false, options: [{ label: "Alpha", detail: "", recommended: false }, { label: "Beta", detail: "", recommended: false }] },
+      { id: "Q2?", header: "Two", multi: true, options: [{ label: "X", detail: "", recommended: false }, { label: "Y", detail: "", recommended: false }] },
+    ],
+  };
+  const picksMap = new Map([[0, new Set([0])], [1, new Set([1])]]);
+  const othersMap = new Map([[0, "olive"], [1, "custom"]]);
+  assert.deepEqual(
+    draftFor(twoSingle, picksMap, othersMap),
+    [{ picks: [], other: "olive" }, { picks: [1], other: "custom" }],
+    "draftFor drops picked option on single-choice when other is non-empty, keeps multi-choice picks",
+  );
+  assert.deepEqual(
+    answersFor(twoSingle, picksMap, othersMap),
+    [{ picks: [], other: "olive" }, { picks: [1], other: "custom" }],
+    "answersFor drops picked option on single-choice when other is non-empty, keeps multi-choice picks",
+  );
+
+  // Flow test against a sidecar enforcing validate_answer_caps (!multi && picks + other > 1 => Picks collision).
+  const singleCard = { type: "card", kind: "question", request: "screen-single-other", unread: 0, question: twoSingle };
+  const drafts = [];
+  const PICKS = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.";
+  fake.exec = (_c, args) => {
+    if (args[0] === "answer") { acts.push(args); return jl(header("answer"), { type: "done", result: "sent" }, end); }
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    const ai = args.indexOf("--answers");
+    const a = ai >= 0 ? JSON.parse(args[ai + 1]) : [];
+    drafts.push(a);
+    const invalidSingle = twoSingle.questions.some((q, i) => !q.multi && (a[i]?.picks?.length ?? 0) + (a[i]?.other?.trim() ? 1 : 0) > 1);
+    return jl(header("card"), invalidSingle ? { ...singleCard, blocked: PICKS } : singleCard, end);
+  };
+
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  // Pick option 0 on Q1, go back, type own answer "olive", then pick X on Q2 and send.
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-back")._h.on_click({}, cx);
+  c.view("t1", T);
+  c.others[0].set_value("olive"); c.others[0]._h.change({}, cx);
+  await c.poll(cx, "t1", true);
+  assert.deepEqual(drafts.at(-1), [{ picks: [], other: "olive" }, { picks: [] }]);
+  assert.equal(byId(c.view("t1", T), "card-blocked"), null, "typing other on single-choice clears false Picks collision");
+
+  byId(c.view("t1", T), "card-next")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  const el = c.view("t1", T);
+  assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send answer is enabled");
+  byId(el, "card-answer")._h.on_click({}, cx);
+  await cx.settle();
+  assert.deepEqual(
+    JSON.parse(acts.at(-1)[acts.at(-1).indexOf("--answers") + 1]),
+    [{ picks: [], other: "olive" }, { picks: [0] }],
+  );
+});
