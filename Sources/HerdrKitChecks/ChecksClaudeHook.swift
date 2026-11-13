@@ -460,14 +460,16 @@ final class ClaudePickerSim: @unchecked Sendable {
           "r1 P1: a row number outside the row column -> no match")
     check(!QuestionAdapter.claudeExact(plain, question: 0, screen: good.replacingOccurrences(of: "     k\n", with: "     k\n  7. x\n"), other: nil, focus: .any, checks: nil),
           "r1 P1: a row-like line that is not a row -> no match")
-    // P2 review: labels with commas, or two labels alike without spaces, make the review ambiguous: refused before any key.
+    // P2 review: comma labels that collide with split siblings, or two labels alike without spaces, are refused before any key.
     let comma = req(#"{"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A, B","description":""},{"label":"A","description":""},{"label":"B","description":""}]}"#)
-    check(QuestionAdapter.reviewAmbiguous(comma, answers: [QuestionAnswer(picks: [0])]), "r1 P2: a label with a comma -> the review cannot prove the picks")
+    check(!QuestionAdapter.reviewAmbiguous(comma, answers: [QuestionAnswer(picks: [0])]), "r1 P2: quoted comma pick alone is unique")
+    check(QuestionAdapter.reviewAmbiguous(comma, answers: [QuestionAnswer(picks: [1, 2])]), "r1 P2: [A, B] with 'A, B' sibling -> blocked")
     let spaces = req(#"{"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]}"#)
     check(QuestionAdapter.reviewAmbiguous(spaces, answers: [QuestionAnswer(picks: [0])]), "r1 P2: two labels alike without spaces -> ambiguous")
     let clean = req(#"{"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A","description":""},{"label":"B","description":""}]}"#)
-    check(QuestionAdapter.reviewAmbiguous(clean, answers: [QuestionAnswer(picks: [0], other: "A")]) && QuestionAdapter.reviewAmbiguous(clean, answers: [QuestionAnswer(other: "x, y")]),
-          "r1 P2: Other text equal to a label, or with a comma -> ambiguous")
+    check(QuestionAdapter.reviewAmbiguous(clean, answers: [QuestionAnswer(picks: [], other: "A")])
+          && QuestionAdapter.reviewAmbiguous(clean, answers: [QuestionAnswer(picks: [0], other: "B")]),
+          "r1 P2: Other text equal to a label or completing a sibling pick -> ambiguous")
     check(!QuestionAdapter.reviewAmbiguous(clean, answers: [QuestionAnswer(picks: [0, 1], other: "olive")]), "r1 P2: distinct labels, no commas -> fine")
     let fake = FakeHerdr(path: NSTemporaryDirectory() + "hkB1-\(getpid()).sock")
     try fake.start()
