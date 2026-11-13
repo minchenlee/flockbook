@@ -205,23 +205,25 @@ pub fn look<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>)
     (None, read)
 }
 
-/// The card's `blocked` line (`question::review_blocked`, the rule `answer` refuses with): Some when the terminal's
-/// review screen could not show these answers. The labels alone, or the person's own answer. None while questions
-/// are unread: `answer` reads them first, and the rule needs them all.
-pub const REVIEW_LABELS: &str = "The terminal's review screen could not show which options were picked (an option with a comma or a ● or → mark, or two options alike). Answer in the terminal.";
-pub const REVIEW_OWN: &str = "Your own answer has a comma, a ● or → mark, or is the same as an option, so the terminal's review screen could not show it. Change it, or answer in the terminal.";
+/// The card's `blocked` line (`question::review_blocked`, the rule `answer` refuses with): Some when two distinct
+/// answers would look identical on the terminal's review screen. None while questions are unread (`answer` reads them
+/// first).
+pub const REVIEW_LABELS: &str = "Two answers here would look identical on the review screen. Answer in the terminal.";
+pub const REVIEW_PICKS: &str = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.";
+pub const REVIEW_OWN: &str = "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.";
 
 pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<String> {
     if q.unread() > 0 {
         return None;
     }
-    if question::review_blocked(q, &[]) {
-        Some(REVIEW_LABELS.into())
-    } else if question::review_blocked(q, answers) {
-        Some(REVIEW_OWN.into())
-    } else {
-        None
-    }
+    question::review_collision(q, answers).map(|kind| {
+        match kind {
+            question::CollisionKind::Labels => REVIEW_LABELS,
+            question::CollisionKind::Picks => REVIEW_PICKS,
+            question::CollisionKind::Own => REVIEW_OWN,
+        }
+        .into()
+    })
 }
 
 /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click).
@@ -451,17 +453,22 @@ mod tests {
     // Issue #11, item 4: the card says so before Send, with the rule `answer` refuses with.
     #[test]
     fn review_note_before_send() {
-        assert_eq!(review_note(&two("x, y", "z"), &[]).as_deref(), Some(REVIEW_LABELS), "a comma label: blocked from the start");
-        assert_eq!(review_note(&two("A B", "AB"), &own("fine")).as_deref(), Some(REVIEW_LABELS), "labels first, whatever is typed");
+        let three = hooked(json!([
+            {"question":"First?","header":"One","multiSelect":true,"options":[{"label":"x, y","description":""},{"label":"x","description":""},{"label":"y","description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}
+        ]));
+        assert_eq!(review_note(&three, &[]).as_deref(), Some(REVIEW_LABELS), "a comma label with split siblings: blocked from the start");
+        assert_eq!(review_note(&two("A B", "AB"), &own("fine")), None, "own('fine') does not collide with colliding option labels");
         assert_eq!(review_note(&two("A", "B"), &[]), None, "clean labels: Send stays on");
-        assert_eq!(review_note(&two("A", "B"), &own("x, y")).as_deref(), Some(REVIEW_OWN), "own answer with a comma");
+        assert_eq!(review_note(&two("A", "B"), &own("x, y")), None, "own answer with non-colliding comma is allowed");
+        assert_eq!(review_note(&two("A", "B"), &own("A, B")).as_deref(), Some(REVIEW_OWN), "own answer colliding with [A, B]");
         assert_eq!(review_note(&two("A", "B"), &own("  B ")).as_deref(), Some(REVIEW_OWN), "own answer alike an option");
         assert_eq!(review_note(&two("A", "B"), &own("olive")), None, "a clean own answer");
         // It is the answer's refusal: the same answers, the same verdict.
-        for (q, a) in [(two("x, y", "z"), vec![]), (two("A", "B"), own("x, y")), (two("A", "B"), own("olive"))] {
+        for (q, a) in [(three.clone(), vec![]), (two("A", "B"), own("A, B")), (two("A", "B"), own("olive"))] {
             assert_eq!(review_note(&q, &a).is_some(), question::review_blocked(&q, &a));
         }
-        let mut unread = two("x, y", "z");
+        let mut unread = two("A B", "AB");
         unread.headers = vec!["One".into(), "Two".into(), "Three".into()];
         assert_eq!(review_note(&unread, &[]), None, "questions unread: answer reads them first");
     }
@@ -479,15 +486,16 @@ mod tests {
             "Screen 2: picking quoted 'Red, Blue' alone must clear blocked note"
         );
         // Round 3 P2 conservative pre-flight
-        assert!(
-            review_note(&red_blue, &[QuestionAnswer { picks: vec![1, 2], other: None }, QuestionAnswer { picks: vec![0], other: None }]).is_some(),
-            "Round 3 P2: [Red, Blue] stays conservatively blocked"
+        assert_eq!(
+            review_note(&red_blue, &[QuestionAnswer { picks: vec![1, 2], other: None }, QuestionAnswer { picks: vec![0], other: None }]).as_deref(),
+            Some(REVIEW_PICKS),
+            "Round 3 P2: [Red, Blue] stays conservatively blocked as REVIEW_PICKS"
         );
 
         // screen- request must not bypass review_note
         let mut screen_ab = two("A B", "AB");
         screen_ab.tool_use_id = "screen-ab".into();
-        assert!(review_note(&screen_ab, &[]).is_some(), "screen- request with colliding labels must warn");
+        assert_eq!(review_note(&screen_ab, &[]).as_deref(), Some(REVIEW_LABELS), "screen- request with colliding labels warns");
         assert_eq!(review_note(&screen_ab, &own("fine")), None, "screen- non-colliding Other is allowed");
 
         // Duplicate labels ['Yes', 'Yes', 'No'] partial / empty / [0] / [2]
@@ -495,19 +503,21 @@ mod tests {
             {"question":"Q1?","header":"H1","multiSelect":false,"options":[{"label":"Yes","description":""},{"label":"Yes","description":""},{"label":"No","description":""}]},
             {"question":"Q2?","header":"H2","multiSelect":false,"options":[{"label":"A","description":""},{"label":"B","description":""}]}
         ]));
-        assert!(review_note(&yes_no, &[]).is_some());
+        assert_eq!(review_note(&yes_no, &[]).as_deref(), Some(REVIEW_LABELS));
         assert_eq!(
             review_note(&yes_no, &[QuestionAnswer { picks: vec![2], other: None }, QuestionAnswer::default()]),
             None,
             "partial [2] ('No') clears the blocked note"
         );
-        assert!(
-            review_note(&yes_no, &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer::default()]).is_some(),
-            "partial [0] ('Yes') still warns"
+        assert_eq!(
+            review_note(&yes_no, &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer::default()]).as_deref(),
+            Some(REVIEW_PICKS),
+            "partial [0] ('Yes') still warns with REVIEW_PICKS"
         );
 
         // New wording (§4.2)
         assert_eq!(REVIEW_LABELS, "Two answers here would look identical on the review screen. Answer in the terminal.");
+        assert_eq!(REVIEW_PICKS, "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.");
         assert_eq!(REVIEW_OWN, "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.");
     }
 }
