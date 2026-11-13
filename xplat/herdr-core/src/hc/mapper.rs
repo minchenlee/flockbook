@@ -294,4 +294,43 @@ mod tests {
         assert_eq!(machine_prefix("box/t4"), "box/");
         assert_eq!(machine_prefix("t4"), "");
     }
+
+    #[test]
+    fn wrapper_kind_from_status_app() {
+        // Test 1: claude-code -> claude and codex -> codex with secretspec in front.
+        let t = Term::parse(&json!({
+            "address": "t1",
+            "argv": ["zsh"],
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--profile", "claude", "--", "claude"], "pid": 500},
+            "status": {"state": "working", "app": "claude-code"}
+        })).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("claude"));
+
+        let t = Term::parse(&json!({
+            "address": "t2",
+            "argv": ["zsh"],
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "codex"], "pid": 501},
+            "status": {"state": "idle", "app": "codex"}
+        })).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("codex"));
+
+        for app in ["pi", "claude", "zsh"] {
+            let t = Term::parse(&json!({
+                "address": "t3",
+                "argv": ["zsh"],
+                "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "x"], "pid": 502},
+                "status": {"state": "idle", "app": app}
+            })).unwrap();
+            assert_eq!(kind(&t), None, "app {app} must not map to a kind");
+        }
+
+        // Test 2: foreground wins over status.app.
+        let t = Term::parse(&json!({
+            "address": "t4",
+            "argv": ["/bin/zsh", "-l"],
+            "foreground": {"name": "pi", "argv": ["pi"], "pid": 503},
+            "status": {"state": "done", "app": "claude-code"}
+        })).unwrap();
+        assert_eq!(kind(&t).as_deref(), Some("pi"));
+    }
 }
