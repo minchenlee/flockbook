@@ -36,7 +36,7 @@ export function answersFor(question, picks, others) {
 // while no own answer is typed: then the card's labels alone decide.
 export function draftFor(question, picks, others) {
   const qs = question?.questions ?? [];
-  if (!qs.some((_q, i) => (others.get(i) ?? "").trim())) return null;
+  if (!qs.some((_q, i) => (picks.get(i)?.size ?? 0) > 0 || (others.get(i) ?? "").trim())) return null;
   return qs.map((_q, i) => {
     const p = [...(picks.get(i) ?? [])].sort((a, b) => a - b);
     const other = (others.get(i) ?? "").trim();
@@ -96,7 +96,7 @@ export class Cards {
   async poll(cx, address, want, force = false) {
     if (!address) return;
     const e = this.entry(address);
-    if (!want) { if (e.card) { e.card = null; e.note = null; cx.notify(); } return; }
+    if (!want) { if (e.card || e.note) { e.card = null; e.note = null; cx.notify(); } return; }
     if (e.busy || e.sending || (!force && Date.now() - e.at < CARD_MS)) return;
     e.busy = true; e.at = Date.now();
     try {
@@ -172,6 +172,8 @@ export class Cards {
     const s = new Set(q.multi ? en.picks.get(qi) ?? [] : []);
     if (s.has(oi)) s.delete(oi); else s.add(oi);
     en.picks.set(qi, s);
+    // The card's `blocked` may change with picks: the next poll reads it again at once.
+    if (en.card?.kind === "question") en.at = 0;
     if (!q.multi && s.size && qi < qs.length - 1) en.step = qi + 1;
     return true;
   }
@@ -180,17 +182,18 @@ export class Cards {
     const e = this.entry(address);
     if (e.sending || !e.card) return;
     e.sending = true; e.note = null; cx.notify();
-    let note = null;
+    let note = null, changedNoMsg = false;
     try {
       const r = await run(e.card);
       const done = r.lines.find((l) => l.type === "done");
       if (r.error) note = r.error.message;
       else if (done?.result === "sent") e.card = null;
       else if (sidecar.agentChanged(done)) note = sidecar.AGENT_CHANGED;
-      else if (done?.result === "changed") note = "It changed on screen. Here is what it shows now.";
+      else if (done?.result === "changed") { changedNoMsg = !done?.message; note = done?.message || "It changed on screen. Here is what it shows now."; }
       else note = done?.message || "The keys did not go out.";
     } finally { e.sending = false; }
     await this.poll(cx, address, true, true);
+    if (changedNoMsg && !e.card) note = "The screen changed. Answer in the terminal.";
     e.note = note;  // after the read: a new card would clear it
     cx.notify();
   }
@@ -208,7 +211,7 @@ export class Cards {
   view(address, t, id = "card") {
     const e = this.byAgent.get(address);
     const c = e?.card;
-    if (!c) return null;
+    if (!c && !e?.note) return null;
     const button = (bid, label, primary, action, off = false) => div().id(`${id}-${bid}`).h(30).px(14).flex().items_center().rounded(8).text_size(13)
       .bg(off ? t.chrome : primary ? t.accent : t.chrome).text_color(off ? t.dim : primary ? t.background : t.foreground)
       .border(1).border_color(primary && !off ? t.accent : t.border)
@@ -230,6 +233,15 @@ export class Cards {
       openTerminal(a);
     };
     const tail = () => e.note ? div().id(`${id}-note`).text_size(12).text_color(t.blocked).child(e.note) : null;
+
+    if (!c) {
+      return box
+        .child(head("The agent waits in the terminal"))
+        .child(tail())
+        .child(h_flex().gap(10).items_center()
+          .child(div().flex_1())
+          .child(button("terminal", "Answer in terminal", false, toTerminal)));
+    }
 
     if (c.kind === "approval") {
       box.child(head(c.title || (c.tool ? `${c.tool} wants to run` : "Approval needed")));
