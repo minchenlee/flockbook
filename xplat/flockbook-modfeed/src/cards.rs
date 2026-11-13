@@ -465,4 +465,49 @@ mod tests {
         unread.headers = vec!["One".into(), "Two".into(), "Three".into()];
         assert_eq!(review_note(&unread, &[]), None, "questions unread: answer reads them first");
     }
+
+    #[test]
+    fn review_note_exact_cases_red() {
+        // Screen 2: multi-select comma option + split siblings
+        let red_blue = hooked(json!([
+            {"question":"Pick?","header":"C","multiSelect":true,"options":[{"label":"Red, Blue","description":""},{"label":"Red","description":""},{"label":"Blue","description":""}]},
+            {"question":"More?","header":"M","multiSelect":false,"options":[{"label":"X","description":""},{"label":"Y","description":""}]}
+        ]));
+        assert_eq!(
+            review_note(&red_blue, &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer { picks: vec![0], other: None }]),
+            None,
+            "Screen 2: picking quoted 'Red, Blue' alone must clear blocked note"
+        );
+        // Round 3 P2 conservative pre-flight
+        assert!(
+            review_note(&red_blue, &[QuestionAnswer { picks: vec![1, 2], other: None }, QuestionAnswer { picks: vec![0], other: None }]).is_some(),
+            "Round 3 P2: [Red, Blue] stays conservatively blocked"
+        );
+
+        // screen- request must not bypass review_note
+        let mut screen_ab = two("A B", "AB");
+        screen_ab.tool_use_id = "screen-ab".into();
+        assert!(review_note(&screen_ab, &[]).is_some(), "screen- request with colliding labels must warn");
+        assert_eq!(review_note(&screen_ab, &own("fine")), None, "screen- non-colliding Other is allowed");
+
+        // Duplicate labels ['Yes', 'Yes', 'No'] partial / empty / [0] / [2]
+        let yes_no = hooked(json!([
+            {"question":"Q1?","header":"H1","multiSelect":false,"options":[{"label":"Yes","description":""},{"label":"Yes","description":""},{"label":"No","description":""}]},
+            {"question":"Q2?","header":"H2","multiSelect":false,"options":[{"label":"A","description":""},{"label":"B","description":""}]}
+        ]));
+        assert!(review_note(&yes_no, &[]).is_some());
+        assert_eq!(
+            review_note(&yes_no, &[QuestionAnswer { picks: vec![2], other: None }, QuestionAnswer::default()]),
+            None,
+            "partial [2] ('No') clears the blocked note"
+        );
+        assert!(
+            review_note(&yes_no, &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer::default()]).is_some(),
+            "partial [0] ('Yes') still warns"
+        );
+
+        // New wording (§4.2)
+        assert_eq!(REVIEW_LABELS, "Two answers here would look identical on the review screen. Answer in the terminal.");
+        assert_eq!(REVIEW_OWN, "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.");
+    }
 }
