@@ -40,16 +40,19 @@ public actor SessionResolver {
         public var cwd: String
         /// hc panes: process ids to start from (foreground first). Empty for TUI panes (found by `HERDR_PANE_ID`).
         public var pids: [Int32]
-        public init(paneId: String, kind: String, cwd: String, pids: [Int32] = []) {
-            self.paneId = paneId; self.kind = kind; self.cwd = cwd; self.pids = pids
+        /// hc panes: the agent's key identity (`Agent.process`).
+        public var process: String?
+        public init(paneId: String, kind: String, cwd: String, pids: [Int32] = [], process: String? = nil) {
+            self.paneId = paneId; self.kind = kind; self.cwd = cwd; self.pids = pids; self.process = process
         }
     }
 
     /// `stamp`: mtime of the Claude pid file the entry came from (hc Claude panes only); `stampPid` names that file.
     /// It may be a child of the agent process, so it is kept apart from `pid`. `needPids`: the hc pane's pids then; a
-    /// change (another program in the terminal) makes the entry due at once.
+    /// change (another program in the terminal) makes the entry due at once. `needProcess`: the pane's key identity
+    /// then (`Agent.process`); a wrapper restarting its agent keeps the pids but changes it, so the entry is due too.
     private struct Entry { var pid: Int32?; var path: String?; var checked: Date; var stamp: Date? = nil; var stampPid: Int32? = nil
-                           var needPids: [Int32] = [] }
+                           var needPids: [Int32] = []; var needProcess: String? = nil }
     private var cache: [String: Entry] = [:]
     private let socketPath: String
     private let codexDir: String
@@ -261,6 +264,7 @@ public actor SessionResolver {
         let due = needs.filter { n in
             guard let e = cache[n.paneId] else { return true }
             return now.timeIntervalSince(e.checked) >= (e.path == nil ? retry : recheck) || pidFileChanged(n, e) || e.needPids != n.pids
+                || e.needProcess != n.process
         }
         if !due.isEmpty {
             let procs = given ?? Self.processes()
@@ -279,10 +283,12 @@ public actor SessionResolver {
                 .sorted { ($0.1?.start ?? .distantFuture, $0.0.paneId) < ($1.1?.start ?? .distantFuture, $1.0.paneId) }
             for (n, agent) in ordered {
                 // agy: /new or /resume swaps the presence lock in the same process, so every recheck reads it again.
-                if let old = cache[n.paneId], let path = old.path, old.pid != nil, old.pid == agent?.pid, !pidFileChanged(n, old),
+                if let old = cache[n.paneId], let path = old.path, old.pid != nil, old.pid == agent?.pid, old.needProcess == n.process,
+                   !pidFileChanged(n, old),
                    n.kind != "agy", !Self.piLike(n.kind) || FileManager.default.fileExists(atPath: path) {
                     cache[n.paneId]?.checked = now
                     cache[n.paneId]?.needPids = n.pids
+                    cache[n.paneId]?.needProcess = n.process
                     continue
                 }
                 var taken = claimed
@@ -295,7 +301,7 @@ public actor SessionResolver {
                 let stampPid = found?.source ?? agent?.pid
                 cache[n.paneId] = Entry(pid: agent?.pid, path: found?.path, checked: now,
                                         stamp: claudeHC ? stampPid.flatMap { pidFileStamp($0) } ?? .distantPast : nil,
-                                        stampPid: claudeHC ? stampPid : nil, needPids: n.pids)
+                                        stampPid: claudeHC ? stampPid : nil, needPids: n.pids, needProcess: n.process)
             }
         }
         var out: [String: String] = [:]
@@ -401,13 +407,37 @@ public actor SessionResolver {
         return words.contains { names.contains($0) }
     }
 
+    /// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. A tie in depth: nil when not
+    /// `tieNewest` (the key gate fails closed), else the newest (the feed). Nearest, not newest: an agent's own helper
+    /// of the same kind (`claude -p` from a hook) is deeper and must not win.
+    public static func agentInTree(root: Int32, kind: String, procs: [Proc], tieNewest: Bool) -> Proc? {
+        var children: [Int32: [Proc]] = [:]
+        for p in procs { children[p.ppid, default: []].append(p) }
+        var seen: Set<Int32> = [root]
+        var frontier = [root]
+        while !frontier.isEmpty {
+            var next: [Int32] = [], matches: [Proc] = []
+            for parent in frontier {
+                for k in children[parent] ?? [] where seen.insert(k.pid).inserted {
+                    if runs(k, kind: kind) { matches.append(k) }
+                    next.append(k.pid)
+                }
+            }
+            if matches.count == 1 { return matches[0] }
+            if matches.count > 1 { return tieNewest ? matches.max { $0.start < $1.start } : nil }
+            frontier = next
+        }
+        return nil
+    }
+
     /// hc: the agent process of a terminal from its pids (foreground first, then the terminal's own process).
-    /// A pid that runs the agent itself wins; else the newest process in their trees that does.
+    /// A pid that runs the agent itself wins; else the nearest process in their trees that does (`agentInTree`, the
+    /// newest on a tie in depth), as the key gate's wrapper check picks it.
     public static func hcAgentProcess(pids: [Int32], kind: String, procs: [Proc]) -> Proc? {
         let byPid = Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
         for pid in pids { if let p = byPid[pid], runs(p, kind: kind) { return p } }
-        let tree = Set(pids.flatMap { subtree($0, procs: procs) })
-        return procs.filter { tree.contains($0.pid) && runs($0, kind: kind) }.max { $0.start < $1.start }
+        for pid in pids { if let p = agentInTree(root: pid, kind: kind, procs: procs, tieNewest: true) { return p } }
+        return nil
     }
 
     /// Claude Code writes `~/.claude/sessions/<pid>.json` with `pid`, `sessionId` and `procStart` (UTC, `ps lstart`

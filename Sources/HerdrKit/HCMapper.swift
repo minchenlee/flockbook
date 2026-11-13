@@ -31,6 +31,8 @@ public enum HCMapper {
         var statusKind: String?
         var statusMsg: String
         var statusApp: String?
+        /// When the status last changed (ms since 1970).
+        var statusMs: Int?
         var fgName: String?
         var fgArgv: [String]
         var fgCwd: String?
@@ -53,6 +55,7 @@ public enum HCMapper {
             statusKind = st?["kind"] as? String
             statusMsg = st?["msg"] as? String ?? ""
             statusApp = st?["app"] as? String
+            statusMs = (o["status_ms"] as? NSNumber)?.intValue
             let fg = o["foreground"] as? [String: Any]
             fgName = fg?["name"] as? String
             fgArgv = fg?["argv"] as? [String] ?? []
@@ -71,15 +74,37 @@ public enum HCMapper {
     static let wrappers: Set<String> = ["node", "bun", "deno", "python", "python3", "env", "npx", "bunx"]
 
     /// Agent kind from the foreground process (what runs now), then the start argv. Interpreters (`node …/codex`)
-    /// are looked through: their first non-flag argument names the program. Last, the 7501 `app` name of agy or omp
-    /// (a launcher can show a shell in front of omp); only those two.
+    /// are looked through: their first non-flag argument names the program. Last, the 7501 `app` name (a launcher or
+    /// a wrapper such as `secretspec run -- claude` can be in front).
     static func kind(_ t: Term) -> String? {
         for argv in [[t.fgName ?? ""] + t.fgArgv, t.argv] { if let k = kind(argv: argv) { return k } }
-        switch t.statusApp {
-        case "antigravity": return "agy"   // agy's own 7501 name (verified), when the processes say nothing
-        case "omp": return "omp"
-        default: return nil
+        return kind(app: t.statusApp)
+    }
+
+    /// The kind an agent's own 7501 `app` name gives: only names seen live (issue #15). Others: nil.
+    static func kind(app: String?) -> String? {
+        switch app {
+        case "claude-code": "claude"
+        case "codex": "codex"
+        case "antigravity": "agy"   // agy's own 7501 name (verified), when the processes say nothing
+        case "omp": "omp"
+        default: nil
         }
+    }
+
+    static let shells: Set<String> = ["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "nu", "xonsh", "elvish",
+                                      "pwsh", "powershell", "cmd"]
+
+    /// A shell in front (`-zsh`, `/bin/bash`, `sh wrapper.sh`), or no foreground name at all. A shell can hold a
+    /// suspended or background agent while its own prompt takes the keys: never a wrapper.
+    static func foregroundIsShell(_ t: Term) -> Bool {
+        func shell(_ raw: String) -> Bool {
+            let base = (raw as NSString).lastPathComponent
+            return shells.contains(base.hasPrefix("-") ? String(base.dropFirst()) : base)
+        }
+        let name = t.fgName ?? "", first = t.fgArgv.first ?? ""
+        if name.isEmpty && first.isEmpty { return true }
+        return (!name.isEmpty && shell(name)) || (!first.isEmpty && shell(first))
     }
 
     /// The agent kind one command line names, if any.
@@ -93,15 +118,28 @@ public enum HCMapper {
     }
 
     /// The agent's process, for a paired device's key gate: the foreground pid when the foreground program is the agent;
-    /// with no foreground read, the terminal's pid only when the terminal's own program is the agent. Anything else
-    /// (a shell, a child of the agent in front, no pid): nil, so paired keys fail closed.
-    static func process(_ t: Term, kind k: String?) -> String? {
+    /// with no foreground read, the terminal's pid only when the terminal's own program is the agent. A wrapper in front
+    /// (issue #15): `<fg_pid>/<agent_pid>@<created>`, only when all hold: `status.app` gives this kind, the terminal is
+    /// local, the foreground is no shell, `status_ms` is there, and `check` finds exactly one nearest agent process
+    /// under the foreground that started before the status last changed. Anything else (a shell, a child of the agent
+    /// in front, no pid): nil, so paired keys fail closed. A direct agent never asks `check`.
+    static func process(_ t: Term, kind k: String?, check: HCAgentCheck = NoAgentCheck()) -> String? {
         guard let k else { return nil }
         let hasForeground = t.fgPid != nil || t.fgName != nil || !t.fgArgv.isEmpty
-        let pid = hasForeground ? (kind(argv: [t.fgName ?? ""] + t.fgArgv) == k ? t.fgPid : nil)
-                                : (kind(argv: t.argv) == k ? t.pid : nil)
-        guard let pid, pid > 0 else { return nil }
-        return "\(pid)@\(t.created)"
+        guard hasForeground else {
+            guard kind(argv: t.argv) == k, let pid = t.pid, pid > 0 else { return nil }
+            return "\(pid)@\(t.created)"
+        }
+        if kind(argv: [t.fgName ?? ""] + t.fgArgv) == k {
+            guard let pid = t.fgPid, pid > 0 else { return nil }
+            return "\(pid)@\(t.created)"
+        }
+        // The wrapper path: everything from the record first, the process table last.
+        guard kind(app: t.statusApp) == k, !t.address.contains("/"), !foregroundIsShell(t),
+              let fg = t.fgPid, fg > 0, let fgPid = Int32(exactly: fg), let statusMs = t.statusMs else { return nil }
+        let ask = HCWrapperAsk(address: t.address, fgPid: fgPid, created: t.created, kind: k, statusMs: statusMs)
+        guard let agent = check.agentUnder(ask), agent > 0 else { return nil }
+        return "\(fgPid)/\(agent)@\(t.created)"
     }
 
     /// hc reports only what the program said (OSC 7501; pi too, live 2026-11-02). No report yet = unknown, never idle.
@@ -116,7 +154,9 @@ public enum HCMapper {
         }
     }
 
-    static func agent(_ t: Term) -> Agent? {
+    static func agent(_ t: Term) -> Agent? { agent(t, check: NoAgentCheck()) }
+
+    static func agent(_ t: Term, check: HCAgentCheck) -> Agent? {
         let k = kind(t)
         guard k != nil || t.status != nil else { return nil }   // a shell that never reported: plain pane
         let kind = k ?? (t.fgName ?? t.argv.first.map { ($0 as NSString).lastPathComponent } ?? "agent")
@@ -130,16 +170,16 @@ public enum HCMapper {
         }
         var a = Agent(name: name, kind: kind, status: status(t.status), sessionId: nil, title: title,
                       backend: .hc, statusKind: statusKind)
-        a.process = process(t, kind: k)
+        a.process = process(t, kind: k, check: check)
         return a
     }
 
-    static func pane(_ t: Term, title: String? = nil) -> Pane {
+    static func pane(_ t: Term, title: String? = nil, check: HCAgentCheck = NoAgentCheck()) -> Pane {
         var pids: [Int32] = []
         for p in [t.fgPid, t.pid].compactMap({ $0 }) where p > 0 && !pids.contains(Int32(p)) { pids.append(Int32(p)) }
         // Remote terminals (`host2/t7`) run on another machine: their pids mean nothing here.
         if t.address.contains("/") { pids = [] }
-        return Pane(id: paneId(t.address), terminalId: t.address, cwd: t.fgCwd ?? t.cwd, agent: agent(t), label: title ?? t.name,
+        return Pane(id: paneId(t.address), terminalId: t.address, cwd: t.fgCwd ?? t.cwd, agent: agent(t, check: check), label: title ?? t.name,
                     backend: .hc, processIds: pids)
     }
 
@@ -151,7 +191,8 @@ public enum HCMapper {
     /// `terminals`: `terminal.list` records. `appDoc`: the `herdr-app` document value, any shape (parsed defensively).
     /// `machineDocs`: each other machine's `herdr-app` document (`doc.get {on}`), in the order to show them. Its ids
     /// are local to that machine; they are shown qualified (`box/sp1`), after this machine's (mirror.rs qualify).
-    public static func workspaces(terminals: [[String: Any]], appDoc: Any?, machineDocs: [(String, Any?)] = []) -> [Workspace] {
+    public static func workspaces(terminals: [[String: Any]], appDoc: Any?, machineDocs: [(String, Any?)] = [],
+                                  check: HCAgentCheck = NoAgentCheck()) -> [Workspace] {
         // Per machine prefix ("" here, "box/" there): names, and the document when it parses (space, tab and pane
         // order, Flockbook's pane names).
         var namesBy: [String: AppDocNames] = ["": AppDocNames(appDoc)]
@@ -164,6 +205,9 @@ public enum HCMapper {
         /// (machine prefix, local id) of a qualified id.
         func local(_ id: String) -> (String, String) { let m = machinePrefix(id); return (m, String(id.dropFirst(m.count))) }
         let terms = terminals.compactMap(Term.init).filter { $0.state == "live" }
+        // One process-table read at most for all wrapper terminals; then the cache forgets terminals that are gone.
+        let wrapper = check.snapshot() ?? check
+        defer { check.prune(live: Set(terms.map(\.address))) }
         let byAddr = Dictionary(terms.map { ($0.address, $0) }, uniquingKeysWith: { a, _ in a })
 
         /// (space, tab) for a terminal: where the document shows it, else its own labels, else the nearest such
@@ -223,7 +267,7 @@ public enum HCMapper {
         }
 
         func makeTab(id: String, label: String, number: Int, terms: [Term]) -> Tab {
-            let ps = terms.map { t in let (m, own) = local(t.address); return pane(t, title: docsBy[m]?.paneTitle(terminal: own)) }
+            let ps = terms.map { t in let (m, own) = local(t.address); return pane(t, title: docsBy[m]?.paneTitle(terminal: own), check: wrapper) }
             return Tab(id: id, label: label, number: number, panes: ps,
                        status: AgentStatus.rollup(ps.compactMap { $0.agent?.status }), backend: .hc)
         }
