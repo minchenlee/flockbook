@@ -20,14 +20,21 @@ export function wanted(agent, rows) {
   return Boolean(last && (last.perm?.state === "pending" || last.question?.state === "pending"));
 }
 
+// Single-choice: non-empty own answer overrides any option pick (matches claude_steps).
+const answerItem = (q, picks, others, i) => {
+  const other = (others.get(i) ?? "").trim();
+  const p = !q?.multi && other ? [] : [...(picks.get(i) ?? [])].sort((a, b) => a - b);
+  return other ? { picks: p, other } : { picks: p };
+};
+
 // The answers `answer --answers` takes, from the picks and "other" texts. Null while one is empty.
 export function answersFor(question, picks, others) {
+  const qs = question?.questions ?? [];
   const out = [];
-  for (let i = 0; i < (question?.questions ?? []).length; i++) {
-    const p = [...(picks.get(i) ?? [])].sort((a, b) => a - b);
-    const other = (others.get(i) ?? "").trim();
-    if (!p.length && !other) return null;
-    out.push(other ? { picks: p, other } : { picks: p });
+  for (let i = 0; i < qs.length; i++) {
+    const item = answerItem(qs[i], picks, others, i);
+    if (!item.picks.length && !item.other) return null;
+    out.push(item);
   }
   return out.length ? out : null;
 }
@@ -37,11 +44,7 @@ export function answersFor(question, picks, others) {
 export function draftFor(question, picks, others) {
   const qs = question?.questions ?? [];
   if (!qs.some((_q, i) => (picks.get(i)?.size ?? 0) > 0 || (others.get(i) ?? "").trim())) return null;
-  return qs.map((_q, i) => {
-    const p = [...(picks.get(i) ?? [])].sort((a, b) => a - b);
-    const other = (others.get(i) ?? "").trim();
-    return other ? { picks: p, other } : { picks: p };
-  });
+  return qs.map((q, i) => answerItem(q, picks, others, i));
 }
 
 export const MAX_QUESTIONS = 4;
