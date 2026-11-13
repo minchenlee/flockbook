@@ -7,10 +7,11 @@
 //! screen checks and the results are the mod's.
 
 use crate::cli;
-use herdr_core::hc::{HcClient, HcSession};
+use herdr_core::hc::{HcClient, HcSession, TreeCheck};
 use herdr_core::{AgentStatus, Workspace};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 
 /// The newest rows sent per conversation (the Mac hub's window).
 pub const WINDOW: usize = 100;
@@ -415,12 +416,13 @@ pub struct Session {
 /// herdr-core's workspaces now: spaces and tabs as the Mac app shows them, other machines' too (`layout`). Empty
 /// when it does not answer. `home`: the herdr-app home whose settings say whether other machines are read.
 pub fn workspaces(home: Option<&str>) -> Vec<herdr_core::Workspace> {
+    static WRAPPER: LazyLock<Arc<TreeCheck>> = LazyLock::new(|| Arc::new(TreeCheck::new()));
     let session = HcSession::resolve_env();
     if !session.is_available() {
         return vec![];
     }
     let never = crate::config::load(crate::config::dir(home).as_deref()).remote_never;
-    super::layout::snapshot(&HcClient::new(session, 8, 22), never).unwrap_or_default()
+    super::layout::snapshot(&HcClient::new(session, 8, 22).with_wrapper(WRAPPER.clone()), never).unwrap_or_default()
 }
 
 fn now_s() -> u64 {

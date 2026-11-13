@@ -1025,3 +1025,84 @@ fn codex_open_subagent_rollout_is_not_the_pane() {
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t5").cloned();
     assert_eq!(got, Some(lead), "the lead's open rollout, not its guardian's");
 }
+
+#[test]
+fn hc_wrapper_feed_and_stale_shell() {
+    let (_t, dir) = tmp();
+    let base = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let procs = vec![
+        proc_(500, 1, base, "-zsh HC_TERMINAL_ID=t1"),
+        proc_(501, 500, base + Duration::seconds(1), "secretspec run -- claude"),
+        proc_(502, 501, base + Duration::seconds(2), "claude HC_TERMINAL_ID=t1"),
+    ];
+    write_pid_file(&dir, 502, "sid-wrap", base + Duration::seconds(2));
+
+    // Test 22: wrapper tree zsh -> secretspec -> claude with Need.pids = [secretspec, zsh] resolves the log.
+    let term = crate::hc::mapper::Term::parse(&serde_json::json!({
+        "address": "t1",
+        "argv": ["zsh"],
+        "pid": 500,
+        "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": 501},
+        "status": {"state": "working", "app": "claude-code"}
+    })).unwrap();
+    let pane = crate::hc::mapper::pane(&term);
+    let a = pane.agent.as_ref().unwrap();
+    assert_eq!(a.kind, "claude");
+    assert_eq!(pane.process_ids, vec![501, 500]);
+    let need = Need::new(&pane.id, &a.kind, "/tmp", pane.process_ids.clone());
+    let mut r = resolver(|r| r.claude_dir = dir.clone());
+    assert_eq!(
+        r.resolve_with(&[need], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"),
+        Some(&"sid-wrap".to_string()),
+        "feed resolves log through wrapper tree"
+    );
+
+    // Test 23: shell in front, kind from a stale status.app, no agent process: no log resolves, no panic.
+    let procs_shell = vec![proc_(600, 1, base, "-zsh HC_TERMINAL_ID=t2")];
+    let term_shell = crate::hc::mapper::Term::parse(&serde_json::json!({
+        "address": "t2",
+        "argv": ["zsh"],
+        "pid": 600,
+        "foreground": {"name": "zsh", "argv": ["zsh"], "pid": 600},
+        "status": {"state": "done", "app": "claude-code"}
+    })).unwrap();
+    let pane_shell = crate::hc::mapper::pane(&term_shell);
+    let need_shell = Need::new(&pane_shell.id, &pane_shell.agent.as_ref().unwrap().kind, "/tmp", pane_shell.process_ids.clone());
+    let mut r2 = resolver(|r| r.claude_dir = dir);
+    assert!(
+        r2.resolve_with(&[need_shell], &set(&[]), &HashMap::new(), Some(&procs_shell)).is_empty(),
+        "stale shell resolves no log"
+    );
+}
+
+#[test]
+fn agent_in_tree_nearest_and_ties() {
+    let t0 = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let procs = vec![
+        // Tree 1: wrapper (10) -> claude (11, older) -> bash (12) -> claude -p helper (13, newer)
+        proc_(10, 1, t0, "secretspec run -- claude"),
+        proc_(11, 10, t0 + Duration::seconds(1), "claude"),
+        proc_(12, 11, t0 + Duration::seconds(2), "bash -c helper"),
+        proc_(13, 12, t0 + Duration::seconds(10), "claude -p summarize"),
+        // Tree 2: wrapper (20) -> two claude children at depth 1 (21 older, 22 newer)
+        proc_(20, 1, t0, "secretspec run -- claude"),
+        proc_(21, 20, t0 + Duration::seconds(1), "claude"),
+        proc_(22, 20, t0 + Duration::seconds(5), "claude"),
+        // Tree 3: two-step wrapper (30 -> 31) -> claude (32) and deeper helper (33)
+        proc_(30, 1, t0, "secretspec run -- claude"),
+        proc_(31, 30, t0 + Duration::seconds(1), "env FOO=1"),
+        proc_(32, 31, t0 + Duration::seconds(2), "claude"),
+        proc_(33, 32, t0 + Duration::seconds(8), "claude -p sub"),
+    ];
+
+    assert_eq!(agent_in_tree(10, "claude", &procs, false).map(|p| p.pid), Some(11), "gate: nearest wins over newer helper");
+    assert_eq!(agent_in_tree(10, "claude", &procs, true).map(|p| p.pid), Some(11), "feed: nearest wins over newer helper");
+    assert_eq!(hc_agent_process(&[10], "claude", &procs).map(|p| p.pid), Some(11), "hc_agent_process: nearest wins over helper");
+
+    assert_eq!(agent_in_tree(20, "claude", &procs, false), None, "gate: tie at same depth fails closed");
+    assert_eq!(agent_in_tree(20, "claude", &procs, true).map(|p| p.pid), Some(22), "feed: tie at same depth picks newest");
+    assert_eq!(hc_agent_process(&[20], "claude", &procs).map(|p| p.pid), Some(22), "hc_agent_process: tie picks newest");
+
+    assert_eq!(agent_in_tree(30, "claude", &procs, false).map(|p| p.pid), Some(32), "nearest at depth 2 wins over depth 3");
+    assert_eq!(agent_in_tree(999, "claude", &procs, false), None, "unknown root -> None");
+}

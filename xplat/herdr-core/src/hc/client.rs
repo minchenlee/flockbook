@@ -1,7 +1,7 @@
 //! Swift: `HCClient.swift`, the plain-mode part: each JSON-RPC call on its own short-lived connection. No attach,
 //! no layout writes, no remote log mirrors (the sidecar does not reach them).
 
-use super::{keys, mapper, HcSession};
+use super::{keys, mapper, HcSession, TreeCheck};
 use crate::error::HerdrError;
 use crate::model::*;
 use crate::screen::{DeliveryOutcome, PaneScreen};
@@ -10,6 +10,7 @@ use crate::transport::{Connector, LineSocket};
 use crate::transport::Transport;
 use serde_json::{json, Value};
 use std::cell::Cell;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub struct HcClient {
@@ -20,6 +21,7 @@ pub struct HcClient {
     pub call_timeout: Duration,
     /// Seconds `terminal.send` waits: the core answers only after nobody typed for ~3 s and the program went `working`.
     pub send_timeout: Duration,
+    wrapper: Arc<TreeCheck>,
 }
 
 /// The `result` object (empty when null or not an object), or the error as `Server{code: kind}`.
@@ -77,7 +79,17 @@ impl HcClient {
             seq: Cell::new(0),
             call_timeout: Duration::from_secs(call_timeout_s),
             send_timeout: Duration::from_secs(send_timeout_s),
+            wrapper: Arc::new(TreeCheck::new()),
         }
+    }
+
+    pub fn with_wrapper(mut self, wrapper: Arc<TreeCheck>) -> HcClient {
+        self.wrapper = wrapper;
+        self
+    }
+
+    pub fn wrapper_check(&self) -> &dyn mapper::AgentCheck {
+        self.wrapper.as_ref()
     }
 
     /// One plain-mode call on its own connection. Skips notifications until the reply with our id.
@@ -183,7 +195,7 @@ impl PaneScreen for HcClient {
     fn snapshot(&self) -> Result<Vec<Workspace>, HerdrError> {
         let list = self.call("terminal.list", json!({}), None)?;
         let terms = list.get("terminals").and_then(Value::as_array).cloned().unwrap_or_default();
-        Ok(mapper::workspaces(&terms))
+        Ok(mapper::workspaces_with(&terms, self.wrapper.as_ref()))
     }
 
     /// `terminal.read` with no history: the visible screen as text. Read-only.
@@ -323,5 +335,58 @@ mod socket_tests {
     fn no_core_is_a_socket_error() {
         let c = HcClient::new(HcSession::new("/nonexistent/hc.sock"), 1, 1);
         assert!(matches!(c.snapshot(), Err(HerdrError::Socket(_))));
+    }
+
+    #[test]
+    fn wrapper_identity_in_snapshot_and_keygate() {
+        let base_ms: i64 = 1_794_500_000_000;
+        let procs = Arc::new(std::sync::Mutex::new(vec![
+            crate::resolver::Proc {
+                pid: 500,
+                ppid: 400,
+                start: chrono::DateTime::from_timestamp_millis(base_ms).unwrap(),
+                line: "secretspec run -- claude".into(),
+            },
+            crate::resolver::Proc {
+                pid: 501,
+                ppid: 500,
+                start: chrono::DateTime::from_timestamp_millis(base_ms + 1000).unwrap(),
+                line: "claude".into(),
+            },
+        ]));
+        let p2 = procs.clone();
+        struct DynProcs(Arc<std::sync::Mutex<Vec<crate::resolver::Proc>>>);
+        impl crate::resolver::ProcessSource for DynProcs {
+            fn processes(&self) -> Vec<crate::resolver::Proc> {
+                self.0.lock().unwrap().clone()
+            }
+            fn open_files(&self, _: &[i32]) -> Vec<String> {
+                vec![]
+            }
+        }
+        let check = Arc::new(TreeCheck::with_hooks(
+            Arc::new(DynProcs(p2)),
+            Arc::new(std::time::Instant::now),
+            Arc::new(move |pid| procs.lock().unwrap().iter().any(|p| p.pid == pid)),
+        ));
+        let core = fake_core::start(move |m, _| match m {
+            "terminal.list" => Some(json!({"terminals": [{
+                "address": "t1",
+                "argv": ["zsh"],
+                "pid": 400,
+                "created_ms": 7,
+                "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": 500},
+                "status": {"state": "blocked", "kind": "permission", "app": "claude-code"},
+                "status_ms": base_ms + 2000
+            }]})),
+            "terminal.keys" => Some(json!({})),
+            _ => None,
+        });
+        let c = HcClient::new(HcSession::new(&core.path), 2, 1).with_wrapper(check);
+        let ws = c.snapshot().unwrap();
+        let a = crate::screen::all_panes(&ws)[0].agent.clone().unwrap();
+        assert_eq!(a.process.as_deref(), Some("500/501@7"));
+        let gate = crate::keygate::KeyGate::new(Some(a), Some(Arc::new(|| true)));
+        assert!(crate::keygate::passes(&c, Some(&gate), "hc:t1", None, None));
     }
 }
