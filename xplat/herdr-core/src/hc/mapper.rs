@@ -43,6 +43,7 @@ pub struct Term {
     pub fg_argv: Vec<String>,
     pub fg_cwd: Option<String>,
     pub fg_pid: Option<i64>,
+    pub status_ms: Option<i64>,
     pub created: i64,
 }
 
@@ -82,6 +83,7 @@ impl Term {
             fg_argv: strings(fg.and_then(|x| x.get("argv"))),
             fg_cwd: fg.and_then(|x| s(x.get("cwd"))).filter(|c| !c.is_empty()),
             fg_pid: fg.and_then(|x| int(x.get("pid"))),
+            status_ms: int(o.get("status_ms")),
             created: int(o.get("created_ms")).unwrap_or(0),
         })
     }
@@ -149,10 +151,45 @@ pub fn kind(t: &Term) -> Option<String> {
     kind_from_app(t.status_app.as_deref()).map(String::from)
 }
 
+/// Question passed to [`AgentCheck`] when a local terminal's foreground program is not a shell and does not directly
+/// name the agent kind reported by `status.app` (the wrapper case).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WrapperAsk {
+    pub address: String,
+    pub fg_pid: i32,
+    pub created: i64,
+    pub kind: String,
+    pub status_ms: i64,
+}
+
+/// Resolves the running agent pid under a wrapper foreground process. Implementations must fail closed (`None`)
+/// when uncertain.
+pub trait AgentCheck {
+    fn agent_under(&self, ask: &WrapperAsk) -> Option<i32>;
+
+    /// Returns a check scoped to one snapshot so implementations can share a single process-table read across all
+    /// wrapper terminals in that snapshot.
+    fn snapshot(&self) -> Option<Box<dyn AgentCheck + '_>> {
+        None
+    }
+
+    /// Drops any per-address state for terminals absent from the latest snapshot.
+    fn prune(&self, _live_addresses: &[&str]) {}
+}
+
+/// Default fail-closed check: never resolves wrapper terminals.
+pub struct NoAgentCheck;
+
+impl AgentCheck for NoAgentCheck {
+    fn agent_under(&self, _ask: &WrapperAsk) -> Option<i32> {
+        None
+    }
+}
+
 /// The agent's process for a key gate: the foreground pid when the foreground program is the agent; with no
-/// foreground read, the terminal's pid only when the terminal's own program is the agent. Anything else: None, so
-/// keys fail closed.
-pub fn process(t: &Term, k: Option<&str>) -> Option<String> {
+/// foreground read, the terminal's pid only when the terminal's own program is the agent; else, when a wrapper
+/// passes W1-W4 and `check` verifies W5-W6, `<fg_pid>/<agent_pid>@<created>`. Anything else: None, so keys fail closed.
+pub fn process_with(t: &Term, k: Option<&str>, _check: &dyn AgentCheck) -> Option<String> {
     let k = k?;
     let has_foreground = t.fg_pid.is_some() || t.fg_name.is_some() || !t.fg_argv.is_empty();
     let pid = if has_foreground {
@@ -168,6 +205,11 @@ pub fn process(t: &Term, k: Option<&str>) -> Option<String> {
     Some(format!("{pid}@{}", t.created))
 }
 
+/// [`process_with`] with [`NoAgentCheck`] (direct paths only; wrapper paths fail closed).
+pub fn process(t: &Term, k: Option<&str>) -> Option<String> {
+    process_with(t, k, &NoAgentCheck)
+}
+
 /// hc reports only what the program said (OSC 7501). No report yet = unknown, never idle. `error` shows as done.
 pub fn status(word: Option<&str>) -> AgentStatus {
     match word {
@@ -179,7 +221,7 @@ pub fn status(word: Option<&str>) -> AgentStatus {
     }
 }
 
-pub fn agent(t: &Term) -> Option<Agent> {
+pub fn agent_with(t: &Term, check: &dyn AgentCheck) -> Option<Agent> {
     let k = kind(t);
     if k.is_none() && t.status.is_none() {
         return None; // a shell that never reported: plain pane
@@ -202,11 +244,15 @@ pub fn agent(t: &Term) -> Option<Agent> {
         title,
         backend: BackendKind::Hc,
         status_kind,
-        process: process(t, k.as_deref()),
+        process: process_with(t, k.as_deref(), check),
     })
 }
 
-pub fn pane(t: &Term) -> Pane {
+pub fn agent(t: &Term) -> Option<Agent> {
+    agent_with(t, &NoAgentCheck)
+}
+
+pub fn pane_with(t: &Term, check: &dyn AgentCheck) -> Pane {
     let mut pids: Vec<i32> = vec![];
     for p in [t.fg_pid, t.pid].into_iter().flatten() {
         if p > 0 && !pids.contains(&(p as i32)) {
@@ -221,21 +267,36 @@ pub fn pane(t: &Term) -> Pane {
         id: pane_id(&t.address),
         terminal_id: t.address.clone(),
         cwd: t.fg_cwd.clone().unwrap_or_else(|| t.cwd.clone()),
-        agent: agent(t),
+        agent: agent_with(t, check),
         label: t.name.clone(),
         backend: BackendKind::Hc,
         process_ids: pids,
     }
 }
 
+pub fn pane(t: &Term) -> Pane {
+    pane_with(t, &NoAgentCheck)
+}
+
 /// `terminal.list` records → one workspace with one tab of every live terminal, in list order.
-pub fn workspaces(terminals: &[Value]) -> Vec<Workspace> {
-    let panes: Vec<Pane> = terminals.iter().filter_map(Term::parse).filter(|t| t.state == "live").map(|t| pane(&t)).collect();
+pub fn workspaces_with(terminals: &[Value], check: &dyn AgentCheck) -> Vec<Workspace> {
+    let live: Vec<Term> = terminals.iter().filter_map(Term::parse).filter(|t| t.state == "live").collect();
+    let snap = check.snapshot();
+    let active = snap.as_deref().unwrap_or(check);
+    let panes: Vec<Pane> = live.iter().map(|t| pane_with(t, active)).collect();
+    drop(snap);
+    let live_addrs: Vec<&str> = live.iter().map(|t| t.address.as_str()).collect();
+    check.prune(&live_addrs);
     vec![Workspace {
         id: "hc:all".into(),
         label: "herdr-core".into(),
         tabs: vec![Tab { id: "hc:all".into(), label: "herdr-core".into(), panes, ..Default::default() }],
     }]
+}
+
+/// `terminal.list` records → one workspace with one tab of every live terminal, in list order (`NoAgentCheck`).
+pub fn workspaces(terminals: &[Value]) -> Vec<Workspace> {
+    workspaces_with(terminals, &NoAgentCheck)
 }
 
 #[cfg(test)]
@@ -338,5 +399,175 @@ mod tests {
             "status": {"state": "done", "app": "claude-code"}
         })).unwrap();
         assert_eq!(kind(&t).as_deref(), Some("pi"));
+    }
+
+    struct PanicCheck;
+    impl AgentCheck for PanicCheck {
+        fn agent_under(&self, ask: &WrapperAsk) -> Option<i32> {
+            panic!("check must not be called for {ask:?}");
+        }
+    }
+
+    struct FixedProcs(Vec<crate::resolver::Proc>);
+    impl crate::resolver::ProcessSource for FixedProcs {
+        fn processes(&self) -> Vec<crate::resolver::Proc> {
+            self.0.clone()
+        }
+        fn open_files(&self, _: &[i32]) -> Vec<String> {
+            vec![]
+        }
+    }
+
+    fn tree_with(procs: Vec<crate::resolver::Proc>) -> crate::hc::wrapper::TreeCheck {
+        use std::sync::Arc;
+        use std::time::Instant;
+        crate::hc::wrapper::TreeCheck::with_hooks(Arc::new(FixedProcs(procs)), Arc::new(Instant::now), Arc::new(|_| true))
+    }
+
+    fn proc_(pid: i32, ppid: i32, ms: i64, line: &str) -> crate::resolver::Proc {
+        crate::resolver::Proc {
+            pid,
+            ppid,
+            start: chrono::DateTime::from_timestamp_millis(ms).unwrap(),
+            line: line.into(),
+        }
+    }
+
+    #[test]
+    fn wrapper_identities_and_fail_closed() {
+        let base_ms: i64 = 1_794_500_000_000;
+        let wrap_json = json!({
+            "address": "t1",
+            "argv": ["zsh"],
+            "pid": 400,
+            "created_ms": 7,
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--profile", "claude", "--", "claude"], "pid": 500},
+            "status": {"state": "working", "app": "claude-code"},
+            "status_ms": base_ms + 2000
+        });
+        let wrap = Term::parse(&wrap_json).unwrap();
+
+        // Test 3 (Brief 1): wrapper + one agent child + status newer than start -> <fg_pid>/<agent_pid>@<created>.
+        let chk = tree_with(vec![proc_(500, 400, base_ms, "secretspec run -- claude"), proc_(501, 500, base_ms + 1000, "claude")]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk).as_deref(), Some("500/501@7"));
+
+        // Test 4 (Brief 2): wrapper in front, no agent process -> None.
+        let chk_none = tree_with(vec![proc_(500, 400, base_ms, "secretspec run -- claude")]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk_none), None);
+
+        // Test 5 (Brief 3): shell in front, stale status.app -> None, and check is never called.
+        for (name, argv) in [
+            ("zsh", json!(["zsh"])),
+            ("-zsh", json!(["-zsh"])),
+            ("bash", json!(["/bin/bash", "-l"])),
+            ("wrapper.sh", json!(["sh", "wrapper.sh"])),
+        ] {
+            let t = Term::parse(&json!({
+                "address": "t-sh",
+                "argv": ["zsh"],
+                "foreground": {"name": name, "argv": argv, "pid": 500},
+                "status": {"state": "done", "app": "claude-code"},
+                "status_ms": base_ms + 2000,
+                "created_ms": 7
+            })).unwrap();
+            assert_eq!(process_with(&t, Some("claude"), &PanicCheck), None, "shell {name} must fail closed without checking");
+        }
+
+        // Test 6 (Brief 4): vim and less in front, stale status.app, no agent below -> None.
+        for viewer in ["vim", "less"] {
+            let t = Term::parse(&json!({
+                "address": "t-view",
+                "argv": ["zsh"],
+                "foreground": {"name": viewer, "argv": [viewer, "notes.md"], "pid": 500},
+                "status": {"state": "done", "app": "claude-code"},
+                "status_ms": base_ms + 2000,
+                "created_ms": 7
+            })).unwrap();
+            assert_eq!(process_with(&t, Some("claude"), &chk_none), None, "{viewer} without agent below -> None");
+        }
+
+        // Test 7 (Brief 5): two agent children at the same depth -> None; agent + deeper helper -> nearer wins.
+        let chk_tie = tree_with(vec![
+            proc_(500, 400, base_ms, "secretspec run -- claude"),
+            proc_(501, 500, base_ms + 1000, "claude"),
+            proc_(502, 500, base_ms + 1500, "claude"),
+        ]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk_tie), None, "tie at same depth -> None");
+
+        let chk_helper = tree_with(vec![
+            proc_(500, 400, base_ms, "secretspec run -- claude"),
+            proc_(501, 500, base_ms + 1000, "claude"),
+            proc_(502, 501, base_ms + 2000, "claude -p helper"),
+        ]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk_helper).as_deref(), Some("500/501@7"), "nearer agent wins over helper");
+
+        // Test 8: agent restarted under same wrapper -> different identity.
+        let chk_restart = tree_with(vec![proc_(500, 400, base_ms, "secretspec run -- claude"), proc_(509, 500, base_ms + 1500, "claude")]);
+        let id1 = process_with(&wrap, Some("claude"), &chk);
+        let id2 = process_with(&wrap, Some("claude"), &chk_restart);
+        assert_eq!(id2.as_deref(), Some("500/509@7"));
+        assert_ne!(id1, id2);
+
+        // Test 9 (Brief 6): direct claude (foreground and no-foreground) never calls check.
+        let direct_fg = Term::parse(&json!({
+            "address": "t-direct",
+            "argv": ["zsh"],
+            "foreground": {"name": "2.1.322", "argv": ["claude"], "pid": 500},
+            "status": {"state": "working", "app": "claude-code"},
+            "status_ms": base_ms,
+            "created_ms": 7
+        })).unwrap();
+        assert_eq!(process_with(&direct_fg, Some("claude"), &PanicCheck).as_deref(), Some("500@7"));
+
+        let direct_start = Term::parse(&json!({
+            "address": "t-direct2",
+            "argv": ["claude"],
+            "pid": 400,
+            "status": {"state": "working", "app": "claude-code"},
+            "status_ms": base_ms,
+            "created_ms": 7
+        })).unwrap();
+        assert_eq!(process_with(&direct_start, Some("claude"), &PanicCheck).as_deref(), Some("400@7"));
+
+        // Test 10 (W6): agent started > 1s after status_ms -> None; inside 1s slack -> Some; missing status_ms -> None (no check).
+        let chk_late = tree_with(vec![
+            proc_(500, 400, base_ms, "secretspec run -- claude"),
+            proc_(501, 500, base_ms + 4000, "claude"),
+        ]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk_late), None, "agent started >1s after status_ms -> None");
+
+        let chk_slack = tree_with(vec![
+            proc_(500, 400, base_ms, "secretspec run -- claude"),
+            proc_(501, 500, base_ms + 3000, "claude"), // status_ms is base_ms + 2000; +1000 == 3000
+        ]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk_slack).as_deref(), Some("500/501@7"), "1s lstart slack allowed");
+
+        let no_status_ms = Term::parse(&json!({
+            "address": "t1",
+            "argv": ["zsh"],
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": 500},
+            "status": {"state": "working", "app": "claude-code"},
+            "created_ms": 7
+        })).unwrap();
+        assert_eq!(process_with(&no_status_ms, Some("claude"), &PanicCheck), None, "missing status_ms -> None without check");
+
+        // Test 11 (W2): remote address -> None, check never called.
+        let remote = Term::parse(&json!({
+            "address": "box/t1",
+            "argv": ["zsh"],
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": 500},
+            "status": {"state": "working", "app": "claude-code"},
+            "status_ms": base_ms + 2000,
+            "created_ms": 7
+        })).unwrap();
+        assert_eq!(process_with(&remote, Some("claude"), &PanicCheck), None, "remote wrapper -> None without check");
+
+        // Test 12: workspaces(terms) (no check) with wrapper fixture -> None.
+        let ws = workspaces(&[wrap_json]);
+        assert_eq!(crate::screen::all_panes(&ws)[0].agent.as_ref().unwrap().process, None);
+
+        // Test 13: empty process list -> None.
+        let chk_empty = tree_with(vec![]);
+        assert_eq!(process_with(&wrap, Some("claude"), &chk_empty), None);
     }
 }

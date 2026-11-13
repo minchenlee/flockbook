@@ -6,6 +6,8 @@ pub mod keys;
 pub mod mapper;
 pub mod observe;
 pub mod session;
+pub mod wrapper;
 
 pub use client::HcClient;
 pub use session::HcSession;
+pub use wrapper::TreeCheck;
