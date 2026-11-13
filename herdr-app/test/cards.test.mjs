@@ -4,7 +4,7 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { Cards, wanted, answersFor } from "../mods/flockbook/cards.js";
+import { Cards, wanted, answersFor, draftFor } from "../mods/flockbook/cards.js";
 import { NeedsView } from "../mods/flockbook/needs.js";
 
 const jl = (...lines) => ({ code: 0, stdout: lines.map((l) => JSON.stringify(l)).join("\n") + "\n", stderr: "" });
@@ -311,4 +311,71 @@ test("an own answer the review cannot show: checked again as it changes, Send of
   assert.equal(byId(el, "card-blocked"), null, "fine now");
   assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send is on");
   assert.equal(c.others[1].value(), "olive", "the typed text stays");
+});
+
+test("draftFor includes picks; pick() resets throttle e.at so poll updates blocked right away", async () => {
+  const q = question.question;
+  assert.equal(draftFor(q, new Map(), new Map()), null, "empty picks and others -> null");
+  assert.deepEqual(
+    draftFor(q, new Map([[0, new Set([1])]]), new Map()),
+    [{ picks: [1] }, { picks: [] }],
+    "draftFor includes picks and { picks: [] } for unanswered questions",
+  );
+
+  cardNow = { ...question, blocked: LABELS };
+  const calls = [];
+  fake.exec = (_c, args) => {
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    calls.push(args);
+    const i = args.indexOf("--answers");
+    const a = i < 0 ? [] : JSON.parse(args[i + 1]);
+    return jl(header("card"), a[0]?.picks?.includes(0) ? question : { ...question, blocked: LABELS }, end);
+  };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  assert.ok(!calls[0].includes("--answers"));
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  assert.equal(c.entry("t1").at, 0, "pick() resets e.at = 0 on a question card");
+  await c.poll(cx, "t1", true); // non-forced poll runs immediately because e.at === 0
+  assert.equal(calls.length, 2, "next poll reads card again with the new pick");
+  const sentDraft = JSON.parse(calls[1][calls[1].indexOf("--answers") + 1]);
+  assert.deepEqual(sentDraft, [{ picks: [0] }, { picks: [] }]);
+  assert.equal(byId(c.view("t1", T), "card-blocked"), null, "picking option 0 clears blocked");
+});
+
+test("review-screen stop: when act fails and poll drops card to null, a read-only stop banner stays", async () => {
+  cardNow = question;
+  fake.exec = (_c, args) => {
+    if (args[0] === "card") return jl(header("card"), cardNow ?? { type: "card" }, end);
+    if (args[0] === "answer") {
+      acts.push(args);
+      cardNow = null; // Claude moved to Review screen where card is null
+      return jl(header("answer"), { type: "done", result: "changed", message: "Review screen did not match; finish in the terminal." }, end);
+    }
+    return jl(header(args[0]), end);
+  };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-answer")._h.on_click({}, cx);
+  await cx.settle();
+
+  const el = c.view("t1", T);
+  assert.notEqual(el, null, "stop banner remains visible when card became null with an error/stop note");
+  assert.match(textOf(byId(el, "card-note")), /Review screen did not match/);
+  assert.equal(byId(el, "card-q0-o0"), null, "option picking is hidden on stop banner");
+  assert.equal(byId(el, "card-answer"), null, "Send answer is hidden on stop banner");
+  assert.equal(c.key_down({ key: "1", modifiers: {} }, cx, "t1"), false, "digit keys disabled");
+  assert.equal(c.key_down({ key: "enter", modifiers: {} }, cx, "t1"), false, "Enter disabled");
+
+  // Subsequent poll while still wanted retains the stop banner; opening terminal works
+  await c.poll(cx, "t1", true, true);
+  assert.notEqual(byId(c.view("t1", T), "card-note"), null);
+  byId(c.view("t1", T), "card-terminal")._h.on_click({}, cx); await cx.settle();
+  assert.equal(log.overlays.length, 1);
+
+  // Once agent is no longer wanted, banner clears
+  await c.poll(cx, "t1", false);
+  assert.equal(c.view("t1", T), null);
 });
