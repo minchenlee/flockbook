@@ -796,7 +796,7 @@ fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Vec<St
     let mut acc = vec![String::new()];
     for (j, alts) in item_alts.iter().enumerate() {
         let mut next = vec![];
-        for cur in &acc {
+        'step: for cur in &acc {
             for alt in alts {
                 let mut s = cur.clone();
                 if j > 0 {
@@ -807,7 +807,7 @@ fn raw_body_variants_for(q: &Question, a: &QuestionAnswer, cap: usize) -> Vec<St
                     next.push(s);
                 }
                 if next.len() >= cap {
-                    return next;
+                    break 'step;
                 }
             }
         }
