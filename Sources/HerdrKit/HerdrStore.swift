@@ -233,7 +233,8 @@ public final class HerdrStore {
         guard !isPreview, resolveTask == nil else { return }
         let panes = raw.flatMap(\.tabs).flatMap(\.panes)
         let needs = panes.compactMap { p in
-            p.agent.flatMap { $0.sessionId == nil ? SessionResolver.Need(paneId: p.id, kind: $0.kind, cwd: p.cwd, pids: p.processIds) : nil }
+            p.agent.flatMap { $0.sessionId == nil ? SessionResolver.Need(paneId: p.id, kind: $0.kind, cwd: p.cwd, pids: p.processIds,
+                                                              process: $0.process) : nil }
         }
         if needs.isEmpty, resolved.isEmpty, Self.leadAsks(raw, found: [:]).isEmpty, swaps.isEmpty, leads.isEmpty { return }
         let claimed = Set(panes.compactMap { $0.agent?.sessionId })

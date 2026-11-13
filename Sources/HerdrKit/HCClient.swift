@@ -52,7 +52,8 @@ public actor HCClient {
     /// Seconds `terminal.send` waits: the core answers only after nobody typed for ~3 s and the program went `working`.
     public let sendTimeout: TimeInterval
 
-    var wrapperCheck: HCAgentCheck = NoAgentCheck()
+    /// Finds a wrapper-started agent's process for the key identity (issue #15); checks swap it.
+    var wrapperCheck: HCAgentCheck = HCTreeCheck()
     public func setWrapperCheck(_ c: HCAgentCheck) { wrapperCheck = c }
 
     public init(session: HCSession, callTimeout: TimeInterval = 10, sendTimeout: TimeInterval = 60) {
@@ -138,7 +139,7 @@ public actor HCClient {
         while machineDocsTask != nil, Date() < deadline { try? await Task.sleep(nanoseconds: 25_000_000) }
         let value = appDoc?["value"]
         let remote: [(String, Any?)] = machineDocs.map { m, d in let v = d["value"]; return (m, v is NSNull ? nil : v) }
-        return HCMapper.workspaces(terminals: terms, appDoc: value is NSNull ? nil : value, machineDocs: remote)
+        return HCMapper.workspaces(terminals: terms, appDoc: value is NSNull ? nil : value, machineDocs: remote, check: wrapperCheck)
     }
 
     /// The layout documents of the machines the official app shows: connected and not temporary (window.rs
