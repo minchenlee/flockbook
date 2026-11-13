@@ -2831,3 +2831,70 @@ fn claude_review_vertical_bar_fail_closed_red() {
     rec_bar.questions[0].options[0].recommended = true;
     assert_eq!(review_collision(&rec_bar, &[]), Some(CollisionKind::Labels), "recommended option with '│' fails closed");
 }
+
+#[test]
+fn claude_review_variant_cap_keeps_full_answer_red() {
+    use super::claude_exact::review_collision;
+
+    assert_eq!(RECOMMENDED_SUFFIXES.len(), 6, "3 recommended picks exceed cap=64 right on item 3");
+    let mut q = hooked(
+        "toolu_r3_cap64",
+        json!([
+            {
+                "question": "Features?",
+                "header": "Features",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Opt1", "description": ""},
+                    {"label": "Opt2", "description": ""},
+                    {"label": "Opt3", "description": ""},
+                    {"label": "→ D", "description": ""}
+                ]
+            },
+            {
+                "question": "Confirm?",
+                "header": "Confirm",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Yes", "description": ""},
+                    {"label": "No", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for i in 0..3 {
+        q.questions[0].options[i].recommended = true;
+    }
+    let answers = [ans(&[0, 1, 2, 3]), ans(&[0])];
+
+    // Before the fix, cap=64 returned after the 3rd pick, dropping ", → D", so dp_cross_collides
+    // matched [0, 1, 2] and falsely reported Some(CollisionKind::Picks).
+    assert_eq!(
+        review_collision(&q, &answers),
+        None,
+        "hitting raw_body_variants_for cap=64 must still append later items and give None"
+    );
+
+    let review = sw(
+        "
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Features  ☒ Confirm  ✔ Submit  →
+
+    Review your answers
+
+     ● Features?
+       → Opt1 (Recommended), Opt2 (Recommended), Opt3 (Recommended), → D
+     ● Confirm?
+       → Yes
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    ",
+    );
+    assert!(
+        claude_review_exact(&q, &answers, &review),
+        "matching review screen with all 4 picks passes claude_review_exact"
+    );
+}
