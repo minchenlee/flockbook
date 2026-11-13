@@ -533,7 +533,7 @@ test("single-choice: picking an option then typing own answer sends picks: [] an
 });
 
 test("single-choice UI: option renders unselected while own answer is non-empty, restores when cleared; multi keeps both", async () => {
-  cardNow = question;
+  cardNow = { ...question, question: { ...question.question, agent: "claude" } };
   const cx = fakeCx(); const c = new Cards(cx);
   await c.poll(cx, "t1", true);
 
@@ -565,4 +565,31 @@ test("single-choice UI: option renders unselected while own answer is non-empty,
   el = c.view("t1", T);
   assert.equal(byId(el, "card-q1-o0")._a.bg, "#selected", "multi-choice keeps option highlighted with other");
   assert.equal(byId(el, "card-q1-other")._a.bg, "#selected");
+});
+
+test("codex single-choice keeps picked option with notes in answers and UI", async () => {
+  const codexQ = { ...question.question, agent: "codex" };
+  const picksMap = new Map([[0, new Set([1])], [1, new Set([0])]]);
+  const othersMap = new Map([[0, "use notes"]]);
+  assert.deepEqual(
+    draftFor(codexQ, picksMap, othersMap),
+    [{ picks: [1], other: "use notes" }, { picks: [0] }],
+    "codex draftFor keeps single-choice pick alongside notes",
+  );
+  assert.deepEqual(
+    answersFor(codexQ, picksMap, othersMap),
+    [{ picks: [1], other: "use notes" }, { picks: [0] }],
+    "codex answersFor keeps single-choice pick alongside notes",
+  );
+
+  cardNow = { ...question, question: codexQ };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-q0-o1")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-back")._h.on_click({}, cx);
+  c.view("t1", T);
+  c.others[0].set_value("use notes"); c.others[0]._h.change({}, cx);
+  const el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o1")._a.bg, "#selected", "codex keeps picked single-choice row highlighted with notes");
+  assert.equal(byId(el, "card-q0-other")._a.bg, "#selected");
 });
