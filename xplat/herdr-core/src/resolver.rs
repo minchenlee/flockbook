@@ -850,6 +850,12 @@ fn runs(p: &Proc, kind: &str) -> bool {
     p.line.split(' ').filter(|w| !w.is_empty()).take(2).any(|w| names.contains(&last_path_component(w)))
 }
 
+/// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. At a tie in depth: `None` when
+/// `tie_newest` is false (key gate fails closed), or the newest by start time when true (feed resolution).
+pub fn agent_in_tree(_root: i32, _kind: &str, _procs: &[Proc], _tie_newest: bool) -> Option<Proc> {
+    None
+}
+
 /// hc: the agent process of a terminal from its pids (foreground first, then the terminal's own process). A pid that
 /// runs the agent itself wins; else the newest process in their trees that does.
 pub fn hc_agent_process(pids: &[i32], kind: &str, procs: &[Proc]) -> Option<Proc> {

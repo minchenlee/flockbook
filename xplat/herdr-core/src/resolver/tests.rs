@@ -1074,3 +1074,35 @@ fn hc_wrapper_feed_and_stale_shell() {
         "stale shell resolves no log"
     );
 }
+
+#[test]
+fn agent_in_tree_nearest_and_ties() {
+    let t0 = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let procs = vec![
+        // Tree 1: wrapper (10) -> claude (11, older) -> bash (12) -> claude -p helper (13, newer)
+        proc_(10, 1, t0, "secretspec run -- claude"),
+        proc_(11, 10, t0 + Duration::seconds(1), "claude"),
+        proc_(12, 11, t0 + Duration::seconds(2), "bash -c helper"),
+        proc_(13, 12, t0 + Duration::seconds(10), "claude -p summarize"),
+        // Tree 2: wrapper (20) -> two claude children at depth 1 (21 older, 22 newer)
+        proc_(20, 1, t0, "secretspec run -- claude"),
+        proc_(21, 20, t0 + Duration::seconds(1), "claude"),
+        proc_(22, 20, t0 + Duration::seconds(5), "claude"),
+        // Tree 3: two-step wrapper (30 -> 31) -> claude (32) and deeper helper (33)
+        proc_(30, 1, t0, "secretspec run -- claude"),
+        proc_(31, 30, t0 + Duration::seconds(1), "env FOO=1"),
+        proc_(32, 31, t0 + Duration::seconds(2), "claude"),
+        proc_(33, 32, t0 + Duration::seconds(8), "claude -p sub"),
+    ];
+
+    assert_eq!(agent_in_tree(10, "claude", &procs, false).map(|p| p.pid), Some(11), "gate: nearest wins over newer helper");
+    assert_eq!(agent_in_tree(10, "claude", &procs, true).map(|p| p.pid), Some(11), "feed: nearest wins over newer helper");
+    assert_eq!(hc_agent_process(&[10], "claude", &procs).map(|p| p.pid), Some(11), "hc_agent_process: nearest wins over helper");
+
+    assert_eq!(agent_in_tree(20, "claude", &procs, false), None, "gate: tie at same depth fails closed");
+    assert_eq!(agent_in_tree(20, "claude", &procs, true).map(|p| p.pid), Some(22), "feed: tie at same depth picks newest");
+    assert_eq!(hc_agent_process(&[20], "claude", &procs).map(|p| p.pid), Some(22), "hc_agent_process: tie picks newest");
+
+    assert_eq!(agent_in_tree(30, "claude", &procs, false).map(|p| p.pid), Some(32), "nearest at depth 2 wins over depth 3");
+    assert_eq!(agent_in_tree(999, "claude", &procs, false), None, "unknown root -> None");
+}
