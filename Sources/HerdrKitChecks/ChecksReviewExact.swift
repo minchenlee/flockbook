@@ -94,6 +94,7 @@ import Foundation
     """)
     var parsedLong = longQ
     parsedLong.toolUseId = "screen-2"
+    parsedLong.questions[0].options = []
     parsedLong.questions[0].multiSelect = true
     check(!QuestionAdapter.showsReview(parsedLong, screen: reviewBar, answers: nil),
           "quote bar: None returns false on Claude")
@@ -189,6 +190,9 @@ import Foundation
     check(QuestionAdapter.reviewNote(qDup, answers: []) == QuestionAdapter.reviewLabels, "#6: empty answers -> reviewLabels")
     check(QuestionAdapter.reviewBlocked(qDup, answers: [QuestionAnswer(), pick([0])]), "#6: partial with Q1 unanswered -> blocked")
     check(QuestionAdapter.reviewBlocked(qDup, answers: [pick([0]), QuestionAnswer()]), "#6: partial picking Yes -> blocked")
+    check(QuestionAdapter.reviewNote(qDup, answers: [pick([0]), pick([0])]) == QuestionAdapter.reviewPicks, "#6: picking colliding Yes -> reviewPicks")
+    check(QuestionAdapter.reviewCollision(qDup, answers: [pick([0]), pick([0])]) == .picks, "#6: collision kind == .picks")
+    check(QuestionAdapter.reviewCollision(qDup, answers: []) == .labels, "#6: empty collision kind == .labels")
     check(!QuestionAdapter.reviewBlocked(qDup, answers: [pick([2]), QuestionAnswer()]), "#6: partial picking unique No -> allowed")
     check(!QuestionAdapter.reviewBlocked(qDup, answers: [pick([2]), pick([0])]), "#6: complete picking unique No -> allowed")
     check(QuestionAdapter.claudeReviewExact(qDup, answers: [pick([2]), pick([0])],
@@ -287,8 +291,8 @@ import Foundation
           "#10: ambiguous newline mark screen rejected")
     let p2Req = req("toolu_P2", qJson("Colors?", "C", true, [("Red, Blue", "", false), ("Red", "", false), ("Blue", "", false)]) + ","
                     + qJson("More?", "M", true, [("X, Y", "", false), ("Z", "", false)]))
-    check(QuestionAdapter.reviewBlocked(p2Req, answers: [pick([1, 2]), pick([0])]),
-          "#10 Round 3 P2: [Red, Blue] stays conservatively blocked even when Q2 has quoted comma")
+    check(QuestionAdapter.reviewNote(p2Req, answers: [pick([1, 2]), pick([0])]) == QuestionAdapter.reviewPicks,
+          "#10 Round 3 P2: [Red, Blue] stays conservatively blocked with reviewPicks even when Q2 has quoted comma")
 
     // MARK: Variant & tuple cap checks (Round 3 + Round 4 P2-b)
     // Under cap: 2 recommended picks + → D = 36 <= 64 variants -> allowed and matches exact review

@@ -480,7 +480,7 @@ final class ClaudePickerSim: @unchecked Sendable {
     fake.screen = sim.render()
     let n = fake.requests.count
     var err: Error?
-    do { try await client.answerQuestion(paneId: "w1:p1", request: comma, answers: [QuestionAnswer(picks: [0])],
+    do { try await client.answerQuestion(paneId: "w1:p1", request: comma, answers: [QuestionAnswer(picks: [1, 2])],
                                          gate: KeyGate(agent: Agent(name: "c", kind: "claude", status: .blocked, sessionId: "s", title: ""), allowed: { true })) } catch { err = error }
     check(err != nil && !fake.requests.dropFirst(n).contains { ["pane.send_keys", "pane.send_text"].contains($0.method) }, "r1 P2: an ambiguous review -> refused before any key")
 
