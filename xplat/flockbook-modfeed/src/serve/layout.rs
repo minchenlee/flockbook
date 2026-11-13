@@ -243,6 +243,12 @@ fn ordered<T>(items: Vec<T>, order: &[String], key: impl Fn(&T) -> String) -> Ve
 
 /// `terms`: `terminal.list` records. `app_doc`: this machine's `herdr-app` value. `machine_docs`: each other
 /// machine's, in the order to show them.
+pub fn workspaces_with(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Value)], _check: &dyn mapper::AgentCheck) -> Vec<Workspace> {
+    workspaces(terms, app_doc, machine_docs)
+}
+
+/// `terms`: `terminal.list` records. `app_doc`: this machine's `herdr-app` value. `machine_docs`: each other
+/// machine's, in the order to show them.
 pub fn workspaces(terms: &[Value], app_doc: &Value, machine_docs: &[(String, Value)]) -> Vec<Workspace> {
     let mut names: HashMap<String, Names> = HashMap::from([(String::new(), Names::of(app_doc))]);
     let mut docs: HashMap<String, Doc> = HashMap::new();
@@ -593,5 +599,30 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(docs(), vec![("box".to_string(), json!({"ok": 1}))]);
+    }
+
+    #[test]
+    fn wrapper_identity_with_check() {
+        struct FixedCheck;
+        impl mapper::AgentCheck for FixedCheck {
+            fn agent_under(&self, ask: &mapper::WrapperAsk) -> Option<i32> {
+                assert_eq!(ask.fg_pid, 500);
+                Some(501)
+            }
+        }
+        let wrap = json!({
+            "address": "t1",
+            "argv": ["zsh"],
+            "pid": 400,
+            "created_ms": 7,
+            "state": "live",
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": 500},
+            "status": {"state": "blocked", "kind": "permission", "app": "claude-code"},
+            "status_ms": 1_794_500_002_000i64
+        });
+        let ws = workspaces_with(&[wrap], &Value::Null, &[], &FixedCheck);
+        let agent = ws[0].tabs[0].panes[0].agent.as_ref().unwrap();
+        assert_eq!(agent.kind, "claude");
+        assert_eq!(agent.process.as_deref(), Some("500/501@7"), "layout must pass wrapper check to mapper");
     }
 }

@@ -363,4 +363,56 @@ mod tests {
         assert!(KeyGate::on_mac(Some(tui_agent("claude", None)), None).agent.is_none(), "(rust extra) on_mac: no identity, no agent check");
         assert_eq!(KeyGate::on_mac(Some(seen.clone()), None).agent, Some(seen), "(rust extra) on_mac: bound to an agent with an identity");
     }
+
+    #[test]
+    fn wrapper_gate() {
+        // Test 14 (Brief 7): gate bound to wrapper identity; snapshot then shows new fg_pid -> passes is false.
+        let seen = hc_seen("t1", "claude", Some("500/501@1"));
+        assert!(KeyGate::has_identity(&seen));
+        let same = hc_screen("t1", "claude", Some("500/501@1"));
+        assert!(passes(&same, Some(&gate(&seen, yes())), "hc:t1", None, None));
+        let new_fg = hc_screen("t1", "claude", Some("600/601@1"));
+        assert!(!passes(&new_fg, Some(&gate(&seen, yes())), "hc:t1", None, None), "new fg pid -> no");
+        let restarted = hc_screen("t1", "claude", Some("500/509@1"));
+        assert!(!passes(&restarted, Some(&gate(&seen, yes())), "hc:t1", None, None), "restarted agent under same wrapper -> no");
+
+        // Test 15: agent gone after first key (wrapper stays -> process becomes None) -> gated_keys stops after first key.
+        struct DisappearingAgent {
+            inner: FakeScreen,
+        }
+        impl PaneScreen for DisappearingAgent {
+            fn backend(&self) -> BackendKind {
+                self.inner.backend()
+            }
+            fn snapshot(&self) -> Result<Vec<Workspace>, HerdrError> {
+                self.inner.snapshot()
+            }
+            fn visible_text(&self, pane_id: &str) -> Result<String, HerdrError> {
+                self.inner.visible_text(pane_id)
+            }
+            fn respond(&self, pane_id: &str, allow: bool) -> Result<(), HerdrError> {
+                self.inner.respond(pane_id, allow)
+            }
+            fn send_named_keys(&self, keys: &[String], pane_id: &str) -> Result<(), HerdrError> {
+                let r = self.inner.send_named_keys(keys, pane_id);
+                // After the first key, the agent exits and the wrapper remains with no agent identity.
+                self.inner.workspaces.borrow_mut()[0].tabs[0].panes[0].agent.as_mut().unwrap().process = None;
+                r
+            }
+            fn send_keys(&self, bytes: &[u8], pane_id: &str) -> Result<(), HerdrError> {
+                self.inner.send_keys(bytes, pane_id)
+            }
+            fn send_text(&self, text: &str, pane_id: &str) -> Result<(), HerdrError> {
+                self.inner.send_text(text, pane_id)
+            }
+            fn pause(&self, ms: u64) {
+                self.inner.pause(ms)
+            }
+        }
+        let scr = DisappearingAgent { inner: hc_screen("t1", "claude", Some("500/501@1")) };
+        let keys = vec!["Down".to_string(), "Enter".to_string()];
+        let res = gated_keys(&scr, &keys, Some(&gate(&seen, yes())), "hc:t1", None);
+        assert_eq!(res, Err(HerdrError::KeyGateStop));
+        assert_eq!(scr.inner.sent(), ["Down"], "agent gone after first key -> stops before Enter");
+    }
 }
