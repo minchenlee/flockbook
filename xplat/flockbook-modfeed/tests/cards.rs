@@ -168,3 +168,123 @@ fn cards_on_a_fake_core() {
     let call = fake.calls("terminal.send").last().cloned().unwrap();
     assert!(sent.result == "sent" && call["text"] == "hello" && call["terminal"] == "t1", "send: terminal.send to the terminal ({sent:?})");
 }
+
+#[test]
+fn wrapper_child_restart_drops_stale_log_cache() {
+    use herdr_core::hc::TreeCheck;
+    use herdr_core::resolver::{Proc, ProcessSource, SessionResolver};
+    use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let base_ms: i64 = 1_794_500_000_000;
+    let proc_at = |pid: i32, ppid: i32, ms: i64, line: &str| Proc {
+        pid,
+        ppid,
+        start: chrono::DateTime::from_timestamp_millis(ms).unwrap(),
+        line: line.into(),
+    };
+    let procs = Arc::new(Mutex::new(vec![
+        proc_at(500, 400, base_ms, "secretspec run -- codex"),
+        proc_at(501, 500, base_ms + 1000, "codex"),
+    ]));
+    struct DynProcs(Arc<Mutex<Vec<Proc>>>);
+    impl ProcessSource for DynProcs {
+        fn processes(&self) -> Vec<Proc> {
+            self.0.lock().unwrap().clone()
+        }
+        fn open_files(&self, _: &[i32]) -> Vec<String> {
+            vec![]
+        }
+    }
+    let alive_procs = procs.clone();
+    let check = Arc::new(TreeCheck::with_hooks(
+        Arc::new(DynProcs(procs.clone())),
+        Arc::new(std::time::Instant::now),
+        Arc::new(move |pid| alive_procs.lock().unwrap().iter().any(|p| p.pid == pid)),
+    ));
+
+    let fake = FakeHc::start();
+    let term_json = |state: &str, status_ms: i64| {
+        json!({
+            "address": "t1",
+            "labels": {},
+            "argv": ["zsh"],
+            "cwd": "/tmp/proj",
+            "state": "live",
+            "created_ms": 1,
+            "screen": "exact",
+            "cols": 80,
+            "rows": 24,
+            "turn": 0,
+            "title": "",
+            "reported": true,
+            "records": {},
+            "pid": 400,
+            "parent": null,
+            "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "codex"], "pid": 500},
+            "status": {"state": state, "app": "codex"},
+            "status_ms": status_ms
+        })
+    };
+    fake.set_terminals(vec![term_json("blocked", base_ms + 2000)]);
+    let hc = HcClient::new(HcSession::new(&fake.path), 10, 60).with_wrapper(check);
+
+    let ws1 = hc.snapshot().unwrap();
+    let p1 = locate::pane(&ws1, "t1").unwrap().clone();
+    assert_eq!(p1.process_ids, vec![500, 400]);
+    assert_eq!(p1.agent.as_ref().and_then(|a| a.process.as_deref()), Some("500/501@1"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let old_log = dir.path().join("rollout-old.jsonl");
+    let lines = [
+        r#"{"timestamp":"2026-10-10T04:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Ask me."}]}}"#,
+        r#"{"timestamp":"2026-10-10T04:00:12.000Z","type":"response_item","payload":{"type":"function_call","name":"request_user_input_async","arguments":"{\"questions\":[{\"title\":\"Which plan?\",\"options\":[\"Fast\",\"Safe\"]}]}","call_id":"call_c4"}}"#,
+        r#"{"timestamp":"2026-10-10T04:00:12.100Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_c4","output":"{\"accepted\":true}"}}"#,
+    ];
+    std::fs::write(&old_log, lines.join("\n") + "\n").unwrap();
+
+    let now_s = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+    let cache_file = dir.path().join("cache.json");
+    let cache_json = json!({
+        "entries": {
+            "t1": {
+                "kind": "codex",
+                "cwd": p1.cwd,
+                "pids": p1.process_ids,
+                "process": p1.agent.as_ref().unwrap().process,
+                "path": old_log.to_string_lossy(),
+                "checked": now_s
+            }
+        },
+        "feeds": {}
+    });
+    std::fs::write(&cache_file, cache_json.to_string()).unwrap();
+
+    let hit = locate::find("t1", &ws1, &mut SessionResolver::new("/nonexistent.sock"), Some(&cache_file), now_s + 1.0).unwrap();
+    assert!(hit.cached && hit.path.as_deref() == Some(old_log.to_string_lossy().as_ref()), "same child uses fresh cache");
+
+    // Wrapper 500 stays, child 501 exits and replacement child 502 starts -> process_ids stays [500, 400].
+    *procs.lock().unwrap() = vec![
+        proc_at(500, 400, base_ms, "secretspec run -- codex"),
+        proc_at(502, 500, base_ms + 3000, "codex"),
+    ];
+    fake.set_terminals(vec![term_json("idle", base_ms + 4000)]);
+    let ws2 = hc.snapshot().unwrap();
+    let p2 = locate::pane(&ws2, "t1").unwrap().clone();
+    assert_eq!(p2.process_ids, vec![500, 400]);
+    assert_eq!(p2.agent.as_ref().and_then(|a| a.process.as_deref()), Some("500/502@1"));
+
+    let cached_after = locate::read_cache(Some(&cache_file));
+    assert!(!locate::fresh(cached_after.entries.get("t1"), &p2, "codex", now_s + 2.0), "restarted child invalidates cached entry");
+
+    let sends_before = fake.calls("terminal.send").len();
+    let keys_before = fake.keys().len();
+    let found = locate::find("t1", &ws2, &mut SessionResolver::new("/nonexistent.sock"), Some(&cache_file), now_s + 2.0).unwrap();
+    assert!(!found.cached && found.path.is_none(), "old log must not be accepted after child restart ({:?})", found.path);
+
+    let log_path = found.path.as_deref().map(std::path::Path::new);
+    let d = cards::answer(&found.pane, &hc, log_path, "call_c4", &[QuestionAnswer { picks: vec![0], other: None }]);
+    assert_eq!(d.result, "changed", "cards::answer must refuse after child restart ({d:?})");
+    assert_eq!(fake.calls("terminal.send").len(), sends_before);
+    assert_eq!(fake.keys().len(), keys_before);
+}
