@@ -415,7 +415,7 @@ fn restore_full_question(q: &QuestionRequest, fq: &FeedQuestion) -> Option<Quest
                     .map(|o| QOption { label: o.label.clone(), detail: o.detail.clone(), recommended: o.recommended })
                     .collect(),
                 multi_select: x.multi,
-                cut_labels: false,
+                cut_labels: x.cut_labels,
             })
             .collect(),
     })
