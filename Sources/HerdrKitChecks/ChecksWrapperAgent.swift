@@ -43,7 +43,7 @@ private func proc(_ pid: Int32, _ ppid: Int32, _ ms: Int, _ line: String) -> R.P
 }
 
 private func tree(_ procs: [R.Proc]) -> HCTreeCheck {
-    HCTreeCheck(source: { procs }, now: { 0 }, alive: { _ in true })
+    HCTreeCheck(source: { procs }, now: { 0 }, probe: { _ in 1 })
 }
 
 private func term(_ addr: String = "t1", argv: [String] = ["zsh"], pid: Int? = 400, created: Int = 7,
@@ -68,6 +68,33 @@ private var secretspec: [String: Any] { ["name": "secretspec", "argv": ["secrets
     try await checksWrapperGate()
     await checksWrapperLogCache()
     checksRealExecutable()
+    checksWrapperPidReuse()
+}
+
+/// Twin of herdr-core `positive_cache_ends_when_the_pid_is_reused` and `pid_start_reads_this_process`.
+@MainActor private func checksWrapperPidReuse() {
+    let s = baseMs + 2000
+    let ask = HCWrapperAsk(address: "t1", fgPid: 500, created: 1, kind: "claude", statusMs: s)
+    let src = Procs([proc(500, 1, baseMs, "secretspec run -- claude"), proc(501, 500, baseMs, "claude")])
+    let clock = Clock()
+    final class Born: @unchecked Sendable { let l = NSLock(); var v: UInt64? = 1; func get() -> UInt64? { l.withLock { v } }; func set(_ x: UInt64?) { l.withLock { v = x } } }
+    let born = Born()
+    let c = HCTreeCheck(source: { src.read() }, now: { clock.now }, probe: { _ in born.get() })
+    check(c.agentUnder(ask) == 501, "pid reuse: first ask")
+    clock.set(2)
+    check(c.agentUnder(ask) == 501 && src.reads == 1, "pid reuse: same start inside 10 s: cached (\(src.reads))")
+    born.set(2)
+    src.set([proc(500, 1, baseMs, "secretspec run -- claude"), proc(501, 1, baseMs, "vim notes")])
+    clock.set(4)
+    check(c.agentUnder(ask) == nil, "pid reuse: a reused pid is not the agent")
+    check(src.reads == 2, "pid reuse: another start: reads again at once (\(src.reads))")
+    let src2 = Procs([proc(500, 1, baseMs, "secretspec run -- claude"), proc(501, 500, baseMs, "claude")])
+    let c2 = HCTreeCheck(source: { src2.read() }, now: { 0 }, probe: { _ in nil })
+    check(c2.agentUnder(ask) == 501 && c2.agentUnder(ask) == 501 && src2.reads == 2, "pid reuse: no start: no Yes entry (\(src2.reads))")
+    let me = getpid()
+    let a = HCTreeCheck.pidStart(me)
+    check(a != nil && HCTreeCheck.pidStart(me) == a, "pid start: this process has one start")
+    check(HCTreeCheck.pidStart(0) == nil && HCTreeCheck.pidStart(Int32.max) == nil, "pid start: pid 0 and an unused pid give nothing")
 }
 
 /// Twins of herdr-core `runs_checks_the_real_executable` and `direct_identity_needs_the_real_executable` (Codex P1): a
@@ -187,7 +214,7 @@ private var secretspec: [String: Any] { ["name": "secretspec", "argv": ["secrets
     let clock = Clock()
     final class Flag: @unchecked Sendable { let l = NSLock(); var v = true; func get() -> Bool { l.withLock { v } }; func set(_ x: Bool) { l.withLock { v = x } } }
     let up = Flag()
-    let c = HCTreeCheck(source: { src.read() }, now: { clock.now }, alive: { _ in up.get() })
+    let c = HCTreeCheck(source: { src.read() }, now: { clock.now }, probe: { _ in up.get() ? 1 : nil })
 
     // 16: two asks inside 10 s, agent alive: one read.
     check(c.agentUnder(ask(s)) == 501 && src.reads == 1, "wrapper 16: first ask reads the table")
@@ -209,7 +236,7 @@ private var secretspec: [String: Any] { ["name": "secretspec", "argv": ["secrets
     // Positive cache: a second agent at the same depth and a new status inside 10 s: read again, fail closed.
     let src2 = Procs([proc(500, 1, baseMs, "secretspec run -- claude"), proc(501, 500, baseMs, "claude")])
     let clock2 = Clock()
-    let c2 = HCTreeCheck(source: { src2.read() }, now: { clock2.now }, alive: { _ in true })
+    let c2 = HCTreeCheck(source: { src2.read() }, now: { clock2.now }, probe: { _ in 1 })
     check(c2.agentUnder(ask(s)) == 501, "wrapper cache: first ask")
     clock2.set(2)
     src2.set([proc(500, 1, baseMs, "secretspec run -- claude"), proc(501, 500, baseMs, "claude"), proc(502, 500, baseMs, "claude")])
@@ -219,7 +246,7 @@ private var secretspec: [String: Any] { ["name": "secretspec", "argv": ["secrets
     let batch = Procs([proc(100, 1, baseMs, "secretspec run -- claude"), proc(101, 100, baseMs, "claude"),
                        proc(200, 1, baseMs, "secretspec run -- claude"), proc(201, 200, baseMs, "claude"),
                        proc(300, 1, baseMs, "secretspec run -- claude"), proc(301, 300, baseMs, "claude")])
-    let bc = HCTreeCheck(source: { batch.read() }, now: { 0 }, alive: { _ in true })
+    let bc = HCTreeCheck(source: { batch.read() }, now: { 0 }, probe: { _ in 1 })
     func t(_ addr: String, _ fg: Int) -> [String: Any] {
         ["address": addr, "argv": ["zsh"], "created_ms": 9, "status_ms": s, "status": ["state": "working", "app": "claude-code"],
          "foreground": ["name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": fg]]
@@ -257,7 +284,7 @@ private var secretspec: [String: Any] { ["name": "secretspec", "argv": ["secrets
     defer { fake.kill() }
     let hc = HCClient(session: HCSession(socketPath: fake.path))
     let procs = Procs([proc(500, 400, baseMs, "secretspec run -- claude"), proc(501, 500, baseMs + 1000, "claude")])
-    await hc.setWrapperCheck(HCTreeCheck(source: { procs.read() }, now: { ProcessInfo.processInfo.systemUptime }, alive: { procs.has($0) }))
+    await hc.setWrapperCheck(HCTreeCheck(source: { procs.read() }, now: { ProcessInfo.processInfo.systemUptime }, probe: { procs.has($0) ? 1 : nil }))
     func wrapTerm(fg: Int) -> [String: Any] {
         var t = FakeHC.terminal("t1", argv: ["zsh"], pid: 400, status: "blocked", kind: "permission",
                                 fg: ["name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": fg])

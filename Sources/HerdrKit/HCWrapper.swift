@@ -37,7 +37,8 @@ public struct NoAgentCheck: HCAgentCheck {
 /// Checks that a wrapper terminal's foreground tree runs the agent (W5: exactly one nearest agent process; W6: the status
 /// changed at or after it started), with a small cache per terminal address. Twin of herdr-core `hc::wrapper::TreeCheck`.
 ///
-/// A Yes holds 10 s and only while `kill(pid, 0)` says the agent lives; a No holds 30 s. Both are keyed on the foreground
+/// A Yes holds 10 s and only while `probe(pid)` gives the start it gave when the tree was read (a dead agent, a zombie
+/// or a reused pid reads again); a No holds 30 s. Both are keyed on the foreground
 /// pid, the terminal's creation, the kind and `status_ms`: a new status report reads the table again at once.
 public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
     static let yesTTL: TimeInterval = 10
@@ -47,20 +48,21 @@ public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
         var fgPid: Int32, created: Int, kind: String, statusMs: Int
         init(_ a: HCWrapperAsk) { fgPid = a.fgPid; created = a.created; kind = a.kind; statusMs = a.statusMs }
     }
-    private enum Entry { case yes(Key, Int32, TimeInterval), no(Key, TimeInterval) }
+    private enum Entry { case yes(Key, Int32, UInt64, TimeInterval), no(Key, TimeInterval) }
 
     private let source: @Sendable () -> [SessionResolver.Proc]
     private let now: @Sendable () -> TimeInterval
-    private let alive: @Sendable (Int32) -> Bool
+    private let probe: @Sendable (Int32) -> UInt64?
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
 
-    /// `source`: the process table (`ps`). `now`: a monotonic clock in seconds. `alive`: whether a pid still runs.
+    /// `source`: the process table (`ps`). `now`: a monotonic clock in seconds. `probe`: a pid's start time while it runs, nil
+    /// when it is gone or a zombie.
     public init(source: (@Sendable () -> [SessionResolver.Proc])? = nil,
                 now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-                alive: @escaping @Sendable (Int32) -> Bool = HCTreeCheck.pidAlive) {
+                probe: @escaping @Sendable (Int32) -> UInt64? = HCTreeCheck.pidStart) {
         self.source = source ?? { SessionResolver.processes() }
-        self.now = now; self.alive = alive
+        self.now = now; self.probe = probe
     }
 
     func lookup(_ ask: HCWrapperAsk, procs load: () -> [SessionResolver.Proc]) -> Int32? {
@@ -68,7 +70,7 @@ public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
         let key = Key(ask)
         let hit: Int32?? = lock.withLock {
             switch entries[ask.address] {
-            case let .yes(k, pid, at) where k == key && t - at <= Self.yesTTL && alive(pid): return .some(pid)
+            case let .yes(k, pid, _, at) where k == key && t - at <= Self.yesTTL && probe(pid) != nil: return .some(pid)
             case let .no(k, at) where k == key && t - at <= Self.noTTL: return .some(nil)
             default: return nil
             }
@@ -82,7 +84,8 @@ public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
             if ask.statusMs + 1000 >= startMs, agent.pid > 0 { found = agent.pid }
         }
         lock.withLock {
-            if let found { entries[ask.address] = .yes(key, found, t) }
+            // No start to bind the entry to (the probe failed): the answer stands, but is not kept.
+            if let found { entries[ask.address] = probe(found).map { .yes(key, found, $0, t) } }
             else if !procs.isEmpty { entries[ask.address] = .no(key, t) }
             else { entries[ask.address] = nil }   // the read failed: no No entry either
         }
@@ -112,6 +115,8 @@ public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
             }
         }
     }
+
+    public static let pidStart: @Sendable (Int32) -> UInt64? = { pidAlive($0) ? 0 : nil }
 
     /// `kill(pid, 0)`: the pid exists (EPERM: it exists, owned by another user).
     public static let pidAlive: @Sendable (Int32) -> Bool = { pid in
