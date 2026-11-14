@@ -7,7 +7,7 @@ One short line: what this release is about.
 
 
 ### 🔒 Security
-- Flockbook no longer treats a program that only names an agent, such as `script claude` or `vim codex`, as that agent, so answers and keys go only to a real agent. A wrapper such as `secretspec run -- claude` still works.
+- Flockbook no longer treats a program that only names an agent, such as `script claude` or `vim codex`, as that agent, so answers and keys go only to a real agent. A wrapper such as `secretspec run -- claude` still works. When an agent behind a wrapper exits, its terminal stops taking keys at once, also if another program gets the same process number.
 
 ### 🐛 Bug Fixes
 - Chat (Herdr app, Claude Code): a dim "/" prompt suggestion in an empty box no longer stops a send with "The agent's box has text in it". The sidecar looks once at the screen's attributes: dim text with the cursor at the box start is a suggestion. Text you typed still stops the send. Tested on the dim empty-box placeholder; a real "/" suggestion was not seen in testing, and if one is not dim the send is refused as before.

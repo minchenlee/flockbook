@@ -70,7 +70,7 @@ public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
         let key = Key(ask)
         let hit: Int32?? = lock.withLock {
             switch entries[ask.address] {
-            case let .yes(k, pid, _, at) where k == key && t - at <= Self.yesTTL && probe(pid) != nil: return .some(pid)
+            case let .yes(k, pid, start, at) where k == key && t - at <= Self.yesTTL && probe(pid) == start: return .some(pid)
             case let .no(k, at) where k == key && t - at <= Self.noTTL: return .some(nil)
             default: return nil
             }
@@ -116,11 +116,13 @@ public final class HCTreeCheck: HCAgentCheck, @unchecked Sendable {
         }
     }
 
-    public static let pidStart: @Sendable (Int32) -> UInt64? = { pidAlive($0) ? 0 : nil }
-
-    /// `kill(pid, 0)`: the pid exists (EPERM: it exists, owned by another user).
-    public static let pidAlive: @Sendable (Int32) -> Bool = { pid in
-        guard pid > 0 else { return false }
-        return kill(pid, 0) == 0 || errno == EPERM
+    /// The pid's start time (microseconds since the epoch) while it runs; nil when it is gone, a zombie, or not
+    /// readable. Not `kill(pid, 0)`: that also succeeds for a zombie and for a reused pid. Twin of herdr-core `pid_start`.
+    public static let pidStart: @Sendable (Int32) -> UInt64? = { pid in
+        guard pid > 0 else { return nil }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_status != UInt32(SZOMB) else { return nil }
+        return info.pbi_start_tvsec &* 1_000_000 &+ info.pbi_start_tvusec
     }
 }
