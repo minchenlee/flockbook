@@ -16,15 +16,17 @@ struct QuestionFlow: Equatable {
     /// Every question's header from Claude's picker tab bar (empty for log items). More headers than questions: the rest
     /// are not read yet (`HerdrClient.loadAllQuestions` reads them, on a user action only).
     var headers: [String] = []
+    var agent: String = "claude"
     var step = 0
     var picks: [Set<Int>]
     var other: [String]
     /// The option picked last (the card scrolls it into view).
     var lastPick: Int?
 
-    init(_ questions: [QuestionRequest.Question], headers: [String] = []) {
+    init(_ questions: [QuestionRequest.Question], headers: [String] = [], agent: String = "claude") {
         self.questions = questions
         self.headers = headers
+        self.agent = agent
         picks = questions.map { _ in [] }
         other = questions.map { _ in "" }
     }
@@ -58,19 +60,31 @@ struct QuestionFlow: Equatable {
         return .ignored
     }
 
+    var otherWinsSingle: Bool { agent == "claude" }
+
+    /// Picks shown and sent for question `k`: on Claude single-choice, a non-empty own answer overrides the pick while
+    /// keeping `picks[k]` underneath so clearing `other` brings it back. Codex and other agents keep pick + notes.
+    func selectedPicks(for k: Int) -> Set<Int> {
+        if otherWinsSingle && !questions[k].multiSelect && !other[k].trimmingCharacters(in: .whitespaces).isEmpty {
+            return []
+        }
+        return picks[k]
+    }
+
     mutating func pick(_ i: Int) {
         lastPick = i
         if question.multiSelect {
             if picks[step].contains(i) { picks[step].remove(i) } else { picks[step].insert(i) }
         } else {
-            picks[step] = [i]; other[step] = ""
+            picks[step] = [i]
+            if otherWinsSingle { other[step] = "" }
         }
     }
 
-    /// Typing an "Other" answer in single choice replaces the pick.
+    /// Typing an "Other" answer keeps the single pick underneath: Claude ignores it while non-empty and brings it back
+    /// when cleared; Codex and other agents keep pick + notes together.
     mutating func setOther(_ s: String) {
         other[step] = s
-        if !question.multiSelect, !s.trimmingCharacters(in: .whitespaces).isEmpty { picks[step] = [] }
     }
 
     /// Return: next question, or true when the last one is answered (time to send).
@@ -88,14 +102,14 @@ struct QuestionFlow: Equatable {
     func values() -> [QuestionAnswer] {
         questions.indices.map { k in
             let o = other[k].trimmingCharacters(in: .whitespaces)
-            return QuestionAnswer(picks: picks[k].sorted(), other: o.isEmpty ? nil : o)
+            return QuestionAnswer(picks: selectedPicks(for: k).sorted(), other: o.isEmpty ? nil : o)
         }
     }
 
     /// One string per question, as HerdrKit reports answers: labels in option order joined ", ", then the "Other" text.
     func answers() -> [String] {
         questions.indices.map { k in
-            var parts = picks[k].sorted().map { questions[k].options[$0].label }
+            var parts = selectedPicks(for: k).sorted().map { questions[k].options[$0].label }
             let o = other[k].trimmingCharacters(in: .whitespaces)
             if !o.isEmpty { parts.append(o) }
             return parts.joined(separator: ", ")
@@ -150,7 +164,7 @@ struct QuestionCard: View {
          onFlow: ((QuestionFlow) -> Void)? = nil, onOpenTerminal: @escaping () -> Void = {}) {
         self.model = model; self.agentName = agentName; self.canSend = canSend; self.maxHeight = maxHeight; self.onSend = onSend; self.onLoadAll = onLoadAll
         self.onFlow = onFlow; self.onOpenTerminal = onOpenTerminal
-        _flow = State(initialValue: QuestionFlow(model.questions, headers: model.headers))
+        _flow = State(initialValue: QuestionFlow(model.questions, headers: model.headers, agent: model.agent))
     }
 
     /// Words for a failed send or read. Nothing was typed for `.notOnScreen` and `.unsupported`.
@@ -251,7 +265,7 @@ struct QuestionCard: View {
     private func optionGroup(_ q: QuestionRequest.Question) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(q.options.enumerated()), id: \.offset) { i, o in
-                QuestionOptionRow(index: i, option: o, multi: q.multiSelect, on: flow.picks[flow.step].contains(i)) {
+                QuestionOptionRow(index: i, option: o, multi: q.multiSelect, on: flow.selectedPicks(for: flow.step).contains(i)) {
                     withAnimation(.spring) { flow.pick(i) }
                     focus = .card
                 }
@@ -396,6 +410,42 @@ struct QuestionCard: View {
             case .ignored: return .ignored
             }
         }
+    }
+}
+
+/// Read-only stop state kept when sending a `screen-` question fails after the terminal already moved to
+/// "Review your answers" (`readScreenQuestion` returns nil): keeps the error visible, picks & Send off, and
+/// "Open terminal" active instead of dropping back to the composer.
+struct QuestionStopCard: View {
+    let agentName: String
+    let message: String
+    let onOpenTerminal: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.bubble.fill").font(.system(size: 20))
+                    .symbolRenderingMode(.hierarchical).foregroundStyle(Color.orange)
+                    .accessibilityHidden(true)
+                Text("\(Text(agentName).font(.headline).foregroundStyle(.primary)) asks you").foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            HStack(spacing: 8) {
+                Label(message, systemImage: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Open terminal") { onOpenTerminal() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .controlSize(.regular)
+        }
+        .padding(16)
+        .glassCard(radius: Radius.bubble)
+        .overlay(RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(agentName) asks you")
     }
 }
 
