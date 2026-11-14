@@ -465,7 +465,7 @@ mod tests {
     fn tree_with(procs: Vec<crate::resolver::Proc>) -> crate::hc::wrapper::TreeCheck {
         use std::sync::Arc;
         use std::time::Instant;
-        crate::hc::wrapper::TreeCheck::with_hooks(Arc::new(FixedProcs(procs)), Arc::new(Instant::now), Arc::new(|_| true))
+        crate::hc::wrapper::TreeCheck::with_hooks(Arc::new(FixedProcs(procs)), Arc::new(Instant::now), Arc::new(|_| Some(1)))
     }
 
     fn proc_(pid: i32, ppid: i32, ms: i64, line: &str) -> crate::resolver::Proc {
