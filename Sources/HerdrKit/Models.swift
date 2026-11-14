@@ -185,6 +185,9 @@ public struct QuestionRequest: Sendable, Hashable {
         public var text: String
         public var options: [Option]
         public var multiSelect: Bool
+        /// Screen reads only: a row's label may go on in the next line (a wrapped label read as its detail), so the
+        /// labels may be cut. The review screen cannot be checked then.
+        public var cutLabels = false
         public init(id: String? = nil, header: String, text: String, options: [Option], multiSelect: Bool = false) {
             self.id = id ?? text; self.header = header; self.text = text; self.options = options; self.multiSelect = multiSelect
         }

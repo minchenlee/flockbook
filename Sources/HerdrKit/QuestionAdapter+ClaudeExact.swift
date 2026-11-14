@@ -42,6 +42,8 @@ extension QuestionAdapter {
     /// Why `reviewCollision` blocked a pre-flight question card / answer set.
     public enum CollisionKind: Sendable, Equatable {
         case labels, picks, own
+        /// A screen read whose option labels may be cut (a wrapped label): the review cannot be checked.
+        case cut
     }
 
     private enum ReviewForm: Equatable {
@@ -730,6 +732,7 @@ extension QuestionAdapter {
     public static let reviewLabels = "Two answers here would look identical on the review screen. Answer in the terminal."
     public static let reviewPicks = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal."
     public static let reviewOwn = "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal."
+    public static let reviewCut = "An option is too long for one line on the screen, so the review screen cannot be checked. Answer in the terminal."
     public static func reviewNote(_ q: QuestionRequest, answers: [QuestionAnswer]) -> String? {
         if q.unread > 0 { return nil }
         switch reviewCollision(q, answers: answers) {
@@ -737,6 +740,7 @@ extension QuestionAdapter {
         case .labels: return reviewLabels
         case .picks: return reviewPicks
         case .own: return reviewOwn
+        case .cut: return reviewCut
         }
     }
 
