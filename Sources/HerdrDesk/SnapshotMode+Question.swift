@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import HerdrKit
 import SwiftUI
 
@@ -201,7 +202,11 @@ extension ContentTests {
         // The answer logic, without a view.
         var f = QuestionFlow(three().questions)
         step("1–n picks, n+1 is Other in single choice", f.digit(2) == .picked && f.picks[0] == [1] && f.digit(4) == .other && f.digit(9) == .ignored)
-        f.setOther("Magic link"); step("typing Other replaces the single pick", f.picks[0].isEmpty && f.valid)
+        f.setOther("Magic link")
+        step("Claude Other wins over single pick while kept underneath", f.picks[0] == [1] && f.values().first == QuestionAnswer(picks: [], other: "Magic link"))
+        f.setOther("")
+        step("clearing Claude Other brings the single pick back", f.picks[0] == [1] && f.values().first == QuestionAnswer(picks: [1]))
+        f.setOther("Magic link")
         _ = f.advance(); _ = f.digit(1); _ = f.digit(3); _ = f.digit(1)
         step("multiSelect toggles: 1, 3, 1 leaves option 3 (\(f.picks[1].sorted()))", f.picks[1] == [2])
         step("multiSelect: no Other key", f.digit(5) == .ignored)
@@ -279,10 +284,10 @@ extension ContentTests {
                     tv.doCommand(by: #selector(NSResponder.insertNewline(_:)))
                     try? await Task.sleep(for: .milliseconds(300))
                     step("\(w): Return while composing commits the text and stays (step \(tflow.step), other '\(tflow.other[0])')", tflow.step == 0 && !tv.hasMarkedText() && tflow.other[0] == "ㄘㄜ")
-                    step("\(w): Other replaces the pick in single choice", tflow.picks[0].isEmpty)
+                    step("\(w): Other wins over the Claude single pick while kept underneath", tflow.values().first == QuestionAnswer(picks: [], other: "ㄘㄜ") && tflow.picks[0] == [0])
                     tv.insertText("2", replacementRange: tv.selectedRange())
                     try? await Task.sleep(for: .milliseconds(200))
-                    step("\(w): a digit typed in Other is text, not a pick ('\(tflow.other[0])')", tflow.other[0] == "ㄘㄜ2" && tflow.picks[0].isEmpty)
+                    step("\(w): a digit typed in Other is text, not a pick ('\(tflow.other[0])')", tflow.other[0] == "ㄘㄜ2" && tflow.values().first == QuestionAnswer(picks: [], other: "ㄘㄜ2") && tflow.picks[0] == [0])
                     tv.doCommand(by: #selector(NSResponder.insertNewline(_:)))
                     try? await Task.sleep(for: .milliseconds(400))
                     step("\(w): Return after composing goes to question 2", tflow.step == 1)
@@ -325,11 +330,52 @@ extension ContentTests {
         step("second try sends and the card says Sent (\(tries) tries)", tries == 2 && elabels2.contains { $0.hasPrefix("Sent.") })
         ewin.orderOut(nil)
 
-        // The terminal's review screen could not show the picks (a hooked multi-select with a comma label): the card says so
-        // from the start, offers the terminal, and Return sends nothing (issue #11 item 4; QuestionAdapter.reviewNote).
+        // Codex keeps pick + notes on single-choice questions; Claude single choice lets non-empty Other win (old pick
+        // does not render selected, clearing Other restores it).
+        var cxSent: [QuestionAnswer]?, cxFlow = QuestionFlow([])
+        let codexSingle = QuestionRequest(toolUseId: "q-cx-single", agent: "codex", questions: single().questions)
+        let (cxWin, cxHost) = window(
+            ZStack {
+                WindowSurface(glass: .off)
+                QuestionCard(model: codexSingle, agentName: "codex", canSend: true, onSend: { cxSent = $0 }, onFlow: { cxFlow = $0 }).inputColumn()
+            }, NSSize(width: 1200, height: 520))
+        try? await Task.sleep(for: .seconds(1.2))
+        await digit(cxWin, 2)
+        if let field = fields(in: cxHost).first(where: { $0.accessibilityLabel() == "Other answer" }) {
+            cxWin.makeFirstResponder(field)
+            try? await Task.sleep(for: .milliseconds(200))
+            if let tv = field.currentEditor() as? NSTextView {
+                tv.insertText("my note", replacementRange: tv.selectedRange())
+                try? await Task.sleep(for: .milliseconds(200))
+                tv.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+        }
+        step("Codex single choice keeps pick + notes on Send (\(cxSent?.map { "\($0.picks)/\($0.other ?? "-")" } ?? []))",
+             cxFlow.values() == [QuestionAnswer(picks: [1], other: "my note")]
+             && cxSent == [QuestionAnswer(picks: [1], other: "my note")])
+        cxWin.orderOut(nil)
+
+        // Multi-choice with a non-colliding comma label now sends cleanly, while truly colliding labels (e.g. two
+        // identical labels) block from the start with the shared exact copy and Return sends nothing.
+        var cleanCommaSent: [QuestionAnswer]?
+        let cleanCommaQ = QuestionRequest(toolUseId: "toolu_cc", questions: [
+            .init(header: "Colors", text: "Which colors?", options: [.init(label: "Red, green"), .init(label: "Blue")], multiSelect: true),
+        ])
+        let (ccWin, _) = window(
+            ZStack {
+                WindowSurface(glass: .off)
+                QuestionCard(model: cleanCommaQ, agentName: agent, canSend: true, onSend: { cleanCommaSent = $0 }).inputColumn()
+            }, NSSize(width: 1200, height: 420))
+        try? await Task.sleep(for: .seconds(1.0))
+        await digit(ccWin, 1); await returnKey(ccWin)
+        step("multi-choice unique comma option now sends (\(cleanCommaSent.map { "\($0.map(\.picks))" } ?? "nothing"))",
+             cleanCommaSent == [QuestionAnswer(picks: [0])])
+        ccWin.orderOut(nil)
+
         var blockedSent: [QuestionAnswer]?, opened = 0
         let commaQ = QuestionRequest(toolUseId: "toolu_rb", questions: [
-            .init(header: "Colors", text: "Which colors?", options: [.init(label: "Red, green"), .init(label: "Blue")], multiSelect: true),
+            .init(header: "Colors", text: "Which colors?", options: [.init(label: "Yes"), .init(label: "Yes")], multiSelect: true),
         ])
         let (rwin, rhost) = window(
             ZStack {
@@ -339,11 +385,86 @@ extension ContentTests {
         try? await Task.sleep(for: .seconds(1.2))
         let rlabels = await axLabels(rhost)
         step("review blocked: the reason and Answer in terminal from the start",
-             rlabels.contains { $0.hasPrefix("The terminal's review screen could not show") } && rlabels.contains("Answer in terminal"))
+             rlabels.contains { $0.hasPrefix("Two answers here would look identical") } && rlabels.contains("Answer in terminal"))
         capture(rwin, to: "\(dir)/question-review-blocked.png")
         await digit(rwin, 2); await returnKey(rwin)
         step("review blocked: 2 and Return send nothing (\(blockedSent.map { "\($0.map(\.picks))" } ?? "nothing"))", blockedSent == nil)
         rwin.orderOut(nil)
+
+        // TabScreen / PaneView: failing on a screen- question when the terminal moved to Review your answers keeps a
+        // read-only stop card (error shown, picks & Send off, Open terminal active) instead of dropping to composer.
+        do {
+            let fakeSock = FakeQuestionSocket(path: NSTemporaryDirectory() + "hd-stop-\(getpid()).sock")
+            fakeSock.agents = #"[{"pane_id":"w1:p1","agent":"claude","name":"claude","agent_status":"blocked","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"s"}}]"#
+            let picker = """
+            ────────────────────────────────────────────────────────
+             ☐ Color
+
+            Pick a color?
+
+            ❯ 1. Red
+              2. Blue
+              3. Type something.
+            ────────────────────────────────────────────────────────
+              4. Chat about this
+
+            Enter to select · ↑/↓ to navigate · Esc to cancel
+            """
+            let review = """
+            ←  ☒ Color  ✔ Submit  →
+
+            Review your answers
+
+             ● Pick a color?
+               → Red
+
+            Ready to submit your answers?
+
+            ❯ 1. Submit answers
+              2. Cancel
+            """
+            fakeSock.screen = picker
+            fakeSock.failSendWithScreen = review
+            try fakeSock.start()
+            defer { fakeSock.kill() }
+            let stopStore = HerdrStore(session: HerdrSession(name: "fake-stop", socketPath: fakeSock.path))
+            let stopModel = AppModel(store: stopStore)
+            stopStore.start()
+            let t0 = Date()
+            while (stopStore.workspaces.first?.tabs.first?.panes.first == nil) && Date().timeIntervalSince(t0) < 3 {
+                await stopStore.refresh()
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            var appeared: QuestionRequest?
+            QuestionProbe.report = { if case .appeared(let q) = $0 { appeared = q } }
+            defer { QuestionProbe.report = nil }
+            let (pwin, phost) = window(
+                ZStack {
+                    WindowSurface(glass: .off)
+                    if let p = stopStore.workspaces.first?.tabs.first?.panes.first {
+                        PaneView(pane: p, showLabel: false, focused: true)
+                    }
+                }.environment(stopModel),
+                NSSize(width: 960, height: 600))
+            let t1 = Date()
+            while appeared == nil && Date().timeIntervalSince(t1) < 3 {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            step("TabScreen screen- card loaded (\(appeared?.toolUseId ?? "nil"))", appeared?.toolUseId.hasPrefix("screen-") == true)
+            await digit(pwin, 1)
+            await returnKey(pwin)
+            try? await Task.sleep(for: .milliseconds(800))
+            let stopLabels = await axLabels(phost)
+            step("TabScreen failed screen- send keeps read-only stop card with error and Open terminal (labels: \(stopLabels))",
+                 stopLabels.contains { $0.contains("Could not reach the terminal") || $0.contains("Nothing was sent") || $0.contains("Check the terminal") }
+                 && stopLabels.contains("Open terminal")
+                 && !stopLabels.contains("Send")
+                 && !stopLabels.contains("Red")
+                 && !stopLabels.contains("Reply to claude"))
+            pwin.orderOut(nil)
+        } catch {
+            step("TabScreen stop card setup failed: \(error)", false)
+        }
 
         // Sending on: the card hands over the values and steps aside.
         var sent: [QuestionAnswer]?
@@ -438,4 +559,88 @@ private struct Covered<Content: View>: View {
     let cover: Cover
     @ViewBuilder let content: () -> Content
     var body: some View { content().environment(\.underSettings, cover.on).disabled(cover.on) }
+}
+
+private final class FakeQuestionSocket: @unchecked Sendable {
+    let path: String
+    private let lock = NSLock()
+    private var listenFD: Int32 = -1
+    private var open: [Int32] = []
+    private var _screen = ""
+    private var _agents = "[]"
+    var failSendWithScreen: String?
+
+    init(path: String) { self.path = path }
+    var screen: String { get { lock.withLock { _screen } } set { lock.withLock { _screen = newValue } } }
+    var agents: String { get { lock.withLock { _agents } } set { lock.withLock { _agents = newValue } } }
+
+    func start() throws {
+        unlink(path)
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            for (i, b) in path.utf8.enumerated() { raw[i] = b }; raw[path.utf8.count] = 0
+        }
+        let rc = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard rc == 0, listen(fd, 16) == 0 else { close(fd); throw HerdrError.socket("fake bind \(errno)") }
+        lock.withLock { listenFD = fd }
+        Thread.detachNewThread { [self] in
+            while true {
+                let c = accept(fd, nil, nil)
+                if c < 0 { return }
+                var one: Int32 = 1
+                setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+                lock.withLock { open.append(c) }
+                Thread.detachNewThread { self.serve(c) }
+            }
+        }
+    }
+
+    func kill() {
+        lock.withLock {
+            if listenFD >= 0 { shutdown(listenFD, SHUT_RDWR); close(listenFD); listenFD = -1 }
+            for c in open { shutdown(c, SHUT_RDWR); close(c) }
+            open = []
+        }
+        unlink(path)
+    }
+
+    private func serve(_ c: Int32) {
+        var buf = [UInt8]()
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let n = read(c, &chunk, chunk.count)
+            if n <= 0 { return }
+            buf += chunk[..<n]
+            while let nl = buf.firstIndex(of: 0x0A) {
+                let line = Data(buf[..<nl]); buf.removeSubrange(...nl)
+                guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+                let id = o["id"] as? String ?? ""
+                let reply: String
+                switch o["method"] as? String {
+                case "session.snapshot":
+                    let a = agents
+                    reply = #"{"id":"\#(id)","result":{"type":"snapshot","snapshot":{"workspaces":[{"workspace_id":"w1","label":"v0","number":1}],"tabs":[{"tab_id":"w1:t1","workspace_id":"w1","label":"1","number":1}],"panes":[{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","terminal_id":"term_1","cwd":"/tmp"}],"agents":\#(a)}}}"#
+                case "events.subscribe":
+                    reply = #"{"id":"\#(id)","result":{"type":"subscription_started"}}"#
+                case "pane.read":
+                    let text = String(decoding: try! JSONSerialization.data(withJSONObject: [screen]), as: UTF8.self).dropFirst().dropLast()
+                    reply = #"{"id":"\#(id)","result":{"type":"pane_read","read":{"text":\#(text)}}}"#
+                case "pane.send_text", "pane.send_keys", "pane.send_input":
+                    if let s = failSendWithScreen {
+                        screen = s
+                        reply = #"{"id":"\#(id)","error":{"code":"failed","message":"review screen"}}"#
+                    } else {
+                        reply = #"{"id":"\#(id)","result":{"type":"ok"}}"#
+                    }
+                default:
+                    reply = #"{"id":"\#(id)","error":{"code":"unknown","message":"fake"}}"#
+                }
+                let out = Array(reply.utf8) + [0x0A]
+                _ = out.withUnsafeBytes { write(c, $0.baseAddress, $0.count) }
+            }
+        }
+    }
 }

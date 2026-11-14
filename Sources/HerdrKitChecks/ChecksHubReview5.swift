@@ -56,8 +56,10 @@ import Foundation
     check(!QuestionAdapter.shows(q, question: 0, screen: lookalike), "r5 bind: same text, another option -> not this question")
     check(!QuestionAdapter.shows(q, question: 0, screen: color.replacingOccurrences(of: "☐ Color", with: "☐ Hue")), "r5 bind: other headers -> not this request")
     check(QuestionAdapter.showsAny(q, screen: size) && !QuestionAdapter.showsAny(q, screen: lookalike), "r5 bind: any question of the request, exactly")
-    check(QuestionAdapter.showsReview(q, screen: review) && !QuestionAdapter.showsReview(q, screen: review.replacingOccurrences(of: "Pick a size?", with: "Pick a shape?"))
-          && !QuestionAdapter.showsReview(q, screen: color), "r5 bind: the review screen lists every question of the request")
+    check(!QuestionAdapter.showsReview(q, screen: review)
+          && QuestionAdapter.showsReview(q, screen: review, answers: [QuestionAnswer(picks: [0]), QuestionAnswer(picks: [0])])
+          && !QuestionAdapter.showsReview(q, screen: review.replacingOccurrences(of: "Pick a size?", with: "Pick a shape?"), answers: [QuestionAnswer(picks: [0]), QuestionAnswer(picks: [0])])
+          && !QuestionAdapter.showsReview(q, screen: color, answers: [QuestionAnswer(picks: [0]), QuestionAnswer(picks: [0])]), "r5 bind: the review screen matches the exact answers on Claude")
 
     fake.agents = agents("s1", status: "blocked")
     let one = QuestionAdapter.screenRequest(headers: ["Color"], questions: [q.questions[0]])

@@ -43,18 +43,22 @@ import Foundation
     let ownReview = review.replacingOccurrences(of: "→ Yes, remind me Dec 28", with: "→ Later, in January")
     check(QuestionAdapter.claudeReviewExact(c, answers: [own([], "Later, in January"), pick([1])], screen: ownReview), "single choice: Other text with a comma matches")
     let multi = req("toolu_M2", q("Which?", "Many", true, ["Yes, remind me", "Yes", "remind me"]))
-    check(QuestionAdapter.reviewAmbiguous(multi, answers: [pick([0])]), "multi choice: a comma in a label is still ambiguous")
-    check(QuestionAdapter.reviewAmbiguous(multi, answers: [own([1], "x, y")]), "multi choice: Other text with a comma is still ambiguous")
+    check(!QuestionAdapter.reviewAmbiguous(multi, answers: [pick([0])]), "multi choice: quoted comma pick alone is not ambiguous")
+    check(QuestionAdapter.reviewAmbiguous(multi, answers: [pick([1, 2])]), "multi choice: [Yes, remind me] collides with comma sibling")
+    check(QuestionAdapter.reviewAmbiguous(multi, answers: [own([1], "remind me")]), "multi choice: pick + Other matching sibling label collides")
 
-    // reviewBlocked: only a hooked Claude picker with 2+ questions or a multi-choice last one.
+    // reviewBlocked: any Claude picker with 2+ questions or a multi-choice last one.
     func two(_ a: String, _ b: String, _ multi: Bool) -> QuestionRequest {
         req("toolu_B", q("First?", "One", multi, [a, b]) + "," + q("Second?", "Two", false, ["C", "D"]))
     }
+    let three = req("toolu_3", q("First?", "One", true, ["x, y", "x", "y"]) + "," + q("Second?", "Two", false, ["C", "D"]))
     check(QuestionAdapter.reviewBlocked(two("A B", "AB", false), answers: []), "reviewBlocked: two labels alike -> blocked before any answer")
-    check(QuestionAdapter.reviewBlocked(two("x, y", "z", true), answers: []), "reviewBlocked: multi choice, a comma label -> blocked")
+    check(!QuestionAdapter.reviewBlocked(two("x, y", "z", true), answers: []), "reviewBlocked: multi choice, a comma label without siblings -> fine")
+    check(QuestionAdapter.reviewBlocked(three, answers: []), "reviewBlocked: multi choice, comma label with split siblings -> blocked")
     check(!QuestionAdapter.reviewBlocked(two("x, y", "z", false), answers: []), "reviewBlocked: single choice, a comma label -> fine")
     check(!QuestionAdapter.reviewBlocked(two("A", "B", true), answers: []), "reviewBlocked: clean labels -> fine")
-    check(QuestionAdapter.reviewBlocked(two("A", "B", true), answers: [own([], "x, y"), pick([0])]), "reviewBlocked: own answer with a comma (multi) -> blocked")
+    check(!QuestionAdapter.reviewBlocked(two("A", "B", true), answers: [own([], "x, y"), pick([0])]), "reviewBlocked: own answer with non-colliding comma (multi) -> fine")
+    check(QuestionAdapter.reviewBlocked(two("A", "B", true), answers: [own([], "A, B"), pick([0])]), "reviewBlocked: own answer colliding with [A, B] (multi) -> blocked")
     check(QuestionAdapter.reviewBlocked(two("A", "B", false), answers: [own([], "B"), pick([0])]), "reviewBlocked: own answer alike a label -> blocked")
     check(!QuestionAdapter.reviewBlocked(two("A", "B", false), answers: [own([], "later, maybe"), pick([0])]), "reviewBlocked: own answer with a comma (single) -> fine")
     let one = req("toolu_1", q("First?", "One", false, ["A B", "AB"]))
@@ -63,20 +67,21 @@ import Foundation
     oneMulti.questions[0].multiSelect = true
     check(QuestionAdapter.reviewBlocked(oneMulti, answers: []), "reviewBlocked: one multi-choice question -> checked")
     var screen = two("A B", "AB", false); screen.toolUseId = "screen-1"
-    check(!QuestionAdapter.reviewBlocked(screen, answers: []), "reviewBlocked: screen question -> fine")
+    check(QuestionAdapter.reviewBlocked(screen, answers: []), "reviewBlocked: screen question -> blocked (no bypass)")
     var codex = two("A B", "AB", false); codex.agent = "codex"
     check(!QuestionAdapter.reviewBlocked(codex, answers: []), "reviewBlocked: another agent -> fine")
     var message = two("A B", "AB", false); message.delivery = .message
     check(!QuestionAdapter.reviewBlocked(message, answers: []), "reviewBlocked: a message answer -> no review screen")
 
-    // reviewNote: what the card says before Send (the Herdr app mod's words). The labels first, then the own answer.
-    check(QuestionAdapter.reviewNote(two("x, y", "z", true), answers: []) == QuestionAdapter.reviewLabels, "reviewNote: a comma label -> blocked from the start")
-    check(QuestionAdapter.reviewNote(two("A B", "AB", false), answers: [own([], "fine"), pick([0])]) == QuestionAdapter.reviewLabels, "reviewNote: labels first, whatever is typed")
+    // reviewNote: what the card says before Send (the Herdr app mod's words).
+    check(QuestionAdapter.reviewNote(three, answers: []) == QuestionAdapter.reviewLabels, "reviewNote: colliding comma labels -> blocked from the start")
+    check(QuestionAdapter.reviewNote(two("A B", "AB", false), answers: []) == QuestionAdapter.reviewLabels, "reviewNote: all-colliding labels -> reviewLabels when empty")
+    check(QuestionAdapter.reviewNote(two("A B", "AB", false), answers: [own([], "fine"), pick([0])]) == nil, "reviewNote: safe own answer overrides all-colliding options -> none")
     check(QuestionAdapter.reviewNote(two("A", "B", true), answers: []) == nil, "reviewNote: clean labels -> none")
-    check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "x, y"), pick([0])]) == QuestionAdapter.reviewOwn, "reviewNote: own answer with a comma")
+    check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "A, B"), pick([0])]) == QuestionAdapter.reviewOwn, "reviewNote: own answer colliding with [A, B]")
     check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "  B "), pick([0])]) == QuestionAdapter.reviewOwn, "reviewNote: own answer alike an option")
     check(QuestionAdapter.reviewNote(two("A", "B", true), answers: [own([], "olive"), pick([0])]) == nil, "reviewNote: a clean own answer -> none")
-    var unread = two("x, y", "z", true); unread.headers = ["One", "Two", "Three"]
+    var unread = three; unread.headers = ["One", "Two", "Three"]
     check(QuestionAdapter.reviewNote(unread, answers: []) == nil, "reviewNote: questions unread -> none (the answer reads them first)")
     check(QuestionAdapter.reviewLabels.hasSuffix("Answer in the terminal.") && QuestionAdapter.reviewOwn.hasSuffix("Change it, or answer in the terminal."), "reviewNote: the mod's words")
 }

@@ -351,10 +351,9 @@ public enum QuestionAdapter {
         q.questions.indices.contains { shows(q, question: $0, screen: screen) }
     }
 
-    /// Claude's review screen of `q`: the request's headers and every one of its questions listed. A hooked request
-    /// needs the exact review of `answers` (`claudeReviewExact`).
+    /// Claude's review screen of `q`, verifying exact rendering and unique answer mapping (`claudeReviewExact`).
     public static func showsReview(_ q: QuestionRequest, screen: String, answers: [QuestionAnswer]? = nil) -> Bool {
-        if !q.toolUseId.hasPrefix("screen-") { return answers.map { claudeReviewExact(q, answers: $0, screen: screen) } ?? false }
+        if q.agent == "claude" { return answers.map { claudeReviewExact(q, answers: $0, screen: screen) } ?? false }
         guard let region = pickerRegion(agent: q.agent, screen: screen), region.contains("Review your answers") else { return false }
         return q.headers.allSatisfy { region.contains($0) } && q.questions.allSatisfy { region.contains(flat($0.text)) }
     }
@@ -589,6 +588,12 @@ extension QuestionAdapter {
                 if marked { strayMark = true }
                 text.append(t)
             }
+        }
+        // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line
+        // has it and the text without it reaches `quoteMin`; a short text's own "│" stays.
+        if !text.isEmpty && text.allSatisfy({ $0.hasPrefix("│") }) {
+            let unquoted = text.map { String($0.dropFirst()).trimmingCharacters(in: .whitespaces) }
+            if displayWidth(unquoted.joined(separator: " ")) >= quoteMin { text = unquoted }
         }
         // The last row is the "Other" row.
         guard closed, options.popLast() != nil else { return nil }

@@ -56,7 +56,7 @@ import Foundation
     ❯ 1. Submit answers
       2. Cancel
     """
-    check(QuestionAdapter.reviewAmbiguous(marks, answers: want), "r2 P2: a label with the review marks ● or → -> ambiguous")
+    check(QuestionAdapter.reviewCollision(marks, answers: want) == nil, "r2 P2: inline marks without newlines cannot forge line-start anchors")
     check(!QuestionAdapter.claudeReviewExact(marks, answers: want, screen: review), "r2 P2: the forged review does not match")
     // Line structure: ● and → start their lines (a plain request still matches; the same text run together does not).
     let plain = req("toolu_P", #"{"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A","description":""},{"label":"B","description":""}]},{"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}"#)

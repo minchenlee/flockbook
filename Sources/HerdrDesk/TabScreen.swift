@@ -80,6 +80,8 @@ struct PaneView: View {
     @State private var focusRequest = 0
     /// Claude's open question picker, read from the screen (Claude logs the question only after the answer).
     @State private var screenQuestion: QuestionRequest?
+    /// Read-only stop card retained when sending a `screen-` question fails and `readScreenQuestion()` sees nil.
+    @State private var stoppedScreenCard: ScreenStop?
     /// Questions answered from Desk: no card while the log or the screen catches up.
     @State private var answeredQuestions: Set<String> = []
     /// The pane's frame: the question card may take the height left after the conversation's minimum.
@@ -184,6 +186,11 @@ extension PaneView {
                          onOpenTerminal: { if let tab { model.focus(pane, in: tab) }; model.showTerminal = true })
                 .id(q.toolUseId)   // fresh answers per question
                 .inputColumn()
+        } else if let stop = stoppedScreenCard, agent.status == .blocked {
+            QuestionStopCard(agentName: agent.name, message: stop.message,
+                             onOpenTerminal: { if let tab { model.focus(pane, in: tab) }; model.showTerminal = true })
+                .id(stop.id)
+                .inputColumn()
         } else if let r = ApprovalProbe.injected.flatMap({ agent.status == .blocked ? $0 : nil }) ?? model.cardInComposer(pane) {
             // A prompt the log does not have (no transcript, a log that lags, a box the log's call does not match): the
             // card from the screen, where the question card goes.
@@ -231,8 +238,10 @@ extension PaneView {
 
     /// READ-ONLY screen read, once each time the agent turns blocked (and after a failed answer). Sends nothing.
     private func readScreenQuestion() async {
+        if pane.agent?.status != .blocked { stoppedScreenCard = nil }
         guard PermissionGate.readQuestion(pane.agent), let screen = model.screen(for: pane) else { screenQuestion = nil; return }
         let fresh = try? await screen.pendingQuestion(paneId: pane.id)
+        if fresh != nil { stoppedScreenCard = nil }
         // Keep the fully read request for the same picker: a read-only read has only the question on screen.
         if let fresh, let old = screenQuestion, old.toolUseId == fresh.toolUseId, old.questions.count > fresh.questions.count { return }
         screenQuestion = fresh
@@ -271,6 +280,9 @@ extension PaneView {
             Task { try? await Task.sleep(for: .seconds(1.5)); answeredQuestions.insert(q.toolUseId) }
         } catch {
             await readScreenQuestion()
+            if q.toolUseId.hasPrefix("screen-"), screenQuestion == nil, pane.agent?.status == .blocked {
+                stoppedScreenCard = ScreenStop(id: q.toolUseId, message: QuestionCard.problemText(error))
+            }
             throw error
         }
     }
@@ -293,6 +305,11 @@ extension PaneView {
             }
             .inputColumn()
     }
+}
+
+private struct ScreenStop: Equatable {
+    let id: String
+    let message: String
 }
 
 struct PaneLabel: View {
