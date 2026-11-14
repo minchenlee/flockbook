@@ -68,8 +68,8 @@ impl TreeCheck {
         let cached = {
             let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
             match entries.get(&ask.address) {
-                Some(CacheEntry::Yes { key, agent_pid, start: _, at })
-                    if key.matches(ask) && now.saturating_duration_since(*at) <= YES_TTL && (self.probe)(*agent_pid).is_some() =>
+                Some(CacheEntry::Yes { key, agent_pid, start, at })
+                    if key.matches(ask) && now.saturating_duration_since(*at) <= YES_TTL && (self.probe)(*agent_pid) == Some(*start) =>
                 {
                     Some(Some(*agent_pid))
                 }
@@ -141,26 +141,41 @@ impl AgentCheck for TreeCheck {
     }
 }
 
-#[cfg(unix)]
-fn pid_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    // SAFETY: signal 0 probes existence for a single pid without sending a signal.
-    let rc = unsafe { libc::kill(pid, 0) };
-    if rc == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn pid_alive(_pid: i32) -> bool {
-    false
-}
-
+/// The pid's start time (microseconds since the epoch) while it runs; `None` when it is gone, a zombie, or not
+/// readable. Not `kill(pid, 0)`: that also succeeds for a zombie and for a reused pid.
+#[cfg(target_os = "macos")]
 fn pid_start(pid: i32) -> Option<u64> {
-    pid_alive(pid).then_some(0)
+    if pid <= 0 {
+        return None;
+    }
+    // SAFETY: proc_bsdinfo is plain data; proc_pidinfo writes at most `size` bytes into it.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&mut info as *mut libc::proc_bsdinfo).cast(), size) };
+    if n != size || info.pbi_status == libc::SZOMB {
+        return None;
+    }
+    Some(info.pbi_start_tvsec.saturating_mul(1_000_000).saturating_add(info.pbi_start_tvusec))
+}
+
+/// `/proc/<pid>/stat`: the state (field 3) and the start time in clock ticks since boot (field 22).
+#[cfg(target_os = "linux")]
+fn pid_start(pid: i32) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let fields: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().collect();
+    if matches!(*fields.first()?, "Z" | "X" | "x") {
+        return None;
+    }
+    fields.get(19)?.parse().ok()
+}
+
+/// No start probe here: a Yes is never kept, every ask reads the table (fail closed).
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn pid_start(_pid: i32) -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -318,6 +333,18 @@ mod tests {
             "new status_ms must re-check tree and fail closed on ambiguity"
         );
         assert_eq!(src.reads(), 2);
+    }
+
+    /// The real probe: this process runs and keeps its start; pid 0 and an unused pid give nothing.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn pid_start_reads_this_process() {
+        let me = std::process::id() as i32;
+        let a = pid_start(me);
+        assert!(a.is_some(), "this process has a start");
+        assert_eq!(pid_start(me), a, "the same start each time");
+        assert_eq!(pid_start(0), None);
+        assert_eq!(pid_start(i32::MAX), None);
     }
 
     /// Codex: "the identity can outlive the agent". The agent exits inside 10 s and its pid is reused (or it is a
