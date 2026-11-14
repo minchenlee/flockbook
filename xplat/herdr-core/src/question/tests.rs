@@ -1227,19 +1227,19 @@ fn claude_hook_review1() {
     assert!(!ex(&plain, 0, &good.replace("  2. DELETE", "   2. DELETE"), None, FieldFocus::Auto, None), "r1 P1: a row number outside the row column -> no match");
     assert!(!ex(&plain, 0, &good.replace("     k\n", "     k\n  7. x\n"), None, FieldFocus::Any, None), "r1 P1: a row-like line that is not a row -> no match");
     let comma = req(json!({"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A, B","description":""},{"label":"A","description":""},{"label":"B","description":""}]}));
-    assert!(review_ambiguous(&comma, &[ans(&[0])]), "r1 P2: a label with a comma -> the review cannot prove the picks");
+    assert_eq!(review_collision(&comma, &[]), Some(CollisionKind::Labels), "r1 P2: comma label with split siblings -> blocked");
+    assert_eq!(review_collision(&comma, &[ans(&[0])]), None, "r1 P2: quoted comma pick alone is unique");
+    assert_eq!(review_collision(&comma, &[ans(&[1, 2])]), Some(CollisionKind::Picks), "r1 P2: [A, B] with 'A, B' sibling -> blocked");
     let spaces = req(json!({"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]}));
-    assert!(review_ambiguous(&spaces, &[ans(&[0])]), "r1 P2: two labels alike without spaces -> ambiguous");
+    assert_eq!(review_collision(&spaces, &[ans(&[0])]), Some(CollisionKind::Picks), "r1 P2: two labels alike without spaces -> ambiguous");
     let clean = req(json!({"question":"Pick?","header":"H","multiSelect":true,"options":[{"label":"A","description":""},{"label":"B","description":""}]}));
-    assert!(
-        review_ambiguous(&clean, &[other(&[0], "A")]) && review_ambiguous(&clean, &[other(&[], "x, y")]),
-        "r1 P2: Other text equal to a label, or with a comma -> ambiguous"
-    );
-    assert!(!review_ambiguous(&clean, &[other(&[0, 1], "olive")]), "r1 P2: distinct labels, no commas -> fine");
+    assert_eq!(review_collision(&clean, &[other(&[], "A")]), Some(CollisionKind::Own), "r1 P2: Other equal to label");
+    assert_eq!(review_collision(&clean, &[other(&[0], "B")]), Some(CollisionKind::Own), "r1 P2: pick + Other equal to sibling picks");
+    assert_eq!(review_collision(&clean, &[other(&[0, 1], "olive")]), None, "r1 P2: distinct labels -> fine");
     let agent = tui_agent("claude", Some("s"));
     let sim = Sim::new(vec![simq("H", "Pick?", &[("A, B", ""), ("A", ""), ("B", "")], true)]);
     let live = Live::new(tui_pane(agent.clone()), &sim.render());
-    let r = answer_question(&live, "w1:p1", &comma, &[ans(&[0])], Some(&gate(&agent, yes())));
+    let r = answer_question(&live, "w1:p1", &comma, &[ans(&[1, 2])], Some(&gate(&agent, yes())));
     assert!(r.is_err() && live.mark() == 0, "r1 P2: an ambiguous review -> refused before any key");
 }
 
@@ -1269,7 +1269,7 @@ fn claude_hook_review2() {
     ❯ 1. Submit answers
       2. Cancel
     "#);
-    assert!(review_ambiguous(&marks, &want), "r2 P2: a label with the review marks ● or → -> ambiguous");
+    assert_eq!(review_collision(&marks, &want), None, "r2 P2: inline marks without newlines cannot forge line-start anchors");
     assert!(!claude_review_exact(&marks, &want, &review), "r2 P2: the forged review does not match");
     let plain = req(
         "toolu_P",
@@ -1315,9 +1315,9 @@ fn claude_review_comma_single_choice() {
             {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
     );
     let want = [ans(&[0]), ans(&[1])];
-    assert!(!review_ambiguous(&q, &want), "single choice: a comma in a label is not ambiguous");
-    assert!(!review_ambiguous(&q, &[other(&[], "Later, in January"), ans(&[1])]), "single choice: Other text with a comma is not ambiguous");
-    assert!(review_ambiguous(&q, &[other(&[], "No / not yet"), ans(&[1])]), "single choice: Other text alike a label is still ambiguous");
+    assert_eq!(review_collision(&q, &want), None, "single choice: a comma in a label is not ambiguous");
+    assert_eq!(review_collision(&q, &[other(&[], "Later, in January"), ans(&[1])]), None, "single choice: Other text with a comma is not ambiguous");
+    assert_eq!(review_collision(&q, &[other(&[], "No / not yet"), ans(&[1])]), Some(CollisionKind::Own), "single choice: Other text alike a label is still ambiguous");
     let review = sw(r#"
     ←  ☒ Nudge  ☒ Two  ✔ Submit  →
 
@@ -1338,13 +1338,16 @@ fn claude_review_comma_single_choice() {
     assert!(!claude_review_exact(&q, &want, &review.replace("→ Yes, remind me Dec 28", "→ No / not yet")), "single choice: another answer shown -> no match");
     let own = review.replace("→ Yes, remind me Dec 28", "→ Later, in January");
     assert!(claude_review_exact(&q, &[other(&[], "Later, in January"), ans(&[1])], &own), "single choice: Other text with a comma matches");
-    // Multi-choice keeps the rule: its picks ARE joined by commas.
+    // Multi-choice checks exact collisions: [0] is quoted uniquely, while [1, 2] collides with unquoted [0].
     let multi = hooked(
         "toolu_M2",
         json!([{"question":"Which?","header":"Many","multiSelect":true,"options":[{"label":"Yes, remind me","description":""},{"label":"Yes","description":""},{"label":"remind me","description":""}]}]),
     );
-    assert!(review_ambiguous(&multi, &[ans(&[0])]), "multi choice: a comma in a label is still ambiguous");
-    assert!(review_ambiguous(&multi, &[other(&[1], "x, y")]), "multi choice: Other text with a comma is still ambiguous");
+    assert_eq!(review_collision(&multi, &[]), Some(CollisionKind::Labels), "multi choice: comma option + split siblings -> ambiguous initially");
+    assert_eq!(review_collision(&multi, &[ans(&[0])]), None, "multi choice: picking the quoted comma option alone is unique");
+    assert_eq!(review_collision(&multi, &[ans(&[1, 2])]), Some(CollisionKind::Picks), "multi choice: [Yes, remind me] collides with unquoted [0]");
+    assert_eq!(review_collision(&multi, &[other(&[1], "remind me")]), Some(CollisionKind::Own), "multi choice: Yes + Other('remind me') collides with [1, 2]");
+    assert_eq!(review_collision(&multi, &[other(&[1], "x, y")]), None, "multi choice: Other('x, y') has no colliding siblings");
 }
 
 #[test]
@@ -1471,9 +1474,12 @@ fn hub_review5_bind() {
     assert!(!shows_plain(&q, 0, &lookalike), "r5 bind: same text, another option -> not this question");
     assert!(!shows_plain(&q, 0, &color.replace("☐ Color", "☐ Hue")), "r5 bind: other headers -> not this request");
     assert!(shows_any(&q, &size) && !shows_any(&q, &lookalike), "r5 bind: any question of the request, exactly");
+    assert!(!shows_review(&q, &review, None), "r5 bind: Claude shows_review without answers returns false");
     assert!(
-        shows_review(&q, &review, None) && !shows_review(&q, &review.replace("Pick a size?", "Pick a shape?"), None) && !shows_review(&q, &color, None),
-        "r5 bind: the review screen lists every question of the request"
+        shows_review(&q, &review, Some(&[ans(&[0]), ans(&[0])]))
+            && !shows_review(&q, &review.replace("Pick a size?", "Pick a shape?"), Some(&[ans(&[0]), ans(&[0])]))
+            && !shows_review(&q, &color, Some(&[ans(&[0]), ans(&[0])])),
+        "r5 bind: the review screen matches with the exact answers"
     );
     let seen = tui_agent("claude", Some("s1"));
     let open = gate(&seen, yes());
@@ -2237,8 +2243,9 @@ fn claude_hook_exact_quote_bar() {
     ❯ 1. Submit answers
       2. Cancel
     "#);
-    let parsed_long = request("screen-2", "claude", vec![question("Final try", long, vec![], false)]);
-    assert!(shows_review(&parsed_long, &review, None), "quote bar: a screen-derived review across a barred wrap");
+    let parsed_long = request("screen-2", "claude", vec![question("Final try", long, vec![], true)]);
+    assert!(!shows_review(&parsed_long, &review, None), "quote bar: None returns false on Claude");
+    assert!(shows_review(&parsed_long, &review, Some(&[other(&[], "Moved + notice")])), "quote bar: a screen-derived review across a barred wrap");
     // A long question whose own text starts with "│", drawn without the quote bar (before 2.1.322) and with it.
     let own = format!("│ {long}");
     let own_q = hooked("toolu_bar3", json!([{"question": own,"header":"Final try","multiSelect":false,"options":[
@@ -2369,7 +2376,9 @@ fn claude_review_bar_only_in_question_text() {
     ❯ 1. Submit answers
       2. Cancel
     "#);
-    assert!(claude_review_exact(&q, &[ans(&[0, 2])], &review), "picks A and │B: the wrapped │B is the label");
+    // Fail closed: any option label containing '│' is refused before any key and in review matching.
+    assert_eq!(super::claude_exact::review_collision(&q, &[]), Some(super::claude_exact::CollisionKind::Labels));
+    assert!(!claude_review_exact(&q, &[ans(&[0, 2])], &review), "option containing '│' fails closed");
     assert!(!claude_review_exact(&q, &[ans(&[0, 1])], &review), "picks A and B: the screen shows │B, not B");
 }
 
@@ -2385,10 +2394,17 @@ fn review_blocked_is_the_answer_refusal() {
         )
     };
     assert!(review_blocked(&two("A B", "AB", false), &[]), "two labels alike: blocked before any answer");
-    assert!(review_blocked(&two("x, y", "z", true), &[]), "multi choice, a comma label: blocked");
+    assert!(!review_blocked(&two("x, y", "z", true), &[]), "multi choice, a comma label without split siblings: fine");
+    let three = hooked(
+        "toolu_3",
+        json!([{"question":"First?","header":"One","multiSelect":true,"options":[{"label":"x, y","description":""},{"label":"x","description":""},{"label":"y","description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]),
+    );
+    assert!(review_blocked(&three, &[]), "multi choice, comma label with split siblings: blocked");
     assert!(!review_blocked(&two("x, y", "z", false), &[]), "single choice, a comma label: fine");
     assert!(!review_blocked(&two("A", "B", true), &[]), "clean labels: fine");
-    assert!(review_blocked(&two("A", "B", true), &[other(&[], "x, y"), ans(&[0])]), "own answer with a comma (multi): blocked");
+    assert!(!review_blocked(&two("A", "B", true), &[other(&[], "x, y"), ans(&[0])]), "own answer with non-colliding comma (multi): fine");
+    assert!(review_blocked(&two("A", "B", true), &[other(&[], "A, B"), ans(&[0])]), "own answer colliding with [A, B] (multi): blocked");
     assert!(review_blocked(&two("A", "B", false), &[other(&[], "B"), ans(&[0])]), "own answer alike a label: blocked");
     assert!(!review_blocked(&two("A", "B", false), &[other(&[], "later, maybe"), ans(&[0])]), "own answer with a comma (single): fine");
     // One single-choice question: its review is not checked, so nothing is refused.
@@ -2397,14 +2413,600 @@ fn review_blocked_is_the_answer_refusal() {
     let mut one_multi = one.clone();
     one_multi.questions[0].multi_select = true;
     assert!(review_blocked(&one_multi, &[]), "one multi-choice question: checked");
-    // Read from the screen, not hooked: no review check.
+    // Read from the screen, not hooked: ALSO checked now (no screen- bypass).
     let mut screen = two("A B", "AB", false);
     screen.tool_use_id = "screen-1".into();
-    assert!(!review_blocked(&screen, &[]), "screen question: fine");
+    assert!(review_blocked(&screen, &[]), "screen question: blocked");
     let mut codex = two("A B", "AB", false);
     codex.agent = "codex".into();
     assert!(!review_blocked(&codex, &[]), "another agent: fine");
     let mut message = two("A B", "AB", false);
     message.delivery = Delivery::Message;
     assert!(!review_blocked(&message, &[]), "a message answer: no review screen");
+}
+
+#[test]
+fn review_exact_screen_cases_red() {
+    let rv = |tabs: &str, body: &str| {
+        sw(&format!(
+            "
+    ←  {tabs}  ✔ Submit  →
+
+    Review your answers
+
+    {body}
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "
+        ))
+    };
+
+    // #1: Screen 1 — screen-derived multi-question + CJK Q2 (>= 80 display cols, < 80 graphemes) with │● quote bar
+    let q1_text = "Reproduce issue part 1: pick the module and mode (this line is 74 cols!!)";
+    assert!(q1_text.len() < 80);
+    let q2_text = "重現用第2題：請問你最想針對哪一個模組進行重構與測試，用來確認寬度超過八十欄時是否出現線條？";
+    assert!(q2_text.chars().count() < 80, "CJK grapheme count < 80 so byte/char check misses it");
+    let mut screen_q = hooked(
+        "screen-1",
+        json!([
+            {"question": q1_text, "header": "Mode", "multiSelect": true, "options": [{"label": "Primary", "description": ""}, {"label": "Secondary", "description": ""}]},
+            {"question": q2_text, "header": "Module", "multiSelect": false, "options": [{"label": "Option X", "description": ""}, {"label": "Option Y", "description": ""}]}
+        ]),
+    );
+    screen_q.tool_use_id = "screen-1".into();
+    let cjk_picker = sw(&format!(
+        "
+    ←  ☒ Mode  ☐ Module  ✔ Submit  →
+    │ {q2_text}
+    ❯ 1. Option X
+      2. Option Y
+    ────────────────────
+      3. Chat about this
+
+    Enter to select · ↑/↓ to navigate · Esc to cancel
+    "
+    ));
+    let parsed_cjk = claude_parse(&cjk_picker).expect("CJK >= 80 cols parses");
+    assert_eq!(parsed_cjk.question.text, q2_text, "#1: CJK >= 80 cols strips quote bar in claude_parse");
+    let cjk_79 = format!("{}a", "寬".repeat(39)); // 39*2 + 1 = 79 cols < 80
+    let cjk_80 = "寬".repeat(40); // 40*2 = 80 cols >= 80
+    let picker_of = |t: &str| {
+        sw(&format!(
+            "
+    ←  ☐ H  ✔ Submit  →
+    │ {t}
+    ❯ 1. Yes
+      2. No
+    ────────────────────
+      3. Chat about this
+
+    Enter to select · ↑/↓ to navigate · Esc to cancel
+    "
+        ))
+    };
+    assert_eq!(claude_parse(&picker_of(&cjk_79)).unwrap().question.text, format!("│ {cjk_79}"), "#1 boundary: 79 cols keeps │");
+    assert_eq!(claude_parse(&picker_of(&cjk_80)).unwrap().question.text, cjk_80, "#1 boundary: 80 cols strips │");
+    let s1_review = rv(
+        "☒ Mode  ☒ Module",
+        &format!(" ● {q1_text}\n       → Primary\n     │ ● {q2_text}\n       → Option Y"),
+    );
+    let s1_ans = [ans(&[0]), ans(&[1])];
+    assert!(!shows_review(&screen_q, &s1_review, None), "#1: screen- without answers must not match review");
+    assert!(shows_review(&screen_q, &s1_review, Some(&s1_ans)), "#1: screen- with matching answers matches review");
+    assert!(!shows_review(&screen_q, &s1_review, Some(&[ans(&[1]), ans(&[1])])), "#1: wrong pick does not match");
+
+    // #2 & #4: Screen 2 — multi-select comma option quoted vs old unquoted
+    let q_red = hooked(
+        "toolu_S2",
+        json!([{"question":"Pick colors?","header":"Colors","multiSelect":true,"options":[{"label":"Red, Blue","description":""},{"label":"Red","description":""},{"label":"Blue","description":""}]}]),
+    );
+    assert!(review_blocked(&q_red, &[]), "#2: empty answers flags potential Red,Blue collision");
+    assert!(!review_blocked(&q_red, &[ans(&[0])]), "#2: picking 'Red, Blue' alone is safe under quoted rendering");
+    let quoted_review = rv("☒ Colors", " ● Pick colors?\n       → \"Red, Blue\"");
+    assert!(claude_review_exact(&q_red, &[ans(&[0])], &quoted_review), "#2: quoted comma pick matches exactly");
+    let unquoted_review = rv("☒ Colors", " ● Pick colors?\n       → Red, Blue");
+    assert!(!claude_review_exact(&q_red, &[ans(&[0])], &unquoted_review), "#4: unquoted 'Red, Blue' is ambiguous -> false");
+    assert!(!claude_review_exact(&q_red, &[ans(&[1, 2])], &unquoted_review), "#4: unquoted [Red, Blue] is ambiguous -> false");
+
+    // #3: Screen 3 — single-choice comma option on a 2-question review screen
+    let q_single = hooked(
+        "toolu_S3",
+        json!([
+            {"question":"Apply?","header":"Go","multiSelect":false,"options":[{"label":"Yes, apply it","description":""},{"label":"No","description":""}]},
+            {"question":"Next?","header":"Step","multiSelect":false,"options":[{"label":"Done","description":""},{"label":"Skip","description":""}]}
+        ]),
+    );
+    assert!(!review_blocked(&q_single, &[]));
+    assert!(claude_review_exact(
+        &q_single,
+        &[ans(&[0]), ans(&[0])],
+        &rv("☒ Go  ☒ Step", " ● Apply?\n       → Yes, apply it\n     ● Next?\n       → Done")
+    ));
+
+    // #5: 'A B' vs 'AB' on screen- request (no bypass)
+    let mut screen_ab = hooked(
+        "screen-ab",
+        json!([
+            {"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A B","description":""},{"label":"AB","description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}
+        ]),
+    );
+    screen_ab.tool_use_id = "screen-ab".into();
+    assert!(review_blocked(&screen_ab, &[]), "#5: screen- no longer bypasses review_blocked");
+    assert!(review_blocked(&screen_ab, &[ans(&[0]), ans(&[0])]), "#5: colliding pick on screen- is blocked");
+    assert!(!review_blocked(&screen_ab, &[other(&[], "fine"), ans(&[0])]), "#5: non-colliding Other on screen- is allowed");
+    let ab_review = rv("☒ One  ☒ Two", " ● First?\n       → AB\n     ● Second?\n       → C");
+    assert!(!claude_review_exact(&screen_ab, &[ans(&[0]), ans(&[0])], &ab_review), "#5: screen- rejects colliding review");
+    let fine_review = rv("☒ One  ☒ Two", " ● First?\n       → fine\n     ● Second?\n       → C");
+    assert!(claude_review_exact(&screen_ab, &[other(&[], "fine"), ans(&[0])], &fine_review), "#5: screen- accepts non-colliding Other");
+
+    // #6: duplicate labels ['Yes', 'Yes', 'No'] empty / partial / [0] / [2]
+    let q_dup = hooked(
+        "toolu_dup",
+        json!([
+            {"question":"Q1?","header":"H1","multiSelect":false,"options":[{"label":"Yes","description":""},{"label":"Yes","description":""},{"label":"No","description":""}]},
+            {"question":"Q2?","header":"H2","multiSelect":false,"options":[{"label":"Alpha","description":""},{"label":"Beta","description":""}]}
+        ]),
+    );
+    assert!(review_blocked(&q_dup, &[]), "#6: empty answers -> blocked");
+    assert!(review_blocked(&q_dup, &[QuestionAnswer::default(), ans(&[0])]), "#6: partial with Q1 unanswered -> blocked");
+    assert!(review_blocked(&q_dup, &[ans(&[0]), QuestionAnswer::default()]), "#6: partial picking Yes -> blocked");
+    assert!(!review_blocked(&q_dup, &[ans(&[2]), QuestionAnswer::default()]), "#6: partial picking unique No -> allowed");
+    assert!(!review_blocked(&q_dup, &[ans(&[2]), ans(&[0])]), "#6: complete picking unique No -> allowed");
+    let dup_no_review = rv("☒ H1  ☒ H2", " ● Q1?\n       → No\n     ● Q2?\n       → Alpha");
+    assert!(claude_review_exact(&q_dup, &[ans(&[2]), ans(&[0])], &dup_no_review));
+
+    // #7: Hard caps: literal quote and empty bare
+    let q_quote_opt = hooked("toolu_q", json!([{"question":"Q?","header":"H","multiSelect":true,"options":[{"label":"say \"hi\"","description":""},{"label":"ok","description":""}]}]));
+    assert!(review_blocked(&q_quote_opt, &[]), "#7: literal quote in option -> blocked");
+    let q_clean = hooked("toolu_cl", json!([{"question":"Q?","header":"H","multiSelect":true,"options":[{"label":"A","description":""},{"label":"B","description":""}]}]));
+    assert!(review_blocked(&q_clean, &[other(&[], "say \"hi\"")]), "#7: literal quote in Other -> blocked");
+    let q_empty_opt = hooked("toolu_em", json!([{"question":"Q?","header":"H","multiSelect":true,"options":[{"label":"   ","description":""},{"label":"ok","description":""}]}]));
+    assert!(review_blocked(&q_empty_opt, &[]), "#7: empty bare option -> blocked");
+
+    // #8: Other collisions & multi-select comma Other
+    let q_xy = hooked("toolu_xy", json!([{"question":"Q?","header":"H","multiSelect":true,"options":[{"label":"x","description":""},{"label":"y","description":""}]}]));
+    assert!(review_blocked(&q_xy, &[other(&[], "x, y")]), "#8: Other('x, y') collides conservatively with [x, y]");
+    assert!(!review_blocked(&q_clean, &[other(&[], "x, y")]), "#8: Other('x, y') with clean ['A','B'] is safe");
+    assert!(claude_review_exact(&q_clean, &[other(&[], "x, y")], &rv("☒ H", " ● Q?\n       → x, y")));
+    assert!(claude_review_exact(&q_clean, &[other(&[], "x, y")], &rv("☒ H", " ● Q?\n       → \"x, y\"")));
+    assert!(!claude_review_exact(&q_xy, &[other(&[], "x, y")], &rv("☒ H", " ● Q?\n       → x, y")));
+    assert!(claude_review_exact(&q_xy, &[other(&[], "x, y")], &rv("☒ H", " ● Q?\n       → \"x, y\"")));
+    assert!(review_blocked(&q_clean, &[other(&[0], "B")]), "#8: A + Other('B') collides with [A, B]");
+
+    // #9: Wrapped │B fails closed on screen- (labels containing '│' are refused)
+    let mut screen_bar = hooked(
+        "screen-rvbar",
+        json!([{"question":"This is a deliberately long first question so the picker draws its text with a side bar, which size?","header":"Size","multiSelect":true,"options":[{"label":"A","description":"a"},{"label":"B","description":"b"},{"label":"│B","description":"c"}]}]),
+    );
+    screen_bar.tool_use_id = "screen-rvbar".into();
+    let bar_review = rv(
+        "☒ Size",
+        " │ ● This is a deliberately long first question so the picker draws its text with a side bar, which size?\n       → A,\n       │B",
+    );
+    assert_eq!(review_collision(&screen_bar, &[]), Some(CollisionKind::Labels), "#9: '│' in option label refused pre-flight on screen-");
+    assert!(!shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 2])])), "#9: '│B' fails closed in review matching");
+    assert!(!shows_review(&screen_bar, &bar_review, Some(&[ans(&[0, 1])])), "#9: wrapped │B does not match B");
+    assert!(!shows_review(&screen_bar, &bar_review, None), "#9: screen- spoof without answers never matches");
+    assert!(!shows_review(&screen_bar, &bar_review.replace("│B", "B"), Some(&[ans(&[0, 2])])), "#9: wrong picks rejected on screen-");
+
+    // #10: n_k > 8, scrolled/mismatched review, cross-question newline mark forgery, & Round 3 P2 conservative pre-flight
+    let nine_opts: Vec<_> = (0..9).map(|i| json!({"label": format!("Opt{i}"), "description": ""})).collect();
+    let q_nine = hooked("toolu_9", json!([{"question":"Q?","header":"H","multiSelect":true,"options": nine_opts}]));
+    assert!(review_blocked(&q_nine, &[]), "#10: n_k > 8 -> fail closed");
+    assert!(!claude_review_exact(&q_red, &[ans(&[0])], &quoted_review.replace("Review your answers", "")), "#10: missing title -> false");
+    let cross_q = hooked(
+        "toolu_cross",
+        json!([
+            {"question":"First?","header":"One","multiSelect":false,"options":[{"label":"A","description":""},{"label":"A\n ● Second?\n → B","description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"B\n ● Second?\n → C","description":""},{"label":"C","description":""}]}
+        ]),
+    );
+    assert!(review_blocked(&cross_q, &[ans(&[0]), ans(&[0])]), "#10: newline mark cross-question collision blocked");
+    assert!(
+        !claude_review_exact(
+            &cross_q,
+            &[ans(&[0]), ans(&[0])],
+            &rv("☒ One  ☒ Two", " ● First?\n       → A\n     ● Second?\n       → B\n     ● Second?\n       → C")
+        ),
+        "#10: ambiguous newline mark screen rejected by claude_review_exact"
+    );
+    let p2_req = hooked(
+        "toolu_P2",
+        json!([
+            {"question":"Colors?","header":"C","multiSelect":true,"options":[{"label":"Red, Blue","description":""},{"label":"Red","description":""},{"label":"Blue","description":""}]},
+            {"question":"More?","header":"M","multiSelect":true,"options":[{"label":"X, Y","description":""},{"label":"Z","description":""}]}
+        ]),
+    );
+    assert!(
+        review_blocked(&p2_req, &[ans(&[1, 2]), ans(&[0])]),
+        "#10 Round 3 P2: [Red, Blue] stays conservatively blocked even when Q2 has a quoted comma"
+    );
+    assert_eq!(
+        review_collision(&p2_req, &[ans(&[1, 2]), ans(&[0])]),
+        Some(CollisionKind::Picks),
+        "#10 Round 3 P2: conservative pre-flight reports CollisionKind::Picks"
+    );
+    assert_eq!(review_collision(&q_dup, &[]), Some(CollisionKind::Labels));
+    assert_eq!(review_collision(&q_dup, &[ans(&[0]), QuestionAnswer::default()]), Some(CollisionKind::Picks));
+    assert_eq!(review_collision(&q_dup, &[ans(&[2]), QuestionAnswer::default()]), None);
+    assert_eq!(review_collision(&q_xy, &[other(&[], "x, y")]), Some(CollisionKind::Own));
+    assert_eq!(review_collision(&cross_q, &[ans(&[0]), ans(&[0])]), Some(CollisionKind::Picks));
+}
+
+#[test]
+fn claude_review_wrapped_bar_dot_in_answer_red() {
+    let rv = |tabs: &str, body: &str| {
+        sw(&format!(
+            "
+    ────────────────────────────────────────────────────────────────
+    ←  {tabs}  ✔ Submit  →
+
+    Review your answers
+
+    {body}
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "
+        ))
+    };
+
+    // Codex P1: wrapped multi-select answer line starts with "│●" (for label "│●B" alongside "●B").
+    // Must not re-enable `barred` inside an answer and strip the label's own '│'.
+    let q = hooked(
+        "toolu_p1_bar_dot",
+        json!([{
+            "question": "Pick options?",
+            "header": "Pick",
+            "multiSelect": true,
+            "options": [
+                {"label": "Long first pick that wraps onto the next line", "description": ""},
+                {"label": "│●B", "description": ""},
+                {"label": "●B", "description": ""}
+            ]
+        }]),
+    );
+    let review = rv(
+        "☒ Pick",
+        " ● Pick options?\n       → Long first pick that wraps onto the next line,\n       │●B",
+    );
+    assert!(
+        !claude_review_exact(&q, &[ans(&[0, 2])], &review),
+        "P1: wrapped answer '│●B' must not match wrong pick '●B'"
+    );
+    assert!(
+        !claude_review_exact(&q, &[ans(&[0, 1])], &review),
+        "P1: fail closed whenever an option label contains '│'"
+    );
+
+    // Multi-question variant: Q1 has wrapped answer "│●B", Q2 is long (>= 80 cols) and quote-barred.
+    let q2_long = "This is a deliberately long second question so the picker draws its text with a side bar, which mode?";
+    let two_q = hooked(
+        "toolu_p1_bar_dot_2",
+        json!([
+            {
+                "question": "Pick options?",
+                "header": "Pick",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Long first pick that wraps onto the next line", "description": ""},
+                    {"label": "│●B", "description": ""},
+                    {"label": "●B", "description": ""}
+                ]
+            },
+            {
+                "question": q2_long,
+                "header": "Mode",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Safe", "description": ""},
+                    {"label": "Fast", "description": ""}
+                ]
+            }
+        ]),
+    );
+    let review_two = rv(
+        "☒ Pick  ☒ Mode",
+        &format!(" ● Pick options?\n       → Long first pick that wraps onto the next line,\n       │●B\n     │ ● {q2_long}\n       → Safe"),
+    );
+    assert!(
+        !claude_review_exact(&two_q, &[ans(&[0, 2]), ans(&[0])], &review_two),
+        "P1 multi-q: wrapped answer '│●B' must not match wrong pick '●B'"
+    );
+    assert!(
+        !claude_review_exact(&two_q, &[ans(&[0, 1]), ans(&[0])], &review_two),
+        "P1 multi-q: fail closed whenever an option label contains '│'"
+    );
+}
+
+#[test]
+fn claude_review_vertical_bar_fail_closed_red() {
+    use super::claude_exact::{review_collision, CollisionKind};
+
+    let rv = |tabs: &str, body: &str| {
+        sw(&format!(
+            "
+    ────────────────────────────────────────────────────────────────
+    ←  {tabs}  ✔ Submit  →
+
+    Review your answers
+
+    {body}
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "
+        ))
+    };
+
+    // Codex Round 2 P1: wrapped answer line has "│ ● <full long question>" followed by "→ ...".
+    // Must fail closed BEFORE any key (review_collision == Labels) and claude_review_exact == false.
+    let q_long = "This is a deliberately long question used to test quote bar stripping boundary on review screens";
+    let opt0_r2 = format!("Wrap,\n │ ● {q_long}\n → Tail");
+    let opt1_r2 = format!("Wrap,\n ● {q_long}\n → Tail");
+    let q_r2 = hooked(
+        "toolu_r2_p1",
+        json!([{
+            "question": q_long,
+            "header": "R2",
+            "multiSelect": true,
+            "options": [
+                {"label": opt0_r2, "description": ""},
+                {"label": opt1_r2, "description": ""}
+            ]
+        }]),
+    );
+    let review_r2 = rv(
+        "☒ R2",
+        &format!(" │ ● {q_long}\n       → Wrap,\n     │ ● {q_long}\n     → Tail"),
+    );
+    assert_eq!(review_collision(&q_r2, &[]), Some(CollisionKind::Labels), "R2: '│' in option label refused before any key");
+    assert!(!claude_review_exact(&q_r2, &[ans(&[1])], &review_r2), "R2: wrong option [1] must not match");
+    assert!(!claude_review_exact(&q_r2, &[ans(&[0])], &review_r2), "R2: option [0] with '│' must also fail closed");
+
+    // Round 1 example ("│●B" vs "●B") must also be refused before any key (fail closed).
+    let q_r1 = hooked(
+        "toolu_r1_fail_closed",
+        json!([{
+            "question": "Pick options?",
+            "header": "Pick",
+            "multiSelect": true,
+            "options": [
+                {"label": "Long first pick that wraps onto the next line", "description": ""},
+                {"label": "│●B", "description": ""},
+                {"label": "●B", "description": ""}
+            ]
+        }]),
+    );
+    let review_r1 = rv(
+        "☒ Pick",
+        " ● Pick options?\n       → Long first pick that wraps onto the next line,\n       │●B",
+    );
+    assert_eq!(review_collision(&q_r1, &[]), Some(CollisionKind::Labels), "R1: '│' in option label refused before any key");
+    assert!(!claude_review_exact(&q_r1, &[ans(&[0, 1])], &review_r1), "R1: '│' label fails closed");
+    assert!(!claude_review_exact(&q_r1, &[ans(&[0, 2])], &review_r1), "R1: wrong option rejected");
+
+    // Question text containing '│' -> Labels collision; Other containing '│' -> Own collision.
+    let q_text_bar = hooked(
+        "toolu_qbar",
+        json!([
+            {"question": "│ Q1?", "header": "One", "multiSelect": false, "options": [{"label":"A","description":""},{"label":"B","description":""}]},
+            {"question": "Q2?", "header": "Two", "multiSelect": false, "options": [{"label":"C","description":""},{"label":"D","description":""}]}
+        ]),
+    );
+    assert_eq!(review_collision(&q_text_bar, &[]), Some(CollisionKind::Labels), "question text with '│' refused before any key");
+    let clean_q = hooked(
+        "toolu_ownbar",
+        json!([
+            {"question": "Q1?", "header": "One", "multiSelect": false, "options": [{"label":"A","description":""},{"label":"B","description":""}]},
+            {"question": "Q2?", "header": "Two", "multiSelect": false, "options": [{"label":"C","description":""},{"label":"D","description":""}]}
+        ]),
+    );
+    assert_eq!(
+        review_collision(&clean_q, &[other(&[], "bad │ own"), ans(&[0])]),
+        Some(CollisionKind::Own),
+        "Other text with '│' refused before any key"
+    );
+    let own_bar_review = rv("☒ One  ☒ Two", " ● Q1?\n       → bad │ own\n     ● Q2?\n       → C");
+    assert!(
+        !claude_review_exact(&clean_q, &[other(&[], "bad │ own"), ans(&[0])], &own_bar_review),
+        "Other text with '│' fails closed in claude_review_exact"
+    );
+
+    // Recommended variant containing '│' must also be refused before any key.
+    let mut rec_bar = hooked(
+        "toolu_rec_bar",
+        json!([
+            {"question": "Q?", "header": "H", "multiSelect": true, "options": [{"label": "│Choice", "description": ""}, {"label": "Plain", "description": ""}]}
+        ]),
+    );
+    rec_bar.questions[0].options[0].recommended = true;
+    assert_eq!(review_collision(&rec_bar, &[]), Some(CollisionKind::Labels), "recommended option with '│' fails closed");
+}
+
+#[test]
+fn claude_review_variant_cap_keeps_full_answer_red() {
+    use super::claude_exact::review_collision;
+
+    assert_eq!(RECOMMENDED_SUFFIXES.len(), 6, "2 recommended picks produce 36 variants <= cap=64");
+    let mut q = hooked(
+        "toolu_r4_under_cap64",
+        json!([
+            {
+                "question": "Features?",
+                "header": "Features",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Opt1", "description": ""},
+                    {"label": "Opt2", "description": ""},
+                    {"label": "→ D", "description": ""}
+                ]
+            },
+            {
+                "question": "Confirm?",
+                "header": "Confirm",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Yes", "description": ""},
+                    {"label": "No", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for i in 0..2 {
+        q.questions[0].options[i].recommended = true;
+    }
+    let answers = [ans(&[0, 1, 2]), ans(&[0])];
+
+    assert_eq!(
+        review_collision(&q, &answers),
+        None,
+        "2 recommended picks + → D gives 36 <= 64 bodies with no collision"
+    );
+
+    let review = sw(
+        "
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Features  ☒ Confirm  ✔ Submit  →
+
+    Review your answers
+
+     ● Features?
+       → Opt1 (Recommended), Opt2 (Recommended), → D
+     ● Confirm?
+       → Yes
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    ",
+    );
+    assert!(
+        claude_review_exact(&q, &answers, &review),
+        "matching review screen under cap=64 passes claude_review_exact"
+    );
+}
+
+#[test]
+fn claude_review_variant_and_tuple_caps_fail_closed() {
+    use super::claude_exact::review_collision;
+
+    assert_eq!(RECOMMENDED_SUFFIXES.len(), 6, "3 recommended picks produce 216 > cap=64");
+
+    // 1) 3 recommended picks + → D exceeds 64-body cap -> must fail closed with Some(Picks).
+    let mut over_64 = hooked(
+        "toolu_r4_over_cap64",
+        json!([
+            {
+                "question": "Features?",
+                "header": "Features",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Opt1", "description": ""},
+                    {"label": "Opt2", "description": ""},
+                    {"label": "Opt3", "description": ""},
+                    {"label": "→ D", "description": ""}
+                ]
+            },
+            {
+                "question": "Confirm?",
+                "header": "Confirm",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Yes", "description": ""},
+                    {"label": "No", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for i in 0..3 {
+        over_64.questions[0].options[i].recommended = true;
+    }
+    assert_eq!(
+        review_collision(&over_64, &[ans(&[0, 1, 2, 3]), ans(&[0])]),
+        Some(CollisionKind::Picks),
+        "exceeding 64 raw body variants must fail closed"
+    );
+
+    // 2) Codex round-4 counterexample: 3 recommended picks with a synthetic label matching
+    // suffix combination #216 (beyond cap=64) must fail closed with Some(Picks).
+    let mut codex_r4 = hooked(
+        "toolu_r4_codex_ex",
+        json!([
+            {
+                "question": "Pick features?",
+                "header": "Pick",
+                "multiSelect": true,
+                "options": [
+                    {"label": "A", "description": ""},
+                    {"label": "B", "description": ""},
+                    {"label": "C", "description": ""},
+                    {"label": "A(推薦),B(推薦),C(推薦)", "description": ""},
+                    {"label": "→", "description": ""}
+                ]
+            },
+            {
+                "question": "Confirm?",
+                "header": "Confirm",
+                "multiSelect": false,
+                "options": [
+                    {"label": "Yes", "description": ""},
+                    {"label": "No", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for i in 0..3 {
+        codex_r4.questions[0].options[i].recommended = true;
+    }
+    assert_eq!(
+        review_collision(&codex_r4, &[ans(&[0, 1, 2]), ans(&[0])]),
+        Some(CollisionKind::Picks),
+        "hidden collision beyond raw_body_variants_for cap=64 must fail closed"
+    );
+
+    // 3) Per-question bodies under 64 (36 each), but 36 * 36 = 1296 > 256 cross-question tuples -> Some(Picks).
+    let mut over_256 = hooked(
+        "toolu_r4_over_cap256",
+        json!([
+            {
+                "question": "Q1?",
+                "header": "Q1",
+                "multiSelect": true,
+                "options": [
+                    {"label": "P1", "description": ""},
+                    {"label": "P2", "description": ""},
+                    {"label": "→", "description": ""}
+                ]
+            },
+            {
+                "question": "Q2?",
+                "header": "Q2",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Q1", "description": ""},
+                    {"label": "Q2", "description": ""}
+                ]
+            }
+        ]),
+    );
+    for qq in &mut over_256.questions {
+        for i in 0..2 {
+            qq.options[i].recommended = true;
+        }
+    }
+    assert_eq!(
+        review_collision(&over_256, &[ans(&[0, 1]), ans(&[0, 1])]),
+        Some(CollisionKind::Picks),
+        "exceeding 256 cross-question tuples must fail closed"
+    );
 }

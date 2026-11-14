@@ -188,8 +188,10 @@ pub fn run(argv: &[String]) -> String {
                     }
                 "card" => {
                     // `--answers` (optional): the picks and own answers so far, for `blocked`. Unreadable: the labels only.
+                    // `--question` (optional): the full question set kept from an earlier `--all`, to re-check `blocked` without keys.
                     let answers = opt("--answers").and_then(|a| cards::parse_answers(&a)).unwrap_or_default();
-                    let c = cards::card_with(&found.pane, &client, log, has("--all"), cache_url, &answers);
+                    let full = opt("--question").and_then(|q| cards::parse_question(&q));
+                    let c = cards::card_with_question(&found.pane, &client, log, has("--all"), cache_url, &answers, full.as_ref());
                     r.out.emit(&c);
                     return r.finish(true);
                 }

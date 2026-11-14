@@ -768,7 +768,7 @@ pub fn shows_any(q: &QuestionRequest, screen: &str) -> bool {
 /// Claude's review screen of `q`: the request's headers and every one of its questions listed. A hooked request
 /// needs the exact review of `answers` (`claude_review_exact`).
 pub fn shows_review(q: &QuestionRequest, screen: &str, answers: Option<&[QuestionAnswer]>) -> bool {
-    if !q.tool_use_id.starts_with("screen-") {
+    if q.agent == "claude" {
         return answers.is_some_and(|a| claude_review_exact(q, a, screen));
     }
     let Some(region) = picker_region(&q.agent, screen) else { return false };
@@ -1173,7 +1173,7 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
     // and the text without it is long (claude_exact::QUOTE_MIN); a short text's own "│" stays.
     if !text.is_empty() && text.iter().all(|t| t.starts_with('│')) {
         let unquoted: Vec<String> = text.iter().map(|t| trim_ws(&t['│'.len_utf8()..]).to_string()).collect();
-        if gcount(&unquoted.join(" ")) >= claude_exact::QUOTE_MIN {
+        if claude_exact::display_width(&unquoted.join(" ")) >= claude_exact::QUOTE_MIN {
             text = unquoted;
         }
     }
@@ -1253,16 +1253,12 @@ fn answer_keys<S: PaneScreen + ?Sized>(screen: &S, keys: &[String], gate: Option
 }
 
 /// Why `review_blocked` refuses (`QuestionFailure::Unsupported`).
-pub const REVIEW_BLOCKED: &str = "the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)";
+pub const REVIEW_BLOCKED: &str = "two distinct answers would look identical on the review screen";
 
-/// The refusal `answer_question` makes before any key when the review screen cannot prove the answers (a hooked
-/// Claude picker with 2+ questions or a multi-choice last one, and `review_ambiguous`). A card shows it before Send.
+/// The refusal `answer_question` makes before any key when pre-flight review checks find a collision
+/// (`review_collision`). A card shows it before Send.
 pub fn review_blocked(q: &QuestionRequest, answers: &[QuestionAnswer]) -> bool {
-    let hooked = q.agent == "claude" && !q.tool_use_id.starts_with("screen-");
-    q.delivery == Delivery::Picker
-        && hooked
-        && (q.questions.len() > 1 || q.questions.last().is_some_and(|x| x.multi_select))
-        && review_ambiguous(q, answers)
+    review_collision(q, answers).is_some()
 }
 
 /// Answers a pending question in `pane_id`, one `QuestionAnswer` per question.

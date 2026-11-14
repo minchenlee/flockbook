@@ -4,7 +4,7 @@ import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
-import { Cards, wanted, answersFor } from "../mods/flockbook/cards.js";
+import { Cards, wanted, answersFor, draftFor } from "../mods/flockbook/cards.js";
 import { NeedsView } from "../mods/flockbook/needs.js";
 
 const jl = (...lines) => ({ code: 0, stdout: lines.map((l) => JSON.stringify(l)).join("\n") + "\n", stderr: "" });
@@ -311,4 +311,285 @@ test("an own answer the review cannot show: checked again as it changes, Send of
   assert.equal(byId(el, "card-blocked"), null, "fine now");
   assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send is on");
   assert.equal(c.others[1].value(), "olive", "the typed text stays");
+});
+
+test("draftFor includes picks; pick() resets throttle e.at so poll updates blocked right away", async () => {
+  const q = question.question;
+  assert.equal(draftFor(q, new Map(), new Map()), null, "empty picks and others -> null");
+  assert.deepEqual(
+    draftFor(q, new Map([[0, new Set([1])]]), new Map()),
+    [{ picks: [1] }, { picks: [] }],
+    "draftFor includes picks and { picks: [] } for unanswered questions",
+  );
+
+  cardNow = { ...question, blocked: LABELS };
+  const calls = [];
+  fake.exec = (_c, args) => {
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    calls.push(args);
+    const i = args.indexOf("--answers");
+    const a = i < 0 ? [] : JSON.parse(args[i + 1]);
+    return jl(header("card"), a[0]?.picks?.includes(0) ? question : { ...question, blocked: LABELS }, end);
+  };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  assert.ok(!calls[0].includes("--answers"));
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  assert.equal(c.entry("t1").at, 0, "pick() resets e.at = 0 on a question card");
+  await c.poll(cx, "t1", true); // non-forced poll runs immediately because e.at === 0
+  assert.equal(calls.length, 2, "next poll reads card again with the new pick");
+  const sentDraft = JSON.parse(calls[1][calls[1].indexOf("--answers") + 1]);
+  assert.deepEqual(sentDraft, [{ picks: [0] }, { picks: [] }]);
+  assert.equal(byId(c.view("t1", T), "card-blocked"), null, "picking option 0 clears blocked");
+});
+
+test("review-screen stop: when act fails and poll drops card to null, a read-only stop banner stays", async () => {
+  cardNow = question;
+  fake.exec = (_c, args) => {
+    if (args[0] === "card") return jl(header("card"), cardNow ?? { type: "card" }, end);
+    if (args[0] === "answer") {
+      acts.push(args);
+      cardNow = null; // Claude moved to Review screen where card is null
+      return jl(header("answer"), { type: "done", result: "changed", message: "Review screen did not match; finish in the terminal." }, end);
+    }
+    return jl(header(args[0]), end);
+  };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-answer")._h.on_click({}, cx);
+  await cx.settle();
+
+  const el = c.view("t1", T);
+  assert.notEqual(el, null, "stop banner remains visible when card became null with an error/stop note");
+  assert.match(textOf(byId(el, "card-note")), /Review screen did not match/);
+  assert.equal(byId(el, "card-q0-o0"), null, "option picking is hidden on stop banner");
+  assert.equal(byId(el, "card-answer"), null, "Send answer is hidden on stop banner");
+  assert.equal(c.key_down({ key: "1", modifiers: {} }, cx, "t1"), false, "digit keys disabled");
+  assert.equal(c.key_down({ key: "enter", modifiers: {} }, cx, "t1"), false, "Enter disabled");
+
+  // Subsequent poll while still wanted retains the stop banner; opening terminal works
+  await c.poll(cx, "t1", true, true);
+  assert.notEqual(byId(c.view("t1", T), "card-note"), null);
+  byId(c.view("t1", T), "card-terminal")._h.on_click({}, cx); await cx.settle();
+  assert.equal(log.overlays.length, 1);
+
+  // Once agent is no longer wanted, banner clears
+  await c.poll(cx, "t1", false);
+  assert.equal(c.view("t1", T), null);
+});
+
+test("Show all screen- card re-checks blocked on kept full question set without --all keys", async () => {
+  const yesNoQ = {
+    toolUseId: "screen-yesno",
+    agent: "claude",
+    delivery: "picker",
+    state: "pending",
+    questions: [
+      {
+        id: "Q1?",
+        header: "One",
+        text: "Q1?",
+        multi: false,
+        options: [
+          { label: "Yes", detail: "", recommended: false },
+          { label: "Yes", detail: "", recommended: false },
+          { label: "No", detail: "", recommended: false },
+        ],
+      },
+      {
+        id: "Q2?",
+        header: "Two",
+        text: "Q2?",
+        multi: false,
+        options: [
+          { label: "A", detail: "", recommended: false },
+          { label: "B", detail: "", recommended: false },
+        ],
+      },
+    ],
+  };
+  const firstScreen = {
+    type: "card",
+    kind: "question",
+    request: "screen-yesno",
+    unread: 1,
+    question: { ...yesNoQ, questions: yesNoQ.questions.slice(0, 1) },
+  };
+  const fullScreen = {
+    type: "card",
+    kind: "question",
+    request: "screen-yesno",
+    unread: 0,
+    question: yesNoQ,
+    blocked: LABELS,
+  };
+  let alls = 0;
+  const pollArgs = [];
+  fake.exec = (_c, args) => {
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    if (args.includes("--all")) {
+      alls += 1;
+      return jl(header("card"), fullScreen, end);
+    }
+    pollArgs.push(args);
+    const qi = args.indexOf("--question");
+    if (qi >= 0) {
+      const passedQ = JSON.parse(args[qi + 1]);
+      const ai = args.indexOf("--answers");
+      const a = ai >= 0 ? JSON.parse(args[ai + 1]) : [];
+      const blocked = a[0]?.picks?.includes(2) ? undefined : LABELS;
+      const { blocked: _drop, ...baseFull } = fullScreen;
+      return jl(header("card"), { ...baseFull, question: passedQ, ...(blocked ? { blocked } : {}) }, end);
+    }
+    return jl(header("card"), firstScreen, end);
+  };
+
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-all")._h.on_click({}, cx); await cx.settle();
+  assert.equal(alls, 1);
+  assert.notEqual(byId(c.view("t1", T), "card-blocked"), null, "initial colliding labels block Send");
+
+  // Pick unique "No" (option 2) on Q1 and "A" (option 0) on Q2; non-forced poll updates blocked without --all.
+  byId(c.view("t1", T), "card-q0-o2")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  await c.poll(cx, "t1", true);
+  assert.equal(alls, 1, "no extra --all key presses on poll");
+  let el = c.view("t1", T);
+  assert.equal(byId(el, "card-blocked"), null, "picking unique 'No' clears blocked on Show all card");
+  assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send answer enables once blocked clears");
+
+  // Go back to Q1 and switch to colliding "Yes" (option 0): re-blocks without --all.
+  byId(el, "card-back")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  await c.poll(cx, "t1", true);
+  assert.equal(alls, 1, "still no --all key presses");
+  el = c.view("t1", T);
+  assert.notEqual(byId(el, "card-blocked"), null, "picking colliding 'Yes' restores blocked");
+  assert.equal(byId(el, "card-answer")._h.on_click, undefined, "Send answer disables again");
+});
+
+test("single-choice: picking an option then typing own answer sends picks: [] and other without Picks collision", async () => {
+  const twoSingle = {
+    toolUseId: "screen-single-other",
+    agent: "claude",
+    delivery: "picker",
+    state: "pending",
+    questions: [
+      { id: "Q1?", header: "One", multi: false, options: [{ label: "Alpha", detail: "", recommended: false }, { label: "Beta", detail: "", recommended: false }] },
+      { id: "Q2?", header: "Two", multi: true, options: [{ label: "X", detail: "", recommended: false }, { label: "Y", detail: "", recommended: false }] },
+    ],
+  };
+  const picksMap = new Map([[0, new Set([0])], [1, new Set([1])]]);
+  const othersMap = new Map([[0, "olive"], [1, "custom"]]);
+  assert.deepEqual(
+    draftFor(twoSingle, picksMap, othersMap),
+    [{ picks: [], other: "olive" }, { picks: [1], other: "custom" }],
+    "draftFor drops picked option on single-choice when other is non-empty, keeps multi-choice picks",
+  );
+  assert.deepEqual(
+    answersFor(twoSingle, picksMap, othersMap),
+    [{ picks: [], other: "olive" }, { picks: [1], other: "custom" }],
+    "answersFor drops picked option on single-choice when other is non-empty, keeps multi-choice picks",
+  );
+
+  // Flow test against a sidecar enforcing validate_answer_caps (!multi && picks + other > 1 => Picks collision).
+  const singleCard = { type: "card", kind: "question", request: "screen-single-other", unread: 0, question: twoSingle };
+  const drafts = [];
+  const PICKS = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.";
+  fake.exec = (_c, args) => {
+    if (args[0] === "answer") { acts.push(args); return jl(header("answer"), { type: "done", result: "sent" }, end); }
+    if (args[0] !== "card") return jl(header(args[0]), end);
+    const ai = args.indexOf("--answers");
+    const a = ai >= 0 ? JSON.parse(args[ai + 1]) : [];
+    drafts.push(a);
+    const invalidSingle = twoSingle.questions.some((q, i) => !q.multi && (a[i]?.picks?.length ?? 0) + (a[i]?.other?.trim() ? 1 : 0) > 1);
+    return jl(header("card"), invalidSingle ? { ...singleCard, blocked: PICKS } : singleCard, end);
+  };
+
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  // Pick option 0 on Q1, go back, type own answer "olive", then pick X on Q2 and send.
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-back")._h.on_click({}, cx);
+  c.view("t1", T);
+  c.others[0].set_value("olive"); c.others[0]._h.change({}, cx);
+  await c.poll(cx, "t1", true);
+  assert.deepEqual(drafts.at(-1), [{ picks: [], other: "olive" }, { picks: [] }]);
+  assert.equal(byId(c.view("t1", T), "card-blocked"), null, "typing other on single-choice clears false Picks collision");
+
+  byId(c.view("t1", T), "card-next")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  const el = c.view("t1", T);
+  assert.notEqual(byId(el, "card-answer")._h.on_click, undefined, "Send answer is enabled");
+  byId(el, "card-answer")._h.on_click({}, cx);
+  await cx.settle();
+  assert.deepEqual(
+    JSON.parse(acts.at(-1)[acts.at(-1).indexOf("--answers") + 1]),
+    [{ picks: [], other: "olive" }, { picks: [0] }],
+  );
+});
+
+test("single-choice UI: option renders unselected while own answer is non-empty, restores when cleared; multi keeps both", async () => {
+  cardNow = { ...question, question: { ...question.question, agent: "claude" } };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+
+  // Pick Q0 option 0 (single-choice), go back to Q0, confirm selected.
+  byId(c.view("t1", T), "card-q0-o0")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-back")._h.on_click({}, cx);
+  let el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o0")._a.bg, "#selected");
+
+  // Type own answer -> option row must not render selected, Other row renders selected, e.picks keeps 0.
+  c.others[0].set_value("olive"); c.others[0]._h.change({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o0")._a.bg, "#background", "old single-choice pick renders unselected while other is active");
+  assert.equal(byId(el, "card-q0-o0")._a.border_color, "#border");
+  assert.equal(byId(el, "card-q0-other")._a.bg, "#selected");
+  assert.ok(c.byAgent.get("t1").picks.get(0)?.has(0), "e.picks keeps the picked index");
+
+  // Clearing own answer restores the option row's selection from e.picks.
+  c.others[0].set_value(""); c.others[0]._h.change({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o0")._a.bg, "#selected", "clearing other restores single-choice pick highlight");
+  assert.equal(byId(el, "card-q0-other")._a.bg, "#background");
+
+  // Multi-choice Q1 still allows option + own answer simultaneously.
+  byId(el, "card-next")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-q1-o0")._h.on_click({}, cx);
+  c.view("t1", T);
+  c.others[1].set_value("extra"); c.others[1]._h.change({}, cx);
+  el = c.view("t1", T);
+  assert.equal(byId(el, "card-q1-o0")._a.bg, "#selected", "multi-choice keeps option highlighted with other");
+  assert.equal(byId(el, "card-q1-other")._a.bg, "#selected");
+});
+
+test("codex single-choice keeps picked option with notes in answers and UI", async () => {
+  const codexQ = { ...question.question, agent: "codex" };
+  const picksMap = new Map([[0, new Set([1])], [1, new Set([0])]]);
+  const othersMap = new Map([[0, "use notes"]]);
+  assert.deepEqual(
+    draftFor(codexQ, picksMap, othersMap),
+    [{ picks: [1], other: "use notes" }, { picks: [0] }],
+    "codex draftFor keeps single-choice pick alongside notes",
+  );
+  assert.deepEqual(
+    answersFor(codexQ, picksMap, othersMap),
+    [{ picks: [1], other: "use notes" }, { picks: [0] }],
+    "codex answersFor keeps single-choice pick alongside notes",
+  );
+
+  cardNow = { ...question, question: codexQ };
+  const cx = fakeCx(); const c = new Cards(cx);
+  await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-q0-o1")._h.on_click({}, cx);
+  byId(c.view("t1", T), "card-back")._h.on_click({}, cx);
+  c.view("t1", T);
+  c.others[0].set_value("use notes"); c.others[0]._h.change({}, cx);
+  const el = c.view("t1", T);
+  assert.equal(byId(el, "card-q0-o1")._a.bg, "#selected", "codex keeps picked single-choice row highlighted with notes");
+  assert.equal(byId(el, "card-q0-other")._a.bg, "#selected");
 });

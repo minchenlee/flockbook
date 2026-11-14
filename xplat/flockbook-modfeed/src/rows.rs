@@ -4,7 +4,7 @@
 use chrono::{Datelike, Duration, TimeZone, Timelike};
 use herdr_core::util::Date;
 use herdr_core::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -108,32 +108,39 @@ pub struct FeedPerm {
     pub state: String,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FeedOption {
     pub label: String,
+    #[serde(default)]
     pub detail: String,
+    #[serde(default)]
     pub recommended: bool,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FeedQuestionItem {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub header: String,
     pub text: String,
+    #[serde(default)]
     pub multi: bool,
     pub options: Vec<FeedOption>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedQuestion {
     pub tool_use_id: String,
     pub agent: String,
     /// "picker" or "message".
+    #[serde(default)]
     pub delivery: String,
     /// "pending", "answered", "declined".
+    #[serde(default)]
     pub state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answers: Option<Vec<String>>,
     pub questions: Vec<FeedQuestionItem>,
 }
