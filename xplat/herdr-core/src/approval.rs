@@ -547,9 +547,11 @@ pub fn respond_grok<S: PaneScreen + ?Sized>(
             continue;
         }
         let Some(key) = key else { return Ok(false) };
-        // The answer's gate before each key: the same agent and the input level, read now. After the Down: the stop
-        // is told (`KeyGateStopSent`), not "nothing was sent".
-        if !passes(screen, gate, pane_id, None, None) {
+        // The answer's gate before each key: the same agent, then this prompt with the focus where this key needs it
+        // (read again after the identity check: the focus can move during it), then the input level. After the Down:
+        // the stop is told (`KeyGateStopSent`), not "nothing was sent".
+        let still = |s: &str| grok_box(s).is_some_and(|b| grok_id(&b) == screen_prompt) && grok_key(s, allow) == Some(key);
+        if !passes(screen, gate, pane_id, Some(&still), None) {
             return if moved { Err(HerdrError::KeyGateStopSent) } else { Ok(false) };
         }
         screen.send_named_keys(&[key.to_string()], pane_id)?;
