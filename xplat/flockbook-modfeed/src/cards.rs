@@ -550,6 +550,21 @@ mod tests {
         assert_eq!(review_note(&unread, &[]), None, "questions unread: answer reads them first");
     }
 
+    // Codex R1 on round 5: the full question set kept by "Show all" goes back through `--question` on the next
+    // poll; a cut label must still block there, as `answer` does.
+    #[test]
+    fn full_question_keeps_cut_labels() {
+        let mut cut = two("A", "B");
+        cut.questions[0].cut_labels = true;
+        let raw = serde_json::to_string(&crate::rows::question(&cut)).unwrap();
+        let fq = parse_question(&raw).unwrap();
+        let back = restore_full_question(&cut, &fq).unwrap();
+        assert!(back.questions[0].cut_labels && !back.questions[1].cut_labels, "the flag goes there and back");
+        assert_eq!(review_note(&back, &[]).as_deref(), Some(REVIEW_CUT), "still blocked after the poll");
+        let plain = crate::rows::question(&two("A", "B"));
+        assert!(!serde_json::to_string(&plain).unwrap().contains("cutLabels"), "no cut label: the JSON is as before");
+    }
+
     #[test]
     fn review_note_exact_cases_red() {
         // Screen 2: multi-select comma option + split siblings
