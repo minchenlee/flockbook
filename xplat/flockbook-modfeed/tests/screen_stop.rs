@@ -28,4 +28,12 @@ fn answer_stop_names_the_cause() {
         d.result == "screen_changed" && m.contains("check the terminal") && !m.contains("Nothing was sent") && !m.contains("another agent"),
         "screen, keys in ({d:?})"
     );
+
+    // hg-keygate-followups: another agent after some keys went in: not "nothing was sent".
+    let d = cards::answer_stop(&pane, &HerdrError::KeyGateStopSent);
+    let m = d.message.clone().unwrap_or_default();
+    assert!(
+        d.result == "changed" && m.contains("nother agent") && m.contains("Some keys may already be in: check the terminal") && !m.to_lowercase().contains("nothing was sent"),
+        "another agent, keys in ({d:?})"
+    );
 }

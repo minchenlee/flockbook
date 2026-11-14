@@ -10,6 +10,9 @@ pub enum HerdrError {
     Timeout(String),
     /// A key gate said no: the input stopped there; the keys after it were not sent (Swift `KeyGateStop`).
     KeyGateStop,
+    /// A key gate said no after keys of this input went in: another agent, or the input level changed. The keys
+    /// after the stop were not sent; the ones before may be in the terminal.
+    KeyGateStopSent,
     /// The same agent, input still allowed, but the exact screen a key needs did not come (waited for it): the input
     /// stopped there. `keys_sent`: keys of this input went in before the stop.
     ScreenStop { keys_sent: bool },
@@ -50,6 +53,7 @@ impl fmt::Display for HerdrError {
             HerdrError::Closed => write!(f, "connection closed"),
             HerdrError::Timeout(m) => write!(f, "timeout: {m}"),
             HerdrError::KeyGateStop => write!(f, "stopped: the pane, its agent or this device's input level changed"),
+            HerdrError::KeyGateStopSent => write!(f, "stopped after some keys: the pane, its agent or this device's input level changed"),
             HerdrError::ScreenStop { .. } => write!(f, "stopped: the question on screen changed while answering"),
             HerdrError::Question(q) => write!(f, "{q}"),
         }

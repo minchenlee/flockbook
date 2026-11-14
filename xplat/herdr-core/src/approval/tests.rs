@@ -714,10 +714,48 @@ fn grok_remote_permission() {
     let off = respond_if_open(&f, "w1:p1", &id, true, "grok", true, None, Some(&gate(yes())));
     assert!(off == Ok(false) && f.sent().is_empty(), "grok remote: the focus on always-approve: nothing sent {:?}", f.sent());
 
-    // The level goes after Down (checks: the open prompt, Down, then Enter): no Enter.
+    // The level goes after Down (checks: the open prompt, Down, then Enter): no Enter, and the Down is told.
     let f = fake(vec![&p2, &p3, GROK_IDLE]);
     let cut = respond_if_open(&f, "w1:p1", &id, false, "grok", true, None, Some(&gate(budget(2))));
-    assert!(cut == Ok(false) && f.sent() == ["Down"], "grok remote: the level gone between keys: no Enter {:?}", f.sent());
+    assert!(cut == Err(HerdrError::KeyGateStopSent) && f.sent() == ["Down"], "grok remote: the level gone between keys: no Enter {:?} {cut:?}", f.sent());
+
+    // hg-keygate-followups: another agent after Down. Each key has the answer's full gate: no Enter, the Down told.
+    let f = fake(vec![&p2, &p3, GROK_IDLE]);
+    let swap = AgentSwap { fake: &f, to: tui_pane(Some(grok_agent("g2"))) };
+    let other = respond_if_open(&swap, "w1:p1", &id, false, "grok", true, None, Some(&gate(yes())));
+    assert!(other == Err(HerdrError::KeyGateStopSent) && f.sent() == ["Down"], "grok remote: another agent after Down: no Enter {:?} {other:?}", f.sent());
+}
+
+/// Puts another pane (another agent) in place once a key went.
+struct AgentSwap<'a> {
+    fake: &'a FakeScreen,
+    to: Pane,
+}
+
+impl PaneScreen for AgentSwap<'_> {
+    fn backend(&self) -> BackendKind {
+        self.fake.backend()
+    }
+    fn snapshot(&self) -> Result<Vec<Workspace>, HerdrError> {
+        self.fake.snapshot()
+    }
+    fn visible_text(&self, pane_id: &str) -> Result<String, HerdrError> {
+        self.fake.visible_text(pane_id)
+    }
+    fn respond(&self, pane_id: &str, allow: bool) -> Result<(), HerdrError> {
+        self.fake.respond(pane_id, allow)
+    }
+    fn send_named_keys(&self, keys: &[String], pane_id: &str) -> Result<(), HerdrError> {
+        self.fake.workspaces.borrow_mut()[0].tabs[0].panes = vec![self.to.clone()];
+        self.fake.send_named_keys(keys, pane_id)
+    }
+    fn send_keys(&self, bytes: &[u8], pane_id: &str) -> Result<(), HerdrError> {
+        self.fake.send_keys(bytes, pane_id)
+    }
+    fn send_text(&self, text: &str, pane_id: &str) -> Result<(), HerdrError> {
+        self.fake.send_text(text, pane_id)
+    }
+    fn pause(&self, _ms: u64) {}
 }
 
 // MARK: ChecksHCGrok.swift (respondIfOpen on an hc pane)
