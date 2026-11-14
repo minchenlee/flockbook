@@ -416,6 +416,8 @@ pub enum CollisionKind {
     Labels,
     Picks,
     Own,
+    /// A screen read whose option labels may be cut (a wrapped label): the review cannot be checked.
+    Cut,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -512,7 +514,7 @@ fn canonical_cand(a: &QuestionAnswer) -> Option<Cand> {
 
 fn validate_question_caps(q: &Question) -> bool {
     let qt = bare(&q.text);
-    if q.options.len() > MAX_REVIEW_OPTIONS || qt.is_empty() || qt.contains('│') {
+    if q.cut_labels || q.options.len() > MAX_REVIEW_OPTIONS || qt.is_empty() || qt.contains('│') {
         return false;
     }
     q.options.iter().all(|o| {
@@ -884,6 +886,9 @@ pub fn review_collision(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Opti
     {
         return None;
     }
+    if q.questions.iter().any(|qq| qq.cut_labels) {
+        return Some(CollisionKind::Cut);
+    }
     for qq in &q.questions {
         if !validate_question_caps(qq) {
             return Some(CollisionKind::Labels);
@@ -983,9 +988,17 @@ pub fn claude_review_exact(q: &QuestionRequest, answers: &[QuestionAnswer], scre
                 let mut j = i;
                 let mut stripped_lines = Vec::new();
                 let mut stripped_bare = String::new();
+                // A barred line that starts with "→" is still question text while the text so far is not yet a whole
+                // long question and the line goes on with it; else it ends the section (no answer has a bar).
+                let goes_on = |so_far: &str, more: &str| {
+                    q.questions.iter().any(|qq| {
+                        let want = format!("●{}", bare(&qq.text));
+                        display_width(&qq.text) >= QUOTE_MIN && so_far != want && want.starts_with(&format!("{so_far}{more}"))
+                    })
+                };
                 while j < body_lines.len() {
                     let Some(rj) = trim_ws(body_lines[j]).strip_prefix('│') else { break };
-                    if trim_ws(rj).starts_with('→') {
+                    if trim_ws(rj).starts_with('→') && !goes_on(&stripped_bare, &bare(rj)) {
                         break;
                     }
                     stripped_bare.push_str(&bare(rj));

@@ -42,6 +42,8 @@ extension QuestionAdapter {
     /// Why `reviewCollision` blocked a pre-flight question card / answer set.
     public enum CollisionKind: Sendable, Equatable {
         case labels, picks, own
+        /// A screen read whose option labels may be cut (a wrapped label): the review cannot be checked.
+        case cut
     }
 
     private enum ReviewForm: Equatable {
@@ -270,7 +272,7 @@ extension QuestionAdapter {
 
     private static func validateQuestionCaps(_ q: QuestionRequest.Question) -> Bool {
         let qt = bare(q.text)
-        if q.options.count > maxReviewOptions || qt.isEmpty || qt.contains("│") { return false }
+        if q.cutLabels || q.options.count > maxReviewOptions || qt.isEmpty || qt.contains("│") { return false }
         return q.options.allSatisfy { o in
             let labels = shownLabels(o)
             return !labels.isEmpty && labels.allSatisfy { !$0.isEmpty && !$0.contains("\"") && !$0.contains("│") }
@@ -572,6 +574,7 @@ extension QuestionAdapter {
               !q.questions.isEmpty,
               q.delivery == .picker,
               q.questions.count > 1 || q.questions.last?.multiSelect == true else { return nil }
+        if q.questions.contains(where: \.cutLabels) { return .cut }
         for qq in q.questions {
             if !validateQuestionCaps(qq) { return .labels }
         }
@@ -647,11 +650,18 @@ extension QuestionAdapter {
                     var j = i
                     var strippedLines: [String] = []
                     var strippedBare = ""
+                    // A "→" line still goes on a long question whose text is not whole yet.
+                    let goesOn = { (soFar: String, more: String) -> Bool in
+                        q.questions.contains { qq in
+                            let want = "●" + bare(qq.text)
+                            return displayWidth(qq.text) >= quoteMin && soFar != want && want.hasPrefix(soFar + more)
+                        }
+                    }
                     while j < bodyLines.endIndex {
                         let tj = bodyLines[j].trimmingCharacters(in: .whitespaces)
                         guard tj.hasPrefix("│") else { break }
                         let rj = String(tj.dropFirst())
-                        if rj.trimmingCharacters(in: .whitespaces).hasPrefix("→") { break }
+                        if rj.trimmingCharacters(in: .whitespaces).hasPrefix("→") && !goesOn(strippedBare, bare(rj)) { break }
                         strippedBare.append(bare(rj))
                         strippedLines.append(rj)
                         j = bodyLines.index(after: j)
@@ -730,6 +740,7 @@ extension QuestionAdapter {
     public static let reviewLabels = "Two answers here would look identical on the review screen. Answer in the terminal."
     public static let reviewPicks = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal."
     public static let reviewOwn = "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal."
+    public static let reviewCut = "An option is too long for one line on the screen, so the review screen cannot be checked. Answer in the terminal."
     public static func reviewNote(_ q: QuestionRequest, answers: [QuestionAnswer]) -> String? {
         if q.unread > 0 { return nil }
         switch reviewCollision(q, answers: answers) {
@@ -737,6 +748,7 @@ extension QuestionAdapter {
         case .labels: return reviewLabels
         case .picks: return reviewPicks
         case .own: return reviewOwn
+        case .cut: return reviewCut
         }
     }
 

@@ -127,6 +127,9 @@ pub struct FeedQuestionItem {
     #[serde(default)]
     pub multi: bool,
     pub options: Vec<FeedOption>,
+    /// A screen read whose labels may be cut: kept when the full set comes back through `--question`.
+    #[serde(default, rename = "cutLabels", skip_serializing_if = "std::ops::Not::not")]
+    pub cut_labels: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -220,6 +223,7 @@ pub fn question(q: &QuestionRequest) -> FeedQuestion {
                 header: x.header.clone(),
                 text: x.text.clone(),
                 multi: x.multi_select,
+                cut_labels: x.cut_labels,
                 options: x
                     .options
                     .iter()

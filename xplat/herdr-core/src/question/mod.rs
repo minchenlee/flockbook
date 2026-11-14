@@ -153,7 +153,7 @@ pub fn option(label: &str, detail: &str, recommended: bool) -> QOption {
 
 /// Swift `Question(id:header:text:options:multiSelect:)`: `id` None is the text (Swift's default).
 pub fn new_question(id: Option<&str>, header: &str, text: &str, options: Vec<QOption>, multi_select: bool) -> Question {
-    Question { id: id.unwrap_or(text).into(), header: header.into(), text: text.into(), options, multi_select }
+    Question { id: id.unwrap_or(text).into(), header: header.into(), text: text.into(), options, multi_select, cut_labels: false }
 }
 
 /// Swift `QuestionRequest(toolUseId:agent:delivery:questions:)`: pending, no headers.
@@ -1106,10 +1106,14 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
     // `marks` counts the focus marks on rows and on Submit; a mark on any other line means the hub does not
     // know where the focus is (focus_marks 0: no key).
     let (mut marks, mut since_row, mut row_column, mut stray_mark) = (0usize, 0usize, None::<usize>, false);
+    // Per row: its line's width and the width of the first word on the next line of its text (a wrapped label?);
+    // the separator's width is the line width.
+    let (mut row_widths, mut next_words, mut line_width) = (Vec::<usize>::new(), Vec::<Option<usize>>::new(), 0usize);
     for l in &lines[bar + 1..end] {
         let t = trim_ws(l);
         if t.starts_with("──") {
             closed = true;
+            line_width = claude_exact::display_width(l.trim_end());
             break;
         }
         let marked = t.starts_with('❯');
@@ -1147,6 +1151,8 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             }
             let (clean, rec) = strip_recommended(&label);
             options.push(option(&clean, "", rec));
+            row_widths.push(claude_exact::display_width(l.trim_end()));
+            next_words.push(None);
             last_raw = label;
             last_focused = trim_ws(l).starts_with('❯');
         } else if in_options {
@@ -1155,6 +1161,9 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             }
             if !t.is_empty() {
                 since_row += 1;
+            }
+            if let (false, Some(w @ None)) = (t.is_empty(), next_words.last_mut()) {
+                *w = Some(claude_exact::display_width(t.split_whitespace().next().unwrap_or(t)));
             }
             if let (false, Some(o)) = (t.is_empty(), options.last_mut()) {
                 if !o.detail.is_empty() {
@@ -1186,8 +1195,12 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
     if options.is_empty() || text.is_empty() {
         return None;
     }
+    // A row whose next line's first word would not have fit on it (2 columns to spare): Claude Code wrapped the
+    // label, and the rest of it was read as detail. Which part is label cannot be told, so the labels may be cut.
+    let cut = (0..options.len()).any(|i| next_words[i].is_some_and(|w| row_widths[i] + 1 + w + 2 > line_width));
     let header = if headers.len() == 1 { headers[0].clone() } else { String::new() };
-    let question = new_question(None, &header, &text.join(" "), options, multi);
+    let mut question = new_question(None, &header, &text.join(" "), options, multi);
+    question.cut_labels = cut;
     Some(ClaudeParse {
         headers,
         question,

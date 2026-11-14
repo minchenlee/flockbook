@@ -3010,3 +3010,65 @@ fn claude_review_variant_and_tuple_caps_fail_closed() {
         "exceeding 256 cross-question tuples must fail closed"
     );
 }
+
+/// Codex round 5 P2 (1): on a screen read, a long option label that wraps is read as label + detail, so the review
+/// could never match it. The question says its labels may be cut, and a review is refused before any key.
+#[test]
+fn claude_screen_wrapped_label_is_refused_before_keys() {
+    let sep = "─".repeat(72);
+    let screen = |first_row: &str, first_next: &str| {
+        format!(
+            "←  ☐ Size  ☐ Tops  ✔ Submit  →\n\nWhich size?\n\n❯ 1. {first_row}\n     {first_next}\n  2. Small\n     a short one\n  3. Type something.\n{sep}\n  4. Chat about this\n"
+        )
+    };
+    // Row 1 is 71 columns wide; "right" (5) would not fit on it in 72 columns: a wrapped label.
+    let wrapped = claude_parse(&screen("A very long option label that goes on and on until it reaches the", "right edge")).expect("picker");
+    assert_eq!(wrapped.question.options[0].label, "A very long option label that goes on and on until it reaches the");
+    assert!(wrapped.question.cut_labels, "a row that fills the line, then more text: the label may be cut");
+    // A short row and its description: "warm" would have fit on the row line, so it is a description.
+    let plain = claude_parse(&screen("Large", "warm")).expect("picker");
+    assert!(!plain.question.cut_labels, "a short row with a description: not cut");
+
+    let two = |first: Question| screen_request(&["Size".into(), "Tops".into()], vec![first, new_question(None, "Tops", "Tops?", vec![option("Ham", "", false), option("Egg", "", false)], false)]);
+    let a = [ans(&[1]), ans(&[0])];
+    assert_eq!(review_collision(&two(wrapped.question.clone()), &a), Some(CollisionKind::Cut), "a cut label: refused before any key");
+    assert!(review_blocked(&two(wrapped.question), &a));
+    assert_eq!(review_collision(&two(plain.question), &a), None, "no cut label: as before");
+}
+
+/// Codex round 5 P2 (2): a long question wraps so one of its quoted lines starts with "→". It is still question
+/// text; an answer line ("→" with no bar) still ends the question.
+#[test]
+fn claude_review_quote_bar_arrow_line() {
+    let long = "This is a deliberately long first question so the picker draws its text with a side bar, → choose a mode?";
+    let q = hooked("toolu_rba", json!([
+        {"question": long,"header":"Size","multiSelect":false,"options":[{"label":"Small","description":"s"},{"label":"Large","description":"l"}]},
+        {"question":"Which toppings?","header":"Tops","multiSelect":true,"options":[{"label":"Cheese","description":"y"},{"label":"Ham","description":"p"},{"label":"Egg","description":"r"}]}]));
+    let a = [ans(&[1]), ans(&[0, 2])];
+    let review = |first: &str| sw(&format!(r#"
+    ────────────────────────────────────────────────────────────────
+    ←  ☒ Size  ☒ Tops  ✔ Submit  →
+
+    Review your answers
+
+    {first}
+     ● Which toppings?
+       → Cheese, Egg
+
+    Ready to submit your answers?
+
+    ❯ 1. Submit answers
+      2. Cancel
+    "#));
+    let wrapped = " │ ● This is a deliberately long first question so the picker draws its text with a side bar,\n     │ → choose a mode?\n       → Large";
+    assert!(claude_review_exact(&q, &a, &review(wrapped)), "a quoted line that starts with → is question text");
+    assert!(!claude_review_exact(&q, &[ans(&[0]), ans(&[0, 2])], &review(wrapped)), "another pick still fails");
+    // The question is whole before the barred "→" line: that line is no question text, and no answer either.
+    let short = "This is a deliberately long first question so the picker draws its text with a side bar, choose a mode?";
+    let q2 = hooked("toolu_rbb", json!([
+        {"question": short,"header":"Size","multiSelect":false,"options":[{"label":"Small","description":"s"},{"label":"Large","description":"l"}]},
+        {"question":"Which toppings?","header":"Tops","multiSelect":true,"options":[{"label":"Cheese","description":"y"},{"label":"Ham","description":"p"},{"label":"Egg","description":"r"}]}]));
+    let barred_answer = format!(" │ ● {short}\n     │ → Large");
+    assert!(!claude_review_exact(&q2, &a, &review(&barred_answer)), "a barred → line after the whole question is no answer");
+    assert!(claude_review_exact(&q2, &a, &review(&format!(" │ ● {short}\n       → Large"))), "the plain case still passes");
+}

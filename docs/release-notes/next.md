@@ -18,6 +18,7 @@ One short line: what this release is about.
 - Herdr app: the Terminal button and ctrl-` work again on a tab whose agent stopped reporting its status (Claude Code can stop after it moves to a new session id; hc then lists it as zsh). They open the tab's focused terminal, else its first one.
 - Mac app question cards (Claude Code): answers to questions with a comma, ● or → in an option now go through, as in the Herdr app. Before Submit, the card checks that the terminal's review screen shows your answers word for word. It stops only when two different answers would look the same there: it says so as you pick or type, Send is off, and "Answer in terminal" opens the pane. If sending fails after moving to the review screen, the card stays read-only and tells you why.
 - Agents started through wrapper commands (such as `secretspec run -- claude` or `codex`) now show their conversation and can be answered from Flockbook.
+- Question cards (Claude Code, Herdr app and Mac app): when an option is too long for one line on the screen, the card now says so before Send and asks you to answer in the terminal, instead of stopping on the review screen. A long question with a line that starts with "→" no longer stops there either.
 
 ### ⚙️ Changes
 - The Swift `flockbook-modfeed` sidecar is retired. The Rust helper, which releases already ship, is the only one; the CI parity check between the two is gone.
