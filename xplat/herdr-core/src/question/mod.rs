@@ -1223,7 +1223,8 @@ const KEY_WAIT_MS: u64 = 5000;
 
 /// The gate before one key of an answer. A gate with a screen check first waits (up to `KEY_WAIT_MS`) for `ok`, so a
 /// slow render is waited for and not taken for a change; then the full check runs on a fresh read right before the
-/// key, as `gated`. A stop names its cause: the agent or the input level changed (`KeyGateStop`, as before), or the
+/// key, as `gated`. A stop names its cause: the agent or the input level changed (`KeyGateStop`; `KeyGateStopSent`
+/// once keys of this input went in), or the
 /// same agent shows another screen (`ScreenStop`, with `sent`: keys of this answer went in before).
 fn answer_gated<S: PaneScreen + ?Sized>(screen: &S, gate: Option<&KeyGate>, pane_id: &str, ok: &dyn Fn(&str) -> bool, sent: bool) -> Result<(), HerdrError> {
     let Some(g) = gate else { return Ok(()) };
@@ -1233,7 +1234,11 @@ fn answer_gated<S: PaneScreen + ?Sized>(screen: &S, gate: Option<&KeyGate>, pane
     }
     let same_agent = g.agent.as_ref().is_none_or(|a| fresh_agent(screen, a, pane_id).is_some());
     let allowed = g.allowed.as_ref().is_none_or(|f| f());
-    Err(if same_agent && allowed { HerdrError::ScreenStop { keys_sent: sent } } else { HerdrError::KeyGateStop })
+    Err(match (same_agent && allowed, sent) {
+        (true, _) => HerdrError::ScreenStop { keys_sent: sent },
+        (false, true) => HerdrError::KeyGateStopSent,
+        (false, false) => HerdrError::KeyGateStop,
+    })
 }
 
 /// Named keys of an answer, each behind `answer_gated` (one key per call, so no committing key rides in a batch past
@@ -1465,15 +1470,19 @@ pub fn load_all_questions<S: PaneScreen + ?Sized>(
         let headers = headers.clone();
         move |s: &str| claude_screen(s).is_some_and(|(h, q)| h == headers && same_question(&q, &want))
     };
+    // The answer's gate before each key (`answer_gated`): the exact screen is waited for, and a stop says whether
+    // keys of this read went in.
+    let mut sent = false;
     // To question 1 (Left stops there). Navigation keys only; none of them chooses anything.
-    gated(screen, gate, pane_id, Some(&exact(shown.clone())))?;
+    answer_gated(screen, gate, pane_id, &exact(shown.clone()), sent)?;
     screen.send_named_keys(&vec!["Left".to_string(); n - 1], pane_id)?;
+    sent = true;
     screen.pause(200);
     let Some(first) = now()? else { return Err(stuck("question 1")) };
     let mut questions = vec![first];
     for _ in 1..n {
         let last = questions[questions.len() - 1].clone();
-        gated(screen, gate, pane_id, Some(&exact(last.clone())))?;
+        answer_gated(screen, gate, pane_id, &exact(last.clone()), sent)?;
         screen.send_named_keys(&["Right".to_string()], pane_id)?;
         let mut next: Option<Question> = None;
         let _ = wait_screen(screen, pane_id, 2000, |s| match claude_screen(s) {
@@ -1489,7 +1498,7 @@ pub fn load_all_questions<S: PaneScreen + ?Sized>(
     // Back to where the picker was.
     let back = n - 1 - questions.iter().position(|x| x.text == shown.text).unwrap_or(0);
     if back > 0 {
-        gated(screen, gate, pane_id, Some(&exact(questions[questions.len() - 1].clone())))?;
+        answer_gated(screen, gate, pane_id, &exact(questions[questions.len() - 1].clone()), sent)?;
         screen.send_named_keys(&vec!["Left".to_string(); back], pane_id)?;
     }
     if !wait_screen(screen, pane_id, 2000, |s| claude_screen(s).is_some_and(|(_, q)| q.text == shown.text))? {
