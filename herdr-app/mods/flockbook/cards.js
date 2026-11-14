@@ -196,7 +196,7 @@ export class Cards {
       const done = r.lines.find((l) => l.type === "done");
       if (r.error) note = r.error.message;
       else if (done?.result === "sent") e.card = null;
-      else if (sidecar.agentChanged(done)) note = sidecar.AGENT_CHANGED;
+      else if (sidecar.agentChanged(done)) note = sidecar.keysMayBeIn(done) ? done.message : sidecar.AGENT_CHANGED;
       else if (done?.result === "changed") { changedNoMsg = !done?.message; note = done?.message || "It changed on screen. Here is what it shows now."; }
       else note = done?.message || "The keys did not go out.";
     } finally { e.sending = false; }
