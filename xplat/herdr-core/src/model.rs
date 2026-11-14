@@ -221,11 +221,14 @@ pub struct Question {
     pub text: String,
     pub options: Vec<QOption>,
     pub multi_select: bool,
+    /// Screen reads only: a row's label may go on in the next line (a wrapped label read as its detail), so the
+    /// labels may be cut. The review screen cannot be checked then.
+    pub cut_labels: bool,
 }
 
 impl Question {
     pub fn new(header: &str, text: &str, options: Vec<QOption>, multi_select: bool) -> Self {
-        Question { id: text.into(), header: header.into(), text: text.into(), options, multi_select }
+        Question { id: text.into(), header: header.into(), text: text.into(), options, multi_select, cut_labels: false }
     }
 }
 

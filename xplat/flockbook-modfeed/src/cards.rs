@@ -211,6 +211,7 @@ pub fn look<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>)
 pub const REVIEW_LABELS: &str = "Two answers here would look identical on the review screen. Answer in the terminal.";
 pub const REVIEW_PICKS: &str = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.";
 pub const REVIEW_OWN: &str = "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.";
+pub const REVIEW_CUT: &str = "An option is too long for one line on the screen, so the review screen cannot be checked. Answer in the terminal.";
 
 pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<String> {
     if q.unread() > 0 {
@@ -221,6 +222,7 @@ pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<St
             question::CollisionKind::Labels => REVIEW_LABELS,
             question::CollisionKind::Picks => REVIEW_PICKS,
             question::CollisionKind::Own => REVIEW_OWN,
+            question::CollisionKind::Cut => REVIEW_CUT,
         }
         .into()
     })
@@ -413,6 +415,7 @@ fn restore_full_question(q: &QuestionRequest, fq: &FeedQuestion) -> Option<Quest
                     .map(|o| QOption { label: o.label.clone(), detail: o.detail.clone(), recommended: o.recommended })
                     .collect(),
                 multi_select: x.multi,
+                cut_labels: false,
             })
             .collect(),
     })
@@ -538,6 +541,10 @@ mod tests {
         for (q, a) in [(three.clone(), vec![]), (two("A", "B"), own("A, B")), (two("A", "B"), own("olive"))] {
             assert_eq!(review_note(&q, &a).is_some(), question::review_blocked(&q, &a));
         }
+        // Round 5 P2 (1): a screen read whose labels may be cut (a wrapped label).
+        let mut cut = two("A", "B");
+        cut.questions[0].cut_labels = true;
+        assert_eq!(review_note(&cut, &[]).as_deref(), Some(REVIEW_CUT), "a cut label: blocked from the start");
         let mut unread = two("A B", "AB");
         unread.headers = vec!["One".into(), "Two".into(), "Three".into()];
         assert_eq!(review_note(&unread, &[]), None, "questions unread: answer reads them first");

@@ -153,7 +153,7 @@ pub fn option(label: &str, detail: &str, recommended: bool) -> QOption {
 
 /// Swift `Question(id:header:text:options:multiSelect:)`: `id` None is the text (Swift's default).
 pub fn new_question(id: Option<&str>, header: &str, text: &str, options: Vec<QOption>, multi_select: bool) -> Question {
-    Question { id: id.unwrap_or(text).into(), header: header.into(), text: text.into(), options, multi_select }
+    Question { id: id.unwrap_or(text).into(), header: header.into(), text: text.into(), options, multi_select, cut_labels: false }
 }
 
 /// Swift `QuestionRequest(toolUseId:agent:delivery:questions:)`: pending, no headers.

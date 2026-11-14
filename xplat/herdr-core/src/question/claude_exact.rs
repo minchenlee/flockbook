@@ -416,6 +416,8 @@ pub enum CollisionKind {
     Labels,
     Picks,
     Own,
+    /// A screen read whose option labels may be cut (a wrapped label): the review cannot be checked.
+    Cut,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
