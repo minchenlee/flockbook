@@ -398,13 +398,33 @@ public actor SessionResolver {
         return (kids.isEmpty ? roots : kids).max { $0.start < $1.start }
     }
 
-    /// Executable names per agent kind, matched against the first two words of a command line (`node …/codex`).
+    /// Interpreters an agent's script runs under (`node …/codex`), with their versioned names (`node22`, `python3.12`).
+    static func isInterpreter(_ w: String) -> Bool {
+        ["node", "bun", "deno", "python"].contains { i in
+            guard w.hasPrefix(i) else { return false }
+            let v = w.dropFirst(i.count)
+            return v.isEmpty || (v.first!.isASCII && v.first!.isNumber && v.allSatisfy { $0 == "." || ($0.isASCII && $0.isNumber) })
+        }
+    }
+
+    /// The program a command line runs: its first word's name or, under an interpreter, the second word's name
+    /// (`node /opt/x/bin/codex` runs `codex`). Interpreter flags are not skipped: `node --inspect …/codex` gives
+    /// `--inspect` (fail closed). A program that only names another (`script claude`) runs itself.
+    /// Twin of herdr-core `resolver::program`.
+    static func program(_ words: [String]) -> String? {
+        guard let w = words.first else { return nil }
+        let first = (w as NSString).lastPathComponent
+        guard isInterpreter(first) else { return first }
+        return words.dropFirst().first.map { ($0 as NSString).lastPathComponent }
+    }
+
+    /// Executable names per agent kind, matched against the program a command line runs (`program`).
     static let executables: [String: Set<String>] = ["claude": ["claude"], "codex": ["codex"], "cursor": ["cursor-agent", "cursor"], "pi": ["pi"]]
 
     static func runs(_ p: Proc, kind: String) -> Bool {
         let names = executables[kind] ?? [kind]
-        let words = p.line.split(separator: " ", maxSplits: 2).prefix(2).map { ($0 as NSString).lastPathComponent }
-        return words.contains { names.contains($0) }
+        let words = p.line.split(separator: " ", maxSplits: 2).prefix(2).map(String.init)
+        return program(words).map { names.contains($0) } ?? false
     }
 
     /// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. A tie in depth: nil when not

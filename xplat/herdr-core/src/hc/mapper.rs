@@ -128,6 +128,13 @@ pub fn kind_of_argv(argv: &[String]) -> Option<String> {
     words.iter().take(2).find_map(|w| known_kind(w)).map(String::from)
 }
 
+/// The agent kind a command line runs (not only names): its program ([`crate::resolver::program`]) is the agent.
+/// The key gate's direct path uses it; [`kind_of_argv`] (display) also looks through other words.
+fn exec_kind(argv: &[String]) -> Option<&'static str> {
+    let words: Vec<&str> = argv.iter().map(String::as_str).filter(|a| !a.is_empty()).collect();
+    crate::resolver::program(&words).and_then(known_kind)
+}
+
 /// Agent kind reported by OSC 7501 `status.app`, for agents with live evidence.
 pub fn kind_from_app(app: Option<&str>) -> Option<&'static str> {
     match app {
@@ -212,13 +219,13 @@ pub fn process_with(t: &Term, k: Option<&str>, check: &dyn AgentCheck) -> Option
     let k = k?;
     let has_foreground = t.fg_pid.is_some() || t.fg_name.is_some() || !t.fg_argv.is_empty();
     if has_foreground {
-        let mut fg = vec![t.fg_name.clone().unwrap_or_default()];
-        fg.extend(t.fg_argv.iter().cloned());
-        if kind_of_argv(&fg).as_deref() == Some(k) {
+        // The foreground's own argv (its name only without one: a native agent's name can be its version).
+        let fg = if t.fg_argv.is_empty() { vec![t.fg_name.clone().unwrap_or_default()] } else { t.fg_argv.clone() };
+        if exec_kind(&fg) == Some(k) {
             let pid = t.fg_pid.filter(|p| *p > 0)?;
             return Some(format!("{pid}@{}", t.created));
         }
-    } else if kind_of_argv(&t.argv).as_deref() == Some(k) {
+    } else if exec_kind(&t.argv) == Some(k) {
         let pid = t.pid.filter(|p| *p > 0)?;
         return Some(format!("{pid}@{}", t.created));
     } else {

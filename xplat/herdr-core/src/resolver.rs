@@ -834,7 +834,26 @@ pub fn agent_process(pane_id: &str, socket_path: &str, procs: &[Proc]) -> Option
     max_by_first(pool, |a, b| a.start < b.start).cloned()
 }
 
-/// Executable names per agent kind, matched against the first two words of a command line (`node …/codex`).
+/// Interpreters an agent's script runs under (`node …/codex`), with their versioned names (`node22`, `python3.12`).
+fn is_interpreter(w: &str) -> bool {
+    ["node", "bun", "deno", "python"].iter().any(|i| {
+        w.strip_prefix(i).is_some_and(|v| v.is_empty() || (v.starts_with(|c: char| c.is_ascii_digit()) && v.chars().all(|c| c.is_ascii_digit() || c == '.')))
+    })
+}
+
+/// The program a command line runs: its first word's name or, under an interpreter, the second word's name
+/// (`node /opt/x/bin/codex` runs `codex`). Interpreter flags are not skipped: `node --inspect …/codex` gives
+/// `--inspect` (fail closed). A program that only names another (`script claude`) runs itself.
+pub(crate) fn program<'a>(words: &[&'a str]) -> Option<&'a str> {
+    let first = last_path_component(words.first()?);
+    if is_interpreter(first) {
+        words.get(1).map(|w| last_path_component(w))
+    } else {
+        Some(first)
+    }
+}
+
+/// Executable names per agent kind, matched against the program a command line runs ([`program`]).
 fn executables(kind: &str) -> Vec<&str> {
     match kind {
         "claude" => vec!["claude"],
@@ -847,7 +866,8 @@ fn executables(kind: &str) -> Vec<&str> {
 
 fn runs(p: &Proc, kind: &str) -> bool {
     let names = executables(kind);
-    p.line.split(' ').filter(|w| !w.is_empty()).take(2).any(|w| names.contains(&last_path_component(w)))
+    let words: Vec<&str> = p.line.split(' ').filter(|w| !w.is_empty()).take(2).collect();
+    program(&words).is_some_and(|w| names.contains(&w))
 }
 
 /// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. At a tie in depth: `None` when

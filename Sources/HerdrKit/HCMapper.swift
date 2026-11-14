@@ -107,6 +107,12 @@ public enum HCMapper {
         return (!name.isEmpty && shell(name)) || (!first.isEmpty && shell(first))
     }
 
+    /// The agent kind a command line runs (not only names): its program (`SessionResolver.program`) is the agent.
+    /// The key gate's direct path uses it; `kind(argv:)` (display) also looks through other words.
+    static func execKind(_ argv: [String]) -> String? {
+        SessionResolver.program(argv.filter { !$0.isEmpty }).flatMap { knownKinds[$0] }
+    }
+
     /// The agent kind one command line names, if any.
     static func kind(argv: [String]) -> String? {
         var words = argv.filter { !$0.isEmpty }.map { ($0 as NSString).lastPathComponent }
@@ -127,10 +133,11 @@ public enum HCMapper {
         guard let k else { return nil }
         let hasForeground = t.fgPid != nil || t.fgName != nil || !t.fgArgv.isEmpty
         guard hasForeground else {
-            guard kind(argv: t.argv) == k, let pid = t.pid, pid > 0 else { return nil }
+            guard execKind(t.argv) == k, let pid = t.pid, pid > 0 else { return nil }
             return "\(pid)@\(t.created)"
         }
-        if kind(argv: [t.fgName ?? ""] + t.fgArgv) == k {
+        // The foreground's own argv (its name only without one: a native agent's name can be its version).
+        if execKind(t.fgArgv.isEmpty ? [t.fgName ?? ""] : t.fgArgv) == k {
             guard let pid = t.fgPid, pid > 0 else { return nil }
             return "\(pid)@\(t.created)"
         }
