@@ -67,6 +67,39 @@ private var secretspec: [String: Any] { ["name": "secretspec", "argv": ["secrets
     checksWrapperResolver()
     try await checksWrapperGate()
     await checksWrapperLogCache()
+    checksRealExecutable()
+}
+
+/// Twins of herdr-core `runs_checks_the_real_executable` and `direct_identity_needs_the_real_executable` (Codex P1): a
+/// process runs the agent only when its program is the agent, or an interpreter whose script is the agent.
+@MainActor private func checksRealExecutable() {
+    func one(_ line: String, _ kind: String) -> Int32? { R.agentInTree(root: 1, kind: kind, procs: [proc(10, 1, baseMs, line)], tieNewest: false)?.pid }
+    for (line, kind) in [("claude --resume", "claude"), ("/usr/local/bin/claude HC_TERMINAL_ID=t1", "claude"),
+                         ("node /opt/x/bin/codex HC_TERMINAL_ID=t1", "codex"), ("node22 /opt/x/bin/claude", "claude"),
+                         ("python3.12 /opt/x/bin/pi", "pi"), ("bun /usr/local/bin/omp", "omp"), ("/usr/local/bin/cursor-agent", "cursor")] {
+        check(one(line, kind) == 10, "real exec: \(line) runs \(kind)")
+    }
+    for (line, kind) in [("script claude", "claude"), ("vim claude", "claude"), ("cat codex", "codex"), ("less /tmp/claude", "claude"),
+                         ("node --inspect /opt/x/bin/codex", "codex"), ("nodemon codex", "codex"), ("node", "claude"), ("", "claude")] {
+        check(one(line, kind) == nil, "real exec: \(line) does not run \(kind)")
+    }
+    check(R.agentInTree(root: 1, kind: "claude", procs: [proc(10, 1, baseMs, "secretspec run -- claude"), proc(11, 10, baseMs, "claude")], tieNewest: false)?.pid == 11,
+          "real exec: a wrapper's child is the agent")
+    check(R.agentInTree(root: 1, kind: "claude", procs: [proc(10, 1, baseMs, "script claude"), proc(11, 10, baseMs, "-zsh")], tieNewest: false) == nil,
+          "real exec: script with a shell under it: no agent")
+
+    func fg(_ argv: [String]) -> [String: Any] { ["argv": argv, "pid": 600] }
+    func direct(_ t: HCMapper.Term, _ k: String) -> String? { HCMapper.process(t, kind: k) }
+    check(direct(term(fg: fg(["claude", "--resume"]), app: nil), "claude") == "600@7", "real exec: direct claude")
+    check(direct(term(fg: fg(["node", "/opt/x/bin/codex"]), app: nil), "codex") == "600@7", "real exec: direct node codex")
+    for argv in [["script", "claude"], ["vim", "claude"], ["node", "--inspect", "/opt/x/bin/claude"]] {
+        check(direct(term(fg: fg(argv), app: nil), "claude") == nil, "real exec: \(argv) names claude, does not run it")
+    }
+    check(direct(term(argv: ["claude"], fg: nil, app: nil), "claude") == "400@7", "real exec: the terminal's own claude")
+    check(direct(term(argv: ["script", "claude"], fg: nil, app: nil), "claude") == nil, "real exec: script claude as the terminal's program")
+    let chk = tree([proc(600, 400, baseMs, "script claude"), proc(601, 600, baseMs + 1000, "claude")])
+    check(HCMapper.process(term(fg: fg(["script", "claude"]), app: "claude-code"), kind: "claude", check: chk) == "600/601@7",
+          "real exec: script in front of a real claude: the tree proves it")
 }
 
 /// Tests 1 and 2: the kind from `status.app`, after the processes.

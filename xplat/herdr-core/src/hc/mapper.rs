@@ -607,4 +607,35 @@ mod tests {
         let chk_empty = tree_with(vec![]);
         assert_eq!(process_with(&wrap, Some("claude"), &chk_empty), None);
     }
+
+    /// Codex P1: the key gate's direct path takes the foreground as the agent only when its program is the agent, or
+    /// an interpreter whose script is the agent. `script claude` only names it.
+    #[test]
+    fn direct_identity_needs_the_real_executable() {
+        let term = |fg: Value, argv: Value, app: Option<&str>| {
+            let mut j = json!({"address": "t1", "argv": argv, "pid": 400, "created_ms": 7, "status_ms": 1_794_500_002_000i64});
+            if !fg.is_null() {
+                j["foreground"] = fg;
+            }
+            if let Some(a) = app {
+                j["status"] = json!({"state": "working", "app": a});
+            }
+            Term::parse(&j).unwrap()
+        };
+        let fg = |argv: Value| json!({"argv": argv, "pid": 600});
+        let zsh = json!(["zsh"]);
+        assert_eq!(process(&term(fg(json!(["claude", "--resume"])), zsh.clone(), None), Some("claude")).as_deref(), Some("600@7"));
+        assert_eq!(process(&term(fg(json!(["node", "/opt/x/bin/codex"])), zsh.clone(), None), Some("codex")).as_deref(), Some("600@7"));
+        for argv in [json!(["script", "claude"]), json!(["vim", "claude"]), json!(["node", "--inspect", "/opt/x/bin/claude"])] {
+            assert_eq!(process(&term(fg(argv.clone()), zsh.clone(), None), Some("claude")), None, "{argv} names claude, does not run it");
+        }
+        // No foreground read: the terminal's own program.
+        assert_eq!(process(&term(Value::Null, json!(["claude"]), None), Some("claude")).as_deref(), Some("400@7"));
+        assert_eq!(process(&term(Value::Null, json!(["script", "claude"]), None), Some("claude")), None, "script claude as the terminal's program");
+        // `script` in front of a real claude: the tree check proves it, as for any wrapper.
+        let base_ms: i64 = 1_794_500_000_000;
+        let chk = tree_with(vec![proc_(600, 400, base_ms, "script claude"), proc_(601, 600, base_ms + 1000, "claude")]);
+        let wrapped = term(fg(json!(["script", "claude"])), zsh, Some("claude-code"));
+        assert_eq!(process_with(&wrapped, Some("claude"), &chk).as_deref(), Some("600/601@7"));
+    }
 }
