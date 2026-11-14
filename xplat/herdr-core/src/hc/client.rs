@@ -367,7 +367,7 @@ mod socket_tests {
         let check = Arc::new(TreeCheck::with_hooks(
             Arc::new(DynProcs(p2)),
             Arc::new(std::time::Instant::now),
-            Arc::new(move |pid| procs.lock().unwrap().iter().any(|p| p.pid == pid)),
+            Arc::new(move |pid| procs.lock().unwrap().iter().any(|p| p.pid == pid).then_some(1)),
         ));
         let core = fake_core::start(move |m, _| match m {
             "terminal.list" => Some(json!({"terminals": [{

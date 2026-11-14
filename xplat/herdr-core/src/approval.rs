@@ -9,7 +9,7 @@
 
 use crate::client::HerdrClient;
 use crate::error::HerdrError;
-use crate::keygate::{fresh_agent, KeyGate};
+use crate::keygate::{fresh_agent, passes, KeyGate};
 use crate::model::*;
 use crate::question as question_adapter;
 use crate::screen::PaneScreen;
@@ -547,10 +547,12 @@ pub fn respond_grok<S: PaneScreen + ?Sized>(
             continue;
         }
         let Some(key) = key else { return Ok(false) };
-        if let Some(allowed) = gate.and_then(|g| g.allowed.as_ref()) {
-            if !allowed() {
-                return Ok(false);
-            }
+        // The answer's gate before each key: the same agent, then this prompt with the focus where this key needs it
+        // (read again after the identity check: the focus can move during it), then the input level. After the Down:
+        // the stop is told (`KeyGateStopSent`), not "nothing was sent".
+        let still = |s: &str| grok_box(s).is_some_and(|b| grok_id(&b) == screen_prompt) && grok_key(s, allow) == Some(key);
+        if !passes(screen, gate, pane_id, Some(&still), None) {
+            return if moved { Err(HerdrError::KeyGateStopSent) } else { Ok(false) };
         }
         screen.send_named_keys(&[key.to_string()], pane_id)?;
         if key == "Enter" {

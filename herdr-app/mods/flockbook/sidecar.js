@@ -87,6 +87,8 @@ export const send = (terminal, text, files = [], seen = null) => call("send", ["
 // The sidecar's "changed" reply when another agent took the pane: nothing was sent.
 export const AGENT_CHANGED = "Another agent is in this pane now. Nothing was sent.";
 export const agentChanged = (done) => done?.result === "changed" && /another agent/i.test(done?.message ?? "");
+// A gate stop after some keys of the answer went in: its own message must stay (AGENT_CHANGED says nothing was sent).
+export const keysMayBeIn = (done) => agentChanged(done) && /some keys may already be in/i.test(done?.message ?? "");
 // The same agent started a new conversation (`/clear`): nothing was sent; the chat reads the new log.
 export const NEW_CONVERSATION = "The agent started a new conversation; the chat now shows it. Nothing was sent.";
 export const newConversation = (done) => done?.result === "changed" && /new conversation/i.test(done?.message ?? "");

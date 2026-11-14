@@ -128,6 +128,13 @@ pub fn kind_of_argv(argv: &[String]) -> Option<String> {
     words.iter().take(2).find_map(|w| known_kind(w)).map(String::from)
 }
 
+/// The agent kind a command line runs (not only names): its program ([`crate::resolver::program`]) is the agent.
+/// The key gate's direct path uses it; [`kind_of_argv`] (display) also looks through other words.
+fn exec_kind(argv: &[String]) -> Option<&'static str> {
+    let words: Vec<&str> = argv.iter().map(String::as_str).filter(|a| !a.is_empty()).collect();
+    crate::resolver::program(&words).and_then(known_kind)
+}
+
 /// Agent kind reported by OSC 7501 `status.app`, for agents with live evidence.
 pub fn kind_from_app(app: Option<&str>) -> Option<&'static str> {
     match app {
@@ -212,13 +219,13 @@ pub fn process_with(t: &Term, k: Option<&str>, check: &dyn AgentCheck) -> Option
     let k = k?;
     let has_foreground = t.fg_pid.is_some() || t.fg_name.is_some() || !t.fg_argv.is_empty();
     if has_foreground {
-        let mut fg = vec![t.fg_name.clone().unwrap_or_default()];
-        fg.extend(t.fg_argv.iter().cloned());
-        if kind_of_argv(&fg).as_deref() == Some(k) {
+        // The foreground's own argv (its name only without one: a native agent's name can be its version).
+        let fg = if t.fg_argv.is_empty() { vec![t.fg_name.clone().unwrap_or_default()] } else { t.fg_argv.clone() };
+        if exec_kind(&fg) == Some(k) {
             let pid = t.fg_pid.filter(|p| *p > 0)?;
             return Some(format!("{pid}@{}", t.created));
         }
-    } else if kind_of_argv(&t.argv).as_deref() == Some(k) {
+    } else if exec_kind(&t.argv) == Some(k) {
         let pid = t.pid.filter(|p| *p > 0)?;
         return Some(format!("{pid}@{}", t.created));
     } else {
@@ -458,7 +465,7 @@ mod tests {
     fn tree_with(procs: Vec<crate::resolver::Proc>) -> crate::hc::wrapper::TreeCheck {
         use std::sync::Arc;
         use std::time::Instant;
-        crate::hc::wrapper::TreeCheck::with_hooks(Arc::new(FixedProcs(procs)), Arc::new(Instant::now), Arc::new(|_| true))
+        crate::hc::wrapper::TreeCheck::with_hooks(Arc::new(FixedProcs(procs)), Arc::new(Instant::now), Arc::new(|_| Some(1)))
     }
 
     fn proc_(pid: i32, ppid: i32, ms: i64, line: &str) -> crate::resolver::Proc {
@@ -606,5 +613,36 @@ mod tests {
         // Test 13: empty process list -> None.
         let chk_empty = tree_with(vec![]);
         assert_eq!(process_with(&wrap, Some("claude"), &chk_empty), None);
+    }
+
+    /// Codex P1: the key gate's direct path takes the foreground as the agent only when its program is the agent, or
+    /// an interpreter whose script is the agent. `script claude` only names it.
+    #[test]
+    fn direct_identity_needs_the_real_executable() {
+        let term = |fg: Value, argv: Value, app: Option<&str>| {
+            let mut j = json!({"address": "t1", "argv": argv, "pid": 400, "created_ms": 7, "status_ms": 1_794_500_002_000i64});
+            if !fg.is_null() {
+                j["foreground"] = fg;
+            }
+            if let Some(a) = app {
+                j["status"] = json!({"state": "working", "app": a});
+            }
+            Term::parse(&j).unwrap()
+        };
+        let fg = |argv: Value| json!({"argv": argv, "pid": 600});
+        let zsh = json!(["zsh"]);
+        assert_eq!(process(&term(fg(json!(["claude", "--resume"])), zsh.clone(), None), Some("claude")).as_deref(), Some("600@7"));
+        assert_eq!(process(&term(fg(json!(["node", "/opt/x/bin/codex"])), zsh.clone(), None), Some("codex")).as_deref(), Some("600@7"));
+        for argv in [json!(["script", "claude"]), json!(["vim", "claude"]), json!(["node", "--inspect", "/opt/x/bin/claude"])] {
+            assert_eq!(process(&term(fg(argv.clone()), zsh.clone(), None), Some("claude")), None, "{argv} names claude, does not run it");
+        }
+        // No foreground read: the terminal's own program.
+        assert_eq!(process(&term(Value::Null, json!(["claude"]), None), Some("claude")).as_deref(), Some("400@7"));
+        assert_eq!(process(&term(Value::Null, json!(["script", "claude"]), None), Some("claude")), None, "script claude as the terminal's program");
+        // `script` in front of a real claude: the tree check proves it, as for any wrapper.
+        let base_ms: i64 = 1_794_500_000_000;
+        let chk = tree_with(vec![proc_(600, 400, base_ms, "script claude"), proc_(601, 600, base_ms + 1000, "claude")]);
+        let wrapped = term(fg(json!(["script", "claude"])), zsh, Some("claude-code"));
+        assert_eq!(process_with(&wrapped, Some("claude"), &chk).as_deref(), Some("600/601@7"));
     }
 }

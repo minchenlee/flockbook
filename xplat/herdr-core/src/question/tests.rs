@@ -1171,7 +1171,7 @@ fn claude_hook_slow_render() {
     live.off();
     assert!(live.sent(n) == ["2"] && err == Err(HerdrError::ScreenStop { keys_sent: true }), "another question, same agent: ScreenStop after a key ({:?}, {err:?})", live.sent(n));
 
-    // Another agent (another session) after question 1: KeyGateStop, as before.
+    // Another agent (another session) after question 1: a gate stop, told as after keys (hg-keygate-followups).
     let s = two_sim();
     live.set(&s.borrow().render());
     let s2 = s.clone();
@@ -1184,7 +1184,59 @@ fn claude_hook_slow_render() {
     let err = answer_question(&live, "w1:p1", &two, &[ans(&[1]), ans(&[0, 2])], Some(&g));
     live.off();
     live.set_agent(agent.clone());
-    assert!(live.sent(n) == ["2"] && is_gate_stop(&err), "another agent: KeyGateStop ({:?}, {err:?})", live.sent(n));
+    assert!(live.sent(n) == ["2"] && err == Err(HerdrError::KeyGateStopSent), "another agent: KeyGateStopSent ({:?}, {err:?})", live.sent(n));
+}
+
+/// hg-keygate-followups: a gate stop after keys of this input went in says so (`KeyGateStopSent`), in the answer and
+/// in `load_all_questions`, which uses the answer's gate. A stop before any key stays `KeyGateStop`.
+#[test]
+fn gate_stop_after_keys_is_told() {
+    let two = two_record();
+    let agent = tui_agent("claude", Some("sess-1"));
+    let live = Live::new(tui_pane(agent.clone()), "");
+    let g = gate(&agent, yes());
+    let two_sim = || {
+        Rc::new(RefCell::new(Sim::new(vec![
+            simq("Size", "Which size?", &[("Small", "small one"), ("Large", "big one")], false),
+            simq("Tops", "Which toppings?", &[("Cheese", "yellow"), ("Ham", "pink"), ("Egg", "")], true),
+        ])))
+    };
+    // The answer: another agent after question 1's key.
+    let s = two_sim();
+    live.set(&s.borrow().render());
+    let s2 = s.clone();
+    live.on(move |i, l| {
+        s2.borrow_mut().input(i);
+        l.set(&s2.borrow().render());
+        l.set_agent(tui_agent("claude", Some("sess-2")));
+    });
+    let n = live.mark();
+    let err = answer_question(&live, "w1:p1", &two, &[ans(&[1]), ans(&[0, 2])], Some(&g));
+    live.off();
+    live.set_agent(agent.clone());
+    assert!(live.sent(n) == ["2"] && err == Err(HerdrError::KeyGateStopSent), "answer: another agent after a key ({:?}, {err:?})", live.sent(n));
+
+    // Reading all questions: another agent after the first navigation key.
+    let s = two_sim();
+    live.set(&s.borrow().render());
+    let s2 = s.clone();
+    live.on(move |i, l| {
+        s2.borrow_mut().input(i);
+        l.set(&s2.borrow().render());
+        l.set_agent(tui_agent("claude", Some("sess-2")));
+    });
+    let n = live.mark();
+    let r = load_all_questions(&live, "w1:p1", Some(&g), None);
+    live.off();
+    live.set_agent(agent.clone());
+    assert!(live.sent(n) == ["Left"] && matches!(r, Err(HerdrError::KeyGateStopSent)), "load all: another agent after a key ({:?}, {r:?})", live.sent(n));
+
+    // Another agent before any key: KeyGateStop, nothing sent.
+    live.set_agent(tui_agent("claude", Some("sess-2")));
+    let n = live.mark();
+    let r = load_all_questions(&live, "w1:p1", Some(&g), None);
+    live.set_agent(agent.clone());
+    assert!(live.sent(n).is_empty() && is_gate_stop(&r), "load all: another agent before any key ({r:?})");
 }
 
 /// checksClaudeHookReview1: rows hidden in free text, row columns, an ambiguous review refused before any key.
@@ -1405,7 +1457,7 @@ fn hub_review4_answer_gated() {
     assert!(total >= 2, "r4 answer: the fixture needs {total} key steps");
     let n = live.mark();
     let r = answer_question(&live, "w1:p1", &q, &a, Some(&gate(&seen, budget(1))));
-    assert!(is_gate_stop(&r) && live.after(n).len() == 1, "r4 answer: level gone after the first key -> stops, 1 key sent ({:?})", live.after(n));
+    assert!(r == Err(HerdrError::KeyGateStopSent) && live.after(n).len() == 1, "r4 answer: level gone after the first key -> stops, 1 key sent, told ({:?})", live.after(n));
     live.set_agent(tui_agent("claude", Some("s9")));
     let n = live.mark();
     let r = answer_question(&live, "w1:p1", &q, &a, Some(&gate(&seen, yes())));

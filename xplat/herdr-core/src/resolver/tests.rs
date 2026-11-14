@@ -1106,3 +1106,39 @@ fn agent_in_tree_nearest_and_ties() {
     assert_eq!(agent_in_tree(30, "claude", &procs, false).map(|p| p.pid), Some(32), "nearest at depth 2 wins over depth 3");
     assert_eq!(agent_in_tree(999, "claude", &procs, false), None, "unknown root -> None");
 }
+
+/// Codex P1 (wrapper-agent twin): a process runs the agent only when its program is the agent (`claude …`), or an
+/// interpreter whose script is the agent (`node …/codex`). A program that only names it (`script claude`) does not.
+#[test]
+fn runs_checks_the_real_executable() {
+    let t0 = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let one = |line: &str, kind: &str| agent_in_tree(1, kind, &[proc_(10, 1, t0, line)], false).map(|p| p.pid);
+    for (line, kind) in [
+        ("claude --resume", "claude"),
+        ("/usr/local/bin/claude HC_TERMINAL_ID=t1", "claude"),
+        ("node /opt/x/bin/codex HC_TERMINAL_ID=t1", "codex"),
+        ("node22 /opt/x/bin/claude", "claude"),
+        ("python3.12 /opt/x/bin/pi", "pi"),
+        ("bun /usr/local/bin/omp", "omp"),
+        ("/usr/local/bin/cursor-agent", "cursor"),
+    ] {
+        assert_eq!(one(line, kind), Some(10), "{line:?} runs {kind}");
+    }
+    for (line, kind) in [
+        ("script claude", "claude"),
+        ("vim claude", "claude"),
+        ("cat codex", "codex"),
+        ("less /tmp/claude", "claude"),
+        ("node --inspect /opt/x/bin/codex", "codex"),
+        ("nodemon codex", "codex"),
+        ("node", "claude"),
+        ("", "claude"),
+    ] {
+        assert_eq!(one(line, kind), None, "{line:?} does not run {kind}");
+    }
+    // A wrapper still works through the tree: its child is the agent.
+    let procs = [proc_(10, 1, t0, "secretspec run -- claude"), proc_(11, 10, t0, "claude")];
+    assert_eq!(agent_in_tree(1, "claude", &procs, false).map(|p| p.pid), Some(11));
+    let procs = [proc_(10, 1, t0, "script claude"), proc_(11, 10, t0, "-zsh")];
+    assert_eq!(agent_in_tree(1, "claude", &procs, false), None, "script with a shell under it: no agent");
+}

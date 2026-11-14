@@ -132,8 +132,13 @@ pub fn answer_stop(pane: &Pane, e: &HerdrError) -> Done {
             "screen_changed",
             Some("The question on screen changed while answering. Some keys may already be in: check the terminal."),
         ),
+        HerdrError::KeyGateStopSent => agent_changed_after_keys(),
         _ => refused(pane),
     }
+}
+/// Another agent (or the input level) stopped the keys after some went in: the screen may have moved.
+pub fn agent_changed_after_keys() -> Done {
+    Done::new("changed", Some("Another agent is in this pane now. Some keys may already be in: check the terminal."))
 }
 pub fn already_answered() -> Done {
     Done::new("answered", Some("this approval was already answered; waiting for the agent to move on"))
@@ -331,6 +336,11 @@ pub fn approve<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Pat
             answered.release(&pane.id, &id);
             Done::new("changed", Some("the prompt on screen is not the one shown"))
         }
+        Err(HerdrError::KeyGateStopSent) => {
+            // A grok Down went, then the gate said no before Enter: nothing was answered, but the focus moved.
+            answered.release(&pane.id, &id);
+            agent_changed_after_keys()
+        }
         Err(HerdrError::Timeout(_)) => {
             // hc may still hold the key for its typing-quiet rule: not "nothing sent". The claim stays while blocked.
             answered.hold(&pane.id, &id);
@@ -445,7 +455,7 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
     match r {
         Ok(Some(d)) => d,
         Ok(None) => Done::new("sent", None),
-        Err(e @ (HerdrError::KeyGateStop | HerdrError::ScreenStop { .. })) => answer_stop(pane, &e),
+        Err(e @ (HerdrError::KeyGateStop | HerdrError::KeyGateStopSent | HerdrError::ScreenStop { .. })) => answer_stop(pane, &e),
         Err(HerdrError::Question(QuestionFailure::NotOnScreen)) => Done::new("changed", Some("the question is not on screen")),
         Err(e) => Done::new("failed", Some(&e.to_string())),
     }

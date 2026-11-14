@@ -7,6 +7,7 @@ One short line: what this release is about.
 
 
 ### 🔒 Security
+- Flockbook no longer treats a program that only names an agent, such as `script claude` or `vim codex`, as that agent, so answers and keys go only to a real agent. A wrapper such as `secretspec run -- claude` still works. When an agent behind a wrapper exits, its terminal stops taking keys at once, also if another program gets the same process number.
 
 ### 🐛 Bug Fixes
 - Chat (Herdr app, Claude Code): a dim "/" prompt suggestion in an empty box no longer stops a send with "The agent's box has text in it". The sidecar looks once at the screen's attributes: dim text with the cursor at the box start is a suggestion. Text you typed still stops the send. Tested on the dim empty-box placeholder; a real "/" suggestion was not seen in testing, and if one is not dim the send is refused as before.
@@ -19,6 +20,7 @@ One short line: what this release is about.
 - Mac app question cards (Claude Code): answers to questions with a comma, ● or → in an option now go through, as in the Herdr app. Before Submit, the card checks that the terminal's review screen shows your answers word for word. It stops only when two different answers would look the same there: it says so as you pick or type, Send is off, and "Answer in terminal" opens the pane. If sending fails after moving to the review screen, the card stays read-only and tells you why.
 - Agents started through wrapper commands (such as `secretspec run -- claude` or `codex`) now show their conversation and can be answered from Flockbook.
 - Question cards (Claude Code, Herdr app and Mac app): when an option is too long for one line on the screen, the card now says so before Send and asks you to answer in the terminal, instead of stopping on the review screen. A long question with a line that starts with "→" no longer stops there either.
+- Question and approval cards (Herdr app): when another agent comes into the pane after some keys already went in, the card no longer says "nothing was sent". It says some keys may already be in and asks you to check the terminal. Reading all questions of a Claude Code question and Grok's approval keys now check the agent before each key, as answers do.
 
 ### ⚙️ Changes
 - The Swift `flockbook-modfeed` sidecar is retired. The Rust helper, which releases already ship, is the only one; the CI parity check between the two is gone.

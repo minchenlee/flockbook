@@ -218,6 +218,16 @@ test("another agent in the pane: the card says so, nothing sent", async () => {
   assert.match(textOf(byId(c.view("t1", T), "card-note")), /Another agent is in this pane now/);
 });
 
+test("another agent after some keys went in: the card keeps the message, not 'Nothing was sent'", async () => {
+  cardNow = approval;
+  fake.result = "changed"; fake.message = "Another agent is in this pane now. Some keys may already be in: check the terminal.";
+  const cx = fakeCx(); const c = new Cards(); await c.poll(cx, "t1", true);
+  byId(c.view("t1", T), "card-allow")._h.on_click({}, cx); await cx.settle();
+  const note = textOf(byId(c.view("t1", T), "card-note"));
+  assert.match(note, /Some keys may already be in: check the terminal/);
+  assert.doesNotMatch(note, /Nothing was sent/);
+});
+
 test("an approval already answered and still on screen: buttons off, 1 and 2 do nothing, it says so", async () => {
   const cx = fakeCx(); const c = new Cards();
   // The key went out but the agent has not redrawn yet: the card comes back marked answered.

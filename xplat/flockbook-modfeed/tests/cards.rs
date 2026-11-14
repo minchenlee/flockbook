@@ -200,7 +200,7 @@ fn wrapper_child_restart_drops_stale_log_cache() {
     let check = Arc::new(TreeCheck::with_hooks(
         Arc::new(DynProcs(procs.clone())),
         Arc::new(std::time::Instant::now),
-        Arc::new(move |pid| alive_procs.lock().unwrap().iter().any(|p| p.pid == pid)),
+        Arc::new(move |pid| alive_procs.lock().unwrap().iter().any(|p| p.pid == pid).then_some(1)),
     ));
 
     let fake = FakeHc::start();
