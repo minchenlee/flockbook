@@ -1,7 +1,7 @@
 <!-- Each user-visible change adds one line here, in the same branch. At release this file becomes vX.Y.Z.md. -->
 ## What's New in vX.Y.Z
 
-One short line: what this release is about.
+Question and approval cards check the terminal word for word before they send, and keys go only to a real agent.
 
 ### ✨ New
 
