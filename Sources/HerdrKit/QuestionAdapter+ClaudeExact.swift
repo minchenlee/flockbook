@@ -272,7 +272,7 @@ extension QuestionAdapter {
 
     private static func validateQuestionCaps(_ q: QuestionRequest.Question) -> Bool {
         let qt = bare(q.text)
-        if q.options.count > maxReviewOptions || qt.isEmpty || qt.contains("│") { return false }
+        if q.cutLabels || q.options.count > maxReviewOptions || qt.isEmpty || qt.contains("│") { return false }
         return q.options.allSatisfy { o in
             let labels = shownLabels(o)
             return !labels.isEmpty && labels.allSatisfy { !$0.isEmpty && !$0.contains("\"") && !$0.contains("│") }
@@ -574,6 +574,7 @@ extension QuestionAdapter {
               !q.questions.isEmpty,
               q.delivery == .picker,
               q.questions.count > 1 || q.questions.last?.multiSelect == true else { return nil }
+        if q.questions.contains(where: \.cutLabels) { return .cut }
         for qq in q.questions {
             if !validateQuestionCaps(qq) { return .labels }
         }
@@ -649,11 +650,18 @@ extension QuestionAdapter {
                     var j = i
                     var strippedLines: [String] = []
                     var strippedBare = ""
+                    // A "→" line still goes on a long question whose text is not whole yet.
+                    let goesOn = { (soFar: String, more: String) -> Bool in
+                        q.questions.contains { qq in
+                            let want = "●" + bare(qq.text)
+                            return displayWidth(qq.text) >= quoteMin && soFar != want && want.hasPrefix(soFar + more)
+                        }
+                    }
                     while j < bodyLines.endIndex {
                         let tj = bodyLines[j].trimmingCharacters(in: .whitespaces)
                         guard tj.hasPrefix("│") else { break }
                         let rj = String(tj.dropFirst())
-                        if rj.trimmingCharacters(in: .whitespaces).hasPrefix("→") { break }
+                        if rj.trimmingCharacters(in: .whitespaces).hasPrefix("→") && !goesOn(strippedBare, bare(rj)) { break }
                         strippedBare.append(bare(rj))
                         strippedLines.append(rj)
                         j = bodyLines.index(after: j)

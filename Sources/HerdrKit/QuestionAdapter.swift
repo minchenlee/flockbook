@@ -561,9 +561,16 @@ extension QuestionAdapter {
         // `marks` counts the focus marks on rows and on Submit; a mark on any other line means the hub does not
         // know where the focus is (focusMarks 0: no key).
         var marks = 0, sinceRow = 0, rowColumn: Int?, strayMark = false
+        // A wrapped label: each row's width, the first word of its next line, and the separator's width.
+        var rowWidths: [Int] = [], nextWords: [Int?] = [], lineWidth = 0
+        let endWidth: (String) -> Int = { l in
+            var s = Substring(l)
+            while let c = s.last, c.isWhitespace { s = s.dropLast() }
+            return displayWidth(String(s))
+        }
         for l in lines[(bar + 1)..<end] {
             let t = l.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("──") { closed = true; break }
+            if t.hasPrefix("──") { closed = true; lineWidth = endWidth(l); break }
             let marked = t.hasPrefix("❯")
             if !t.isEmpty, submitFocused { submitFocused = false; strayMark = true; sinceRow += 1 }   // that was not Submit
             if inOptions, sinceRow == 0, marked, t.dropFirst().trimmingCharacters(in: .whitespaces) == "Submit" { submitFocused = true; marks += 1; continue }
@@ -578,11 +585,16 @@ extension QuestionAdapter {
                 if m.3 != nil { multi = true }
                 let (clean, rec) = stripRecommended(label)
                 options.append(.init(label: clean, recommended: rec))
+                rowWidths.append(endWidth(l))
+                nextWords.append(nil)
                 lastRaw = label
                 lastFocused = l.trimmingCharacters(in: .whitespaces).hasPrefix("❯")
             } else if inOptions {
                 if marked { strayMark = true }
                 if !t.isEmpty { sinceRow += 1 }
+                if !t.isEmpty, let last = nextWords.indices.last, nextWords[last] == nil {
+                    nextWords[last] = displayWidth(String(t.split(whereSeparator: \.isWhitespace).first ?? Substring(t)))
+                }
                 if !t.isEmpty, !options.isEmpty { options[options.count - 1].detail += (options[options.count - 1].detail.isEmpty ? "" : " ") + t }
             } else if !t.isEmpty {
                 if marked { strayMark = true }
@@ -601,7 +613,11 @@ extension QuestionAdapter {
         let typed: String? = lastRaw == "Type something." || lastRaw == "Type something" ? nil : lastRaw
         guard !options.isEmpty, !text.isEmpty else { return nil }
         let q = text.joined(separator: " ")
-        return (headers, .init(header: headers.count == 1 ? headers[0] : "", text: q, options: options, multiSelect: multi), typed, lastFocused, submitFocused, strayMark ? 0 : marks)
+        // A row is cut when its next line's first word would have fit on it (2 columns to spare): word wrap moved it.
+        let cut = options.indices.contains { i in nextWords[i].map { rowWidths[i] + 1 + $0 + 2 > lineWidth } ?? false }
+        var question = QuestionRequest.Question(header: headers.count == 1 ? headers[0] : "", text: q, options: options, multiSelect: multi)
+        question.cutLabels = cut
+        return (headers, question, typed, lastFocused, submitFocused, strayMark ? 0 : marks)
     }
 }
 
