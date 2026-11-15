@@ -705,7 +705,7 @@ pub fn claude_suggestion_in_paint(paint: &[u8], text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
-    let (cells, cursor) = paint_cells(&String::from_utf8_lossy(paint));
+    let Some((cells, cursor)) = paint_cells(&String::from_utf8_lossy(paint)) else { return false };
     // The box row: the last row whose first visible character is "❯".
     let mut rows: Vec<u32> = cells.keys().map(|&(r, _)| r).collect();
     rows.dedup();
@@ -728,14 +728,16 @@ type Cells = std::collections::BTreeMap<(u32, u32), (char, bool)>;
 
 /// A small VT reading of a paint: each written cell (row, col, 1-based) with its character and whether it is dim
 /// (SGR 2, off with 22 or 0), and the cursor at the end. Wide characters count one column: a paint with them gets a
-/// cursor that does not match, which reads as doubt.
-fn paint_cells(s: &str) -> (Cells, (u32, u32)) {
+/// cursor that does not match, which reads as doubt. `None` when the paint ends inside a control sequence (its rest
+/// still coming in a later frame): the cut sequence may move the cursor or clear the row, so nothing can be told.
+fn paint_cells(s: &str) -> Option<(Cells, (u32, u32))> {
     let mut cells = std::collections::BTreeMap::new();
     let (mut row, mut col, mut dim) = (1u32, 1u32, false);
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
         match c {
             '\x1b' => match it.next() {
+                None => return None,
                 Some('[') => {
                     let mut params = String::new();
                     let mut fin = None;
@@ -746,6 +748,7 @@ fn paint_cells(s: &str) -> (Cells, (u32, u32)) {
                         }
                         params.push(c);
                     }
+                    fin?;
                     let private = params.starts_with(['?', '>', '<', '=']);
                     let nums: Vec<u32> = params.split(';').map(|p| p.parse().unwrap_or(0)).collect();
                     let n = |i: usize| nums.get(i).copied().filter(|&v| v > 0).unwrap_or(1);
@@ -788,14 +791,19 @@ fn paint_cells(s: &str) -> (Cells, (u32, u32)) {
                 }
                 // OSC: up to BEL or ST.
                 Some(']') => {
+                    let mut closed = false;
                     while let Some(c) = it.next() {
                         if c == '\x07' || (c == '\x1b' && it.next_if_eq(&'\\').is_some()) {
+                            closed = true;
                             break;
                         }
                     }
+                    if !closed {
+                        return None;
+                    }
                 }
                 Some('(') | Some(')') => {
-                    it.next();
+                    it.next()?;
                 }
                 _ => {}
             },
@@ -809,7 +817,7 @@ fn paint_cells(s: &str) -> (Cells, (u32, u32)) {
             }
         }
     }
-    (cells, (row, col))
+    Some((cells, (row, col)))
 }
 
 /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another

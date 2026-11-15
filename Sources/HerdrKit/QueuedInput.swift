@@ -629,7 +629,7 @@ public enum AgentBox {
     public static func suggestionInPaint(_ paint: Data, text: String) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return false }
-        let (cells, cursor) = paintCells(String(decoding: paint, as: UTF8.self))
+        guard let (cells, cursor) = paintCells(String(decoding: paint, as: UTF8.self)) else { return false }
         // The box row: the last row whose first visible character is "❯".
         var box: (row: Int, mark: Int)?
         for r in cells.keys.sorted().reversed() {
@@ -650,8 +650,10 @@ public enum AgentBox {
 
     /// A small VT reading of a paint: each written cell (row, col, 1-based) with its character and whether it is dim
     /// (SGR 2, off with 22 or 0), and the cursor at the end. Wide characters count one column: a paint with them gets a
-    /// cursor that does not match, which reads as doubt. Rust: `paint_cells`.
-    static func paintCells(_ s: String) -> (cells: [Int: [Int: PaintCell]], cursor: (row: Int, col: Int)) {
+    /// cursor that does not match, which reads as doubt. Nil when the paint ends inside a control sequence (its rest
+    /// still coming in a later frame): the cut sequence may move the cursor or clear the row, so nothing can be told.
+    /// Rust: `paint_cells`.
+    static func paintCells(_ s: String) -> (cells: [Int: [Int: PaintCell]], cursor: (row: Int, col: Int))? {
         var cells: [Int: [Int: PaintCell]] = [:]
         var row = 1, col = 1, dim = false
         let u = Array(s.unicodeScalars)
@@ -660,7 +662,7 @@ public enum AgentBox {
             let c = u[i]; i += 1
             switch c {
             case "\u{1b}":
-                guard i < u.count else { continue }
+                guard i < u.count else { return nil }
                 let next = u[i]; i += 1
                 if next == "[" {
                     var params = "", fin: Unicode.Scalar?
@@ -669,6 +671,7 @@ public enum AgentBox {
                         if (0x40...0x7E).contains(x.value) { fin = x; break }
                         params.unicodeScalars.append(x)
                     }
+                    guard fin != nil else { return nil }
                     if let p = params.unicodeScalars.first, "?><=".unicodeScalars.contains(p) { continue }
                     let ps = params.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
                     let nums = ps.map { Int($0) ?? 0 }
@@ -706,12 +709,15 @@ public enum AgentBox {
                     }
                 } else if next == "]" {
                     // OSC: up to BEL or ST.
+                    var closed = false
                     while i < u.count {
                         let x = u[i]; i += 1
-                        if x == "\u{7}" { break }
-                        if x == "\u{1b}", i < u.count, u[i] == "\\" { i += 1; break }
+                        if x == "\u{7}" { closed = true; break }
+                        if x == "\u{1b}", i < u.count, u[i] == "\\" { i += 1; closed = true; break }
                     }
+                    if !closed { return nil }
                 } else if next == "(" || next == ")" {
+                    guard i < u.count else { return nil }
                     i += 1
                 }
             case "\r": col = 1
