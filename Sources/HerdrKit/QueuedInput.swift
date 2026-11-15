@@ -611,6 +611,15 @@ public enum AgentBox {
         return QueuePull.rows(inside, mark: mark)
     }
 
+    /// How long a send looks at a pane's first paint for a dim suggestion (Rust: `cards::LOOK_LIMIT`).
+    public static let lookLimit: TimeInterval = 0.5
+
+    /// Claude Code's box when it is one row starting with "/": that row, trimmed. Rust: `claude_slash_row`.
+    public static func claudeSlashRow(_ screen: String) -> String? { nil }
+
+    /// Whether the box row in `paint` holds only a dim suggestion reading `text`. Rust: `claude_suggestion_in_paint`.
+    public static func suggestionInPaint(_ paint: Data, text: String) -> Bool { false }
+
     /// Claude Code's `promptSuggestionEnabled` (default on), from the user's settings in `home`.
     public static func claudeSuggests(home: URL?) -> Bool {
         guard let home, let data = try? Data(contentsOf: home.appendingPathComponent(".claude/settings.json")),

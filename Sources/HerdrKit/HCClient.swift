@@ -108,6 +108,11 @@ public actor HCClient {
         try await framedConnection().attach(terminal: terminal, cols: cols, rows: rows, history: history, observe: observe, resumed: resumed)
     }
 
+    /// The pane's first paint (attributes and cursor), through a watch-only attach. Rust: `HcClient::first_paint`.
+    public func firstPaint(paneId: String, limit: TimeInterval) async throws -> Data {
+        throw HerdrError.protocolError("first paint: not read")
+    }
+
     // MARK: - Snapshot
 
     public static let appDocName = "herdr-app"

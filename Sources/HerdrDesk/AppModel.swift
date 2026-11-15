@@ -474,6 +474,8 @@ final class AppModel {
     /// Test hooks: the pane's screen text for the send guard (checks never read a real pane), and the home the agent's
     /// "/" files are read from.
     @ObservationIgnored var screenHook: ((String) async -> String?)?
+    /// Test hook: the pane's first paint for the dim-suggestion look (checks never attach to a real pane).
+    @ObservationIgnored var paintHook: ((String) async -> Data?)?
     @ObservationIgnored var agentHome = FileManager.default.homeDirectoryForCurrentUser
 
     /// Why `text` does not go to the pane's agent now (the note for the person), or nil. Before any key:

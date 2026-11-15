@@ -166,6 +166,29 @@ extension ContentTests {
         var r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
         step("text in the agent's box: not sent (\(r), typed \(typed))", r == .failed && typed.isEmpty)
         step("the note is the agent-box note", MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        // A dim "/" prompt suggestion (issue #11, item 2): one watch-only look at the first paint. Dim with the cursor at
+        // the box start: a suggestion, sent. Typed (a colour, the cursor after it) or no paint: held back as before.
+        func paint(_ row: String, _ col: Int) -> Data {
+            Data("\u{1b}[2J\u{1b}[1;1H● Done.\u{1b}[3;1H\(rule)\u{1b}[4;1H\(row)\u{1b}[5;1H\(rule)\u{1b}[6;3H~/proj\u{1b}[4;\(col)H".utf8)
+        }
+        screen = claude("❯\u{a0}/clear")
+        var looked = 0
+        var painted: Data? = paint("❯\u{a0}\u{1b}[0m\u{1b}[38;2;177;185;249m/clear\u{1b}[0m", 9)
+        model.paintHook = { _ in looked += 1; return painted }
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("typed \"/clear\" (a colour, the cursor after it): not sent (\(r))", r == .failed && typed.isEmpty && looked == 1 && MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        painted = nil
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("no paint: not sent (\(r))", r == .failed && typed.isEmpty && MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        painted = paint("❯\u{a0}\u{1b}[0m\u{1b}[2m/clear\u{1b}[0m", 3)
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("a dim \"/clear\" suggestion, the cursor at the box start: sent (\(r), typed \(typed))", r == .sent && typed == ["hello"])
+        screen = claude("❯\u{a0}/compact")
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("dim, but the paint reads other text than the screen: not sent (\(r))", r == .failed && typed == ["hello"] && MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        model.paintHook = nil
+        typed = []
+        screen = claude("❯\u{a0}/sta")
         screen = claude("❯\u{a0}run the tests")
         r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
         step("Claude Code with prompt suggestions on: other text may be a suggestion, so it is sent (\(r))", r == .sent && typed == ["hello"])
