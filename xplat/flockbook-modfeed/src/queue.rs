@@ -961,6 +961,24 @@ mod box_tests {
         assert!(s(&whole, "/clear"), "the same sequence whole: read");
     }
 
+    /// Codex R2 (Mac parity): a number too big for a screen is doubt: no overflow (a debug panic, a release wrap), no
+    /// "1" in its place.
+    #[test]
+    fn a_number_too_big_is_doubt() {
+        let s = super::claude_suggestion_in_paint;
+        for (tail, why) in [
+            ("\x1b[4;2H\x1b[99999999999C", "a number too big to read"),
+            ("\x1b[4;2H\x1b[99999C", "a move past any screen"),
+            ("\x1b[4294967295B", "a huge move down"),
+            ("\x1b[4294967295C", "a huge move right"),
+            ("\x1b[4294967295;4294967295H", "a huge position"),
+        ] {
+            let mut p = paint(DIM, 3);
+            p.extend_from_slice(tail.as_bytes());
+            assert!(!s(&p, "/clear"), "{why}: doubt");
+        }
+    }
+
     #[test]
     fn codex_box() {
         let codex = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · Context 100% left · 0 in\n  ← for agents · ? for shortcuts\n");

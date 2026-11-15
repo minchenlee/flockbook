@@ -71,6 +71,8 @@ final class FakeHC: @unchecked Sendable {
     var onPut: (@Sendable (String) -> Void)?
     private var seq = 0
     /// First paint sent on each new attach channel.
+    /// Raw bytes written in the same write as the first paint (e.g. the start of a frame whose rest never comes).
+    var paintTail = Data()
     var firstPaint = Data("\u{1b}[2J\u{1b}[Hhello from t1\r\n".utf8)
 
     init(path: String) { self.path = path }
@@ -332,10 +334,10 @@ final class FakeHC: @unchecked Sendable {
                 if reuseChannels { ch = 1; while attachWriters[ch] != nil { ch += 1 } } else { nextChannel += 1 }
                 attachWriters[ch] = (c, writeLock); connOf[ch] = (c, writeLock); return ch
             }
-            let paint = firstPaint, burst = paintBurst
+            let paint = firstPaint, burst = paintBurst, tail = paintTail
             return (reply(id: id, result: ["channel": ch, "terminal": t]), {
                 writeLock.withLock {
-                    Self.writeAll(c, HCFrame(channel: ch, kind: .data, payload: paint).encoded())
+                    Self.writeAll(c, HCFrame(channel: ch, kind: .data, payload: paint).encoded() + tail)
                     for i in 0..<burst { Self.writeAll(c, HCFrame(channel: ch, kind: .data, payload: Data("#\(i + 1);".utf8)).encoded()) }
                 }
             })

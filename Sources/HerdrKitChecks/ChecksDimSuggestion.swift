@@ -33,6 +33,9 @@ import Foundation
         check(!s(paint(dim, 3) + Data(cut.utf8), "/clear"), "dim: \(why) at the end: no proof")
     }
     check(s(paint(dim, 9) + Data("\u{1b}[4;3H".utf8), "/clear"), "dim: the same sequence whole: read")
+    // Codex R2: a number too big for a screen is doubt (no overflow, no "1" in its place).
+    check(!s(paint(dim, 3) + Data("\u{1b}[4;2H\u{1b}[99999999999999999999C".utf8), "/clear"), "dim: a number too big to read is doubt")
+    check(!s(paint(dim, 3) + Data("\u{1b}[4;2H\u{1b}[99999C".utf8), "/clear"), "dim: a move past any screen is doubt")
 
     func screen(_ row: String) -> String { "● Done.\n\n\(rule)\n\(row)\n\(rule)\n  ~/proj\n" }
     check(AgentBox.claudeSlashRow(screen("❯\u{a0}/clear")) == "/clear", "dim: the box's one \"/\" row")
@@ -65,6 +68,16 @@ import Foundation
     check(cutPaint != nil && !s(cutPaint ?? Data(), "/clear"), "dim look: a sequence cut across DATA frames: no proof (\(cutPaint?.count ?? -1) bytes)")
     fake.firstPaint = paint(dim, 3)
 
+    // Codex R2: one read holds the whole dim paint and the start of the next frame (a redraw, maybe of typed text);
+    // the reader hands out the paint and stalls. The frame part already read is not quiet.
+    let redraw = HCFrame(channel: fake.lastChannel + 1, kind: .data, payload: Data("\u{1b}[4;3H\u{1b}[38;2;177;185;249m/clear\u{1b}[4;9H".utf8)).encoded()
+    fake.paintTail = redraw.prefix(12)
+    HCFramedConnection.pauseAfterData = 0.15
+    let stalled = try? await hc.firstPaint(paneId: "hc:t1", limit: AgentBox.lookLimit)
+    HCFramedConnection.pauseAfterData = 0
+    fake.paintTail = Data()
+    check(stalled.map { !s($0, "/clear") } ?? true, "dim look: a frame part in the same read as the paint is not quiet (\(stalled?.count ?? -1) bytes)")
+
     fake.attachError = "not_found"
     var t0 = ProcessInfo.processInfo.systemUptime
     var failed = (try? await hc.firstPaint(paneId: "hc:t1", limit: AgentBox.lookLimit)) == nil
@@ -81,4 +94,9 @@ import Foundation
     check(failed && ProcessInfo.processInfo.systemUptime - t0 < 1.5, "dim look: a slow attach ends at the limit (\(ProcessInfo.processInfo.systemUptime - t0) s)")
     fake.attachDelay = 0
     check(!fake.calls.contains { typing.contains($0.method) }, "dim look: still no keys, no text")
+
+    // Codex R2: a huge move must not overflow (it trapped the app). Last here: before the fix it ends the run.
+    for big in ["\u{1b}[9223372036854775807B", "\u{1b}[9223372036854775807C", "\u{1b}[9223372036854775807;9223372036854775807H"] {
+        check(!s(paint(dim, 3) + Data(big.utf8), "/clear"), "dim: a huge move does not overflow (\(big.dropFirst()))")
+    }
 }

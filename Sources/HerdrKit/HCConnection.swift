@@ -144,12 +144,18 @@ public final class HCFramedConnection: @unchecked Sendable {
         lock.withLock { streams[ch] = nil; early[ch] = nil; awaiting.remove(ch) }
     }
 
+    /// Checks only: the reader thread waits this long after it hands out a DATA frame (a busy machine).
+    nonisolated(unsafe) static var pauseAfterData: TimeInterval = 0
+
     private func readLoop(_ leftover: [UInt8]) {
         var dec = HCFrameDecoder()
         do {
             var frames = try dec.feed(leftover[...])
             while true {
-                for f in frames { dispatch(f) }
+                for f in frames {
+                    dispatch(f)
+                    if f.channel != 0, f.kind == .data, Self.pauseAfterData > 0 { Thread.sleep(forTimeInterval: Self.pauseAfterData) }
+                }
                 let p = dec.hasPartial
                 lock.withLock { partial = p }
                 frames = try dec.feed(try sock.readChunk())
