@@ -152,3 +152,8 @@ jobs:
       # Includes the AppKit glass (NSVisualEffectView) path.
       - name: Build
         run: cargo build --workspace --all-targets --locked
+
+      # The same tests as Linux, on macOS: the macOS-only code (proc_pidinfo start-time probe, AppKit paths) runs
+      # here too. Headless; the live terminal tests are #[ignore].
+      - name: Test
+        run: cargo test --workspace --locked
