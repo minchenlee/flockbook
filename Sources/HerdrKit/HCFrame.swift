@@ -51,6 +51,8 @@ public struct HCFrame: Sendable, Equatable {
 public struct HCFrameDecoder: Sendable {
     private var buf: [UInt8] = []
     public init() {}
+    /// Bytes of a frame that has not all come yet.
+    public var hasPartial: Bool { !buf.isEmpty }
 
     public mutating func feed(_ bytes: ArraySlice<UInt8>) throws -> [HCFrame] {
         buf.append(contentsOf: bytes)
