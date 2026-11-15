@@ -26,6 +26,13 @@ import Foundation
     check(!s(Data(), "/clear"), "dim: no paint")
     check(!s(paint("hello", 3), "/clear"), "dim: no box row")
     check(!s(paint(dim, 3), ""), "dim: nothing to match")
+    // Codex R1: a paint cut inside a control sequence (its rest in a later DATA frame) is doubt: the cut sequence may
+    // move the cursor or clear the row.
+    for (cut, why) in [("\u{1b}[4;", "a CSI without its final byte"), ("\u{1b}", "a lone ESC"), ("\u{1b}]0;title", "an OSC without BEL or ST"),
+                       ("\u{1b}]0;title\u{1b}", "an OSC cut inside its ST"), ("\u{1b}(", "a charset choice without its charset")] {
+        check(!s(paint(dim, 3) + Data(cut.utf8), "/clear"), "dim: \(why) at the end: no proof")
+    }
+    check(s(paint(dim, 9) + Data("\u{1b}[4;3H".utf8), "/clear"), "dim: the same sequence whole: read")
 
     func screen(_ row: String) -> String { "● Done.\n\n\(rule)\n\(row)\n\(rule)\n  ~/proj\n" }
     check(AgentBox.claudeSlashRow(screen("❯\u{a0}/clear")) == "/clear", "dim: the box's one \"/\" row")
@@ -48,6 +55,15 @@ import Foundation
     try await Task.sleep(for: .milliseconds(150))
     check(fake.lastChannel > 0 && fake.closedByViewer(fake.lastChannel), "dim look: detached right after")
     check(!fake.calls.contains { typing.contains($0.method) }, "dim look: no keys, no text")
+
+    // The paint's last sequence cut across two DATA frames, the rest later than the quiet time: the look gives the
+    // first part, which must read as doubt.
+    fake.firstPaint = paint(dim, 3) + Data("\u{1b}[4;".utf8)
+    let late = Task.detached { try? await Task.sleep(for: .milliseconds(250)); fake.output(fake.lastChannel, Data("9H".utf8)) }
+    let cutPaint = try? await hc.firstPaint(paneId: "hc:t1", limit: AgentBox.lookLimit)
+    await late.value
+    check(cutPaint != nil && !s(cutPaint ?? Data(), "/clear"), "dim look: a sequence cut across DATA frames: no proof (\(cutPaint?.count ?? -1) bytes)")
+    fake.firstPaint = paint(dim, 3)
 
     fake.attachError = "not_found"
     var t0 = ProcessInfo.processInfo.systemUptime

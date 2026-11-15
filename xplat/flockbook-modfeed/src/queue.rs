@@ -937,6 +937,22 @@ mod box_tests {
         assert!(!s(&paint(DIM, 3), ""), "nothing to match");
     }
 
+    /// Codex R1 (Mac parity): a paint cut inside a control sequence (its rest in a later DATA frame, after the quiet
+    /// time) is doubt: the cut sequence may move the cursor or clear the row.
+    #[test]
+    fn a_cut_sequence_is_doubt() {
+        let s = super::claude_suggestion_in_paint;
+        for (cut, why) in [("\x1b[4;", "a CSI without its final byte"), ("\x1b", "a lone ESC"), ("\x1b]0;title", "an OSC without BEL or ST"),
+                           ("\x1b]0;title\x1b", "an OSC cut inside its ST"), ("\x1b(", "a charset choice without its charset")] {
+            let mut p = paint(DIM, 3);
+            p.extend_from_slice(cut.as_bytes());
+            assert!(!s(&p, "/clear"), "{why} at the end: no proof");
+        }
+        let mut whole = paint(DIM, 9);
+        whole.extend_from_slice(b"\x1b[4;3H");
+        assert!(s(&whole, "/clear"), "the same sequence whole: read");
+    }
+
     #[test]
     fn codex_box() {
         let codex = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · Context 100% left · 0 in\n  ← for agents · ? for shortcuts\n");
