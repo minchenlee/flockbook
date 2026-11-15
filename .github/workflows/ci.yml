@@ -69,7 +69,9 @@ jobs:
           # helpers (xplat.yml and helpers.yml test them), docs and the site skip them. A manual run always runs them.
           app=1
           if [ "$EVENT" != workflow_dispatch ]; then
-            # A new branch's first push has no "before": compare with main (the branch's fork point from it).
+            # A ci/ branch compares with main (its fork point), not with its last push: a last push whose Mac jobs
+            # were cancelled must not hide its Mac changes. A new branch's first push has no "before": main too.
+            if [ "$EVENT" = push ] && [ "$GITHUB_REF" != refs/heads/main ]; then BASE=main; fi
             if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then BASE=main; fi
             if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[].filename'); then
               n=$(printf '%s\n' "$files" | grep -c . || true)
