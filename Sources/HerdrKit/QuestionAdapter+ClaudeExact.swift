@@ -13,6 +13,16 @@ extension QuestionAdapter {
         "Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel",
     ]
 
+    /// One of Claude's key lines (spacing aside). The "ctrl+g" part names the person's own editor ($VISUAL/$EDITOR):
+    /// "edit in Vim", "edit in VS Code" (seen live 2026-11-11, 2.1.322) and so on; any name counts as that line.
+    /// Twin of herdr-core `claude_exact::claude_key_line`.
+    static func claudeKeyLine(_ line: String) -> Bool {
+        let s = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if claudeKeyLines.contains(s) { return true }
+        guard let m = s.wholeMatch(of: /(Enter to select · (?:↑\/↓|Tab\/Arrow keys) to navigate · ctrl\+g to edit in )[^·]+?( · Esc to cancel)/) else { return false }
+        return claudeKeyLines.contains("\(m.1)Vim\(m.2)")
+    }
+
     static func bare(_ s: String) -> String {
         String(s.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) })
     }
@@ -116,7 +126,7 @@ extension QuestionAdapter {
         let lines = screen.components(separatedBy: "\n")
         let blank: (String) -> Bool = { $0.trimmingCharacters(in: .whitespaces).isEmpty }
         guard let foot = lines.lastIndex(where: { !blank($0) }),
-              claudeKeyLines.contains(lines[foot].split(whereSeparator: \.isWhitespace).joined(separator: " ")),
+              claudeKeyLine(lines[foot]),
               let sep = lines[..<foot].lastIndex(where: { l in
                   let t = l.trimmingCharacters(in: .whitespaces); return t.count >= 3 && t.allSatisfy { $0 == "─" }
               }),

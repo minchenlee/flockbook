@@ -50,6 +50,13 @@ public protocol PaneScreen: HerdrBackend {
     func visibleText(paneId: String) async throws -> String
     /// Answers a permission prompt: allow once, or deny. Call only when the prompt is on screen.
     func respond(to paneId: String, allow: Bool) async throws
+    /// Whether `sendKeys` can type every character of `text` (hc: `HCKeys.typeable`). Checked before any key of an
+    /// answer goes, so an answer never stops half typed.
+    nonisolated func canType(_ text: String) -> Bool
+}
+
+public extension PaneScreen {
+    nonisolated func canType(_ text: String) -> Bool { true }
 }
 
 extension HerdrClient: PaneScreen {}
