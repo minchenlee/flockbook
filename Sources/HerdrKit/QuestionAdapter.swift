@@ -355,7 +355,7 @@ public enum QuestionAdapter {
     public static func showsReview(_ q: QuestionRequest, screen: String, answers: [QuestionAnswer]? = nil) -> Bool {
         if q.agent == "claude" { return answers.map { claudeReviewExact(q, answers: $0, screen: screen) } ?? false }
         guard let region = pickerRegion(agent: q.agent, screen: screen), region.contains("Review your answers") else { return false }
-        return q.headers.allSatisfy { region.contains($0) } && q.questions.allSatisfy { region.contains(flat($0.text)) }
+        return q.headers.allSatisfy { region.contains($0) } && q.questions.allSatisfy { pickerHas(agent: q.agent, screen: screen, flat($0.text)) }
     }
 
     public static func pickerShown(_ q: QuestionRequest, screen: String) -> Bool {
@@ -364,8 +364,21 @@ public enum QuestionAdapter {
 
     /// The picker is open and shows the first question.
     public static func screenShows(_ q: QuestionRequest, screen: String) -> Bool {
-        guard let first = q.questions.first, let region = pickerRegion(agent: q.agent, screen: screen) else { return false }
-        return region.contains(needle(first))
+        guard let first = q.questions.first else { return false }
+        return pickerHas(agent: q.agent, screen: screen, needle(first))
+    }
+
+    /// `pickerRegion` holds `s`. For Claude also with the 2.1.322 quote bar ("│" at a line start) dropped: a long
+    /// question wrapped inside its needle has the bar between the two parts. A presence check only; the keys are
+    /// gated by the exact checks. Twin of herdr-core `question::picker_has`.
+    static func pickerHas(agent: String, screen: String, _ s: String) -> Bool {
+        if pickerRegion(agent: agent, screen: screen)?.contains(s) == true { return true }
+        guard agent == "claude" else { return false }
+        let unbarred = screen.components(separatedBy: "\n").map { l -> String in
+            let t = l.trimmingCharacters(in: .whitespaces)
+            return t.hasPrefix("│") ? String(t.dropFirst()) : l
+        }
+        return pickerRegion(agent: agent, screen: unbarred.joined(separator: "\n"))?.contains(s) == true
     }
 
     /// The key sequence for a picker question. Throws `.unsupported` before anything is sent.
@@ -649,6 +662,11 @@ extension PaneScreen {
             return
         }
         let steps = try QuestionAdapter.steps(for: q, answers: answers)
+        // Typed answers go key by key: refused before any key when the backend cannot type one of their characters.
+        if let bad = answers.compactMap(QuestionAdapter.otherText).first(where: { !canType($0) }) {
+            let shown = String(Set(bad.filter { !canType(String($0)) }).sorted())
+            throw QuestionAdapter.Failure.unsupported("the typed answer has characters Herdr cannot type yet (\(shown)): answer in the terminal")
+        }
         // `gate` (a remote device): before every key, the same agent, the exact question the key is for on screen
         // (its text, options, the request's headers; the review screen for the last key), input allowed.
         let any: @Sendable (String) -> Bool = { QuestionAdapter.showsAny(q, screen: $0) }
@@ -711,7 +729,7 @@ extension PaneScreen {
             case .waitFor(let s):
                 if s == "Review your answers" { review = true } else { at += 1 }
                 otherOpen = false; typedIn = false; shown = nil; focus = .auto; row = nil; checked = []
-                guard try await waitScreen(paneId: paneId, timeout: 3, { QuestionAdapter.pickerRegion(agent: q.agent, screen: $0)?.contains(s) == true }) else {
+                guard try await waitScreen(paneId: paneId, timeout: 3, { QuestionAdapter.pickerHas(agent: q.agent, screen: $0, s) }) else {
                     throw QuestionAdapter.Failure.stuck(s)
                 }
             }

@@ -474,6 +474,8 @@ final class AppModel {
     /// Test hooks: the pane's screen text for the send guard (checks never read a real pane), and the home the agent's
     /// "/" files are read from.
     @ObservationIgnored var screenHook: ((String) async -> String?)?
+    /// Test hook: the pane's first paint for the dim-suggestion look (checks never attach to a real pane).
+    @ObservationIgnored var paintHook: ((String) async -> Data?)?
     @ObservationIgnored var agentHome = FileManager.default.homeDirectoryForCurrentUser
 
     /// Why `text` does not go to the pane's agent now (the note for the person), or nil. Before any key:
@@ -497,7 +499,23 @@ final class AppModel {
         guard let shown else { return nil }
         // Claude Code's prompt suggestions: its setting on this Mac; an agent on another machine: on (its default).
         let suggests = kind == "claude" ? await Task.detached { [local = agentIsLocal(pane: id)] in AgentBox.claudeSuggests(home: local ? home : nil) }.value : false
-        return AgentBox.hasText(kind: kind, screen: shown, claudeSuggests: suggests) == true ? AgentBox.notEmpty : nil
+        guard AgentBox.hasText(kind: kind, screen: shown, claudeSuggests: suggests) == true else { return nil }
+        // Claude Code's box shows "/…" that may be its dim prompt suggestion, not typed text (issue #11, item 2). One
+        // watch-only look at the first paint (hc only; no keys, no resize; detached at once, `AgentBox.lookLimit` at
+        // most): sent only when it reads the same text, all dim, with the cursor at the box start. Any doubt: held back.
+        // A phone's send checks the agent again after this (`readyForText` and its gate), as the helper's server does.
+        if suggests, let row = AgentBox.claudeSlashRow(shown), let paint = await firstPaint(pane: id),
+           AgentBox.suggestionInPaint(paint, text: row) { return nil }
+        return AgentBox.notEmpty
+    }
+
+    /// The pane's first paint for the dim-suggestion look: hc panes only (herdr's own panes: nil, the send is held
+    /// back as before). Checks never attach to a real pane.
+    func firstPaint(pane id: String) async -> Data? {
+        if let paintHook { return await paintHook(id) }
+        if sendHook != nil || screenHook != nil { return nil }
+        guard HCMapper.address(fromPaneId: id) != nil, let hc = store.hcClient else { return nil }
+        return try? await hc.firstPaint(paneId: id, limit: AgentBox.lookLimit)
     }
 
     /// The pane's agent runs on this Mac (not on the herdr session's host, not on another machine of the core).

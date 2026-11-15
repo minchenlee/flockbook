@@ -108,6 +108,11 @@ public actor HCClient {
         try await framedConnection().attach(terminal: terminal, cols: cols, rows: rows, history: history, observe: observe, resumed: resumed)
     }
 
+    /// The pane's first paint (attributes and cursor), through a watch-only attach. Rust: `HcClient::first_paint`.
+    public func firstPaint(paneId: String, limit: TimeInterval) async throws -> Data {
+        try await HCFirstPaint.read(socketPath: session.socketPath, terminal: try address(paneId), limit: limit)
+    }
+
     // MARK: - Snapshot
 
     public static let appDocName = "herdr-app"
@@ -316,6 +321,9 @@ public actor HCClient {
         _ = try await call("terminal.keys", ["terminal": try address(paneId), "keys": [allow ? ApprovalKeys.allowOnce : HCKeys.translate(ApprovalKeys.deny)]])
     }
 
+    /// Whether `sendKeys` can type every character of `text` (`HCKeys.typeable`).
+    nonisolated public func canType(_ text: String) -> Bool { text.allSatisfy(HCKeys.typeable) }
+
     /// herdr key names ("Enter", "Down", "C-c") translated to hc's ("enter", "down", "ctrl+c").
     public func sendNamedKeys(_ keys: [String], to paneId: String) async throws {
         _ = try await call("terminal.keys", ["terminal": try address(paneId), "keys": keys.map(HCKeys.translate)])
@@ -342,8 +350,18 @@ public enum HCKeys {
         return l
     }
 
+    /// The characters hc's `terminal.keys` can type (tested live 2026-11-11): its key names are read without case
+    /// ("A" types "a"), so a capital goes as "shift+a"; digits, space and the unshifted symbols type as themselves;
+    /// every other character (! ? ( ) " : and anything outside ASCII) is refused as an unknown key name, and "shift+1"
+    /// types "1", not "!". Typed answers are checked with this before any key goes (`PaneScreen.canType`).
+    /// Twin of herdr-core `hc::keys::typeable`.
+    public static func typeable(_ c: Character) -> Bool {
+        guard c.isASCII else { return false }
+        return c.isLetter || c.isNumber || " ',.;/-=[]\\`".contains(c)
+    }
+
     /// Bytes → key names: CR/LF enter, ESC esc, tab, DEL backspace, 0x01–0x1A ctrl+letter, arrow escape sequences,
-    /// every other character as itself.
+    /// a capital letter as shift+letter, every other character as itself.
     public static func names(for bytes: [UInt8]) -> [String] {
         var out: [String] = []
         let s = String(decoding: bytes, as: UTF8.self)
@@ -362,6 +380,7 @@ public enum HCKeys {
             case 0x7F, 0x08: out.append("backspace")
             case 0x01...0x1A: out.append("ctrl+" + String(Character(Unicode.Scalar(c.value + 0x60)!)))
             case 0x20: out.append("space")
+            case 0x41...0x5A: out.append("shift+" + String(Character(c)).lowercased())
             default: out.append(String(Character(c)))
             }
         }

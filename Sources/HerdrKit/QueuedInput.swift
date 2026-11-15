@@ -611,6 +611,140 @@ public enum AgentBox {
         return QueuePull.rows(inside, mark: mark)
     }
 
+    /// How long a send looks at a pane's first paint for a dim suggestion (Rust: `cards::LOOK_LIMIT`).
+    public static let lookLimit: TimeInterval = 0.5
+
+    /// Claude Code's box when it is one row starting with "/" (with prompt suggestions on, `hasText` counts it as
+    /// text, and it may be a dim suggestion): that row, trimmed. Rust: `claude_slash_row`.
+    public static func claudeSlashRow(_ screen: String) -> String? {
+        guard let rows = ruled(screen.components(separatedBy: "\n"), mark: "❯"), rows.count == 1,
+              rows[0].drop(while: \.isWhitespace).hasPrefix("/") else { return nil }
+        return rows[0].trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Whether Claude Code's box row in `paint` (a terminal's first paint, from a watch-only attach) holds only a dim
+    /// prompt suggestion that reads `text`: every character after "❯ " is dim, they read `text`, and the cursor stands
+    /// at the box's start. Typed text is not dim and the cursor stands after it. Any doubt: false (the send is
+    /// refused). Rust: `claude_suggestion_in_paint`.
+    public static func suggestionInPaint(_ paint: Data, text: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        guard let (cells, cursor) = paintCells(String(decoding: paint, as: UTF8.self)) else { return false }
+        // The box row: the last row whose first visible character is "❯".
+        var box: (row: Int, mark: Int)?
+        for r in cells.keys.sorted().reversed() {
+            let line = cells[r] ?? [:]
+            guard let first = line.keys.sorted().first(where: { line[$0]!.c != " " && line[$0]!.c != "\u{a0}" }) else { continue }
+            if line[first]!.c == "❯" { box = (r, first); break }
+        }
+        guard let box, cursor.row == box.row, cursor.col == box.mark + 2 else { return false }
+        let line = cells[box.row] ?? [:]
+        let after = line.keys.sorted().filter { $0 >= box.mark + 2 }.map { line[$0]! }
+        var shown = String.UnicodeScalarView()
+        for cell in after { shown.append(cell.c == "\u{a0}" ? " " : cell.c) }
+        return String(shown).trimmingCharacters(in: .whitespacesAndNewlines) == text
+            && after.allSatisfy { $0.dim || $0.c.properties.isWhitespace }
+    }
+
+    struct PaintCell { var c: Unicode.Scalar; var dim: Bool }
+    /// No screen has more rows or columns: a position or move past it is doubt. Rust: `MAX_COORD`.
+    static let maxCoord = 10_000
+
+    /// A small VT reading of a paint: each written cell (row, col, 1-based) with its character and whether it is dim
+    /// (SGR 2, off with 22 or 0), and the cursor at the end. Wide characters count one column: a paint with them gets a
+    /// cursor that does not match, which reads as doubt. Nil when the paint ends inside a control sequence (its rest
+    /// still coming in a later frame): the cut sequence may move the cursor or clear the row, so nothing can be told.
+    /// Rust: `paint_cells`.
+    static func paintCells(_ s: String) -> (cells: [Int: [Int: PaintCell]], cursor: (row: Int, col: Int))? {
+        var cells: [Int: [Int: PaintCell]] = [:]
+        var row = 1, col = 1, dim = false
+        let u = Array(s.unicodeScalars)
+        var i = 0
+        while i < u.count {
+            let c = u[i]; i += 1
+            switch c {
+            case "\u{1b}":
+                guard i < u.count else { return nil }
+                let next = u[i]; i += 1
+                if next == "[" {
+                    var params = "", fin: Unicode.Scalar?
+                    while i < u.count {
+                        let x = u[i]; i += 1
+                        if (0x40...0x7E).contains(x.value) { fin = x; break }
+                        params.unicodeScalars.append(x)
+                    }
+                    guard fin != nil else { return nil }
+                    if let p = params.unicodeScalars.first, "?><=".unicodeScalars.contains(p) { continue }
+                    let ps = params.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+                    // A number no screen has (or none at all to read) is doubt: no overflow, no "1" in its place.
+                    var nums: [Int] = []
+                    // Only the moves and erases read numbers ("m" reads its own; other sequences are passed over).
+                    if let f = fin, "HfABCDGdKJ".unicodeScalars.contains(f) {
+                        for p in ps {
+                            if p.isEmpty { nums.append(0); continue }
+                            guard let v = Int(p), v <= maxCoord else { return nil }
+                            nums.append(v)
+                        }
+                    }
+                    if nums.isEmpty { nums = [0] }
+                    func n(_ k: Int) -> Int { k < nums.count && nums[k] > 0 ? nums[k] : 1 }
+                    switch fin {
+                    case "H", "f": row = n(0); col = n(1)
+                    case "A": row = max(row - n(0), 1)
+                    case "B": row += n(0)
+                    case "C": col += n(0)
+                    case "D": col = max(col - n(0), 1)
+                    case "G": col = n(0)
+                    case "d": row = n(0)
+                    case "K":
+                        switch nums[0] {
+                        case 0: cells[row] = cells[row]?.filter { $0.key < col }
+                        case 1: cells[row] = cells[row]?.filter { $0.key > col }
+                        default: cells[row] = nil
+                        }
+                    case "J" where nums[0] == 2 || nums[0] == 3: cells = [:]
+                    case "m":
+                        var k = 0
+                        while k < ps.count {
+                            switch ps[k] {
+                            case "", "0": dim = false
+                            case "2": dim = true
+                            case "22": dim = false
+                            // A colour's own numbers: "2;r;g;b" or "5;n" (a "2" there is not dim).
+                            case "38", "48", "58":
+                                if k + 1 < ps.count, ps[k + 1] == "2" { k += 4 } else if k + 1 < ps.count, ps[k + 1] == "5" { k += 2 }
+                            default: break
+                            }
+                            k += 1
+                        }
+                    default: break
+                    }
+                } else if next == "]" {
+                    // OSC: up to BEL or ST.
+                    var closed = false
+                    while i < u.count {
+                        let x = u[i]; i += 1
+                        if x == "\u{7}" { closed = true; break }
+                        if x == "\u{1b}", i < u.count, u[i] == "\\" { i += 1; closed = true; break }
+                    }
+                    if !closed { return nil }
+                } else if next == "(" || next == ")" {
+                    guard i < u.count else { return nil }
+                    i += 1
+                }
+            case "\r": col = 1
+            case "\n": row += 1
+            case "\u{8}": col = max(col - 1, 1)
+            default:
+                if c.value < 0x20 || c.value == 0x7F { continue }
+                cells[row, default: [:]][col] = PaintCell(c: c, dim: dim)
+                col += 1
+            }
+            if row > maxCoord || col > maxCoord { return nil }
+        }
+        return (cells, (row, col))
+    }
+
     /// Claude Code's `promptSuggestionEnabled` (default on), from the user's settings in `home`.
     public static func claudeSuggests(home: URL?) -> Bool {
         guard let home, let data = try? Data(contentsOf: home.appendingPathComponent(".claude/settings.json")),
