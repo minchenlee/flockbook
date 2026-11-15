@@ -33,6 +33,7 @@ import Foundation
         check(!s(paint(dim, 3) + Data(cut.utf8), "/clear"), "dim: \(why) at the end: no proof")
     }
     check(s(paint(dim, 9) + Data("\u{1b}[4;3H".utf8), "/clear"), "dim: the same sequence whole: read")
+    check(s(paint(dim, 9) + Data("\u{1b}[?25h\u{1b}[2 q\u{1b}[>4;2m\u{1b}[4;3H".utf8), "/clear"), "dim: private modes and a cursor style are passed over")
     // Codex R2: a number too big for a screen is doubt (no overflow, no "1" in its place).
     check(!s(paint(dim, 3) + Data("\u{1b}[4;2H\u{1b}[99999999999999999999C".utf8), "/clear"), "dim: a number too big to read is doubt")
     check(!s(paint(dim, 3) + Data("\u{1b}[4;2H\u{1b}[99999C".utf8), "/clear"), "dim: a move past any screen is doubt")

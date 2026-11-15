@@ -74,7 +74,7 @@ public final class HCFramedConnection: @unchecked Sendable {
     public func shutdown() { fail(HerdrError.closed) }
 
     public var isClosed: Bool { lock.withLock { closed } }
-    /// Part of a frame is read and the rest has not come yet (set once the frames before it were handed out).
+    /// Part of a frame is read and the rest has not come yet, or the frames of the last read are still being handed out.
     public var hasPartialFrame: Bool { lock.withLock { partial } }
     /// Closes the connection: pending calls and streams end with `closed`.
     public func close() { fail(HerdrError.closed) }
@@ -152,6 +152,8 @@ public final class HCFramedConnection: @unchecked Sendable {
         do {
             var frames = try dec.feed(leftover[...])
             while true {
+                // Not settled while this read's frames are handed out: a frame part read with them is already known.
+                if !frames.isEmpty { lock.withLock { partial = true } }
                 for f in frames {
                     dispatch(f)
                     if f.channel != 0, f.kind == .data, Self.pauseAfterData > 0 { Thread.sleep(forTimeInterval: Self.pauseAfterData) }

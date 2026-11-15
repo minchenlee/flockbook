@@ -647,6 +647,8 @@ public enum AgentBox {
     }
 
     struct PaintCell { var c: Unicode.Scalar; var dim: Bool }
+    /// No screen has more rows or columns: a position or move past it is doubt. Rust: `MAX_COORD`.
+    static let maxCoord = 10_000
 
     /// A small VT reading of a paint: each written cell (row, col, 1-based) with its character and whether it is dim
     /// (SGR 2, off with 22 or 0), and the cursor at the end. Wide characters count one column: a paint with them gets a
@@ -674,7 +676,17 @@ public enum AgentBox {
                     guard fin != nil else { return nil }
                     if let p = params.unicodeScalars.first, "?><=".unicodeScalars.contains(p) { continue }
                     let ps = params.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
-                    let nums = ps.map { Int($0) ?? 0 }
+                    // A number no screen has (or none at all to read) is doubt: no overflow, no "1" in its place.
+                    var nums: [Int] = []
+                    // Only the moves and erases read numbers ("m" reads its own; other sequences are passed over).
+                    if let f = fin, "HfABCDGdKJ".unicodeScalars.contains(f) {
+                        for p in ps {
+                            if p.isEmpty { nums.append(0); continue }
+                            guard let v = Int(p), v <= maxCoord else { return nil }
+                            nums.append(v)
+                        }
+                    }
+                    if nums.isEmpty { nums = [0] }
                     func n(_ k: Int) -> Int { k < nums.count && nums[k] > 0 ? nums[k] : 1 }
                     switch fin {
                     case "H", "f": row = n(0); col = n(1)
@@ -728,6 +740,7 @@ public enum AgentBox {
                 cells[row, default: [:]][col] = PaintCell(c: c, dim: dim)
                 col += 1
             }
+            if row > maxCoord || col > maxCoord { return nil }
         }
         return (cells, (row, col))
     }

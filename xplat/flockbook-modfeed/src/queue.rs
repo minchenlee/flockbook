@@ -723,6 +723,9 @@ pub fn claude_suggestion_in_paint(paint: &[u8], text: &str) -> bool {
     shown.trim() == text && after.iter().all(|(c, dim)| *dim || c.is_whitespace())
 }
 
+/// No screen has more rows or columns: a position or move past it is doubt. Swift: `AgentBox.maxCoord`.
+const MAX_COORD: u32 = 10_000;
+
 /// Cells by (row, col): the character and whether it is dim.
 type Cells = std::collections::BTreeMap<(u32, u32), (char, bool)>;
 
@@ -750,7 +753,25 @@ fn paint_cells(s: &str) -> Option<(Cells, (u32, u32))> {
                     }
                     fin?;
                     let private = params.starts_with(['?', '>', '<', '=']);
-                    let nums: Vec<u32> = params.split(';').map(|p| p.parse().unwrap_or(0)).collect();
+                    // A number no screen has (or none at all to read) is doubt: no overflow, no "1" in its place.
+                    let mut nums: Vec<u32> = vec![];
+                    // Only the moves and erases read numbers ("m" reads its own; other sequences are passed over).
+                    if !private && matches!(fin, Some('H' | 'f' | 'A' | 'B' | 'C' | 'D' | 'G' | 'd' | 'K' | 'J')) {
+                        for p in params.split(';') {
+                            if p.is_empty() {
+                                nums.push(0);
+                                continue;
+                            }
+                            let v: u32 = p.parse().ok()?;
+                            if v > MAX_COORD {
+                                return None;
+                            }
+                            nums.push(v);
+                        }
+                    }
+                    if nums.is_empty() {
+                        nums.push(0);
+                    }
                     let n = |i: usize| nums.get(i).copied().filter(|&v| v > 0).unwrap_or(1);
                     match fin {
                         _ if private => {}
@@ -815,6 +836,9 @@ fn paint_cells(s: &str) -> Option<(Cells, (u32, u32))> {
                 cells.insert((row, col), (c, dim));
                 col += 1;
             }
+        }
+        if row > MAX_COORD || col > MAX_COORD {
+            return None;
         }
     }
     Some((cells, (row, col)))
@@ -959,6 +983,9 @@ mod box_tests {
         let mut whole = paint(DIM, 9);
         whole.extend_from_slice(b"\x1b[4;3H");
         assert!(s(&whole, "/clear"), "the same sequence whole: read");
+        let mut modes = paint(DIM, 9);
+        modes.extend_from_slice(b"\x1b[?25h\x1b[2 q\x1b[>4;2m\x1b[4;3H");
+        assert!(s(&modes, "/clear"), "private modes and a cursor style are passed over");
     }
 
     /// Codex R2 (Mac parity): a number too big for a screen is doubt: no overflow (a debug panic, a release wrap), no
