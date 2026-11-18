@@ -172,10 +172,11 @@ func checksSlashCommands() throws {
         put(home.appendingPathComponent(".omp/agent/skills/s/SKILL.md"), "---\nname: s\n---\n")
         put(home.appendingPathComponent(".omp/agent/commands/mine.md"), "a command")
         let v = SlashCommands.list("omp", home: home, cwd: t.appendingPathComponent("proj"))
-        check(v.map(\.name) == ["add-dir", "btw", "changelog", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "hotkeys", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch", "tools", "usage"], "slash omp: its built-ins, no files")
+        check(v.map(\.name) == ["add-dir", "btw", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch"], "slash omp: its built-ins, no files")
         func c(_ n: String) -> SlashCommands.Command { v.first { $0.name == n }! }
-        check(vals(c("effort").args) == ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"] && c("effort").screen && !c("new").screen, "slash omp: /effort values; screen marks")
-        check(SlashCommands.screens("omp", home: home) == ["agents", "branch", "context", "copy", "extensions", "hub", "model", "settings", "tree"], "slash omp: screens")
+        check(vals(c("effort").args) == ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"] && c("effort").screen && !c("new").screen
+              && c("goal").screen && !c("fork").screen, "slash omp: /effort values; screen marks")
+        check(SlashCommands.screens("omp", home: home) == ["agents", "branch", "changelog", "context", "copy", "extensions", "hotkeys", "hub", "model", "settings", "tools", "tree", "usage"], "slash omp: screens")
     }
 
     try scratch { t in

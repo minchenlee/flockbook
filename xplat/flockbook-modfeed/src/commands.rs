@@ -200,7 +200,7 @@ pub const OMP: [Builtin; 37] = [
     b("agents", "Open the agents hub (per-agent model, prewalk, and advisor)", "", &[], true),
     b("branch", "Rewind to a previous message, keeping the old path as a branch (also /rewind)", "", &[], true),
     b("btw", "Ask a side question, or browse this session's BTW history", "[question]", &[], true),
-    b("changelog", "Show changelog entries", "", &[], false),
+    b("changelog", "Show changelog entries", "", &[], true),
     b("clear", "Clear the conversation context in place, keeping the session", "", &[], false),
     b("compact", "Manually compact the session context", "[focus]", &[], false),
     b("context", "Browse context usage and detailed content", "", &[], true),
@@ -209,11 +209,11 @@ pub const OMP: [Builtin; 37] = [
     b("effort", "Set reasoning effort (thinking level) for this session", "[level]", &OMP_THINKING, true),
     b("export", "Export session to HTML file", "[--themes] [path]", &[], false),
     b("extensions", "Open Extension Control Center dashboard (also /status)", "", &[], true),
-    b("fork", "Fork this session, or open it in a multiplexer pane or window", "[pane|window|tab]", &[], true),
+    b("fork", "Fork this session, or open it in a multiplexer pane or window", "[pane|window|tab]", &[], false),
     b("git", "Open the git UI (split diff viewer, staging, commit composer)", "[revision]", &[], true),
-    b("goal", "Toggle goal mode (persistent autonomous objective for this session)", "[objective]", &[], false),
+    b("goal", "Toggle goal mode (persistent autonomous objective for this session)", "[objective]", &[], true),
     b("handoff", "Summarize the session into a handoff document and compact in place", "[focus instructions]", &[], false),
-    b("hotkeys", "Show all keyboard shortcuts", "", &[], false),
+    b("hotkeys", "Show all keyboard shortcuts", "", &[], true),
     b("hub", "Open the live Agent Hub (subagents, including finished ones) (also /subagents)", "", &[], true),
     b("jobs", "Show async background jobs status", "[full|kill <id>|kill all]", &[], false),
     b("loop", "Toggle loop mode: the next prompt re-submits after every yield", "[count|duration] [--while|--until '<cmd>'] [prompt]", &[], false),
@@ -230,9 +230,9 @@ pub const OMP: [Builtin; 37] = [
     b("seance", "Consult a saved session without resuming it", "[session id|path] [--model selector]", &[], true),
     b("settings", "Open settings menu", "", &[], true),
     b("switch", "Switch model for this session only (fuzzy ids, provider/id, @role, :level)", "[model]", &[], true),
-    b("tools", "Show tools currently visible to the agent", "", &[], false),
+    b("tools", "Show tools currently visible to the agent", "", &[], true),
     b("tree", "Navigate session tree (switch branches)", "", &[], true),
-    b("usage", "Show provider usage and limits", "", &[], false),
+    b("usage", "Show provider usage and limits", "", &[], true),
 ];
 
 /// grok 1.0.77 (Grok Build): a short set. Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
@@ -821,11 +821,11 @@ mod tests {
         put(&home.join(".omp/agent/commands/mine.md"), "a command");
         let v = list("omp", &home, &t.path().join("proj"));
         let got: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(got, vec!["add-dir", "btw", "changelog", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "hotkeys", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch", "tools", "usage"]);
+        assert_eq!(got, vec!["add-dir", "btw", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch"]);
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
         assert_eq!(vals(&c("effort").args), vec!["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]);
-        assert!(c("effort").screen && !c("new").screen);
-        assert_eq!(screens("omp", Some(&home)), vec!["agents", "branch", "context", "copy", "extensions", "hub", "model", "settings", "tree"]);
+        assert!(c("effort").screen && !c("new").screen && c("goal").screen && !c("fork").screen);
+        assert_eq!(screens("omp", Some(&home)), vec!["agents", "branch", "changelog", "context", "copy", "extensions", "hotkeys", "hub", "model", "settings", "tools", "tree", "usage"]);
     }
 
     #[test]

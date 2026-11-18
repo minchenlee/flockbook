@@ -963,7 +963,7 @@
     "description": "Show changelog entries",
     "hint": "",
     "args": [],
-    "screen": false
+    "screen": true
    },
    {
     "name": "clear",
@@ -1035,7 +1035,7 @@
     "description": "Fork this session, or open it in a multiplexer pane or window",
     "hint": "[pane|window|tab]",
     "args": [],
-    "screen": true
+    "screen": false
    },
    {
     "name": "git",
@@ -1049,7 +1049,7 @@
     "description": "Toggle goal mode (persistent autonomous objective for this session)",
     "hint": "[objective]",
     "args": [],
-    "screen": false
+    "screen": true
    },
    {
     "name": "handoff",
@@ -1063,7 +1063,7 @@
     "description": "Show all keyboard shortcuts",
     "hint": "",
     "args": [],
-    "screen": false
+    "screen": true
    },
    {
     "name": "hub",
@@ -1182,7 +1182,7 @@
     "description": "Show tools currently visible to the agent",
     "hint": "",
     "args": [],
-    "screen": false
+    "screen": true
    },
    {
     "name": "tree",
@@ -1196,7 +1196,7 @@
     "description": "Show provider usage and limits",
     "hint": "",
     "args": [],
-    "screen": false
+    "screen": true
    }
   ],
   "grok": [

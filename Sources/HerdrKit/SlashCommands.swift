@@ -90,7 +90,10 @@ public enum SlashCommands {
     //   /remote-control, /swarm, /teamwork, /title, /voice.
     // - omp 18.18.8: can1357/oh-my-pi tag v18.18.8, packages/coding-agent/src/slash-commands/builtin-*.ts and
     //   seance.ts. A short set: no quit, restart, delete, account, share or collab, voice, record, debug or
-    //   feature-toggle commands. Screens of /context, /fork and /mcp: unconfirmed.
+    //   feature-toggle commands. Screens read from modes/controllers/command-controller.ts and interactive-mode.ts
+    //   (outside a Tern terminal): /context, /usage and bare /goal open a sheet, a menu or an editor; /changelog,
+    //   /hotkeys, /tools and bare /mcp show a report that takes the whole screen when taller than the rows under the
+    //   chat. /jobs and /plan open one only in some states, and bare /fork opens none: not marked.
     // - grok 1.0.77 (Grok Build): its pager's command table (program strings) and its guide 04-slash-commands.md.
     //   Left out: commands shown only with a feature or a screen mode (/auto, /context-window, /dashboard, /goal,
     //   /memory, /flush, /dream, /find, /jump, /timeline, /theme, /tutorial, /expand, /minimal, /fullscreen), quit,
@@ -234,7 +237,7 @@ public enum SlashCommands {
         b("agents", "Open the agents hub (per-agent model, prewalk, and advisor)", "", [], true),
         b("branch", "Rewind to a previous message, keeping the old path as a branch (also /rewind)", "", [], true),
         b("btw", "Ask a side question, or browse this session's BTW history", "[question]", [], true),
-        b("changelog", "Show changelog entries", "", [], false),
+        b("changelog", "Show changelog entries", "", [], true),
         b("clear", "Clear the conversation context in place, keeping the session", "", [], false),
         b("compact", "Manually compact the session context", "[focus]", [], false),
         b("context", "Browse context usage and detailed content", "", [], true),
@@ -243,11 +246,11 @@ public enum SlashCommands {
         b("effort", "Set reasoning effort (thinking level) for this session", "[level]", ompThinking, true),
         b("export", "Export session to HTML file", "[--themes] [path]", [], false),
         b("extensions", "Open Extension Control Center dashboard (also /status)", "", [], true),
-        b("fork", "Fork this session, or open it in a multiplexer pane or window", "[pane|window|tab]", [], true),
+        b("fork", "Fork this session, or open it in a multiplexer pane or window", "[pane|window|tab]", [], false),
         b("git", "Open the git UI (split diff viewer, staging, commit composer)", "[revision]", [], true),
-        b("goal", "Toggle goal mode (persistent autonomous objective for this session)", "[objective]", [], false),
+        b("goal", "Toggle goal mode (persistent autonomous objective for this session)", "[objective]", [], true),
         b("handoff", "Summarize the session into a handoff document and compact in place", "[focus instructions]", [], false),
-        b("hotkeys", "Show all keyboard shortcuts", "", [], false),
+        b("hotkeys", "Show all keyboard shortcuts", "", [], true),
         b("hub", "Open the live Agent Hub (subagents, including finished ones) (also /subagents)", "", [], true),
         b("jobs", "Show async background jobs status", "[full|kill <id>|kill all]", [], false),
         b("loop", "Toggle loop mode: the next prompt re-submits after every yield", "[count|duration] [--while|--until '<cmd>'] [prompt]", [], false),
@@ -264,9 +267,9 @@ public enum SlashCommands {
         b("seance", "Consult a saved session without resuming it", "[session id|path] [--model selector]", [], true),
         b("settings", "Open settings menu", "", [], true),
         b("switch", "Switch model for this session only (fuzzy ids, provider/id, @role, :level)", "[model]", [], true),
-        b("tools", "Show tools currently visible to the agent", "", [], false),
+        b("tools", "Show tools currently visible to the agent", "", [], true),
         b("tree", "Navigate session tree (switch branches)", "", [], true),
-        b("usage", "Show provider usage and limits", "", [], false),
+        b("usage", "Show provider usage and limits", "", [], true),
     ]
     static let grok: [Builtin] = [
         b("btw", "Ask a side question without interrupting", "<question>", [], false),
