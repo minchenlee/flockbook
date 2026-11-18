@@ -25,15 +25,16 @@ func checksSlashTables() throws {
     // The tables are the helper's: both sides compare theirs with this file.
     let o = try JSONSerialization.jsonObject(with: fixture("slash-tables.json")) as! [String: Any]
     check(o["efforts"] as? [String] == SlashCommands.efforts && o["pi_thinking"] as? [String] == SlashCommands.piThinking, "slash tables: effort and thinking values")
+    check(o["omp_thinking"] as? [String] == SlashCommands.ompThinking && o["grok_efforts"] as? [String] == SlashCommands.grokEfforts, "slash tables: omp and grok effort values")
     let built = o["builtins"] as! [String: [[String: Any]]]
-    for kind in ["claude", "codex", "pi", "agy"] {
+    for kind in SlashCommands.kinds {
         let want = (built[kind] ?? []).map { b in
             SlashCommands.Builtin(name: b["name"] as! String, description: b["description"] as! String, hint: b["hint"] as! String,
                                   args: b["args"] as! [String], screen: b["screen"] as! Bool)
         }
         check(!want.isEmpty && SlashCommands.builtins(kind) == want, "slash tables: \(kind) built-ins as the fixture")
     }
-    check(Set(built.keys) == ["claude", "codex", "pi", "agy"] && SlashCommands.builtins("cursor-agent").isEmpty, "slash tables: four kinds, no other")
+    check(SlashCommands.kinds == ["claude", "codex", "pi", "agy", "omp", "grok"] && Set(built.keys) == Set(SlashCommands.kinds) && SlashCommands.builtins("cursor-agent").isEmpty, "slash tables: six kinds, no other")
     let models = o["models"] as! [String: [[String]]]
     check(models["claude"] == SlashCommands.claudeModels.map { [$0.0, $0.1] } && models["agy"] == SlashCommands.agyModels.map { [$0.0, $0.1] }, "slash tables: model values as the fixture")
 }
@@ -41,7 +42,7 @@ func checksSlashTables() throws {
 func checksSlashCommands() throws {
     try scratch { t in
         let v = SlashCommands.list("claude", home: t.appendingPathComponent("home"), cwd: t.appendingPathComponent("proj"))
-        check(v.map(\.name) == ["add-dir", "clear", "compact", "context", "effort", "export", "init", "model", "resume", "review"],
+        check(v.map(\.name) == ["add-dir", "batch", "branch", "btw", "cd", "clear", "code-review", "compact", "config", "context", "debug", "doctor", "effort", "export", "fewer-permission-prompts", "goal", "init", "mcp", "model", "plan", "recap", "reload-plugins", "reload-skills", "rename", "resume", "security-review", "simplify", "update-config", "verify"],
               "slash: Claude built-ins without files; screens with no value are left out")
         check(v.allSatisfy { $0.source == "builtin" }, "slash: all built-in")
         func c(_ n: String) -> SlashCommands.Command { v.first { $0.name == n }! }
@@ -110,7 +111,7 @@ func checksSlashCommands() throws {
         check(v.allSatisfy { $0.source == "builtin" }, "slash codex: no prompts, no skills, nothing of Claude's")
         check(v.count == SlashCommands.codex.count - SlashCommands.screens("codex", home: home).count, "slash codex: built-ins less the screens")
         check(v.first { $0.name == "status" }?.screen == false && v.first { $0.name == "rename" }?.hint == "<name>", "slash codex: /status prints in the chat; hints")
-        check(SlashCommands.screens("codex", home: home) == ["config", "model", "permissions", "resume", "skills"], "slash codex: no model cache: /model takes no value")
+        check(SlashCommands.screens("codex", home: home) == ["agents", "config", "copy", "memories", "model", "permissions", "presets", "resume", "skills", "subagents", "usage", "warnings"], "slash codex: no model cache: /model takes no value")
         put(home.appendingPathComponent(".codex/models_cache.json"), #"{"models": [{"slug": "gpt-x", "display_name": "GPT-X", "visibility": "list", "priority": 1}]}"#)
         v = SlashCommands.list("codex", home: home, cwd: proj)
         let m = v.first { $0.name == "model" }
@@ -141,7 +142,7 @@ func checksSlashCommands() throws {
         check(c("review").hint == "[focus]" && c("review").description == "Review staged changes", "slash pi: a prompt's hint and description")
         check(vals(c("thinking").args) == ["off", "minimal", "low", "medium", "high", "xhigh", "max"], "slash pi: /thinking values")
         check(c("thinking").screen && c("model").screen && !c("session").screen, "slash pi: screen marks")
-        check(SlashCommands.screens("pi", home: home) == ["fork", "resume", "scoped-models", "settings", "tree"], "slash pi: screens")
+        check(SlashCommands.screens("pi", home: home) == ["fork", "resume", "scoped-models", "settings", "tree", "trust"], "slash pi: screens")
         put(home.appendingPathComponent(".pi/agent/settings.json"), #"{"enableSkillCommands": false}"#)
         check(SlashCommands.list("pi", home: home, cwd: proj).allSatisfy { !$0.name.hasPrefix("skill:") }, "slash pi: skill commands turned off")
     }
@@ -160,6 +161,53 @@ func checksSlashCommands() throws {
     }
 
     try scratch { t in
+        let home = t.appendingPathComponent("home")
+        let v = SlashCommands.list("claude", home: home, cwd: t.appendingPathComponent("proj"))
+        check(v.contains { $0.name == "reload-skills" && $0.source == "builtin" } && v.contains { $0.name == "reload-plugins" && $0.hint == "[--force]" }, "slash: Claude's /reload-skills and /reload-plugins")
+        check(!v.contains { $0.name == "review" } && v.contains { $0.name == "code-review" }, "slash: /review is now /code-review")
+    }
+
+    try scratch { t in
+        let home = t.appendingPathComponent("home")
+        put(home.appendingPathComponent(".omp/agent/skills/s/SKILL.md"), "---\nname: s\n---\n")
+        put(home.appendingPathComponent(".omp/agent/commands/mine.md"), "a command")
+        let v = SlashCommands.list("omp", home: home, cwd: t.appendingPathComponent("proj"))
+        check(v.map(\.name) == ["add-dir", "btw", "changelog", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "hotkeys", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch", "tools", "usage"], "slash omp: its built-ins, no files")
+        func c(_ n: String) -> SlashCommands.Command { v.first { $0.name == n }! }
+        check(vals(c("effort").args) == ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"] && c("effort").screen && !c("new").screen, "slash omp: /effort values; screen marks")
+        check(SlashCommands.screens("omp", home: home) == ["agents", "branch", "context", "copy", "extensions", "hub", "model", "settings", "tree"], "slash omp: screens")
+    }
+
+    try scratch { t in
+        let home = t.appendingPathComponent("home"), repo = t.appendingPathComponent("repo")
+        let proj = repo.appendingPathComponent("app/web")
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: proj, withIntermediateDirectories: true)
+        put(proj.appendingPathComponent(".grok/skills/local/SKILL.md"), "---\nname: local\ndescription: Here\n---\n")
+        put(repo.appendingPathComponent("app/.agents/skills/mid/SKILL.md"), "---\nname: mid\n---\n")
+        put(repo.appendingPathComponent(".grok/skills/top/SKILL.md"), "---\nname: top\n---\n")
+        put(repo.appendingPathComponent(".grok/skills/local/SKILL.md"), "---\nname: local\ndescription: The repo's\n---\n")
+        put(t.appendingPathComponent(".grok/skills/outside/SKILL.md"), "---\nname: outside\n---\n")
+        put(home.appendingPathComponent(".grok/skills/mine/SKILL.md"), "---\nname: mine\n---\n")
+        put(home.appendingPathComponent(".grok/skills/quiet/SKILL.md"), "---\nname: quiet\nuser-invocable: false\n---\n")
+        put(home.appendingPathComponent(".agents/skills/shared/SKILL.md"), "---\nname: shared\n---\n")
+        put(proj.appendingPathComponent(".grok/commands/deploy.md"), "---\ndescription: Deploy it\nargument-hint: \"[env]\"\n---\n")
+        put(repo.appendingPathComponent(".agents/commands/ship.md"), "Ship it")
+        put(home.appendingPathComponent(".grok/commands/lint.md"), "Lint it")
+        put(home.appendingPathComponent(".grok/commands/nested/deep.md"), "not loaded: flat files only")
+        put(home.appendingPathComponent(".claude/skills/claude-only/SKILL.md"), "---\nname: claude-only\n---\n")
+        put(proj.appendingPathComponent(".claude/commands/claude-cmd.md"), "x")
+        let v = SlashCommands.list("grok", home: home, cwd: proj)
+        let own = v.filter { $0.source != "builtin" }.map { "\($0.name) \($0.source)" }
+        check(own == ["deploy project", "lint user", "local skill", "mid skill", "mine skill", "shared skill", "ship project", "top skill"],
+              "slash grok: .grok and .agents skills and commands up to the repository root, then the home; no Claude folders \(own)")
+        func c(_ n: String) -> SlashCommands.Command { v.first { $0.name == n }! }
+        check(c("local").description == "Here" && c("deploy").hint == "[env]", "slash grok: the nearest folder wins; a command's hint")
+        check(vals(c("effort").args) == ["low", "medium", "high", "xhigh"] && c("model").hint == "<model> [window] [effort]", "slash grok: /effort has no max; /model")
+        check(SlashCommands.screens("grok", home: home) == ["config-agents", "context", "help", "history", "hooks", "mcps", "personas", "plugins", "release-notes", "rewind", "session-info", "settings", "skills", "tasks", "view-plan", "workflows"], "slash grok: screens")
+    }
+
+    try scratch { t in
         func opens(_ kind: String, _ text: String) -> String? { SlashCommands.opensScreen(kind, text: text, home: t) }
         check(opens("claude", "/model") == "/model opens a menu in the terminal. Add a value, like /model claude-fable-5-2.", "screen: /model bare")
         check(opens("claude", "  /status \n") == "/status opens a screen in the terminal. Use it there.", "screen: /status, spaces trimmed")
@@ -169,9 +217,9 @@ func checksSlashCommands() throws {
         }
         check(opens("codex", "/model") == "/model opens a screen in the terminal. Use it there.", "screen: per agent; Codex with no model cache")
         check(opens("codex", "/status") == nil && opens("pi", "/thinking") != nil && opens("agy", "/usage") != nil && opens("cursor-agent", "/model") == nil, "screen: per agent")
-        check(SlashCommands.screens("claude", home: t) == ["config", "help", "hooks", "mcp", "memory", "permissions", "plugin", "rewind", "status", "usage"], "screen: Claude's left-out screens")
+        check(SlashCommands.screens("claude", home: t) == ["diff", "help", "hooks", "memory", "permissions", "plugin", "release-notes", "rewind", "skills", "status", "tasks", "usage"], "screen: Claude's left-out screens")
         // Every screen command is either listed (it takes a value) or named in `screens`.
-        for kind in ["claude", "codex", "pi", "agy"] {
+        for kind in SlashCommands.kinds {
             let listed = SlashCommands.list(kind, home: t, cwd: t), left = SlashCommands.screens(kind, home: t)
             check(SlashCommands.builtins(kind).filter(\.screen).allSatisfy { b in listed.contains { $0.name == b.name } != left.contains(b.name) }, "screen: \(kind) listed or left out, never both")
             // The composer's note (from the listing) is the send path's (from the tables).

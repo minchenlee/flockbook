@@ -67,6 +67,10 @@ public enum SlashCommands {
 
     static let efforts = ["low", "medium", "high", "xhigh", "max"]
     static let piThinking = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+    static let ompThinking = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]
+    static let grokEfforts = ["low", "medium", "high", "xhigh"]
+    /// The kinds with a table, in the fixture's order.
+    public static let kinds = ["claude", "codex", "pi", "agy", "omp", "grok"]
 
     // The tables: Claude Code 2.1, Codex 0.167 (a short set of its about 60), pi 1.3, agy 1.5 (as commands.rs), then
     // the /model values of Claude Code 2.1.322 (full ids first, then the aliases) and agy 1.5.3 (as models.rs).

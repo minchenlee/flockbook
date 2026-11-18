@@ -45,6 +45,10 @@ const fn b(name: &'static str, description: &'static str, hint: &'static str, ar
 
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const PI_THINKING: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+pub const OMP_THINKING: [&str; 8] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"];
+pub const GROK_EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+/// The kinds with a table, in the fixture's order.
+pub const KINDS: [&str; 6] = ["claude", "codex", "pi", "agy", "omp", "grok"];
 
 /// Claude Code 2.1 (spike: /agents is gone; /cost and /review are other names of /usage and /code-review).
 pub const CLAUDE: [Builtin; 20] = [
@@ -502,7 +506,7 @@ mod tests {
         let got: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
             got,
-            vec!["add-dir", "clear", "compact", "context", "effort", "export", "init", "model", "resume", "review"],
+            vec!["add-dir", "batch", "branch", "btw", "cd", "clear", "code-review", "compact", "config", "context", "debug", "doctor", "effort", "export", "fewer-permission-prompts", "goal", "init", "mcp", "model", "plan", "recap", "reload-plugins", "reload-skills", "rename", "resume", "security-review", "simplify", "update-config", "verify"],
             "screens with no value (/status, /config …) are left out"
         );
         assert!(v.iter().all(|c| c.source == "builtin"));
@@ -514,7 +518,7 @@ mod tests {
         assert_eq!(c("model").hint, "<model>");
         assert!(c("model").screen && c("resume").screen && !c("clear").screen && !c("context").screen);
         // On the wire: hint, args and screen only where they say something.
-        assert_eq!(serde_json::to_value(c("clear")).unwrap(), serde_json::json!({"name": "clear", "description": "Start a new conversation (clears the history)", "source": "builtin"}));
+        assert_eq!(serde_json::to_value(c("init")).unwrap(), serde_json::json!({"name": "init", "description": "Initialize a new CLAUDE.md file with codebase documentation", "source": "builtin"}));
         assert_eq!(serde_json::to_value(c("add-dir")).unwrap()["hint"], "<path>");
     }
 
@@ -589,7 +593,7 @@ mod tests {
         assert_eq!(v.len(), CODEX.len() - screens("codex", Some(&home)).len());
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
         assert!(!c("status").screen, "Codex's /status prints in the chat");
-        assert_eq!(screens("codex", Some(&home)), vec!["config", "model", "permissions", "resume", "skills"], "no model cache: /model takes no value");
+        assert_eq!(screens("codex", Some(&home)), vec!["agents", "config", "copy", "memories", "model", "permissions", "presets", "resume", "skills", "subagents", "usage", "warnings"], "no model cache: /model takes no value");
         assert_eq!(c("rename").hint, "<name>");
         put(&home.join(".codex/models_cache.json"), r#"{"models": [{"slug": "gpt-x", "display_name": "GPT-X", "visibility": "list", "priority": 1}]}"#);
         let v = list("codex", &home, &t.path().join("proj"));
@@ -635,7 +639,7 @@ mod tests {
         assert_eq!(c("review").description, "Review staged changes");
         assert_eq!(vals(&c("thinking").args), vec!["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
         assert!(c("thinking").screen && c("model").screen && !c("session").screen);
-        assert_eq!(screens("pi", Some(&home)), vec!["fork", "resume", "scoped-models", "settings", "tree"]);
+        assert_eq!(screens("pi", Some(&home)), vec!["fork", "resume", "scoped-models", "settings", "tree", "trust"]);
         put(&home.join(".pi/agent/settings.json"), r#"{"enableSkillCommands": false}"#);
         assert!(list("pi", &home, &proj).iter().all(|c| !c.name.starts_with("skill:")), "skill commands turned off");
     }
@@ -655,6 +659,75 @@ mod tests {
         assert!(c("clear").description.contains("/new"));
         assert_eq!(vals(&c("effort").args), vec!["low", "medium", "high", "xhigh", "max"]);
         assert_eq!(c("model").args[1], Arg::new("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"));
+    }
+
+    #[test]
+    fn claude_has_reload_skills_and_plugins() {
+        let t = tempfile::tempdir().unwrap();
+        let v = list("claude", &t.path().join("home"), &t.path().join("proj"));
+        assert!(v.iter().any(|c| c.name == "reload-skills" && c.source == "builtin"));
+        assert!(v.iter().any(|c| c.name == "reload-plugins" && c.hint == "[--force]"));
+        assert!(v.iter().all(|c| c.name != "review") && v.iter().any(|c| c.name == "code-review"), "/review is now /code-review");
+    }
+
+    #[test]
+    fn omp_gets_its_builtins_only() {
+        let t = tempfile::tempdir().unwrap();
+        let home = t.path().join("home");
+        put(&home.join(".omp/agent/skills/s/SKILL.md"), "---\nname: s\n---\n");
+        put(&home.join(".omp/agent/commands/mine.md"), "a command");
+        let v = list("omp", &home, &t.path().join("proj"));
+        let got: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(got, vec!["add-dir", "btw", "changelog", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "hotkeys", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch", "tools", "usage"]);
+        let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(vals(&c("effort").args), vec!["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]);
+        assert!(c("effort").screen && !c("new").screen);
+        assert_eq!(screens("omp", Some(&home)), vec!["agents", "branch", "context", "copy", "extensions", "hub", "model", "settings", "tree"]);
+    }
+
+    #[test]
+    fn grok_builtins_skills_and_commands() {
+        let t = tempfile::tempdir().unwrap();
+        let (home, repo) = (t.path().join("home"), t.path().join("repo"));
+        let proj = repo.join("app/web");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::create_dir_all(&proj).unwrap();
+        put(&proj.join(".grok/skills/local/SKILL.md"), "---\nname: local\ndescription: Here\n---\n");
+        put(&repo.join("app/.agents/skills/mid/SKILL.md"), "---\nname: mid\n---\n");
+        put(&repo.join(".grok/skills/top/SKILL.md"), "---\nname: top\n---\n");
+        put(&repo.join(".grok/skills/local/SKILL.md"), "---\nname: local\ndescription: The repo's\n---\n");
+        put(&t.path().join(".grok/skills/outside/SKILL.md"), "---\nname: outside\n---\n");
+        put(&home.join(".grok/skills/mine/SKILL.md"), "---\nname: mine\n---\n");
+        put(&home.join(".grok/skills/quiet/SKILL.md"), "---\nname: quiet\nuser-invocable: false\n---\n");
+        put(&home.join(".agents/skills/shared/SKILL.md"), "---\nname: shared\n---\n");
+        put(&proj.join(".grok/commands/deploy.md"), "---\ndescription: Deploy it\nargument-hint: \"[env]\"\n---\n");
+        put(&repo.join(".agents/commands/ship.md"), "Ship it");
+        put(&home.join(".grok/commands/lint.md"), "Lint it");
+        put(&home.join(".grok/commands/nested/deep.md"), "not loaded: flat files only");
+        put(&home.join(".claude/skills/claude-only/SKILL.md"), "---\nname: claude-only\n---\n");
+        put(&proj.join(".claude/commands/claude-cmd.md"), "x");
+        let v = list("grok", &home, &proj);
+        let own: Vec<(&str, &str)> = v.iter().filter(|c| c.source != "builtin").map(|c| (c.name.as_str(), c.source)).collect();
+        assert_eq!(
+            own,
+            vec![
+                ("deploy", "project"),
+                ("lint", "user"),
+                ("local", "skill"),
+                ("mid", "skill"),
+                ("mine", "skill"),
+                ("shared", "skill"),
+                ("ship", "project"),
+                ("top", "skill"),
+            ],
+            ".grok and .agents skills and commands up to the repository root, then the home; no Claude folders"
+        );
+        let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(c("local").description, "Here", "the nearest folder wins");
+        assert_eq!(c("deploy").hint, "[env]");
+        assert_eq!(vals(&c("effort").args), vec!["low", "medium", "high", "xhigh"], "no max");
+        assert_eq!(c("model").hint, "<model> [window] [effort]");
+        assert_eq!(screens("grok", Some(&home)), vec!["config-agents", "context", "help", "history", "hooks", "mcps", "personas", "plugins", "release-notes", "rewind", "session-info", "settings", "skills", "tasks", "view-plan", "workflows"]);
     }
 
     #[test]
@@ -684,9 +757,9 @@ mod tests {
         assert!(opens_screen("codex", "/status").is_none());
         assert!(opens_screen("pi", "/thinking").is_some() && opens_screen("agy", "/usage").is_some());
         assert_eq!(opens_screen("cursor-agent", "/model"), None);
-        assert_eq!(screens("claude"), vec!["config", "help", "hooks", "mcp", "memory", "permissions", "plugin", "rewind", "status", "usage"]);
+        assert_eq!(screens("claude"), vec!["diff", "help", "hooks", "memory", "permissions", "plugin", "release-notes", "rewind", "skills", "status", "tasks", "usage"]);
         // Every screen command is either listed (it takes a value) or named in `screens`.
-        for kind in ["claude", "codex", "pi", "agy"] {
+        for kind in KINDS {
             let listed = list(kind, t.path(), t.path());
             for b in builtins(kind).iter().filter(|b| b.screen) {
                 assert!(listed.iter().any(|c| c.name == b.name) != screens(kind).contains(&b.name), "{kind} /{}", b.name);
@@ -711,8 +784,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(text).unwrap();
         assert_eq!(v["efforts"], serde_json::json!(EFFORTS));
         assert_eq!(v["pi_thinking"], serde_json::json!(PI_THINKING));
-        assert_eq!(v["builtins"].as_object().unwrap().len(), 4, "the four kinds, no other");
-        for kind in ["claude", "codex", "pi", "agy"] {
+        assert_eq!(v["omp_thinking"], serde_json::json!(OMP_THINKING));
+        assert_eq!(v["grok_efforts"], serde_json::json!(GROK_EFFORTS));
+        assert_eq!(KINDS, ["claude", "codex", "pi", "agy", "omp", "grok"]);
+        assert_eq!(v["builtins"].as_object().unwrap().len(), KINDS.len(), "the six kinds, no other");
+        for kind in KINDS {
             let own: Vec<serde_json::Value> = builtins(kind)
                 .iter()
                 .map(|b| serde_json::json!({"name": b.name, "description": b.description, "hint": b.hint, "args": b.args, "screen": b.screen}))
