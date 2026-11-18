@@ -256,8 +256,25 @@ func checksSummaryAsk() async {
         let piArgs = (try? String(contentsOf: dir.appendingPathComponent("args"), encoding: .utf8)) ?? ""
         check(piArgs.contains("--no-tools\n") && piArgs.contains("--model\ngo/glm\n"), "summary ask: pi with the chosen model for another agent's turn")
     }
-    let env = ProcessRunner.environment(["PATH": "/usr/bin", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "HOME": "/h"], home: "/h")
+    let env = ProcessRunner.environment(["PATH": "/usr/bin", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_USE_BEDROCK": "1", "HOME": "/h"], home: "/h")
     check(env["CLAUDECODE"] == nil && env["CLAUDE_CODE_ENTRYPOINT"] == nil && env["PATH"]!.hasPrefix("/usr/bin:/h/.local/bin:"), "summary ask: no nested-session marks; the usual program folders on PATH")
+    check(env["CLAUDE_CODE_USE_BEDROCK"] == "1" && env["HOME"] == "/h", "summary ask: the provider and login settings stay")
+    await scratch { dir in
+        func script(_ name: String, _ body: String) -> String {
+            let p = dir.appendingPathComponent(name)
+            try? Data("#!/bin/sh\n\(body)\n".utf8).write(to: p)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: p.path)
+            return p.path
+        }
+        let began = Date()
+        let slow = await ProcessRunner().run(argv: [script("slow", "sleep 30")], input: "", cwd: dir.path, timeout: 1)
+        check(slow.timedOut && slow.code == nil && Date().timeIntervalSince(began) < 10, "process runner: a program past its time is stopped")
+        let began2 = Date()
+        let left = await ProcessRunner().run(argv: [script("left", "sleep 30 &\necho STATE: done")], input: "", cwd: dir.path, timeout: 20)
+        check(left.code == 0 && left.stdout.contains("STATE: done") && Date().timeIntervalSince(began2) < 10, "process runner: a child that keeps the pipe open does not hold the run (\(left))")
+        let deaf = await ProcessRunner().run(argv: [script("deaf", "echo ok")], input: String(repeating: "x", count: 1_000_000), cwd: dir.path, timeout: 10)
+        check(deaf.code == 0 && deaf.stdout == "ok\n", "process runner: a program that reads no stdin")
+    }
 }
 
 func checksLogTails() async {

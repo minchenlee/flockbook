@@ -117,13 +117,14 @@ public protocol SummaryRunner: Sendable {
 
 /// On this Mac, as a child of the app. The app may have a short PATH (started from Finder): the usual folders of
 /// command line programs are added after it. A Claude Code session's markers are not passed on, so `claude -p` does not
-/// take itself for a nested session.
+/// take itself for a nested session (the rest of the environment stays, logins and providers too).
 public struct ProcessRunner: SummaryRunner {
     public init() {}
 
     public static func environment(_ env: [String: String] = ProcessInfo.processInfo.environment, home: String = NSHomeDirectory()) -> [String: String] {
         var e = env
-        for k in e.keys where k == "CLAUDECODE" || k.hasPrefix("CLAUDE_CODE_") { e[k] = nil }
+        // Only the markers of a running Claude Code session: its login and provider settings stay.
+        e["CLAUDECODE"] = nil; e["CLAUDE_CODE_ENTRYPOINT"] = nil
         let extra = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.bun/bin", "\(home)/.npm-global/bin", "\(home)/.cargo/bin", "/usr/bin", "/bin"]
         var path = (e["PATH"] ?? "").split(separator: ":").map(String.init)
         for p in extra where !path.contains(p) { path.append(p) }
@@ -137,30 +138,59 @@ public struct ProcessRunner: SummaryRunner {
         return path.split(separator: ":").map { "\($0)/\(program)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// Writing to a program that closed its stdin must not end the app (SIGPIPE): the write fails instead.
+    private static let noSigpipe: Void = { signal(SIGPIPE, SIG_IGN); return () }()
+
+    /// Its output, filled from the pipes as it comes.
+    private final class Output: @unchecked Sendable {
+        let lock = NSLock()
+        var out = Data(), err = Data()
+        var timedOut = false
+    }
+
     public func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult {
         let env = Self.environment()
         guard let first = argv.first, let exe = Self.find(first, path: env["PATH"] ?? "") else { return ExecResult(code: nil, missing: true) }
+        _ = Self.noSigpipe
         return await withCheckedContinuation { (k: CheckedContinuation<ExecResult, Never>) in
             DispatchQueue.global().async {
-                let p = Process(), out = Pipe(), err = Pipe(), inp = Pipe()
+                let p = Process(), out = Pipe(), err = Pipe(), inp = Pipe(), got = Output()
                 p.executableURL = URL(fileURLWithPath: exe)
                 p.arguments = Array(argv.dropFirst())
                 p.environment = env
                 try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
                 p.currentDirectoryURL = URL(fileURLWithPath: cwd)
                 p.standardOutput = out; p.standardError = err; p.standardInput = inp
-                do { try p.run() } catch { k.resume(returning: ExecResult(code: nil, missing: true)); return }
-                let timer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+                // Read as it comes. A program can leave a child that keeps the pipe open after it ends: the end of the
+                // program, not the end of the pipe, decides when the run is over.
+                let g = DispatchGroup()
+                for (pipe, isOut) in [(out, true), (err, false)] {
+                    g.enter()
+                    pipe.fileHandleForReading.readabilityHandler = { h in
+                        let d = h.availableData
+                        if d.isEmpty { h.readabilityHandler = nil; g.leave(); return }
+                        got.lock.withLock { if isOut { got.out.append(d) } else { got.err.append(d) } }
+                    }
+                }
+                do { try p.run() } catch {
+                    out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
+                    k.resume(returning: ExecResult(code: nil, missing: true)); return
+                }
+                let pid = p.processIdentifier
+                let timer = DispatchWorkItem {
+                    guard p.isRunning else { return }
+                    got.lock.withLock { got.timedOut = true }
+                    p.terminate()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if p.isRunning { kill(pid, SIGKILL) } }
+                }
                 DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(timeout), execute: timer)
-                DispatchQueue.global().async { inp.fileHandleForWriting.write(Data(input.utf8)); try? inp.fileHandleForWriting.close() }
-                var errData = Data()
-                let g = DispatchGroup(); g.enter()
-                DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
-                let o = out.fileHandleForReading.readDataToEndOfFile()
-                g.wait(); p.waitUntilExit(); timer.cancel()
-                let timedOut = p.terminationReason == .uncaughtSignal && p.terminationStatus == SIGTERM
+                DispatchQueue.global().async { try? inp.fileHandleForWriting.write(contentsOf: Data(input.utf8)); try? inp.fileHandleForWriting.close() }
+                p.waitUntilExit(); timer.cancel()
+                _ = g.wait(timeout: .now() + 2)
+                out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
+                let (o, e, timedOut) = got.lock.withLock { (got.out, got.err, got.timedOut) }
                 k.resume(returning: ExecResult(code: timedOut ? nil : p.terminationStatus, stdout: String(decoding: o, as: UTF8.self),
-                                               stderr: String(decoding: errData, as: UTF8.self), timedOut: timedOut))
+                                               stderr: String(decoding: e, as: UTF8.self), timedOut: timedOut))
             }
         }
     }
