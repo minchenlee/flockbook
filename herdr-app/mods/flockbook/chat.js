@@ -22,6 +22,8 @@ import { openMenu } from "./menu.js";
 import { Cards, wanted } from "./cards.js";
 import { startTop, overBar, BAR_H } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
+import { pollGlance, glanceOn, glanceFor, glancedAt, seenFor, markSeen, summaryFor } from "./glance.js";
+import { arrive, sinceLeft, sinceCard } from "./since.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
@@ -99,7 +101,31 @@ export class ChatView {
     this.address = address; this.cards.shown = address;
     if (address && !this.feeds.has(address)) this.feeds.set(address, emptyFeed(address));
     this.follow = true; this.open = new Set(); this.autoOlder = 0;
+    this.arriving = Date.now(); this.away = null;
     this.toNewest();
+  }
+
+  // The chat is on screen with this agent's newest item: say so (glance.js). On the way in, first see how
+  // long the chat was away: that is the "Since you left" card. `arriving`: when the chat came on screen (ms).
+  // A glance line from before then can be old (nothing polls while the chat is not on screen), so the chat
+  // waits for a newer one, and marks nothing until then.
+  see(cx) {
+    const a = this.address, g = a && glanceOn() ? glanceFor(a) : null;
+    if (!g?.id) return;
+    if (this.arriving) {
+      if (glancedAt() < this.arriving) return;
+      this.arriving = 0;
+      this.away = arrive(a, seenFor(a), g, Date.now());
+      if (this.away) cx.notify();
+    }
+    cx.spawn(() => markSeen(a));
+  }
+
+  // The owner's message the card names: bring it to the top of the list.
+  jumpTo(id, cx) {
+    const i = this.feed()?.rows.findIndex((r) => r.id === id) ?? -1;
+    if (i < 0) return;
+    this.follow = false; this.scroll.scroll_to_item(i, "top"); cx.notify();
   }
 
   tick(cx) {
@@ -107,8 +133,10 @@ export class ChatView {
     if (a !== this.address) { this.switchTo(a); this.lastPoll = 0; cx.notify(); }
     // Coming back to the chat screen (from Overview, Needs you, a shell tab) also opens at the end.
     const screen = shownScreen();
-    if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.toNewest(); cx.notify(); }
+    if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.arriving = Date.now(); this.toNewest(); cx.notify(); }
     this.screen = screen;
+    // On the way in, the glance is asked now, not after the usual wait.
+    if (screen === "chat") { const force = Boolean(this.arriving); cx.spawn((cx) => pollGlance(cx, force)); this.see(cx); }
     if (this.helper.changed()) cx.notify();
     cx.spawn((cx) => this.composer.pollStatus(cx));
     const agent = currentAgent();
@@ -376,6 +404,9 @@ export class ChatView {
         .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
       .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
         .on_mouse_down("left", stop).child(this.helper.removeCard(t, this.refresh))))
+      .when(Boolean(f?.rows.length) && this.away?.address === this.address, (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
+        .on_mouse_down("left", stop).child(sinceCard(t, sinceLeft(f.rows, this.away, glanceFor(this.address)), summaryFor(this.address),
+          (id, cx) => this.jumpTo(id, cx), (cx) => { this.away = null; cx.notify(); }))))
       .when(Boolean(f) && f.error?.code !== "not-agent" && !isRemoteProblem(f.error), (el) => {
         const card = this.cards.view(this.address, t, "chat-card");
         if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
