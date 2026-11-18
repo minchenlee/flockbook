@@ -54,7 +54,7 @@ fn protocol_lines() {
 }
 
 /// `commands`: a Claude Code terminal's "/" commands, read from files in its folder and the user's home. No key goes
-/// to the agent. Another agent: an empty list (the mod shows nothing).
+/// to the agent. Codex, grok and omp terminals get their own lists. Not an agent: an error.
 #[test]
 fn commands_lists_a_claude_terminals_slash_commands() {
     let t = tempfile::tempdir().unwrap();
@@ -68,7 +68,13 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     c["cwd"] = serde_json::json!(proj);
     let mut x = common::terminal("t2", &["codex"], Some(77), Some("idle"), None);
     x["cwd"] = serde_json::json!(proj);
-    fake.set_terminals(vec![c, x, common::terminal("t3", &["zsh"], Some(9), None, None)]);
+    std::fs::create_dir_all(proj.join(".grok/commands")).unwrap();
+    std::fs::write(proj.join(".grok/commands/ship.md"), "Ship it").unwrap();
+    let mut g = common::terminal("t4", &["grok"], Some(78), Some("idle"), None);
+    g["cwd"] = serde_json::json!(proj);
+    let mut m = common::terminal("t5", &["omp"], Some(79), Some("idle"), None);
+    m["cwd"] = serde_json::json!(proj);
+    fake.set_terminals(vec![c, x, common::terminal("t3", &["zsh"], Some(9), None, None), g, m]);
     let run_home = |args: &[&str]| -> Vec<Value> {
         let out = Command::new(env!("CARGO_BIN_EXE_flockbook-modfeed")).args(args).env_clear().env("HC_SOCKET", &fake.path).env("HOME", &home).output().unwrap();
         String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
@@ -93,6 +99,14 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     assert!(!codex.contains(&"model"), "Codex's /model takes no value: it can never be sent from the chat");
     assert_eq!(o[1]["screens"], serde_json::json!(["agents", "config", "copy", "memories", "model", "permissions", "presets", "resume", "skills", "subagents", "usage", "warnings"]));
     assert!(v[1]["screens"].as_array().unwrap().contains(&serde_json::json!("status")));
+    let g = run_home(&["commands", "--terminal", "t4"]);
+    assert_eq!(g[1]["agent"], "grok");
+    let grok: Vec<&str> = g[1]["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert!(grok.contains(&"compact") && grok.contains(&"ship") && !grok.contains(&"deploy"), "grok: its built-ins and its own commands: {grok:?}");
+    let m = run_home(&["commands", "--terminal", "t5"]);
+    assert_eq!(m[1]["agent"], "omp");
+    assert!(m[1]["commands"].as_array().unwrap().iter().all(|c| c["source"] == "builtin"), "omp: its built-ins only");
+    assert!(m[1]["screens"].as_array().unwrap().contains(&serde_json::json!("hotkeys")));
     assert_eq!(run_home(&["commands", "--terminal", "t3"])[1]["code"], "not-agent");
     assert_eq!(run_home(&["commands"])[1]["message"], "commands needs --terminal <addr>");
     assert!(fake.keys().is_empty(), "commands sends no keys");
