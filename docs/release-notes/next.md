@@ -5,6 +5,7 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- The "/" menu lists the current commands of Claude Code (now with /reload-skills and /reload-plugins), Codex, pi and Antigravity, and now also of omp and Grok Build, with Grok's own skills and command files.
 
 ### 🔒 Security
 
