@@ -92,3 +92,14 @@ export const keysMayBeIn = (done) => agentChanged(done) && /some keys may alread
 // The same agent started a new conversation (`/clear`): nothing was sent; the chat reads the new log.
 export const NEW_CONVERSATION = "The agent started a new conversation; the chat now shows it. Nothing was sent.";
 export const newConversation = (done) => done?.result === "changed" && /new conversation/i.test(done?.message ?? "");
+// What each agent's last turn did, by rules, from its log (docs/protocol.md, glance). Every agent on this
+// machine in one call; nothing goes to an agent.
+export const glance = () => call("glance", ["--cache", cachePath()]);
+// Two lines about one agent's last turn, by that agent's small model (docs/protocol.md, summary). The helper
+// refuses unless the setting Summaries is on.
+// The models a program (claude, codex, pi) can run for a summary, for the settings' list. Nothing of an agent is read.
+export const summaryModels = (by) => call("summary-models", ["--by", by]);
+// How many times a model ran for a summary since each time in `since` (ms), and how much text went and came
+// (docs/protocol.md, summary-usage). It reads the helper's count; nothing is sent.
+export const summaryUsage = (since) => call("summary-usage", ["--cache", cachePath(), ...since.flatMap((s) => ["--since", String(s)])]);
+export const summary = (terminal) => call("summary", ["--terminal", terminal, "--cache", cachePath()]);

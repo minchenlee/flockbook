@@ -54,7 +54,7 @@ const press = (el) => el._h.on_click({}, fakeCx());
 
 test("no config.json: every setting is its default, and nothing is written", async () => {
   await loadConfig();
-  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false, text_size: "default" });
+  assert.deepEqual(DEFAULTS, { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false, text_size: "default", summaries: "off", summary_by: "own", summary_model: "" });
   for (const [k, v] of Object.entries(DEFAULTS)) assert.equal(setting(k), v, k);
   assert.equal(configBad(), false);
   assert.equal(log.writes.length, 0, "opening Flockbook never creates the file");
@@ -194,9 +194,9 @@ test("settings layout: a click, Enter or Space on a section shows it; every sett
     assert.equal(v.section, id);
     const el = v.render(fakeCx());
     assert.equal(byId(el, `set-nav-${id}`)._a.bg, "#selected");
-    for (const key of [...SETTINGS.map((s) => s.key), "phone"]) if (byId(byId(el, "settings-root"), `set-${key}`)) (where[key] ??= []).push(id);
+    for (const key of [...SETTINGS.map((s) => s.key), "summary_model", "phone"]) if (byId(byId(el, "settings-root"), `set-${key}`)) (where[key] ??= []).push(id);
   }
-  assert.deepEqual(where, { text_size: ["general"], status_row: ["general"], remote_helper: ["general"], phone: ["phone"], check_updates: ["updates"] });
+  assert.deepEqual(where, { text_size: ["general"], status_row: ["general"], summaries: ["general"], remote_helper: ["general"], phone: ["phone"], check_updates: ["updates"] });
 });
 
 test("settings layout: a row is the title and its line on the left, the control on the right", async () => {

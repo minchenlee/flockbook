@@ -51,12 +51,16 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` `[--cache <file>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one; nothing is sent. Its message says "new conversation" when the same agent process wrote the expected log, e.g. after `/clear`. With `--cache` the log is looked up again and written to the cache, so the next `feed` reads it) |
 | `queue` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; `serve` and other machines) | `queued` |
 | `commands` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only) | `commands` |
+| `glance` | `[--cache <file>]` (Rust sidecar only) | one `glance` per agent on this machine |
+| `summary` | `--terminal <addr> [--cache <file>]` (Rust sidecar only) | `summary`, only with the setting `summaries` on |
+| `summary-models` | `--by <claude\|codex\|pi>` (Rust sidecar only) | `models` |
+| `summary-usage` | `--cache <file> [--since <ms>]…` (Rust sidecar only) | one `summary-usage` per `--since` |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
 
-`card` and `commands` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
+`card`, `commands` and `glance` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
@@ -160,7 +164,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands","glance","summary","summary-models","summary-usage"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -332,6 +336,122 @@ approval is the `card` command's job.
 | `tags[]` | `kind` (`model`, `effort`, `context`, `cost`, `own`), `text`, `percent` (context only), `warn` (context 80% or more). |
 
 The mod adds the cwd, the branch and the agent name from herdr-app's own `panes()` data.
+
+### `glance` (`glance`)
+
+What each agent's last turn did, read from its log by rules. No model runs and nothing leaves the machine. One line
+for every agent terminal on this machine, in herdr-core's order; a terminal on another machine gets none.
+
+```json
+{"agent":"claude","commands":3,"edited":5,"ended":1793670036000,"id":"a5-0","path":"/…/session.jsonl","said":"I found two ways.","terminal":"t7","tests":"passed","test":"pytest","type":"glance"}
+```
+
+The mod reads it for the chat's "Since you left" card: `id` to see whether the agent wrote more while the chat was
+not on screen, and the counts for the card's line from the log ("Edited 5 files · pytest passed after the last
+edit"). With the setting Summaries on, `said` and `ended` choose which agents' turns go to `summary`.
+
+The last turn is everything after the newest user message in the last 2 MB of the log.
+
+| Field | Meaning |
+|---|---|
+| `terminal`, `agent`, `path` | The terminal address, the agent kind, its log (`null`: none found; the counts are then 0). |
+| `id` | The id of the turn's newest item. Another id means the agent wrote more. Absent: an empty log. |
+| `ended` | When the turn's newest item came (ms since 1970). |
+| `edited` | Files the edit tools changed in the turn, each once. An edit made by a shell command is not seen. |
+| `commands` | Shell commands with a result. |
+| `failed` | The newest finished command's first line, when it failed. Absent: it passed, or no command. Codex's log has no error flag: its exit code is read from the start of the output. |
+| `tests` | The newest test command that finished after the last edit: `passed`, `failed`, or `ran` (its output went into a pipe without `pipefail`, so the exit code is not the tests'). `none`: a code file was edited and no test command finished after the last edit. Absent: no test command, and no edit but to files of words (`.md`, `.txt`, `.rst`, `.adoc`, `.org`, `.csv`, `.tsv`, `.log`). |
+| `test` | That command's short name (`pytest`, `cargo test`). A test command is known by its program's name only: `pytest`, `tox`, `nox`, `unittest`, `jest`, `vitest`, `mocha`, `ava`, `rspec`, `phpunit`, `ctest`, `npm`/`yarn`/`pnpm`/`bun` `test`, `go test`, `cargo test`, `cargo nextest`, `swift test`, `deno test`, `dotnet test`, `node --test`, `playwright test`, `mvn test`, `gradle test`, `make`/`just` `test`, `xcodebuild test`; also after `sudo`, `env`, `npx`, `uv run`, `python -m`, `timeout <n>`, and after the `--` of a wrapper. |
+| `said` | The first sentence of the turn's newest message, without markdown marks (at most 160 characters). In `said` a path that starts with `/` or `~/` is its last name only (`/w/src/a.rs` reads `a.rs`). |
+
+`--cache`: where each agent's log is (as for `feed`). The lines are kept beside it in `glance.json` and reused
+while a log's size and change time are the same, so a call is cheap when nothing was written. A line kept by a
+helper that wrote other fields is not reused.
+
+### `summary` (`summary`)
+
+Two lines about an agent's last turn (the state of the work, and what it needs from the owner), written by a small model, for the chat's "Since you left" card. Off unless config.json has `"summaries": "on"`
+(the mod's Flockbook settings, Summaries); while off the answer is the error `summaries-off`, nothing is read and
+no program runs. The mod asks only for an agent that stopped and wrote something, once per turn, at most 3 at a
+time (one call each, side by side), the newest first. It asks for every such agent on this machine, not only the one
+whose chat is open, but only while a chat screen is open (the mod polls from the chat screen). Back from the Overview,
+the card can show before its summary; the summary lines come in when the model answers.
+
+```json
+{"by":"claude","cached":false,"id":"a5-0","model":"claude-haiku-5-5","needs":"Say whether to update the changelog.","state":"The parser skips empty lines and the tests pass.","terminal":"t7","type":"summary"}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | The turn's newest item, as in `glance`. A summary is for that turn only. |
+| `state` | One sentence: the state of the work (at most 240 characters). |
+| `needs` | What the owner must do or decide now, or `null`. |
+| `by` | The program that wrote it: `claude`, `codex` or `pi`. |
+| `model` | The model that wrote it; for Codex and pi with none named, "Codex's default model" or "pi's default model". |
+| `cached` | The kept answer for this turn (`summary.json` beside `--cache`); the model did not run. When a new answer is kept, the answers of terminals that are no agent on this machine any more are dropped. |
+
+How it runs: one program, once, without a terminal (hc `machine.exec` `argv`, no shell, 60 s), in an empty folder
+(`flockbook-summary` in the temp folder). Which program: config.json `"summary_by"` (Flockbook settings, Summary
+written by): `own` (the default: the program of the agent that wrote the turn; Claude Code, Codex and pi agents), or
+`claude`, `codex` or `pi` for the turns of every agent. `"summary_model"` (Summary model) names the model for a chosen
+program: letters, digits and `._:/-`, at most 80, not led by `-`; anything else is not used. With `own` it is not used.
+
+| Program | Arguments | Model when none is named |
+|---|---|---|
+| Claude Code | `claude -p --model <model> --no-session-persistence --tools "" --disable-slash-commands --strict-mcp-config --setting-sources "" --system-prompt <fixed text>` | `claude-haiku-5-5` |
+| Codex | `codex exec --sandbox read-only --ephemeral --skip-git-repo-check --ignore-rules --ignore-user-config --color never -c model_reasoning_effort="low" --disable hooks --disable apps [-m <model>] -` | the one Codex uses by default |
+| pi | `pi -p --no-session --no-tools --no-extensions --no-mcp --no-skills --no-prompt-templates --no-context-files --no-approve --no-themes --system-prompt <fixed text> [--model <model>]` | the one pi uses by default |
+
+Claude Code and pi run with no tools, no saved session, no settings or context files, no MCP servers. (`claude
+--bare` is not used: it reads no login, so an account without an API key would fail. Hooks of installed plugins may
+still start.) Codex cannot run without its tools: it runs in a sandbox that only reads, with no rules, no config
+file, no hooks and no session file, and it has no system prompt option, so the fixed text leads its stdin.
+The stdin: the owner's message that started the last turn (at most 1 500 characters), the end of what the agent wrote in that
+turn (at most 6 000), and one line of the `glance` facts. With `own` the text goes to the provider that agent's
+conversation already goes to, on that agent's account, and nowhere else; with one program chosen it goes to that
+program's provider, also for the turns of other agents.
+The answer must have a line `STATE: …`; `NEEDS: …` is optional and `NEEDS: nothing` means none. Other
+lines are dropped. A kept answer is for one turn, one program and one model: after a change of either the turn is
+asked again, and so is an answer kept by a helper that asked for other lines.
+
+Each run of a model adds one line to `summary-usage.jsonl` beside `--cache`: the time, the program, the model, the
+characters that went (the stdin, and the fixed text when it goes apart) and came, the time it took, and whether it
+worked. No word of the turn or of the answer is in it. A kept answer is not a run.
+
+`summary-usage --cache <file> [--since <ms>]…`: one line for each `--since` (0 with none), from that count:
+
+```json
+{"failed":1,"got":5149,"ms":412000,"runs":42,"sent":96321,"since":1793635200000,"type":"summary-usage"}
+```
+
+`runs`: the runs of a model from `since` on; `failed`: those that gave no summary; `sent`, `got`: characters, not
+tokens (the programs do not all say their tokens); `ms`: the time they took together. The command only reads the
+count. When the file is over 512 KB, lines older than 35 days are dropped (the file is written whole through a temp file).
+
+Errors: `summaries-off`; `summary-unsupported` (with `own`, an agent whose program writes none; or a terminal on another machine);
+`summary-none` (no conversation, or the agent wrote nothing in its last turn); `summary-failed` (the program is
+missing, failed, ran out of time, or answered in another shape; `message` says which). A failure is not kept, so the
+next call tries again.
+
+### `models` (`summary-models`)
+
+The models a program can run for a summary, for the list in the mod's settings. Nothing of an agent is read or sent.
+
+```json
+{"by":"pi","models":[{"id":"opencode-go/glm-5.3-flash","note":"1M context"}],"source":"program","type":"models"}
+```
+
+| `source` | Where the list is from |
+|---|---|
+| `built-in` | Claude Code: it has no command that lists models, so a short list is kept in the helper. |
+| `file` | Codex: `models_cache.json` in its home (`CODEX_HOME`, else `~/.codex`), the models it shows in its picker. No program runs. |
+| `program` | pi: `pi --offline --list-models`, run once without a terminal (hc `machine.exec`, 20 s). |
+
+`id` is what `summary_model` takes. A name that is not in the list can still be set. Errors: `usage` (no such
+program), `models-failed` (pi did not run).
+
+The "Since you left" card shows the two lines under "Summary · written by a model, may be wrong", above the line
+from the log, never in its place. After any error it shows the line from the log alone. No other screen shows them.
 
 ### `card` (`card`)
 

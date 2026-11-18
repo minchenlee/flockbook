@@ -9,6 +9,8 @@
 //!   flockbook-modfeed approve --terminal <addr> --request <id> --allow|--deny [--cache <file>]
 //!   flockbook-modfeed answer --terminal <addr> --request <id> --answers <json> [--cache <file>]
 //!   flockbook-modfeed queue  --terminal <addr> [--cache <file>]   (the agent's own queue: one `queued` line; read only)
+//!   flockbook-modfeed glance [--cache <file>]   (every agent on this machine: one `glance` line each; read only)
+//!   flockbook-modfeed summary --terminal <addr> [--cache <file>]   (two lines by the agent's small model; only with summaries on)
 //!   flockbook-modfeed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
 //!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
@@ -21,7 +23,7 @@
 //! A terminal `m/tN` on another machine: the command runs there, in the helper there (`remote`). Rust only.
 
 use crate::protocol::{JsonLines, PROTOCOL_VERSION, SIDECAR_VERSION};
-use crate::{cards, config, feed, locate, paste, phone, queue, remote, status, update};
+use crate::{cards, config, feed, glance, locate, paste, phone, queue, remote, status, summary, update};
 use herdr_core::hc::{HcClient, HcSession};
 use herdr_core::PaneScreen;
 use herdr_core::resolver::SessionResolver;
@@ -60,7 +62,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage"], "release": update::release()}));
             r.finish(true)
         }
         "paste-image" => {
@@ -131,13 +133,60 @@ pub fn run(argv: &[String]) -> String {
                 Err((code, message)) => r.fail(code, &message),
             }
         }
-        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" => {
+        "summary-usage" => {
+            // How many times a model ran for a summary, and how much text went and came. Reads a count; nothing is sent.
+            let since: Vec<i64> = args.iter().enumerate().filter(|(_, a)| *a == "--since").filter_map(|(i, _)| args.get(i + 1)?.parse().ok()).collect();
+            for l in summary::usage(opt("--cache").map(PathBuf::from).as_deref(), if since.is_empty() { &[0] } else { &since }) {
+                r.out.emit_value(l);
+            }
+            r.finish(true)
+        }
+        "summary-models" => {
+            // The models a program can run for a summary, for the settings' list. Nothing of an agent is read or sent.
+            let by = opt("--by").unwrap_or_default();
+            let client = HcClient::new(HcSession::resolve_env(), 8, 22);
+            match summary::models(&client, &by) {
+                Ok(l) => {
+                    r.out.emit_value(l);
+                    r.finish(true)
+                }
+                Err((code, message)) => r.fail(code, &message),
+            }
+        }
+        "glance" => {
+            // What each agent's last turn did, by rules, from its log. Reads only: no key and no text goes to an agent.
+            let session = HcSession::resolve_env();
+            if !session.is_available() {
+                return r.fail("no-core", "herdr-core is not running");
+            }
+            let client = HcClient::new(session.clone(), 8, 22);
+            let ws = match client.snapshot() {
+                Ok(ws) => ws,
+                Err(e) => return r.fail("core", &format!("herdr-core: {e}")),
+            };
+            let now_s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let mut resolver = SessionResolver::new(&session.socket_path);
+            for l in glance::all(&ws, &mut resolver, opt("--cache").map(PathBuf::from).as_deref(), now_s) {
+                r.out.emit_value(l);
+            }
+            r.finish(true)
+        }
+        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" | "summary" => {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
             let cache_path = opt("--cache").map(PathBuf::from);
             let cache_url = cache_path.as_deref();
             // Another machine, and the person chose Never: nothing runs there, not even a look.
             if matches!(remote::split(&terminal), Ok(Some(_))) && config::load(config::dir(home().as_deref()).as_deref()).remote_never {
                 return r.fail("remote-off", config::REMOTE_OFF);
+            }
+            if cmd == "summary" {
+                // Nothing is read and no model runs unless the person turned summaries on.
+                if !config::load(config::dir(home().as_deref()).as_deref()).summaries {
+                    return r.fail("summaries-off", config::SUMMARIES_OFF);
+                }
+                if matches!(remote::split(&terminal), Ok(Some(_))) {
+                    return r.fail("summary-unsupported", "No summary for a terminal on another machine yet.");
+                }
             }
             let session = HcSession::resolve_env();
             if !session.is_available() {
@@ -154,7 +203,7 @@ pub fn run(argv: &[String]) -> String {
                 Ok(None) => {}
             }
             // A send looks the log up again: the chat's log may be a conversation the agent left (`/clear`).
-            let (found, was, client) = match find(&terminal, cache_url, cmd == "send") {
+            let (found, was, client, live) = match find(&terminal, cache_url, cmd == "send") {
                 Ok(x) => x,
                 Err((code, message)) => return r.fail(code, &message),
             };
@@ -162,6 +211,16 @@ pub fn run(argv: &[String]) -> String {
             let url = found.path.as_ref().map(PathBuf::from);
             let log = url.as_deref();
             match cmd.as_str() {
+                "summary" => {
+                    let cfg = config::load(config::dir(home().as_deref()).as_deref());
+                    return match summary::run(&client, &found.pane.terminal_id, &kind, &cfg.summary_by, cfg.summary_model.as_deref(), log, cache_url, &live) {
+                        Ok(l) => {
+                            r.out.emit_value(l);
+                            r.finish(true)
+                        }
+                        Err((code, message)) => r.fail(code, &message),
+                    };
+                }
                 "commands" => {
                     // Per agent kind (Claude Code, Codex, pi, agy); other agents get an empty list. Files only, in the
                     // terminal's folder and the user's home (HOME); nothing goes to the agent. `screens`: the
@@ -256,7 +315,8 @@ pub fn run(argv: &[String]) -> String {
 
 /// herdr-core's client and the agent in `terminal` (with its session log), or the error line's code and message.
 /// `recheck`: as `locate::recheck` (a send), with the entry the cache had; else `locate::find`.
-fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::Found, Option<locate::Entry>, HcClient), (&'static str, String)> {
+/// Also the terminals of every agent on this machine (`summary` drops what it kept for the others).
+fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::Found, Option<locate::Entry>, HcClient, Vec<String>), (&'static str, String)> {
     let session = HcSession::resolve_env();
     if !session.is_available() {
         return Err(("no-core", "herdr-core is not running".into()));
@@ -268,7 +328,7 @@ fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::
     let mut resolver = SessionResolver::new(&session.socket_path);
     let found = if recheck { locate::recheck(terminal, &ws, &mut resolver, cache, now_s) } else { locate::find(terminal, &ws, &mut resolver, cache, now_s).map(|f| (f, None)) };
     match found {
-        Ok((f, was)) => Ok((f, was, client)),
+        Ok((f, was)) => Ok((f, was, client, locate::local_terminals(&ws))),
         Err(e @ locate::Failure::NoTerminal(_)) => Err(("no-terminal", e.to_string())),
         Err(e) => Err(("not-agent", e.to_string())),
     }
@@ -292,7 +352,7 @@ pub fn keys(terminal: &str, cache: Option<&Path>, home: Option<&str>, keys: Keys
         Ok(Some((machine, there))) => return remote_keys(&machine, &there, cache, home, keys).unwrap_or_else(|(c, m)| error(c, &m)),
         Ok(None) => {}
     }
-    let (found, was, client) = match find(terminal, cache, matches!(keys, Keys::Send { .. })) {
+    let (found, was, client, _) = match find(terminal, cache, matches!(keys, Keys::Send { .. })) {
         Ok(x) => x,
         Err((code, message)) => return json!({"type": "error", "code": code, "message": message}),
     };
@@ -365,7 +425,7 @@ pub fn pull(terminal: &str, cache: Option<&Path>, keep: &mut dyn FnMut(&str) -> 
         }
         Ok(None) => {}
     }
-    let (found, _, client) = find(terminal, cache, false)?;
+    let (found, _, client, _) = find(terminal, cache, false)?;
     let Some(agent) = found.pane.agent.clone() else { return Err(("not-agent", format!("terminal {terminal} runs no agent"))) };
     let log = queue::log_at(found.path.as_deref().map(Path::new));
     let mut io = queue::Live { client: &client, pane_id: found.pane.id.clone() };
