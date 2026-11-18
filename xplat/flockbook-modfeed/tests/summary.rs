@@ -161,6 +161,37 @@ fn the_last_turn_goes_to_the_small_model_once() {
 }
 
 #[test]
+fn kept_answers_of_terminals_that_are_gone_are_dropped() {
+    let w = world(Some("on"), &turn());
+    let kept_at = Path::new(&w.cache).with_file_name("summary.json");
+    let old = json!({"path": "/gone.jsonl", "id": "z1-0", "state": "Old.", "needs": null, "model": "claude-haiku-5-5", "by": "claude", "v": 5});
+    std::fs::write(&kept_at, json!({"t3": old, "t8": old}).to_string()).unwrap();
+    let cli = fake_cli(w.dir.path(), "echo 'STATE: Done.'\necho 'NEEDS: nothing'");
+    let v = run(&w.fake.path, &cli, &["summary", "--terminal", "t1", "--cache", &w.cache, "--home", &w.home]);
+    assert_eq!(v[1]["state"], "Done.", "{v:?}");
+    let kept: Value = serde_json::from_slice(&std::fs::read(&kept_at).unwrap()).unwrap();
+    let keys: Vec<&String> = kept.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["t1", "t3"], "t8 is no agent on this machine any more: {kept}");
+}
+
+#[test]
+fn a_large_count_keeps_the_last_days_and_is_written_whole() {
+    let w = world(Some("on"), &turn());
+    let at = Path::new(&w.cache).with_file_name("summary-usage.jsonl");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    let row = |t: i64| format!("{}\n", json!({"at": t, "by": "claude", "sent": 1, "got": 1, "ms": 1, "ok": true, "pad": "x".repeat(200)}));
+    let mut text: String = (0..3000).map(|_| row(1)).collect();
+    text.push_str(&row(now));
+    std::fs::write(&at, text).unwrap();
+    let cli = w.dir.path().join("none");
+    let u = run(&w.fake.path, &cli, &["summary-usage", "--cache", &w.cache, "--since", "0", "--home", &w.home]);
+    assert_eq!(u[1]["runs"], 3001, "this answer still counts the file as it was read");
+    assert_eq!(std::fs::read_to_string(&at).unwrap().lines().count(), 1, "only the line of the last days stays");
+    let left: Vec<String> = std::fs::read_dir(at.parent().unwrap()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with('.')).collect();
+    assert!(left.is_empty(), "no temp file stays: {left:?}");
+}
+
+#[test]
 fn the_person_chooses_the_program_and_its_model() {
     let w = world(Some("on"), &turn());
     let set = |v: Value| std::fs::write(Path::new(&w.home).join("flockbook/config.json"), v.to_string()).unwrap();

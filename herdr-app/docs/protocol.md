@@ -388,7 +388,7 @@ the card can show before its summary; the summary lines come in when the model a
 | `needs` | What the owner must do or decide now, or `null`. |
 | `by` | The program that wrote it: `claude`, `codex` or `pi`. |
 | `model` | The model that wrote it; for Codex and pi with none named, "Codex's default model" or "pi's default model". |
-| `cached` | The kept answer for this turn (`summary.json` beside `--cache`); the model did not run. |
+| `cached` | The kept answer for this turn (`summary.json` beside `--cache`); the model did not run. When a new answer is kept, the answers of terminals that are no agent on this machine any more are dropped. |
 
 How it runs: one program, once, without a terminal (hc `machine.exec` `argv`, no shell, 60 s), in an empty folder
 (`flockbook-summary` in the temp folder). Which program: config.json `"summary_by"` (Flockbook settings, Summary
@@ -426,7 +426,7 @@ worked. No word of the turn or of the answer is in it. A kept answer is not a ru
 
 `runs`: the runs of a model from `since` on; `failed`: those that gave no summary; `sent`, `got`: characters, not
 tokens (the programs do not all say their tokens); `ms`: the time they took together. The command only reads the
-count. When the file is over 512 KB, lines older than 35 days are dropped.
+count. When the file is over 512 KB, lines older than 35 days are dropped (the file is written whole through a temp file).
 
 Errors: `summaries-off`; `summary-unsupported` (with `own`, an agent whose program writes none; or a terminal on another machine);
 `summary-none` (no conversation, or the agent wrote nothing in its last turn); `summary-failed` (the program is

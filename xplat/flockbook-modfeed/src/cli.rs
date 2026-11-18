@@ -203,7 +203,7 @@ pub fn run(argv: &[String]) -> String {
                 Ok(None) => {}
             }
             // A send looks the log up again: the chat's log may be a conversation the agent left (`/clear`).
-            let (found, was, client) = match find(&terminal, cache_url, cmd == "send") {
+            let (found, was, client, live) = match find(&terminal, cache_url, cmd == "send") {
                 Ok(x) => x,
                 Err((code, message)) => return r.fail(code, &message),
             };
@@ -213,7 +213,7 @@ pub fn run(argv: &[String]) -> String {
             match cmd.as_str() {
                 "summary" => {
                     let cfg = config::load(config::dir(home().as_deref()).as_deref());
-                    return match summary::run(&client, &found.pane.terminal_id, &kind, &cfg.summary_by, cfg.summary_model.as_deref(), log, cache_url) {
+                    return match summary::run(&client, &found.pane.terminal_id, &kind, &cfg.summary_by, cfg.summary_model.as_deref(), log, cache_url, &live) {
                         Ok(l) => {
                             r.out.emit_value(l);
                             r.finish(true)
@@ -315,7 +315,8 @@ pub fn run(argv: &[String]) -> String {
 
 /// herdr-core's client and the agent in `terminal` (with its session log), or the error line's code and message.
 /// `recheck`: as `locate::recheck` (a send), with the entry the cache had; else `locate::find`.
-fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::Found, Option<locate::Entry>, HcClient), (&'static str, String)> {
+/// Also the terminals of every agent on this machine (`summary` drops what it kept for the others).
+fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::Found, Option<locate::Entry>, HcClient, Vec<String>), (&'static str, String)> {
     let session = HcSession::resolve_env();
     if !session.is_available() {
         return Err(("no-core", "herdr-core is not running".into()));
@@ -327,7 +328,7 @@ fn find(terminal: &str, cache: Option<&Path>, recheck: bool) -> Result<(locate::
     let mut resolver = SessionResolver::new(&session.socket_path);
     let found = if recheck { locate::recheck(terminal, &ws, &mut resolver, cache, now_s) } else { locate::find(terminal, &ws, &mut resolver, cache, now_s).map(|f| (f, None)) };
     match found {
-        Ok((f, was)) => Ok((f, was, client)),
+        Ok((f, was)) => Ok((f, was, client, locate::local_terminals(&ws))),
         Err(e @ locate::Failure::NoTerminal(_)) => Err(("no-terminal", e.to_string())),
         Err(e) => Err(("not-agent", e.to_string())),
     }
@@ -351,7 +352,7 @@ pub fn keys(terminal: &str, cache: Option<&Path>, home: Option<&str>, keys: Keys
         Ok(Some((machine, there))) => return remote_keys(&machine, &there, cache, home, keys).unwrap_or_else(|(c, m)| error(c, &m)),
         Ok(None) => {}
     }
-    let (found, was, client) = match find(terminal, cache, matches!(keys, Keys::Send { .. })) {
+    let (found, was, client, _) = match find(terminal, cache, matches!(keys, Keys::Send { .. })) {
         Ok(x) => x,
         Err((code, message)) => return json!({"type": "error", "code": code, "message": message}),
     };
@@ -424,7 +425,7 @@ pub fn pull(terminal: &str, cache: Option<&Path>, keep: &mut dyn FnMut(&str) -> 
         }
         Ok(None) => {}
     }
-    let (found, _, client) = find(terminal, cache, false)?;
+    let (found, _, client, _) = find(terminal, cache, false)?;
     let Some(agent) = found.pane.agent.clone() else { return Err(("not-agent", format!("terminal {terminal} runs no agent"))) };
     let log = queue::log_at(found.path.as_deref().map(Path::new));
     let mut io = queue::Live { client: &client, pane_id: found.pane.id.clone() };

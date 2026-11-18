@@ -87,8 +87,14 @@ pub fn write_cache(c: &Cache, to: Option<&Path>) {
 
 /// Any of the helper's kept files: written whole through a temp file, for the owner only.
 pub fn write_json<T: Serialize>(c: &T, to: Option<&Path>) {
+    if let Ok(d) = serde_json::to_vec(c) {
+        write_bytes(&d, to);
+    }
+}
+
+/// Writes `d` whole through a temp file, for the owner only: a reader sees the old file or the new one.
+pub fn write_bytes(d: &[u8], to: Option<&Path>) {
     let Some(url) = to else { return };
-    let Ok(d) = serde_json::to_vec(c) else { return };
     let dir = url.parent().unwrap_or(Path::new(""));
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
@@ -106,7 +112,7 @@ pub fn write_json<T: Serialize>(c: &T, to: Option<&Path>) {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);
     }
-    let ok = o.open(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, &d)).is_ok();
+    let ok = o.open(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, d)).is_ok();
     if !ok {
         let _ = std::fs::remove_file(&tmp);
         return;
@@ -167,6 +173,11 @@ fn look(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_
     let next = resolve(ws, resolver, &cache, cache_path, now_s);
     let path = next.entries.get(&pane.terminal_id).filter(|_| !pane.terminal_id.contains('/')).and_then(|e| e.path.clone());
     Ok(Found { pane, path, cached: false })
+}
+
+/// The terminals of the agent panes on this machine.
+pub fn local_terminals(ws: &[Workspace]) -> Vec<String> {
+    local_agents(ws).into_iter().map(|p| p.terminal_id.clone()).collect()
 }
 
 /// The agent panes on this machine.

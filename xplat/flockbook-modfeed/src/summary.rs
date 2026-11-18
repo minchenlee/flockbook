@@ -156,8 +156,9 @@ fn line(terminal: &str, k: &Kept, cached: bool) -> Value {
 
 /// The summary of the last turn in the log at `path`. `kind`: the agent that wrote the log. `by`: the program
 /// that writes the summary (`own`: the agent's), `model`: its model, None for the default.
+/// `live`: the terminals of the agents on this machine; what was kept for any other is dropped when this one is kept.
 /// Err: (code, message); the mod then shows the facts alone.
-pub fn run(client: &HcClient, terminal: &str, kind: &str, by: &str, model: Option<&str>, path: Option<&Path>, cache: Option<&Path>) -> Result<Value, (&'static str, String)> {
+pub fn run(client: &HcClient, terminal: &str, kind: &str, by: &str, model: Option<&str>, path: Option<&Path>, cache: Option<&Path>, live: &[String]) -> Result<Value, (&'static str, String)> {
     let program = std::env::var("FLOCKBOOK_SUMMARY_CLI").ok().filter(|p| !p.is_empty());
     // A model is the person's choice for one program; each agent's own program runs its default.
     let (by, model) = if by == "own" { (kind, None) } else { (by, model) };
@@ -210,6 +211,7 @@ pub fn run(client: &HcClient, terminal: &str, kind: &str, by: &str, model: Optio
     // Read again: the mod asks about a few agents side by side, and the model took seconds. What another call
     // kept in that time stays.
     let mut kept = read_kept();
+    kept.retain(|t, _| t == terminal || live.contains(t));
     kept.insert(terminal.into(), k.clone());
     locate::write_json(&kept, kept_at.as_deref());
     used(out.chars().count(), true);
@@ -249,7 +251,7 @@ pub fn usage(cache: Option<&Path>, since: &[i64]) -> Vec<Value> {
     if let Some(p) = p.as_deref().filter(|_| text.len() as u64 > USAGE_BYTES) {
         let from = now_ms() - USAGE_DAYS * 86_400_000;
         let kept: String = rows.iter().filter(|r| n(r, "at") >= from).map(|r| format!("{r}\n")).collect();
-        let _ = std::fs::write(p, kept);
+        locate::write_bytes(kept.as_bytes(), Some(p));
     }
     since.iter().map(|&s| {
         let part: Vec<&Value> = rows.iter().filter(|r| n(r, "at") >= s).collect();
