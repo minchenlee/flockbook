@@ -61,6 +61,7 @@ extension ConversationParser {
                 openToolUses[id] = Self.agySummary(args, fallback: name)
                 callById[id] = ToolCall(id: id, toolName: name, summary: Self.agySummary(args, fallback: name),
                                         input: Self.cut(Self.prettyJSON(args)))
+                callSeq += 1; callById[id]?.seq = callSeq
                 openAgySlot(id, at: at, from: step)
             }
         case "GENERIC":
