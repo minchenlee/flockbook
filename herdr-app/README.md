@@ -1,6 +1,6 @@
 # Flockbook for herdr-app
 
-<img src="preview.png" alt="Flockbook in herdr-app: the sidebar, a conversation with tool chips, and the composer" width="800">
+<img src="preview-chat.png" alt="Flockbook in herdr-app: the sidebar, a conversation with tool chips, and the composer" width="800">
 
 More screenshots (cards, Needs you, Overview, attachments, the terminal, menus and the floating sidebar) are in the [repository README](../README.md#flockbook-for-the-herdr-app).
 

@@ -22,7 +22,7 @@ For the Mac app, see [Flockbook for Mac](#flockbook-for-mac).
 
 ## Flockbook for the Herdr app
 
-<img src="herdr-app/preview.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
+<img src="herdr-app/preview-chat.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
 
 The reading view runs inside the Herdr app window, with no change to the app:
 
