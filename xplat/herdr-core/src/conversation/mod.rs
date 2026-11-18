@@ -607,7 +607,7 @@ fn chips(run: &[RunEntry], key: &str, calls: &HashMap<String, ToolCall>, at: Opt
     let mut counts: HashMap<&str, usize> = HashMap::new();
     let mut labels: HashMap<&str, &ToolLabel> = HashMap::new();
     let mut groups: HashMap<&str, Vec<ToolCall>> = HashMap::new();
-    for r in run {
+    for (seq, r) in run.iter().enumerate() {
         let k = r.label.singular.as_str();
         if !counts.contains_key(k) {
             order.push(k);
@@ -615,7 +615,7 @@ fn chips(run: &[RunEntry], key: &str, calls: &HashMap<String, ToolCall>, at: Opt
         }
         *counts.entry(k).or_insert(0) += 1;
         if let Some(c) = calls.get(&r.id) {
-            groups.entry(k).or_default().push(c.clone());
+            groups.entry(k).or_default().push(ToolCall { seq, ..c.clone() });
         }
     }
     let chips = order

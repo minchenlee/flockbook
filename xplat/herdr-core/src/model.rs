@@ -149,6 +149,9 @@ pub struct ToolCall {
     pub is_error: bool,
     /// Pictures in the result, in order.
     pub images: Vec<ImageRef>,
+    /// Its place in its run of calls. A chip groups the calls of one kind, so the chips alone lose the order
+    /// between an edit and a command.
+    pub seq: usize,
 }
 
 impl ToolCall {

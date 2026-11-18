@@ -82,6 +82,11 @@ pub fn read_cache(path: Option<&Path>) -> Cache {
 
 /// Written whole through a temp file, so a reader never sees half a file.
 pub fn write_cache(c: &Cache, to: Option<&Path>) {
+    write_json(c, to)
+}
+
+/// Any of the helper's kept files: written whole through a temp file, for the owner only.
+pub fn write_json<T: Serialize>(c: &T, to: Option<&Path>) {
     let Some(url) = to else { return };
     let Ok(d) = serde_json::to_vec(c) else { return };
     let dir = url.parent().unwrap_or(Path::new(""));
@@ -159,7 +164,19 @@ fn look(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_
             return Ok(Found { pane, path, cached: true });
         }
     }
-    let agents: Vec<&Pane> = herdr_core::all_panes(ws).into_iter().filter(|p| p.agent.is_some() && !p.terminal_id.contains('/')).collect();
+    let next = resolve(ws, resolver, &cache, cache_path, now_s);
+    let path = next.entries.get(&pane.terminal_id).filter(|_| !pane.terminal_id.contains('/')).and_then(|e| e.path.clone());
+    Ok(Found { pane, path, cached: false })
+}
+
+/// The agent panes on this machine.
+fn local_agents(ws: &[Workspace]) -> Vec<&Pane> {
+    herdr_core::all_panes(ws).into_iter().filter(|p| p.agent.is_some() && !p.terminal_id.contains('/')).collect()
+}
+
+/// Resolves every local agent pane in one pass, writes the cache (the feed states kept) and returns it.
+fn resolve(ws: &[Workspace], resolver: &mut SessionResolver, cache: &Cache, cache_path: Option<&Path>, now_s: f64) -> Cache {
+    let agents = local_agents(ws);
     let needs: Vec<Need> = agents
         .iter()
         .map(|p| Need::new(&p.id, &p.agent.as_ref().unwrap().kind, &p.cwd, p.process_ids.clone()))
@@ -174,6 +191,31 @@ fn look(terminal: &str, ws: &[Workspace], resolver: &mut SessionResolver, cache_
         );
     }
     write_cache(&next, cache_path);
-    let path = latest(absolute(found.get(&pane.id), &kind), &kind);
-    Ok(Found { pane, path, cached: false })
+    next
+}
+
+/// As `fresh`, but an agent with no log yet also counts: `glance` asks for every agent, and one without a log must
+/// not start a process scan on each call.
+fn settled(e: Option<&Entry>, pane: &Pane, kind: &str, now_s: f64) -> bool {
+    let Some(e) = e else { return false };
+    if e.kind != kind || e.pids != pane.process_ids || e.process.as_deref() != pane_process(pane) || now_s - e.checked >= RECHECK_S {
+        return false;
+    }
+    e.path.as_ref().is_none_or(|p| Path::new(p).exists())
+}
+
+/// Every agent pane on this machine with its log (`glance`). The cache answers while every entry holds; else one
+/// pass resolves them all.
+pub fn all(ws: &[Workspace], resolver: &mut SessionResolver, cache_path: Option<&Path>, now_s: f64) -> Vec<Found> {
+    let agents = local_agents(ws);
+    let kind = |p: &Pane| p.agent.as_ref().map(|a| a.kind.clone()).unwrap_or_default();
+    let mut cache = read_cache(cache_path);
+    let cached = agents.iter().all(|p| settled(cache.entries.get(&p.terminal_id), p, &kind(p), now_s));
+    if !cached {
+        cache = resolve(ws, resolver, &cache, cache_path, now_s);
+    }
+    agents
+        .into_iter()
+        .map(|p| Found { pane: p.clone(), path: cache.entries.get(&p.terminal_id).and_then(|e| latest(e.path.clone(), &kind(p))), cached })
+        .collect()
 }

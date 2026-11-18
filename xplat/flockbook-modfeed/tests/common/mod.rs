@@ -20,7 +20,7 @@ pub struct State {
     pub send_delay: f64,
     /// Seconds `terminal.keys` takes before it answers (hc's typing-quiet rule can hold keys this long).
     pub keys_delay: f64,
-    /// Other machines (`machine.exec`, `file.write` with `on`): name -> its home and the socket of its core. A
+    /// Other machines (`machine.exec`, `file.write` with `on`; the name "" is this machine: a call without `on`): name -> its home and the socket of its core. A
     /// command there runs here with `sh -c`, HOME set to that home and HC_SOCKET to that core.
     pub machines: HashMap<String, (std::path::PathBuf, String)>,
     /// What `uname -sm` gives there: Some((code, stdout)); None runs the real one.
@@ -145,7 +145,7 @@ pub enum Run {
 }
 
 /// Runs it on this computer as that machine would: in its home, with its core. Err: an hc error kind.
-fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool, windows: bool, in_root: bool) -> Result<Value, String> {
+fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32, String)>, timed_out: bool, windows: bool, in_root: bool, input: Option<Vec<u8>>) -> Result<Value, String> {
     if timed_out {
         return Ok(json!({"code": null, "signal": 15, "stdout": "", "stderr": "", "truncated": false, "timed_out": true, "ms": 30000}));
     }
@@ -173,7 +173,13 @@ fn exec_there(run: &Run, home: &std::path::Path, sock: &str, uname: Option<(i32,
         }
     };
     c.current_dir(if in_root { std::path::Path::new("/") } else { home }).env_clear().env("HOME", home).env("HC_SOCKET", sock).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
-    match c.output() {
+    // `input`: bytes for its stdin; without, stdin is closed.
+    c.stdin(if input.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() }).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    let Ok(mut child) = c.spawn() else { return Err("spawn_failed".into()) };
+    if let (Some(data), Some(mut stdin)) = (input, child.stdin.take()) {
+        let _ = stdin.write_all(&data);
+    }
+    match child.wait_with_output() {
         Ok(o) => Ok(json!({"code": o.status.code(), "stdout": b64(&o.stdout), "stderr": b64(&o.stderr), "truncated": false, "timed_out": false, "ms": 1})),
         Err(_) => Err("spawn_failed".into()),
     }
@@ -237,7 +243,11 @@ fn serve(mut s: std::os::unix::net::UnixStream, st: Arc<Mutex<State>>) {
                         };
                         let (uname, timed_out, windows, in_root) = (g.uname.clone(), g.exec_timed_out, g.windows, g.exec_in_root);
                         drop(g);
-                        Some(match exec_there(&run, &home, &sock, uname, timed_out, windows, in_root) {
+                        let input = p["input"].as_str().map(|d| {
+                            use base64::Engine;
+                            base64::engine::general_purpose::STANDARD.decode(d).unwrap()
+                        });
+                        Some(match exec_there(&run, &home, &sock, uname, timed_out, windows, in_root, input) {
                             Ok(v) => reply(v),
                             Err(kind) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": kind, "data": {"kind": kind}}}),
                         })
