@@ -372,8 +372,8 @@ while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` 
 
 ### `commands` (`commands`)
 
-The "/" commands of an agent's terminal, for the list above the reply box: Claude Code, Codex, pi and agy. Read from
-files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
+The "/" commands of an agent's terminal, for the list above the reply box: Claude Code, Codex, pi, agy, omp and
+grok. Read from files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
 
 ```json
 {"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new session with empty context; previous session stays on disk (resumable with /resume)","source":"builtin","hint":"[name]"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["diff","help","hooks","memory","permissions","plugin","release-notes","rewind","skills","status","tasks","usage"]}
@@ -381,7 +381,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
 
 - Sources per agent (`agent`), the first one with a name wins:
   - `claude`: built-ins (the ones people use most that the chat can send: `add-dir`, `clear`, `compact`, `context`,
-    `effort`, `export`, `init`, `model`, `resume`, `review`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
+    `effort`, `export`, `init`, `model`, `resume`, `code-review`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
     home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`; not when its front matter says
     `user-invocable: false`); installed plugins that are not turned off (`enabledPlugins`), their commands and
     skills as `<plugin>:<name>` (`plugin`).
@@ -394,11 +394,18 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     listed.
   - `agy`: its built-ins (one row a command; its other names in the description); skills from `~/.gemini/skills`
     and `~/.gemini/antigravity/skills` (`skill`).
+  - `omp`: its built-ins only. Its custom commands and skills come from many providers turned on in its settings, so
+    they are not read.
+  - `grok`: its built-ins; skills (`.grok/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md`, one level; not
+    when its front matter says `user-invocable: false`) and commands (`.grok/commands/*.md`, `.agents/commands/*.md`,
+    top level; `project` up to the repository root, `user` in the home), from the terminal's folder up to the
+    repository root, then in the home (the nearest wins); skills have the source `skill`. Not read: the Claude and
+    Cursor folders and `[skills]` folders of its `config.toml`.
 - `description`: the front matter's `description`, else the file's first line; at most 120 characters.
 - Each when it says something: `hint`, what may follow the name (`<model>`, `[file]`; for a file, its front matter's
   `argument-hint`); built-ins only: `args`, the values the mod offers after `/<name> `, each `{"value", "label"}` (no
-  `label` where the value says it all; the mod also takes plain strings). Fixed lists in the helper: Claude Code's and
-  agy's `effort`, pi's `thinking`. `model`, per agent (models.rs), where its `/model <value>` switches with no screen:
+  `label` where the value says it all; the mod also takes plain strings). Fixed lists in the helper: Claude Code's, agy's,
+  omp's and grok's `effort`, pi's `thinking`. `model`, per agent (models.rs), where its `/model <value>` switches with no screen:
   - `claude`: its current models' full ids, then the aliases (a table: its list is inside its program), plus ids in
     `~/.claude/settings.json` (`modelSettings`, `availableModels`) and `~/.claude.json`
     `additionalModelOptionsCache`. It also saves the model as the default for new sessions, as its picker does.
@@ -409,6 +416,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     pi's picker.
   - `agy`: a table (agy reads its list from its server): its slugs, `gemini-4-argon-medium`; it also saves the
     default.
+  - `omp`, `grok`: no value list. omp's `/model` is in `screens`; grok's has a hint and `screen: true`.
   A value list with no hint gets the hint `<model>`. The mod finds a value by any part of its value or label.
   `screen: true`, sent bare
   it opens a screen in the terminal (a picker or a dialog: the chat cannot show it), so it goes out only with a
