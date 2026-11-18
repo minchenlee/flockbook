@@ -11,6 +11,9 @@ enum Screen: Hashable { case tab, inbox, overview, search, settings }
 @MainActor @Observable
 final class AppModel {
     let store: HerdrStore
+    /// The Since you left card and Summaries (`Since.swift`).
+    let since = SinceModel(dir: SinceModel.defaultDir())
+    let summaryModels = SummaryModels()
     /// Remote access; nil in checks and previews (they never listen).
     var remote: RemoteHub?
     var screen: Screen = .tab { didSet { if screen != .tab { showTerminal = false }; updateVisibleSessions() } }

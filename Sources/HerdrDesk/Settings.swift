@@ -34,6 +34,9 @@ struct SettingsView: View {
     var shown: HerdrSession? = nil
     /// The running store, for Backend (a new choice applies at once); nil in snapshots.
     var store: HerdrStore? = nil
+    /// Summaries: the count of model runs, and the lists of models (nil: none read, as in snapshots).
+    var since: SinceModel? = nil
+    var summaryModels: SummaryModels? = nil
     /// Widest the rows get, and their distance from the tab list.
     static let column: CGFloat = 760
     static let margin: CGFloat = 40
@@ -135,6 +138,7 @@ struct SettingsView: View {
             }
             .settingsControl(.plusButton)
         }
+        SummariesGroup(usage: since?.usageText() ?? "", models: summaryModels ?? SummaryModels(fixed: [:]))
     }
 
     @ViewBuilder private var agents: some View {
@@ -299,6 +303,8 @@ struct SettingsSplit: View {
     var back: (() -> Void)? = nil
     var shown: HerdrSession? = nil
     var store: HerdrStore? = nil
+    var since: SinceModel? = nil
+    var summaryModels: SummaryModels? = nil
     static let listWidth: CGFloat = 196
 
     private var tab: SettingsTab { fixed ?? SettingsTab(stored: stored) }
@@ -314,7 +320,7 @@ struct SettingsSplit: View {
                 Divider()
             }
             SettingsView(tab: tab, reduceTransparency: reduceTransparency, remote: remote, statusLine: statusLine, grokStatusLine: grokStatusLine,
-                         scrolls: scrolls, shown: shown, store: store)
+                         scrolls: scrolls, shown: shown, store: store, since: since, summaryModels: summaryModels)
                 .frame(maxWidth: scrolls ? .infinity : nil, maxHeight: scrolls ? .infinity : nil, alignment: .top)
                 .probe { SettingsProbe.content = $0 }
                 .id(tab)
@@ -370,7 +376,7 @@ struct SettingsPage: View {
     var body: some View {
         let own = model.sidebarVisibility == .detailOnly
         SettingsSplit(remote: model.remote, statusLine: .live, grokStatusLine: .grokLive, scrolls: true, list: own, back: own ? { model.closeSettings() } : nil,
-                      shown: model.store.session, store: model.store)
+                      shown: model.store.session, store: model.store, since: model.since, summaryModels: model.summaryModels)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background { Button("Back") { model.closeSettings() }.keyboardShortcut(.cancelAction).hidden() }
             .probe { SettingsProbe.page = $0 }
