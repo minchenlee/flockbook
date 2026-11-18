@@ -84,7 +84,9 @@ func checksLaunchGuard() async throws {
     let prefixes: Set<String> = ["--test", "--snapshot"]   // hasPrefix tests, not flags
     // Arguments the app passes to other tools (herdr, tailscale, git, log), not its own.
     let otherTools: Set<String> = ["--abbrev-ref", "--bg", "--check", "--cols", "--json", "--last", "--predicate", "--rows", "--style", "--takeover", "--show-toplevel"]
-    let unknown = used.subtracting(prefixes).subtracting(otherTools).subtracting(LaunchGuard.known).sorted()
+    // The arguments of the programs that write summaries (claude, codex, pi), taken from Summary.argv itself.
+    let summaryArgs = Set(Summary.programs.flatMap { Summary.argv($0, model: "m")?.argv ?? [] }.filter { $0.hasPrefix("--") })
+    let unknown = used.subtracting(prefixes).subtracting(otherTools).subtracting(summaryArgs).subtracting(LaunchGuard.known).sorted()
     check(used.count > 40, "launch guard: scanned the app's flags (\(used.count) flags)")
     check(unknown.isEmpty, "launch guard: every flag the app uses is known (unknown: \(unknown))")
 }
