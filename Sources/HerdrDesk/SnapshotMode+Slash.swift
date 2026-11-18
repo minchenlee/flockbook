@@ -45,9 +45,11 @@ extension ContentTests {
         func clear() async { tv.selectAll(nil); tv.delete(nil); await wait() }
 
         await type("/")
+        // The scroll steps need more rows than the window and the 9 steps below (pick 10): a floor, not the exact count.
+        let n = want.commands.count
         step("\"/\" shows the agent's commands (\(probe.slash?.items.count ?? -1) of \(want.commands.count)), 8 rows (\(probe.slash?.shown.count ?? -1))",
-             probe.slash?.items.map(\.name) == want.commands.map(\.name) && probe.slash?.shown.count == 8 && want.commands.count == 12)
-        step("the count says there are more (\(probe.slash?.count ?? "none"))", probe.slash?.count == "1–8 of 12")
+             probe.slash?.items.map(\.name) == want.commands.map(\.name) && probe.slash?.shown.count == 8 && n > 11)
+        step("the count says there are more (\(probe.slash?.count ?? "none"))", probe.slash?.count == "1–8 of \(n)")
         step("its own commands and skills are in it", probe.slash?.items.contains { $0.name == "deploy" && $0.hint == "[target]" } == true && probe.slash?.items.contains { $0.name == "take-notes" } == true)
         capture(win, to: "\(dir)/slash-list.png")
         press(win, down.0, down.1, arrows); press(win, down.0, down.1, arrows); await wait()
@@ -56,11 +58,11 @@ extension ContentTests {
         step("↑ moves it back (\(probe.slash?.pick ?? -1))", probe.slash?.pick == 1)
         for _ in 0..<9 { press(win, down.0, down.1, arrows) }
         await wait()
-        step("↓ past the last row moves the window (\(probe.slash?.count ?? "none"), pick \(probe.slash?.pick ?? -1))", probe.slash?.count == "4–11 of 12" && probe.slash?.pick == 10)
+        step("↓ past the last row moves the window (\(probe.slash?.count ?? "none"), pick \(probe.slash?.pick ?? -1))", probe.slash?.count == "4–11 of \(n)" && probe.slash?.pick == 10)
         capture(win, to: "\(dir)/slash-list-scrolled.png")
-        for _ in 0..<9 { press(win, down.0, down.1, arrows) }
+        for _ in 0..<n { press(win, down.0, down.1, arrows) }
         await wait()
-        step("↓ stops at the last match (\(probe.slash?.pick ?? -1))", probe.slash?.pick == 11 && tv.string == "/")
+        step("↓ stops at the last match (\(probe.slash?.pick ?? -1) of \(n))", probe.slash?.pick == n - 1 && probe.slash?.count == "\(n - 7)–\(n) of \(n)" && tv.string == "/")
 
         // The wheel over the list: a real scroll event through the app's event path.
         await clear(); await type("/")
