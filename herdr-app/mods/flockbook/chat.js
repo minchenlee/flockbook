@@ -136,7 +136,7 @@ export class ChatView {
     if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.arriving = Date.now(); this.toNewest(); cx.notify(); }
     this.screen = screen;
     // On the way in, the glance is asked now, not after the usual wait.
-    if (screen === "chat") { const force = Boolean(this.arriving); cx.spawn((cx) => pollGlance(cx, force)); this.see(cx); }
+    if (screen === "chat") { const force = Boolean(this.arriving) && this.forced !== this.arriving; if (force) this.forced = this.arriving; cx.spawn((cx) => pollGlance(cx, force)); this.see(cx); }
     if (this.helper.changed()) cx.notify();
     cx.spawn((cx) => this.composer.pollStatus(cx));
     const agent = currentAgent();

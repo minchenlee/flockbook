@@ -374,7 +374,8 @@ Two lines about an agent's last turn (the state of the work, and what it needs f
 (the mod's Flockbook settings, Summaries); while off the answer is the error `summaries-off`, nothing is read and
 no program runs. The mod asks only for an agent that stopped and wrote something, once per turn, at most 3 at a
 time (one call each, side by side), the newest first. It asks for every such agent on this machine, not only the one
-whose chat is open, so that a summary is there when the card shows.
+whose chat is open, but only while a chat screen is open (the mod polls from the chat screen). Back from the Overview,
+the card can show before its summary; the summary lines come in when the model answers.
 
 ```json
 {"by":"claude","cached":false,"id":"a5-0","model":"claude-haiku-5-5","needs":"Say whether to update the changelog.","state":"The parser skips empty lines and the tests pass.","terminal":"t7","type":"summary"}

@@ -1,6 +1,6 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { fake, reset } from "./stub/herdr.mjs";
+import { fake, log, reset } from "./stub/herdr.mjs";
 import { textOf, byId, calls } from "./stub/ui.mjs";
 import { fakeCx } from "./fake-cx.mjs";
 import { agent, space } from "./fixtures.mjs";
@@ -126,6 +126,15 @@ test("chat: back from the Overview with an old glance line: the card waits for a
   await v.tick(cx); await cx.settle();
   assert.match(textOf(byId(v.render(cx), "since-card")), /You were away 47 minutes/);
   assert.equal(fake.shared[KEY_MARKS].seen.t1.id, "a3");
+});
+
+test("chat: an agent with no glance id yet: the glance is asked once on the way in, not on every tick", async () => {
+  fake.exec = helper([{ type: "row", id: "u1", k: "user", text: "hi", ts: 1 }], () => gline({ id: undefined }));
+  const cx = fakeCx();
+  const v = new ChatView(cx); v.width = 900;
+  await cx.settle();
+  for (let i = 0; i < 5; i++) { await v.tick(cx); await cx.settle(); }
+  assert.equal(log.exec.filter((e) => e[1][0] === "glance").length, 1);
 });
 
 test("chat: a helper without glance shows no card and marks nothing", async () => {
