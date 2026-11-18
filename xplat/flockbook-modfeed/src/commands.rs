@@ -11,11 +11,15 @@
 //!   `.pi/skills`, and `.agents/skills` from the folder up to the repository root (off with `enableSkillCommands`).
 //! - agy (Antigravity CLI): its built-ins (`AGY`, one row a command, other names in the description); skills from
 //!   `~/.gemini/skills` and `~/.gemini/antigravity/skills`.
+//! - omp (oh-my-pi): its built-ins (`OMP`). Its custom commands and skills come from many providers turned on in its
+//!   settings, so they are not read.
+//! - grok (Grok Build): its built-ins (`GROK`); skills (`<dir>/<name>/SKILL.md`, not `user-invocable: false`) and
+//!   flat `*.md` commands in `.grok/` and `.agents/` from the folder up to the repository root, then in the home.
 //! - Any other agent: nothing. Commands an agent's extensions add (pi's npm packages) cannot be read from files.
 //!
 //! Built-ins carry an argument hint, fixed argument values where the agent has them (/model, /effort, /thinking),
-//! and a mark on those that open a screen in the terminal when sent bare (spike, Claude Code 2.1, Codex 0.167,
-//! pi 1.3, agy 1.5). A name seen once is not listed again (the first source wins).
+//! and a mark on those that open a screen in the terminal when sent bare (Claude Code 2.1.327, Codex 0.170.0,
+//! pi 1.3.0, agy 1.5.10, omp 18.18.8, grok 1.0.77; sources above the Swift tables). A name seen once is not listed again (the first source wins).
 //!
 //! A screen built-in sent bare ("/model") is not sent (`opens_screen`, in the mod and in `send`): the chat cannot
 //! show the screen. One that takes a value stays in the list ("/model sonnet" goes out); one that takes none
@@ -29,8 +33,8 @@ use std::path::{Path, PathBuf};
 
 /// A built-in: name, description (as Claude Code's own menu says it), argument hint, argument values (the mod offers
 /// them after "/name "), and whether sent bare it opens a screen in the terminal (a picker, a dialog: the chat cannot
-/// show it, the owner answers it in the terminal). Checked against Claude Code 2.1 (spike): /agents is gone, /cost
-/// and /review are other names of /usage and /code-review.
+/// show it, the owner answers it in the terminal). One table per agent kind; where each was read is written above the
+/// Swift tables (`Sources/HerdrKit/SlashCommands.swift`).
 pub struct Builtin {
     pub name: &'static str,
     pub description: &'static str,
@@ -45,78 +49,117 @@ const fn b(name: &'static str, description: &'static str, hint: &'static str, ar
 
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 pub const PI_THINKING: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+pub const OMP_THINKING: [&str; 8] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"];
+pub const GROK_EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+/// The kinds with a table, in the fixture's order.
+pub const KINDS: [&str; 6] = ["claude", "codex", "pi", "agy", "omp", "grok"];
 
-/// Claude Code 2.1 (spike: /agents is gone; /cost and /review are other names of /usage and /code-review).
-pub const CLAUDE: [Builtin; 20] = [
-    b("add-dir", "Add a new working directory", "<path>", &[], true),
-    b("clear", "Start a new conversation (clears the history)", "", &[], false),
-    b("compact", "Summarise the conversation so far, to free context", "[instructions]", &[], false),
-    b("config", "Open the settings", "", &[], true),
-    b("context", "Show how full the context is", "", &[], false),
-    b("effort", "Set effort level for model usage", "low|medium|high|xhigh|max", &EFFORTS, true),
-    b("export", "Export the current conversation to a file or clipboard", "[file]", &[], true),
-    b("help", "Show help and the keys", "", &[], true),
-    b("hooks", "Show the hooks", "", &[], true),
+/// Claude Code 2.1.327. Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
+pub const CLAUDE: [Builtin; 41] = [
+    b("add-dir", "Add a working directory", "<path>", &[], true),
+    b("batch", "Plan a large change; background agents each open a PR", "<instruction>", &[], false),
+    b("branch", "Create a branch of the current conversation at this point", "[name]", &[], true),
+    b("btw", "Ask a side question without interrupting Claude", "[question]", &[], true),
+    b("cd", "Move this session to a new working directory", "<path>", &[], true),
+    b("clear", "Start a new session with empty context; previous session stays on disk (resumable with /resume)", "[name]", &[], false),
+    b("code-review", "Review the current diff or a PR for bugs and cleanups (also /review)", "", &[], false),
+    b("compact", "Free up context by summarizing the conversation so far", "[instructions]", &[], false),
+    b("config", "Open settings (also /settings)", "[key=value]", &[], true),
+    b("context", "Show what fills the context", "[all]", &[], false),
+    b("debug", "Turn on debug logging and investigate problems", "[issue description]", &[], false),
+    b("diff", "View uncommitted changes and per-turn diffs", "", &[], true),
+    b("doctor", "Health-check your setup and fix issues (also /checkup)", "[prompt-audit [<path>]]", &[], false),
+    b("effort", "Set the model's effort level", "low|medium|high|xhigh|max", &EFFORTS, true),
+    b("export", "Export this session to a file or clipboard", "[file]", &[], true),
+    b("fewer-permission-prompts", "Pre-approve safe read-only commands based on your usage", "", &[], false),
+    b("goal", "Set a goal Claude checks before stopping", "[<condition> | clear]", &[], true),
+    b("help", "Show help and available commands", "", &[], true),
+    b("hooks", "View hook configurations for tool events", "", &[], true),
     b("init", "Initialize a new CLAUDE.md file with codebase documentation", "", &[], false),
-    b("mcp", "Manage MCP servers", "", &[], true),
-    b("memory", "Edit the memory and instruction files", "", &[], true),
+    b("mcp", "Manage MCP servers", "[reconnect|enable|disable [<server>|all]]", &[], true),
+    b("memory", "Edit CLAUDE.md files and memory settings", "", &[], true),
     b("model", "Set the AI model for Claude Code", "<model>", &[], true),
-    b("permissions", "Show and edit the tool permission rules", "", &[], true),
-    b("resume", "Resume an earlier conversation", "[session]", &[], true),
-    b("review", "Review the current diff or a PR for bugs", "", &[], false),
-    b("rewind", "Restore the code and/or conversation to a previous point", "", &[], true),
-    b("status", "Show the version, model, account and connections", "", &[], true),
-    b("usage", "Show session cost, plan usage, and activity stats", "", &[], true),
-    b("plugin", "Manage plugins", "", &[], true),
+    b("permissions", "Manage allow and deny tool permission rules (also /allowed-tools)", "", &[], true),
+    b("plan", "Turn on plan mode or view the plan", "[open|<description>]", &[], true),
+    b("plugin", "Manage Claude Code plugins (also /plugins, /marketplace)", "", &[], true),
+    b("recap", "Generate a one-line session recap now", "", &[], false),
+    b("release-notes", "View release notes", "", &[], true),
+    b("reload-plugins", "Activate pending plugin changes in the current session", "[--force]", &[], false),
+    b("reload-skills", "Pick up skills added or changed on disk during this session", "", &[], false),
+    b("rename", "Rename the current conversation", "[name]", &[], true),
+    b("resume", "Resume a previous session (also /continue)", "[session]", &[], true),
+    b("rewind", "Restore earlier code, conversation, or both (also /checkpoint, /undo)", "", &[], true),
+    b("security-review", "Complete a security review of the pending changes on the current branch", "", &[], false),
+    b("simplify", "Clean up the changed code without changing behavior", "[<target>]", &[], false),
+    b("skills", "List available skills", "", &[], true),
+    b("status", "Show version, account, model, MCP servers, and setup warnings", "", &[], true),
+    b("tasks", "View and manage everything running in the background (also /bashes)", "", &[], true),
+    b("update-config", "Change settings: hooks, permissions, environment variables", "", &[], false),
+    b("usage", "Show session cost, plan usage, and activity stats (also /cost, /stats)", "", &[], true),
+    b("verify", "Try your change and report if it works", "", &[], false),
 ];
 
-/// Codex 0.167: a short set of its about 60 (descriptions as its menu says them).
-pub const CODEX: [Builtin; 20] = [
+/// Codex 0.170.0: a short set (descriptions as its menu says them). Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
+pub const CODEX: [Builtin; 32] = [
+    b("agents", "Open the agent command center", "", &[], true),
+    b("cd", "Change the current working directory", "<path>", &[], false),
     b("clear", "Clear the terminal and start a new chat", "", &[], false),
     b("compact", "Summarize conversation to prevent hitting the context limit", "", &[], false),
     b("config", "Configure Codex preferences", "", &[], true),
-    b("copy", "Copy the last response or part of it", "", &[], false),
+    b("copy", "Copy the last response or part of it", "", &[], true),
     b("diff", "Show git diff (including untracked files)", "", &[], false),
-    b("export", "Export the conversation as markdown", "", &[], false),
+    b("export", "Export the conversation as markdown", "[file]", &[], true),
     b("fork", "Fork the current chat", "", &[], false),
-    b("goal", "Set or view the goal for a long-running task", "[goal]", &[], false),
+    b("goal", "Set or view the goal for a long-running task", "[goal]", &[], true),
+    b("hooks", "View and manage lifecycle hooks", "", &[], false),
     b("init", "Create an AGENTS.md file with instructions for Codex", "", &[], false),
     b("mcp", "List MCP tools", "[verbose]", &[], false),
-    b("model", "Choose what model and reasoning effort to use", "", &[], true),   // values: models.rs
+    b("memories", "Configure memory use and generation", "", &[], true),
+    b("model", "Choose what model and reasoning effort to use", "", &[], true),
     b("new", "Start a new chat during a conversation", "", &[], false),
     b("permissions", "Choose what Codex is allowed to do", "", &[], true),
     b("plan", "Switch to Plan mode", "", &[], false),
-    b("rename", "Rename the current thread", "<name>", &[], false),
+    b("presets", "Run or save reusable prompts and slash commands", "", &[], true),
+    b("ps", "List background terminals", "", &[], false),
+    b("pwd", "Show the current working directory", "", &[], false),
+    b("recap", "Summarize the current conversation now", "", &[], false),
+    b("rename", "Rename the current thread", "<name>", &[], true),
     b("resume", "Resume a saved chat", "", &[], true),
-    b("review", "Review my current changes and find issues", "", &[], false),
-    b("status", "Show current session configuration and token usage", "", &[], false),
-    b("usage", "View account usage or use a usage limit reset", "", &[], false),
+    b("review", "Review my current changes and find issues", "[instructions]", &[], true),
+    b("side", "Start a side conversation (also /btw)", "[question]", &[], true),
     b("skills", "Use skills to improve how Codex performs specific tasks", "", &[], true),
+    b("status", "Show current session configuration and token usage", "", &[], false),
+    b("stop", "Stop all background terminals (also /clean)", "", &[], false),
+    b("subagents", "Switch between this session's subagents", "", &[], true),
+    b("usage", "View account usage or use a usage limit reset", "", &[], true),
+    b("warnings", "View retained warnings and diagnostic details", "", &[], true),
 ];
 
-/// pi 1.3 (docs/slash-commands.md and its menu).
-pub const PI: [Builtin; 17] = [
+/// pi 1.3.0. Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
+pub const PI: [Builtin; 19] = [
     b("changelog", "Show changelog entries", "", &[], false),
     b("clone", "Duplicate the current session at the current position", "", &[], false),
-    b("compact", "Compact the session context, optionally with instructions", "[instructions]", &[], false),
-    b("copy", "Copy the last agent message to the clipboard", "", &[], false),
-    b("export", "Export the session as HTML or JSONL", "[path]", &[], false),
+    b("compact", "Manually compact the session context", "[instructions]", &[], false),
+    b("copy", "Copy last agent message to clipboard", "", &[], false),
+    b("export", "Export session (HTML default, or specify path: .html/.jsonl)", "[path]", &[], false),
     b("fork", "Create a new fork from a previous user message", "", &[], true),
     b("hotkeys", "Show all keyboard shortcuts", "", &[], false),
-    b("model", "Select a model", "[provider/model]", &[], true),
-    b("name", "Set the session display name", "[name]", &[], false),
+    b("import", "Import and resume a session from a JSONL file", "<path>", &[], false),
+    b("model", "Select model (opens selector UI)", "[provider/model]", &[], true),
+    b("name", "Set session display name", "[name]", &[], false),
     b("new", "Start a new session", "", &[], false),
-    b("reload", "Reload keybindings, extensions, skills, prompts, themes and context files", "", &[], false),
+    b("reload", "Reload keybindings, extensions, skills, prompts, themes, and context files", "", &[], false),
     b("resume", "Resume a different session", "", &[], true),
-    b("scoped-models", "Enable or disable models for Ctrl+P cycling", "", &[], true),
+    b("scoped-models", "Enable/disable models for Ctrl+P cycling", "", &[], true),
     b("session", "Show session info and stats", "", &[], false),
-    b("settings", "Open the settings menu", "", &[], true),
-    b("thinking", "Set the thinking level", "[level]", &PI_THINKING, true),
-    b("tree", "Navigate the session tree", "", &[], true),
+    b("settings", "Open settings menu", "", &[], true),
+    b("thinking", "Set thinking level", "[level]", &PI_THINKING, true),
+    b("tree", "Navigate session tree (switch branches)", "", &[], true),
+    b("trust", "Save project trust decision for future sessions", "", &[], true),
 ];
 
-/// agy 1.5 (Antigravity CLI): one row a command; its other names are in the description.
-pub const AGY: [Builtin; 28] = [
+/// agy 1.5.10 (one row a command, other names in the description). Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
+pub const AGY: [Builtin; 32] = [
     b("add-dir", "Add a directory to the workspace", "<path>", &[], false),
     b("agents", "List available custom agents", "", &[], false),
     b("artifact", "View and review artifacts", "", &[], true),
@@ -128,23 +171,106 @@ pub const AGY: [Builtin; 28] = [
     b("config", "Open settings panel (also /settings)", "", &[], true),
     b("context", "Visualize current context usage", "", &[], true),
     b("copy", "Copy the last planner response to the clipboard", "[n]", &[], false),
-    b("credits", "Show remaining credits", "", &[], false),
+    b("credits", "Show remaining G1 credits and purchase link", "", &[], false),
     b("diff", "View uncommitted changes and per-turn diffs", "", &[], true),
     b("effort", "Set the reasoning effort", "[level]", &EFFORTS, true),
-    b("fork", "Create a branch of the conversation at this point (also /branch)", "[name]", &[], false),
+    b("fork", "Fork the current conversation", "[name]", &[], false),
     b("goal", "Run until the specified goal is completely finished", "<goal>", &[], false),
     b("help", "Show available commands and keybindings", "", &[], true),
     b("hooks", "Manage hook configurations for tool events", "", &[], true),
+    b("keybindings", "Set custom keybindings", "", &[], true),
     b("mcp", "Manage MCP servers", "", &[], true),
     b("model", "Set a model, or run a single prompt on another model", "[model]", &[], true),
+    b("open", "Open a file or view opened/edited files", "<file_path>", &[], true),
     b("permissions", "Manage tool permissions", "", &[], true),
     b("plan", "Plan carefully before executing a task", "[task]", &[], false),
     b("plugin", "Manage plugins", "", &[], true),
+    b("projects", "Create and edit projects", "", &[], true),
     b("rename", "Rename the current conversation", "<name>", &[], false),
     b("resume", "Browse and resume past conversations (also /switch)", "", &[], true),
     b("rewind", "Rewind conversation to a previous message (also /undo)", "", &[], true),
     b("skills", "List available skills", "", &[], false),
+    b("tasks", "View background tasks", "", &[], true),
     b("usage", "View model quota usage (also /quota)", "", &[], true),
+];
+
+/// omp 18.18.8: a short set. Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
+pub const OMP: [Builtin; 37] = [
+    b("add-dir", "Add a workspace directory to this session (multi-root)", "<path>", &[], false),
+    b("agents", "Open the agents hub (per-agent model, prewalk, and advisor)", "", &[], true),
+    b("branch", "Rewind to a previous message, keeping the old path as a branch (also /rewind)", "", &[], true),
+    b("btw", "Ask a side question, or browse this session's BTW history", "[question]", &[], true),
+    b("changelog", "Show changelog entries", "", &[], true),
+    b("clear", "Clear the conversation context in place, keeping the session", "", &[], false),
+    b("compact", "Manually compact the session context", "[focus]", &[], false),
+    b("context", "Browse context usage and detailed content", "", &[], true),
+    b("copy", "Pick text or code from the conversation to copy", "", &[], true),
+    b("dirs", "List this session's workspace directories", "", &[], false),
+    b("effort", "Set reasoning effort (thinking level) for this session", "[level]", &OMP_THINKING, true),
+    b("export", "Export session to HTML file", "[--themes] [path]", &[], false),
+    b("extensions", "Open Extension Control Center dashboard (also /status)", "", &[], true),
+    b("fork", "Fork this session, or open it in a multiplexer pane or window", "[pane|window|tab]", &[], false),
+    b("git", "Open the git UI (split diff viewer, staging, commit composer)", "[revision]", &[], true),
+    b("goal", "Toggle goal mode (persistent autonomous objective for this session)", "[objective]", &[], true),
+    b("handoff", "Summarize the session into a handoff document and compact in place", "[focus instructions]", &[], false),
+    b("hotkeys", "Show all keyboard shortcuts", "", &[], true),
+    b("hub", "Open the live Agent Hub (subagents, including finished ones) (also /subagents)", "", &[], true),
+    b("jobs", "Show async background jobs status", "[full|kill <id>|kill all]", &[], false),
+    b("loop", "Toggle loop mode: the next prompt re-submits after every yield", "[count|duration] [--while|--until '<cmd>'] [prompt]", &[], false),
+    b("mcp", "Manage MCP servers (add, list, remove, test)", "<subcommand>", &[], true),
+    b("model", "Switch model for this session (also /models)", "", &[], true),
+    b("new", "Start a new session", "", &[], false),
+    b("plan", "Toggle plan mode (agent plans before executing)", "[prompt]", &[], false),
+    b("plugins", "View and manage installed plugins (also /plugin)", "", &[], false),
+    b("queue", "Queue a message for after the agent yields", "<message>", &[], false),
+    b("reload-plugins", "Reload all plugins (skills, commands, hooks, tools, agents, MCP)", "", &[], false),
+    b("rename", "Rename the current session (omit title to generate)", "[title]", &[], false),
+    b("resume", "Resume a different session", "[session id|@claude|@codex]", &[], true),
+    b("retry", "Retry the last failed agent turn", "", &[], false),
+    b("seance", "Consult a saved session without resuming it", "[session id|path] [--model selector]", &[], true),
+    b("settings", "Open settings menu", "", &[], true),
+    b("switch", "Switch model for this session only (fuzzy ids, provider/id, @role, :level)", "[model]", &[], true),
+    b("tools", "Show tools currently visible to the agent", "", &[], true),
+    b("tree", "Navigate session tree (switch branches)", "", &[], true),
+    b("usage", "Show provider usage and limits", "", &[], true),
+];
+
+/// grok 1.0.77 (Grok Build): a short set. Sources: `Sources/HerdrKit/SlashCommands.swift`, above its tables.
+pub const GROK: [Builtin; 34] = [
+    b("btw", "Ask a side question without interrupting", "<question>", &[], false),
+    b("cd", "Change the working directory for new agents", "[path]", &[], true),
+    b("compact", "Compact conversation history", "", &[], false),
+    b("config-agents", "Manage agent definitions (also /agents)", "", &[], true),
+    b("context", "View context usage", "", &[], true),
+    b("copy", "Copy last response to clipboard or file", "[N] [file]", &[], false),
+    b("doctor", "Check this session and show available fixes", "[fix [FIX]]", &[], true),
+    b("effort", "Set reasoning effort for the current model", "<level>", &GROK_EFFORTS, true),
+    b("export", "Export the current conversation to a file or clipboard", "[filename]", &[], true),
+    b("fork", "Branch the current session into a peer agent", "[directive]", &[], true),
+    b("help", "Browse commands and keyboard shortcuts", "", &[], true),
+    b("history", "Search prompt history", "", &[], true),
+    b("hooks", "View hooks", "", &[], true),
+    b("imagine", "Generate an image from a text description", "<description>", &[], false),
+    b("loop", "Run a prompt on a recurring interval", "[interval] <prompt>", &[], false),
+    b("mcps", "Show MCP server status", "", &[], true),
+    b("model", "Switch the active model (also /m)", "<model> [window] [effort]", &[], true),
+    b("new", "Start a new session (also /clear)", "", &[], false),
+    b("personas", "Manage personas (create, edit, delete)", "", &[], true),
+    b("plan", "Enter plan mode", "[description]", &[], false),
+    b("plugins", "View plugins", "", &[], true),
+    b("queue", "List the prompts queued behind the running turn", "", &[], false),
+    b("recap", "Summarize the session so far (also /summarize)", "", &[], false),
+    b("release-notes", "View release notes for the current version (also /changelog)", "", &[], true),
+    b("rename", "Rename the current session (also /title)", "<title> | --auto", &[], false),
+    b("resume", "Resume a previous session by id or name, or pick one", "[SESSION_ID_OR_TITLE]", &[], true),
+    b("rewind", "Rewind to a previous turn", "", &[], true),
+    b("session-info", "Show session info (also /status, /info)", "", &[], true),
+    b("settings", "Open the settings modal (also /config)", "", &[], true),
+    b("skills", "View skills", "", &[], true),
+    b("tasks", "List background tasks, subagents, and scheduled tasks", "", &[], true),
+    b("usage", "View usage (also /cost)", "[show|manage]", &[], true),
+    b("view-plan", "View the current plan (also /show-plan)", "", &[], true),
+    b("workflows", "Browse installed workflows", "", &[], true),
 ];
 
 /// The built-ins of an agent of `kind` (none for an unknown kind).
@@ -154,6 +280,8 @@ pub fn builtins(kind: &str) -> &'static [Builtin] {
         "codex" => &CODEX,
         "pi" => &PI,
         "agy" => &AGY,
+        "omp" => &OMP,
+        "grok" => &GROK,
         _ => &[],
     }
 }
@@ -284,6 +412,25 @@ pub fn list(kind: &str, home: &Path, cwd: &Path) -> Vec<Command> {
             for d in [home.join(".gemini/skills"), home.join(".gemini/antigravity/skills")] {
                 for (name, desc) in skills_in(&d, 0) {
                     l.add(name, desc, "skill", String::new());
+                }
+            }
+        }
+        "omp" => l.builtins(kind, home),
+        "grok" => {
+            l.builtins(kind, home);
+            // Skills and flat command files in .grok and .agents, from the folder up to the repository root, then in
+            // the home (the nearest wins). Not read: the Claude and Cursor folders and `[skills]` folders, which
+            // depend on its config.toml and environment.
+            let mut bases: Vec<(PathBuf, &'static str)> = up_to_repo(cwd).into_iter().map(|d| (d, "project")).collect();
+            bases.push((home.to_path_buf(), "user"));
+            for (base, source) in bases {
+                for d in [".grok", ".agents"] {
+                    for (name, desc) in skills_in(&base.join(d).join("skills"), 0) {
+                        l.add(name, desc, "skill", String::new());
+                    }
+                    for (name, desc, hint) in commands_in(&base.join(d).join("commands"), 0) {
+                        l.add(name, desc, source, hint);
+                    }
                 }
             }
         }
@@ -502,7 +649,7 @@ mod tests {
         let got: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
             got,
-            vec!["add-dir", "clear", "compact", "context", "effort", "export", "init", "model", "resume", "review"],
+            vec!["add-dir", "batch", "branch", "btw", "cd", "clear", "code-review", "compact", "config", "context", "debug", "doctor", "effort", "export", "fewer-permission-prompts", "goal", "init", "mcp", "model", "plan", "recap", "reload-plugins", "reload-skills", "rename", "resume", "security-review", "simplify", "update-config", "verify"],
             "screens with no value (/status, /config …) are left out"
         );
         assert!(v.iter().all(|c| c.source == "builtin"));
@@ -514,7 +661,7 @@ mod tests {
         assert_eq!(c("model").hint, "<model>");
         assert!(c("model").screen && c("resume").screen && !c("clear").screen && !c("context").screen);
         // On the wire: hint, args and screen only where they say something.
-        assert_eq!(serde_json::to_value(c("clear")).unwrap(), serde_json::json!({"name": "clear", "description": "Start a new conversation (clears the history)", "source": "builtin"}));
+        assert_eq!(serde_json::to_value(c("init")).unwrap(), serde_json::json!({"name": "init", "description": "Initialize a new CLAUDE.md file with codebase documentation", "source": "builtin"}));
         assert_eq!(serde_json::to_value(c("add-dir")).unwrap()["hint"], "<path>");
     }
 
@@ -589,7 +736,7 @@ mod tests {
         assert_eq!(v.len(), CODEX.len() - screens("codex", Some(&home)).len());
         let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
         assert!(!c("status").screen, "Codex's /status prints in the chat");
-        assert_eq!(screens("codex", Some(&home)), vec!["config", "model", "permissions", "resume", "skills"], "no model cache: /model takes no value");
+        assert_eq!(screens("codex", Some(&home)), vec!["agents", "config", "copy", "memories", "model", "permissions", "presets", "resume", "skills", "subagents", "usage", "warnings"], "no model cache: /model takes no value");
         assert_eq!(c("rename").hint, "<name>");
         put(&home.join(".codex/models_cache.json"), r#"{"models": [{"slug": "gpt-x", "display_name": "GPT-X", "visibility": "list", "priority": 1}]}"#);
         let v = list("codex", &home, &t.path().join("proj"));
@@ -635,7 +782,7 @@ mod tests {
         assert_eq!(c("review").description, "Review staged changes");
         assert_eq!(vals(&c("thinking").args), vec!["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
         assert!(c("thinking").screen && c("model").screen && !c("session").screen);
-        assert_eq!(screens("pi", Some(&home)), vec!["fork", "resume", "scoped-models", "settings", "tree"]);
+        assert_eq!(screens("pi", Some(&home)), vec!["fork", "resume", "scoped-models", "settings", "tree", "trust"]);
         put(&home.join(".pi/agent/settings.json"), r#"{"enableSkillCommands": false}"#);
         assert!(list("pi", &home, &proj).iter().all(|c| !c.name.starts_with("skill:")), "skill commands turned off");
     }
@@ -655,6 +802,75 @@ mod tests {
         assert!(c("clear").description.contains("/new"));
         assert_eq!(vals(&c("effort").args), vec!["low", "medium", "high", "xhigh", "max"]);
         assert_eq!(c("model").args[1], Arg::new("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"));
+    }
+
+    #[test]
+    fn claude_has_reload_skills_and_plugins() {
+        let t = tempfile::tempdir().unwrap();
+        let v = list("claude", &t.path().join("home"), &t.path().join("proj"));
+        assert!(v.iter().any(|c| c.name == "reload-skills" && c.source == "builtin"));
+        assert!(v.iter().any(|c| c.name == "reload-plugins" && c.hint == "[--force]"));
+        assert!(v.iter().all(|c| c.name != "review") && v.iter().any(|c| c.name == "code-review"), "/review is now /code-review");
+    }
+
+    #[test]
+    fn omp_gets_its_builtins_only() {
+        let t = tempfile::tempdir().unwrap();
+        let home = t.path().join("home");
+        put(&home.join(".omp/agent/skills/s/SKILL.md"), "---\nname: s\n---\n");
+        put(&home.join(".omp/agent/commands/mine.md"), "a command");
+        let v = list("omp", &home, &t.path().join("proj"));
+        let got: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(got, vec!["add-dir", "btw", "clear", "compact", "dirs", "effort", "export", "fork", "git", "goal", "handoff", "jobs", "loop", "mcp", "new", "plan", "plugins", "queue", "reload-plugins", "rename", "resume", "retry", "seance", "switch"]);
+        let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(vals(&c("effort").args), vec!["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]);
+        assert!(c("effort").screen && !c("new").screen && c("goal").screen && !c("fork").screen);
+        assert_eq!(screens("omp", Some(&home)), vec!["agents", "branch", "changelog", "context", "copy", "extensions", "hotkeys", "hub", "model", "settings", "tools", "tree", "usage"]);
+    }
+
+    #[test]
+    fn grok_builtins_skills_and_commands() {
+        let t = tempfile::tempdir().unwrap();
+        let (home, repo) = (t.path().join("home"), t.path().join("repo"));
+        let proj = repo.join("app/web");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::create_dir_all(&proj).unwrap();
+        put(&proj.join(".grok/skills/local/SKILL.md"), "---\nname: local\ndescription: Here\n---\n");
+        put(&repo.join("app/.agents/skills/mid/SKILL.md"), "---\nname: mid\n---\n");
+        put(&repo.join(".grok/skills/top/SKILL.md"), "---\nname: top\n---\n");
+        put(&repo.join(".grok/skills/local/SKILL.md"), "---\nname: local\ndescription: The repo's\n---\n");
+        put(&t.path().join(".grok/skills/outside/SKILL.md"), "---\nname: outside\n---\n");
+        put(&home.join(".grok/skills/mine/SKILL.md"), "---\nname: mine\n---\n");
+        put(&home.join(".grok/skills/quiet/SKILL.md"), "---\nname: quiet\nuser-invocable: false\n---\n");
+        put(&home.join(".agents/skills/shared/SKILL.md"), "---\nname: shared\n---\n");
+        put(&proj.join(".grok/commands/deploy.md"), "---\ndescription: Deploy it\nargument-hint: \"[env]\"\n---\n");
+        put(&repo.join(".agents/commands/ship.md"), "Ship it");
+        put(&home.join(".grok/commands/lint.md"), "Lint it");
+        put(&home.join(".grok/commands/nested/deep.md"), "not loaded: flat files only");
+        put(&home.join(".claude/skills/claude-only/SKILL.md"), "---\nname: claude-only\n---\n");
+        put(&proj.join(".claude/commands/claude-cmd.md"), "x");
+        let v = list("grok", &home, &proj);
+        let own: Vec<(&str, &str)> = v.iter().filter(|c| c.source != "builtin").map(|c| (c.name.as_str(), c.source)).collect();
+        assert_eq!(
+            own,
+            vec![
+                ("deploy", "project"),
+                ("lint", "user"),
+                ("local", "skill"),
+                ("mid", "skill"),
+                ("mine", "skill"),
+                ("shared", "skill"),
+                ("ship", "project"),
+                ("top", "skill"),
+            ],
+            ".grok and .agents skills and commands up to the repository root, then the home; no Claude folders"
+        );
+        let c = |n: &str| v.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(c("local").description, "Here", "the nearest folder wins");
+        assert_eq!(c("deploy").hint, "[env]");
+        assert_eq!(vals(&c("effort").args), vec!["low", "medium", "high", "xhigh"], "no max");
+        assert_eq!(c("model").hint, "<model> [window] [effort]");
+        assert_eq!(screens("grok", Some(&home)), vec!["config-agents", "context", "help", "history", "hooks", "mcps", "personas", "plugins", "release-notes", "rewind", "session-info", "settings", "skills", "tasks", "view-plan", "workflows"]);
     }
 
     #[test]
@@ -684,9 +900,9 @@ mod tests {
         assert!(opens_screen("codex", "/status").is_none());
         assert!(opens_screen("pi", "/thinking").is_some() && opens_screen("agy", "/usage").is_some());
         assert_eq!(opens_screen("cursor-agent", "/model"), None);
-        assert_eq!(screens("claude"), vec!["config", "help", "hooks", "mcp", "memory", "permissions", "plugin", "rewind", "status", "usage"]);
+        assert_eq!(screens("claude"), vec!["diff", "help", "hooks", "memory", "permissions", "plugin", "release-notes", "rewind", "skills", "status", "tasks", "usage"]);
         // Every screen command is either listed (it takes a value) or named in `screens`.
-        for kind in ["claude", "codex", "pi", "agy"] {
+        for kind in KINDS {
             let listed = list(kind, t.path(), t.path());
             for b in builtins(kind).iter().filter(|b| b.screen) {
                 assert!(listed.iter().any(|c| c.name == b.name) != screens(kind).contains(&b.name), "{kind} /{}", b.name);
@@ -711,8 +927,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(text).unwrap();
         assert_eq!(v["efforts"], serde_json::json!(EFFORTS));
         assert_eq!(v["pi_thinking"], serde_json::json!(PI_THINKING));
-        assert_eq!(v["builtins"].as_object().unwrap().len(), 4, "the four kinds, no other");
-        for kind in ["claude", "codex", "pi", "agy"] {
+        assert_eq!(v["omp_thinking"], serde_json::json!(OMP_THINKING));
+        assert_eq!(v["grok_efforts"], serde_json::json!(GROK_EFFORTS));
+        assert_eq!(KINDS, ["claude", "codex", "pi", "agy", "omp", "grok"]);
+        assert_eq!(v["builtins"].as_object().unwrap().len(), KINDS.len(), "the six kinds, no other");
+        for kind in KINDS {
             let own: Vec<serde_json::Value> = builtins(kind)
                 .iter()
                 .map(|b| serde_json::json!({"name": b.name, "description": b.description, "hint": b.hint, "args": b.args, "screen": b.screen}))
