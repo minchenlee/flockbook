@@ -277,6 +277,19 @@ func checksSummaryAsk() async {
     }
 }
 
+func checksSinceJump() {
+    // The card's Jump: the owner's message comes into the window (with up to maxRows after it), then the view goes to it.
+    let ids = (0..<400).map { "m\($0)" }
+    var w = ConversationWindow(shown: ConversationWindow.page)
+    check(w.reveal("m350", ids) && w.range(ids) == 300..<400 && !w.detached, "since jump: a row in the window: nothing moves")
+    check(w.reveal("m120", ids) && w.range(ids).contains(120) && w.range(ids).lowerBound == 120 && w.range(ids).count == ConversationWindow.maxRows, "since jump: an older row: the window starts at it, at most maxRows")
+    check(w.detached && w.range(ids).upperBound == 270, "since jump: newer rows wait behind Jump to latest")
+    check(w.reveal("m380", ids) && w.range(ids).contains(380), "since jump: a newer row than the window")
+    check(!w.reveal("gone", ids), "since jump: a row not in the log: false")
+    var near = ConversationWindow(shown: ConversationWindow.page)
+    check(near.reveal("m260", ids) && near.range(ids) == 260..<400 && !near.detached, "since jump: the window grows to the newest when it can")
+}
+
 func checksLogTails() async {
     await scratch { dir in
         let url = dir.appendingPathComponent("s.jsonl")
