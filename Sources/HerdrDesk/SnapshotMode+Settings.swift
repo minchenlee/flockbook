@@ -113,7 +113,7 @@ extension SnapshotRunner {
         _ = await shoot(SettingsSplit(fixed: .agents, remote: RemoteHub.preview(running: false, devices: [], offer: false)), dark: false, to: nil) { _ in offAgents = shown() }
         step("agents with Remote access off: [\(names(offAgents))], no question hook", offAgents == [.allowInput, .statusLine, .grokStatusLine])
         // Sparkle never starts in a check run (UpdaterGate), so the automatic-update switch cannot show here.
-        // Written by and Model show only with Summaries on (off by default); --snapshot-since shows them.
+        // Written by and Model show only with Summaries on (off by default); --snapshot-since checks them.
         let missing = Set(SettingsControl.allCases).subtracting(seen).subtracting([.autoUpdate, .summaryBy, .summaryModel])
         step("every control shows in some tab (missing: [\(names(missing))])", missing.isEmpty)
 
@@ -236,6 +236,8 @@ enum SettingsProbe {
     nonisolated(unsafe) static var tabs: [SettingsTab: CGRect] = [:]
     /// The rows on screen now (`settingsControl`).
     nonisolated(unsafe) static var controls: [SettingsControl: CGRect] = [:]
+    /// Which view put each row in `controls`: a view that leaves removes only its own row, not the one a newer view put there.
+    nonisolated(unsafe) static var owners: [SettingsControl: UUID] = [:]
     /// The terminal colours row's value (the theme's names, or why it is not used).
     nonisolated(unsafe) static var terminalColors: String?
     /// The Back row (the sidebar's while Settings has it, or the page's own list while the sidebar is hidden).

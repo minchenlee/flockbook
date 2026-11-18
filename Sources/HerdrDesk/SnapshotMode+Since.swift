@@ -116,8 +116,13 @@ extension SnapshotRunner {
             let models = SummaryModels(fixed: ["pi": .init(models: [(id: "opencode-go/glm-5.3-flash", note: "1M context"), (id: "openrouter/qwen-coder:free", note: "262K context")], source: "program", failed: false)])
             for (n, on, by, m) in [("off", false, "own", ""), ("on", true, "own", ""), ("pi", true, "pi", "opencode-go/glm-5.3-flash")] {
                 AppDefaults.store.set(on, forKey: SinceModel.onKey); AppDefaults.store.set(by, forKey: SinceModel.byKey); AppDefaults.store.set(m, forKey: SinceModel.modelKey)
-                let ok = await shotSettings(SettingsView(tab: .general, since: since, summaryModels: models), dark: dark, path: "\(dir)/since-settings-\(n)-\(mode).png")
-                step("settings \(n) \(mode): off every screen", ok)
+                // The rows --snapshot-settings leaves out (it runs with Summaries off): Written by only when on, Model only for a set
+                // program. Read while the window is up: the last window's rows leave the probe when it closes.
+                var rows: Set<SettingsControl> = []
+                let ok = await shotSettings(SettingsView(tab: .general, since: since, summaryModels: models), dark: dark, path: "\(dir)/since-settings-\(n)-\(mode).png") {
+                    rows = Set(SettingsProbe.controls.filter { $0.value.width > 0 }.keys).intersection([.summaries, .summaryBy, .summaryModel])                }
+                let want: Set<SettingsControl> = !on ? [.summaries] : by == "own" ? [.summaries, .summaryBy] : [.summaries, .summaryBy, .summaryModel]
+                step("settings \(n) \(mode): off every screen, rows [\(rows.map(\.rawValue).sorted().joined(separator: ","))]", ok && rows == want)
             }
         }
         AppDefaults.store.removeObject(forKey: SinceModel.onKey)
@@ -149,15 +154,15 @@ extension SnapshotRunner {
         return (cardFrame, composer.minY - cardFrame.maxY, away)
     }
 
-    @MainActor private static func shotSettings(_ v: some View, dark: Bool, path: String) async -> Bool {
+    @MainActor private static func shotSettings(_ v: some View, dark: Bool, path: String, inspect: () -> Void = {}) async -> Bool {
         let width: CGFloat = 760
         let fit = NSHostingController(rootView: v.environment(\.colorScheme, dark ? .dark : .light)).sizeThatFits(in: CGSize(width: width, height: 0))
         let size = NSSize(width: width, height: max(80, fit.height))
         return await renderSince(ZStack(alignment: .top) { Color(nsColor: .windowBackgroundColor); v }
-            .environment(\.colorScheme, dark ? .dark : .light).frame(width: size.width, height: size.height), size: size, dark: dark, path: path)
+            .environment(\.colorScheme, dark ? .dark : .light).frame(width: size.width, height: size.height), size: size, dark: dark, path: path, inspect: inspect)
     }
 
-    @MainActor private static func renderSince(_ view: some View, size: NSSize, dark: Bool, path: String) async -> Bool {
+    @MainActor private static func renderSince(_ view: some View, size: NSSize, dark: Bool, path: String, inspect: () -> Void = {}) async -> Bool {
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: size)
         let win = OffscreenWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
@@ -170,6 +175,7 @@ extension SnapshotRunner {
             host.cacheDisplay(in: host.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
+        inspect()
         win.orderOut(nil)
         return away
     }

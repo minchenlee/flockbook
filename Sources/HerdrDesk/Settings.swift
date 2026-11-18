@@ -386,9 +386,19 @@ struct SettingsPage: View {
 
 extension View {
     /// Marks a Settings row: checks find each control's frame (and so its tab) in `SettingsProbe.controls`.
-    func settingsControl(_ c: SettingsControl) -> some View {
-        probe { SettingsProbe.controls[c] = $0 }
-            .onDisappear { SettingsProbe.controls[c] = nil }
+    func settingsControl(_ c: SettingsControl) -> some View { modifier(SettingsControlProbe(control: c)) }
+}
+
+private struct SettingsControlProbe: ViewModifier {
+    let control: SettingsControl
+    @State private var me = UUID()
+    func body(content: Content) -> some View {
+        content
+            .probe { SettingsProbe.controls[control] = $0; SettingsProbe.owners[control] = me }
+            .onDisappear {
+                guard SettingsProbe.owners[control] == me else { return }
+                SettingsProbe.controls[control] = nil; SettingsProbe.owners[control] = nil
+            }
     }
 }
 
