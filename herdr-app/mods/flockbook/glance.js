@@ -94,15 +94,16 @@ export async function summarize(cx, now = Date.now()) {
   if (!glanceOn()) return;
   if (!shared(KEY_CONFIG)) await loadConfig();
   if (!summariesOn() || now - (shared(KEY_SUMMARY_BUSY) ?? 0) < SUMMARY_BUSY_MS) return;
-  const have = shared(KEY_SUMMARY) ?? {}, by = writer(), own = setting("summary_by") === "own";
-  const next = agents().filter((a) => {
-    const g = glanceFor(a.address), had = have[term(a.address)];
-    return a.status !== "working" && a.status !== "blocked" && g?.id && g.said && (!own || WRITERS.includes(g.agent))
-      && !(had?.id === g.id && had.by === by && had.v === SUMMARY_V);
-  }).sort((a, b) => (glanceFor(b.address).ended ?? 0) - (glanceFor(a.address).ended ?? 0)).slice(0, SUMMARY_BATCH);
-  if (!next.length || !(await sidecar.hasCommand("summary"))) return;
+  // Taken before the first await: another copy of this mod that looks now sees it.
   setShared(KEY_SUMMARY_BUSY, now);
   try {
+    const have = shared(KEY_SUMMARY) ?? {}, by = writer(), own = setting("summary_by") === "own";
+    const next = agents().filter((a) => {
+      const g = glanceFor(a.address), had = have[term(a.address)];
+      return a.status !== "working" && a.status !== "blocked" && g?.id && g.said && (!own || WRITERS.includes(g.agent))
+        && !(had?.id === g.id && had.by === by && had.v === SUMMARY_V);
+    }).sort((a, b) => (glanceFor(b.address).ended ?? 0) - (glanceFor(a.address).ended ?? 0)).slice(0, SUMMARY_BATCH);
+    if (!next.length || !(await sidecar.hasCommand("summary"))) return;
     await Promise.all(next.map(async (a) => {
       const t = term(a.address), id = glanceFor(a.address).id;
       const r = await sidecar.summary(t);

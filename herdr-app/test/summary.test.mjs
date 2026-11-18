@@ -116,6 +116,17 @@ test("summaries on, many agents stopped: at most three are asked at a time, the 
   assert.equal(asked().length, 5);
 });
 
+test("summaries on, two copies of the mod look at the same time: one asks, the other sees it busy", async () => {
+  fake.exec = helper([gline("t1"), gline("t2")], { t1: sum("t1", "About t1."), t2: sum("t2", "About t2.") });
+  const cx = fakeCx();
+  await pollGlance(cx, true);
+  on(); forgetCommands();
+  await Promise.all([summarize(cx), summarize(cx)]);
+  assert.deepEqual(asked(), ["t1", "t2"], "each turn once");
+  await summarize(cx);
+  assert.deepEqual(asked(), ["t1", "t2"], "free again after: nothing new to ask");
+});
+
 test("summaries on, an older helper without `summary`: nothing is asked", async () => {
   on();
   fake.exec = helper([gline("t1")], {}, ["version", "glance"]);
