@@ -62,7 +62,7 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     std::fs::create_dir_all(proj.join(".claude/commands")).unwrap();
     std::fs::write(proj.join(".claude/commands/deploy.md"), "---\ndescription: Deploy the app\n---\n").unwrap();
     std::fs::create_dir_all(home.join(".claude/commands")).unwrap();
-    std::fs::write(home.join(".claude/commands/review.md"), "Review the diff.").unwrap();
+    std::fs::write(home.join(".claude/commands/init.md"), "Make my own CLAUDE.md.").unwrap();
     let fake = FakeHc::start();
     let mut c = claude("t1", "idle", "idle");
     c["cwd"] = serde_json::json!(proj);
@@ -78,7 +78,7 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     assert_eq!(v[1]["agent"], "claude");
     let cmds = v[1]["commands"].as_array().unwrap();
     let own: Vec<&Value> = cmds.iter().filter(|c| c["source"] != "builtin").collect();
-    assert_eq!(own, vec![&serde_json::json!({"name": "deploy", "description": "Deploy the app", "source": "project"})], "the user's review is hidden by the built-in /review");
+    assert_eq!(own, vec![&serde_json::json!({"name": "deploy", "description": "Deploy the app", "source": "project"})], "the user's init is hidden by the built-in /init");
     let model = cmds.iter().find(|c| c["name"] == "model").unwrap();
     assert_eq!(model["args"][1], serde_json::json!({"value": "claude-opus-5-5", "label": "Opus 5.5"}), "full ids, with labels");
     assert!(model["args"].as_array().unwrap().contains(&serde_json::json!({"value": "opus", "label": "The latest Opus"})));
@@ -91,7 +91,7 @@ fn commands_lists_a_claude_terminals_slash_commands() {
     let codex: Vec<&str> = o[1]["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
     assert!(codex.contains(&"compact") && !codex.contains(&"deploy"), "Codex: its built-ins, not Claude's files: {codex:?}");
     assert!(!codex.contains(&"model"), "Codex's /model takes no value: it can never be sent from the chat");
-    assert_eq!(o[1]["screens"], serde_json::json!(["config", "model", "permissions", "resume", "skills"]));
+    assert_eq!(o[1]["screens"], serde_json::json!(["agents", "config", "copy", "memories", "model", "permissions", "presets", "resume", "skills", "subagents", "usage", "warnings"]));
     assert!(v[1]["screens"].as_array().unwrap().contains(&serde_json::json!("status")));
     assert_eq!(run_home(&["commands", "--terminal", "t3"])[1]["code"], "not-agent");
     assert_eq!(run_home(&["commands"])[1]["message"], "commands needs --terminal <addr>");

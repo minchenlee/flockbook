@@ -376,7 +376,7 @@ The "/" commands of an agent's terminal, for the list above the reply box: Claud
 files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
 
 ```json
-{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["config","help","hooks","mcp","memory","permissions","plugin","rewind","status","usage"]}
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new session with empty context; previous session stays on disk (resumable with /resume)","source":"builtin","hint":"[name]"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["diff","help","hooks","memory","permissions","plugin","release-notes","rewind","skills","status","tasks","usage"]}
 ```
 
 - Sources per agent (`agent`), the first one with a name wins:
