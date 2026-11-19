@@ -36,9 +36,12 @@ final class SinceModel {
         store = SinceStore(dir: dir)
     }
 
+    /// A check or snapshot run: never this Mac's marks or logs.
+    static let isCheck = AppDefaults.isTest || CommandLine.arguments.contains(where: { $0.hasPrefix("--snapshot") || $0.hasPrefix("--test") || $0.hasPrefix("--hittest") })
+
     /// The app's folder; a fresh temp folder for every check and snapshot run, so they never see the owner's marks.
     static func defaultDir() -> URL {
-        if AppDefaults.isTest || CommandLine.arguments.contains(where: { $0.hasPrefix("--snapshot") || $0.hasPrefix("--test") }) {
+        if isCheck {
             return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("flockbook-since-\(getpid())")
         }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -206,6 +209,8 @@ final class SinceModel {
     /// The agent's log: the one the store reads, else found once on disk (it is not on screen).
     private func logURL(_ a: Agent, sid: String, store: HerdrStore) -> URL? {
         if let logFor { return logFor(a, sid) }
+        // Checks and snapshots read only the logs they wrote (`logFor`), never one found on this Mac.
+        if Self.isCheck { return nil }
         if let u = store.logURL(for: sid) { return u }
         if let u = located[sid], FileManager.default.fileExists(atPath: u.path) { return u }
         let u = SessionLog.locate(agent: a.kind, sessionId: sid, dir: SessionLog.defaultDir(agent: a.kind))
