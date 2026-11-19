@@ -94,18 +94,21 @@ public actor HCClient {
     /// be reached (not started yet, restarting). Nothing ran then; any other error came after the request went.
     /// Called off with its task: the connection closes, and herdr-core ends the program and all it started ("when the
     /// caller goes away", `machine.exec`). hc has no other way to end a run; its `timeout` is the last limit.
-    func run(_ method: String, json params: HCJSON, timeout: TimeInterval) async throws -> HCJSON {
+    /// `go` is asked once the connection is open, right before the request is written: false (Summaries went off,
+    /// another writer), or a run called off by then, writes nothing (`HCNotSent`).
+    func run(_ method: String, json params: HCJSON, timeout: TimeInterval, go: @escaping @Sendable () async -> Bool = { true }) async throws -> HCJSON {
         seq += 1
         let id = seq
         let path = session.socketPath
         let body = try HCRPC.request(id: id, method: method, params: params.object)
         let conn = HCRunConnection()
         let line = try await withTaskCancellationHandler {
-            try await Task.detached(priority: .userInitiated) { () throws -> Data in
+            try await Task.detached(priority: .userInitiated) { () async throws -> Data in
                 let sock: LineSocket
                 do { sock = try LineSocket(path: path, timeout: timeout) } catch { throw HCNotSent() }
                 defer { sock.close() }
                 guard conn.open(sock) else { throw HCNotSent() }   // called off before the request went
+                guard await go(), !conn.isCancelled else { throw HCNotSent() }
                 try sock.writeLine(body)
                 while true {
                     let line = try sock.readLine()

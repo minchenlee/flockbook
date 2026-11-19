@@ -31,6 +31,10 @@ final class SinceModel {
     @ObservationIgnored private var batch: Task<Void, Never>?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    /// Moves when Summaries changes (off, another writer or model) or the app quits: a run of an older one never starts.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var lastSettings: Summary.Settings?
+    @ObservationIgnored private var settingsObserver: NSObjectProtocol?
 
     init(dir: URL) {
         store = SinceStore(dir: dir)
@@ -119,13 +123,14 @@ final class SinceModel {
     func start(_ model: AppModel) {
         guard loop == nil else { return }
         watchApp()
+        watchSettings()
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.stop() }
         })
         loop = Task { @MainActor [weak self, weak model] in
             while !Task.isCancelled {
                 if let self, let model {
-                    if !self.settings.on { self.batch?.cancel() }
+                    self.settingsMayHaveChanged()
                     if model.screen == .tab, self.appVisible { await self.tick(model) }
                 }
                 try? await Task.sleep(for: .seconds(5))
@@ -135,7 +140,32 @@ final class SinceModel {
 
     /// Ends the runs of a model now (the app quits): their programs stop with them.
     func stop() {
+        generation += 1
         batch?.cancel()
+    }
+
+    /// A change of Summaries (off, another writer or model) calls the round off at once: its programs stop, and no
+    /// request made for the old settings goes out.
+    func watchSettings() {
+        guard settingsObserver == nil else { return }
+        lastSettings = settings
+        settingsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.settingsMayHaveChanged() }
+        }
+    }
+
+    private func settingsMayHaveChanged() {
+        let now = settings
+        guard now != lastSettings else { return }
+        lastSettings = now
+        generation += 1
+        batch?.cancel()
+    }
+
+    /// A run made in `generation` with the settings `s` may still start: the same settings, the agent stopped.
+    private func mayRun(_ generation: Int, _ s: Summary.Settings, _ pane: Pane, _ model: AppModel?) -> Bool {
+        guard let model, generation == self.generation, settings == s, let st = status(pane, model) else { return false }
+        return st != .working && st != .blocked
     }
 
     /// Waits for the round that is asking now (checks and snapshots).
@@ -181,10 +211,15 @@ final class SinceModel {
         batch = Task { @MainActor [weak self, weak model] in
             let tasks = runs.map { (c, pane, items, id, run) in
                 Task { @MainActor [weak self, weak model] () -> Bool in
-                    guard let self, let model, !Task.isCancelled else { return false }
-                    // Checked again when the run starts: no await between here and the program's start.
-                    guard self.settings == s, let st = self.status(pane, model), st != .working, st != .blocked else { return false }
-                    let r = await Summary.ask(items: items, kind: c.kind, settings: s, runner: run, store: self.store, program: program)
+                    guard let self, !Task.isCancelled else { return false }
+                    // Checked when the run's turn comes, and again right before the program starts or its request goes
+                    // to herdr-core (`go`): Summaries still on with the same writer, the agent still stopped.
+                    let g = self.generation
+                    guard self.mayRun(g, s, pane, model) else { return false }
+                    let go: @Sendable () async -> Bool = { [weak self, weak model] in
+                        await MainActor.run { self?.mayRun(g, s, pane, model) ?? false }
+                    }
+                    let r = await Summary.ask(items: items, kind: c.kind, settings: s, runner: run, store: self.store, program: program, go: go)
                     guard !Task.isCancelled else { return false }   // called off: the turn is asked again later
                     // A failed run is marked (not asked again); nothing ran (herdr-core not reached): asked again later.
                     guard let k = Summary.keep(r, id: id, by: s.writer) else { return false }

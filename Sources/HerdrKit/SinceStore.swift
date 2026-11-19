@@ -115,12 +115,15 @@ public struct ExecResult: Sendable, Hashable {
 /// Runs one program once, without a terminal and without a shell.
 public protocol SummaryRunner: Sendable {
     func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult
+    /// The same, asking `go` right before the program starts (through herdr-core: right before the request is written);
+    /// false: nothing runs (`sent` false).
     func run(argv: [String], input: String, cwd: String, timeout: Int, go: @escaping @Sendable () async -> Bool) async -> ExecResult
 }
 
 extension SummaryRunner {
     public func run(argv: [String], input: String, cwd: String, timeout: Int, go: @escaping @Sendable () async -> Bool) async -> ExecResult {
-        await run(argv: argv, input: input, cwd: cwd, timeout: timeout)
+        guard await go() else { return ExecResult(code: nil, sent: false) }
+        return await run(argv: argv, input: input, cwd: cwd, timeout: timeout)
     }
 }
 
@@ -247,10 +250,14 @@ public struct HCExecRunner: SummaryRunner {
     }
 
     public func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult {
+        await run(argv: argv, input: input, cwd: cwd, timeout: timeout, go: { true })
+    }
+
+    public func run(argv: [String], input: String, cwd: String, timeout: Int, go: @escaping @Sendable () async -> Bool) async -> ExecResult {
         try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
         let p = HCJSON(Self.payload(argv: argv, input: input, cwd: cwd, timeout: timeout))
         do {
-            let r = try await client.run("machine.exec", json: p, timeout: TimeInterval(timeout + 5))
+            let r = try await client.run("machine.exec", json: p, timeout: TimeInterval(timeout + 5), go: go)
             let dec = { (k: String) in String(decoding: Data(base64Encoded: r[k] as? String ?? "") ?? Data(), as: UTF8.self) }
             if r["timed_out"] as? Bool == true { return ExecResult(code: nil, stdout: dec("stdout"), timedOut: true) }
             return ExecResult(code: (r["code"] as? NSNumber).map { Int32(truncating: $0) }, stdout: dec("stdout"), stderr: dec("stderr"))
@@ -288,6 +295,7 @@ extension Summary {
     @MainActor
     public static func ask(items: [ConversationItem], kind: String, settings: Settings, runner: any SummaryRunner, store: SinceStore,
                            program: String? = nil, cwd: String = NSTemporaryDirectory() + "flockbook-summary",
+                           go: @escaping @Sendable () async -> Bool = { true },
                            now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) async -> Result<(id: String, state: String, needs: String?, model: String), Failure> {
         // A model is the person's choice for one program; each agent's own program runs its default.
         let (by, model) = settings.by == "own" ? (kind, nil) : (settings.by, modelName(settings.model))
@@ -297,7 +305,7 @@ extension Summary {
         guard let (id, text) = input(items, agent: kind) else { return .failure(.none("The agent wrote nothing in its last turn.")) }
         let sent = stdin(by, text)
         let began = Date()
-        let r = await runner.run(argv: args, input: sent, cwd: cwd, timeout: timeoutS)
+        let r = await runner.run(argv: args, input: sent, cwd: cwd, timeout: timeoutS, go: go)
         if !r.sent { return .failure(.notSent) }
         let used = { (got: Int, ok: Bool) in
             store.noteRun(at: now(), by: by, model: named, sent: sent.unicodeScalars.count + (by == "codex" ? 0 : system.unicodeScalars.count),

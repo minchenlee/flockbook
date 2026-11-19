@@ -31,7 +31,11 @@ func checksHCExecGate() async throws {
     fake.execReplies = [("claude", "STATE: Done.\n")]
     let run = HCExecRunner(client: HCClient(session: HCSession(socketPath: fake.path)))
     let seen = Flag()
-    let no = await run.run(argv: ["claude", "-p"], input: "T", cwd: NSTemporaryDirectory(), timeout: 10, go: { seen.add(fake.openCount); return false })
+    let no = await run.run(argv: ["claude", "-p"], input: "T", cwd: NSTemporaryDirectory(), timeout: 10, go: {
+        // The fake takes the connection a moment after connect returns: wait for it (none comes if not connected).
+        for _ in 0..<40 where fake.openCount == 0 { try? await Task.sleep(for: .milliseconds(25)) }
+        seen.add(fake.openCount); return false
+    })
     let execs = fake.calls.filter { $0.method == "machine.exec" }.count
     check(!no.sent && execs == 0, "hc exec gate: no: nothing goes to herdr-core (sent \(no.sent), \(execs) runs)")
     check(seen.all.count == 1 && (seen.all.first ?? 0) >= 1, "hc exec gate: asked once, with the connection open (\(seen.all))")

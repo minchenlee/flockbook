@@ -187,6 +187,33 @@ extension SnapshotRunner {
             step("a round that asks does not hold the loop (\(String(format: "%.1f", took)) s); its answer comes after", took < 1.5 && s.store.summaries.first?.value.state == "Done.")
         }
         do {
+            // Changed while the request is on its way (herdr-core: after the connection opened): nothing goes.
+            let asked = tmp.appendingPathComponent("asked-late")
+            let s = fresh("app-late", program: stub("m-late", "cat > '\(asked.path)'\n\(answer)")) { a, _ in a.name == agent.name ? log : nil }
+            s.runner = { _ in LateChange(change: { AppDefaults.store.set("pi", forKey: SinceModel.byKey) }) }
+            await s.tick(model); await s.settle()
+            step("another writer while the request is on its way: nothing goes, nothing is marked", !FileManager.default.fileExists(atPath: asked.path) && s.store.summaries.isEmpty)
+            AppDefaults.store.set("own", forKey: SinceModel.byKey)
+        }
+        do {
+            // Changed while the model runs: the round is called off at once, its program stops.
+            let pidFile = tmp.appendingPathComponent("pid-writer")
+            let s = fresh("app-writer", program: stub("m-hang-w", "echo $$ > '\(pidFile.path)'\nexec sleep 30")) { a, _ in a.name == agent.name ? log : nil }
+            s.watchSettings()
+            await s.tick(model)
+            var pid: Int32 = 0
+            for _ in 0..<300 where pid == 0 {
+                try? await Task.sleep(for: .milliseconds(50))
+                pid = Int32(((try? String(contentsOf: pidFile, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            }
+            let began = Date()
+            AppDefaults.store.set("pi", forKey: SinceModel.byKey)
+            await s.settle()
+            let took = Date().timeIntervalSince(began)
+            step("another writer while the model runs: its program stops (\(String(format: "%.1f", took)) s, pid \(pid)), nothing is marked", pid > 0 && took < 5 && kill(pid, 0) != 0 && s.store.summaries.isEmpty)
+            AppDefaults.store.set("own", forKey: SinceModel.byKey)
+        }
+        do {
             let pidFile = tmp.appendingPathComponent("pid")
             let s = fresh("app-quit", program: stub("m-hang", "echo $$ > '\(pidFile.path)'\nexec sleep 30")) { a, _ in a.name == agent.name ? log : nil }
             await s.tick(model)
@@ -199,6 +226,20 @@ extension SnapshotRunner {
             s.stop(); await s.settle()
             let took = Date().timeIntervalSince(began)
             step("the app quits during a run: its program stops (\(String(format: "%.1f", took)) s, pid \(pid), alive \(pid > 0 && kill(pid, 0) == 0), kept \(s.store.summaries.count)) and the turn is not marked", pid > 0 && took < 5 && kill(pid, 0) != 0 && s.store.summaries.isEmpty)
+        }
+    }
+
+    /// A runner whose request is on its way when the settings change (herdr-core: the connection is open), then asks
+    /// `go` as `HCExecRunner` does right before the request is written.
+    private struct LateChange: SummaryRunner {
+        let change: @MainActor @Sendable () -> Void
+        func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult {
+            await ProcessRunner().run(argv: argv, input: input, cwd: cwd, timeout: timeout)
+        }
+        func run(argv: [String], input: String, cwd: String, timeout: Int, go: @escaping @Sendable () async -> Bool) async -> ExecResult {
+            await change()
+            guard await go() else { return ExecResult(code: nil, sent: false) }
+            return await run(argv: argv, input: input, cwd: cwd, timeout: timeout)
         }
     }
 
