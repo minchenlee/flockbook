@@ -129,6 +129,7 @@ struct PaneView: View {
                             }
                             if let line = model.statusLines[pane.id] { StatusLineBar(record: line) }
                             composer(agent)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.composer = $0 } }
                         }
                     }
                     .softScrollEdges([.top, .bottom])
@@ -217,11 +218,13 @@ extension PaneView {
     /// minimized or covered.
     var sinceOnScreen: Bool { model.screen == .tab && model.since.appVisible }
 
-    /// A question, stop or approval card holds the reply box's place: the Since you left card waits, so the two never
-    /// take more than the pane's height.
+    /// A question, stop or approval card holds the reply box's place, or an approval card stands in the conversation:
+    /// the Since you left card waits (`SinceLeft.waits`).
     private func composerHoldsCard(_ agent: Agent) -> Bool {
-        question(agent) != nil || (stoppedScreenCard != nil && agent.status == .blocked)
-            || (ApprovalProbe.injected != nil && agent.status == .blocked) || model.cardInComposer(pane) != nil
+        SinceLeft.waits(question: question(agent) != nil,
+                        stopCard: (stoppedScreenCard != nil || ApprovalProbe.injected != nil) && agent.status == .blocked,
+                        composerCard: model.cardInComposer(pane) != nil,
+                        conversationCard: model.liveCardInConversation(pane) != nil)
     }
 
     /// The Since you left card, while the owner has not hidden it (×) and the conversation has rows.
@@ -234,6 +237,7 @@ extension PaneView {
                 SinceCard(card: SinceLeft.card(items, away: away, facts: facts), summary: model.since.summary(key, id: facts.id),
                           onJump: { jump = SinceJump(id: $0, token: (jump?.token ?? 0) + 1) },
                           onHide: { model.since.away[key] = nil })
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.card = $0 } }
                     .inputColumn()
                     .padding(.bottom, 8)
             }

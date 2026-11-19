@@ -71,18 +71,19 @@ extension SnapshotRunner {
         since.runner = { _ in ProcessRunner() }
         since.program = stub.path
         AppDefaults.store.removeObject(forKey: SinceModel.onKey)
+        AppDefaults.store.removeObject(forKey: SinceModel.byKey); AppDefaults.store.removeObject(forKey: SinceModel.modelKey)
         step("Summaries is off by default", since.settings == Summary.Settings())
-        await since.tick(model)
+        await since.tick(model); await since.settle()
         step("off: no model runs", since.store.summaries.isEmpty && !FileManager.default.fileExists(atPath: asked.path))
         AppDefaults.store.set(true, forKey: SinceModel.onKey)
-        await since.tick(model)
+        await since.tick(model); await since.settle()
         let kept = since.store.summaries[key]
         step("on: the stopped agent's last turn is asked (\(String(describing: kept)))", kept?.state?.hasPrefix("Quoted newlines") == true && kept?.needs == "Say whether to add a changelog line.")
         let sent = (try? String(contentsOf: asked, encoding: .utf8)) ?? ""
         step("the model gets the owner's message, the end of the turn and the line of facts", sent.hasPrefix("OWNER ASKED:\nFix the importer") && sent.contains("FROM THE LOG: edited 2 files; ran 1 commands; tests passed (pytest)"))
         step("only that agent: others have no log here", since.store.summaries.count == 1)
         try? FileManager.default.removeItem(at: asked)
-        await since.tick(model)
+        await since.tick(model); await since.settle()
         step("each turn once: not asked again", !FileManager.default.fileExists(atPath: asked.path))
         step("the usage line counts the run (\(since.usageText()))", since.usageText().hasPrefix("Today: 1 run of a model, about "))
         AppDefaults.store.set(false, forKey: SinceModel.onKey)
@@ -91,6 +92,9 @@ extension SnapshotRunner {
         step("off: a kept summary is not shown", since.summary(key, id: facts.id) == nil)
         AppDefaults.store.set(true, forKey: SinceModel.onKey)
         step("on: the kept summary is shown for its turn", since.summary(key, id: facts.id)?.state == kept?.state)
+
+        await rounds(tmp: tmp, log: log, agent: agent, model: model, step: step)
+        AppDefaults.store.set(true, forKey: SinceModel.onKey)
 
         // The marks and the arrival, in the app's own folder.
         let ms = { (d: Date) in Int64(d.timeIntervalSince1970 * 1000) }
@@ -103,6 +107,13 @@ extension SnapshotRunner {
         let card = SinceLeft.card(items, away: away, facts: facts)
         step("the card's counts: \(SinceLeft.countLine(card))", card.messages == 2 && card.said?.text == "Fix the importer so quoted newlines stay in one row.")
         let quiet = SinceLeft.card(items, away: .init(from: ms(now) - 30 * 60_000, back: ms(now)), facts: facts)
+        let unwritable = await shotPane(items, card: card, summary: nil, dark: false, size: NSSize(width: 600, height: 500), path: tmp.appendingPathComponent("no-such-folder/x.png").path)
+        step("a picture that cannot be written fails the check", !unwritable.away)
+        for dark in [false, true] {
+            let r = await shotRealPane(model: AppModel(store: store), agent: agent, log: log, now: now, dark: dark, path: "\(dir)/since-pane-\(dark ? "dark" : "light").png")
+            step("real pane \(dark ? "dark" : "light"): back after 47 minutes, the pane's own way in shows the card right over its reply box (gap \(Int(r.gap)) pt, \(Int(r.card.width)) × \(Int(r.card.height)) pt)",
+                 r.away && r.shown && r.gap >= 0 && r.gap <= 32 && r.card.height > 60)
+        }
         for dark in [false, true] {
             let mode = dark ? "dark" : "light"
             for (n, c, s) in [("log", card, nil), ("summary", card, kept), ("nothing-new", quiet, nil)] as [(String, SinceLeft.Card, Summary.Kept?)] {
@@ -128,6 +139,89 @@ extension SnapshotRunner {
         AppDefaults.store.removeObject(forKey: SinceModel.onKey)
         print("snapshot-since: \(failures == 0 ? "PASS" : "FAIL x\(failures)"), written to \(dir)")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    /// The rounds of Summaries, each with its own folder and stub: what is checked when a run starts, a round that does
+    /// not hold the loop, and a run called off.
+    @MainActor private static func rounds(tmp: URL, log: URL, agent: Agent, model: AppModel, step: (String, Bool) -> Void) async {
+        func stub(_ name: String, _ body: String) -> URL {
+            let u = tmp.appendingPathComponent(name)
+            try? Data("#!/bin/sh\n\(body)\n".utf8).write(to: u)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: u.path)
+            return u
+        }
+        func fresh(_ n: String, program: URL, logFor: @escaping (Agent, String) -> URL?) -> SinceModel {
+            let s = SinceModel(dir: tmp.appendingPathComponent(n))
+            s.runner = { _ in ProcessRunner() }
+            s.program = program.path
+            s.logFor = logFor
+            return s
+        }
+        let answer = "printf 'STATE: Done.\\nNEEDS: none\\n'"
+        // Changed while the logs are read: the run does not start.
+        for (n, change) in [("turned off", { AppDefaults.store.set(false, forKey: SinceModel.onKey) }),
+                            ("another writer", { AppDefaults.store.set("pi", forKey: SinceModel.byKey) })] as [(String, () -> Void)] {
+            AppDefaults.store.set(true, forKey: SinceModel.onKey); AppDefaults.store.set("own", forKey: SinceModel.byKey)
+            let asked = tmp.appendingPathComponent("asked-\(n.count)")
+            let s = fresh("app-\(n.count)", program: stub("m-\(n.count)", "cat > '\(asked.path)'\n\(answer)")) { a, _ in
+                guard a.name == agent.name else { return nil }
+                change(); return log
+            }
+            await s.tick(model); await s.settle()
+            step("\(n) while the logs are read: no model runs", !FileManager.default.fileExists(atPath: asked.path) && s.store.summaries.isEmpty)
+        }
+        AppDefaults.store.set(true, forKey: SinceModel.onKey); AppDefaults.store.set("own", forKey: SinceModel.byKey)
+        do {
+            let asked = tmp.appendingPathComponent("asked-working")
+            let s = fresh("app-working", program: stub("m-working", "cat > '\(asked.path)'\n\(answer)")) { a, _ in a.name == agent.name ? log : nil }
+            s.statusNow = { _, _ in .working }
+            await s.tick(model); await s.settle()
+            step("the agent started working while the logs are read: no model runs", !FileManager.default.fileExists(atPath: asked.path))
+        }
+        do {
+            let s = fresh("app-slow", program: stub("m-slow", "cat > /dev/null\nsleep 2\n\(answer)")) { a, _ in a.name == agent.name ? log : nil }
+            let began = Date()
+            await s.tick(model)
+            let took = Date().timeIntervalSince(began)
+            await s.settle()
+            step("a round that asks does not hold the loop (\(String(format: "%.1f", took)) s); its answer comes after", took < 1.5 && s.store.summaries.first?.value.state == "Done.")
+        }
+        do {
+            let pidFile = tmp.appendingPathComponent("pid")
+            let s = fresh("app-quit", program: stub("m-hang", "echo $$ > '\(pidFile.path)'\nexec sleep 30")) { a, _ in a.name == agent.name ? log : nil }
+            await s.tick(model)
+            var pid: Int32 = 0
+            for _ in 0..<300 where pid == 0 {   // up to 15 s: a busy Mac starts programs slowly
+                try? await Task.sleep(for: .milliseconds(50))
+                pid = Int32(((try? String(contentsOf: pidFile, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            }
+            let began = Date()
+            s.stop(); await s.settle()
+            let took = Date().timeIntervalSince(began)
+            step("the app quits during a run: its program stops (\(String(format: "%.1f", took)) s, pid \(pid), alive \(pid > 0 && kill(pid, 0) == 0), kept \(s.store.summaries.count)) and the turn is not marked", pid > 0 && took < 5 && kill(pid, 0) != 0 && s.store.summaries.isEmpty)
+        }
+    }
+
+    /// A real pane of the preview tree, its conversation on screen: the pane's own way in decides the card from the log
+    /// (`logFor`), the owner last saw the conversation 47 minutes ago. Returns the card's frame and gap over the
+    /// pane's reply box (`SinceProbe`), whether the card showed, and whether the window touched no screen.
+    @MainActor private static func shotRealPane(model: AppModel, agent: Agent, log: URL, now: Date, dark: Bool, path: String) async
+        -> (card: CGRect, gap: CGFloat, shown: Bool, away: Bool) {
+        guard let pane = model.store.workspaces.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.agent?.name == agent.name }) else { return (.zero, 0, false, false) }
+        let since = model.since
+        since.logFor = { a, _ in a.name == agent.name ? log : nil }
+        let key = since.key(pane, session: model.store.session)
+        since.away[key] = nil
+        since.store.markSeen(key, id: "a1", now: Int64(now.timeIntervalSince1970 * 1000) - 47 * 60_000)
+        SinceProbe.on = true; SinceProbe.card = .zero; SinceProbe.composer = .zero
+        defer { SinceProbe.on = false }
+        let size = NSSize(width: 1020, height: 768)
+        let view = ZStack { WindowSurface(glass: .off); PaneView(pane: pane, showLabel: false, focused: true) }
+            .environment(model).environment(\.flatGlass, true).environment(\.colorScheme, dark ? .dark : .light)
+            .frame(width: size.width, height: size.height)
+        let away = await renderSince(view, size: size, dark: dark, path: path)
+        let shown = since.away[key] != nil && SinceProbe.card.height > 0
+        return (SinceProbe.card, SinceProbe.composer.minY - SinceProbe.card.maxY, shown, away)
     }
 
     /// A pane's conversation, the card and the reply box, as in a tab. Returns the card's frame, its gap over the reply
@@ -171,12 +265,16 @@ extension SnapshotRunner {
         func check() { away = away && !NSScreen.screens.contains(where: { $0.frame.intersects(win.frame) }) }
         win.contentView = host; win.setFrameOrigin(NSPoint(x: -3000, y: -3000)); win.orderFrontRegardless(); check()
         for _ in 0..<10 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded(); host.displayIfNeeded(); check() }
+        var wrote = false
         if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            if let png = rep.representation(using: .png, properties: [:]) {
+                wrote = (try? png.write(to: URL(fileURLWithPath: path))) != nil && FileManager.default.fileExists(atPath: path)
+            }
         }
+        if !wrote { print("snapshot-since: the picture \(path) was not written") }
         inspect()
         win.orderOut(nil)
-        return away
+        return away && wrote
     }
 }

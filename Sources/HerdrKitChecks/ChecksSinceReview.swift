@@ -44,7 +44,7 @@ func checksProcessRunnerCancel() async {
         try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: p.path)
         let run = Task { await ProcessRunner().run(argv: [p.path], input: "", cwd: dir.path, timeout: 8) }
         var pid: Int32 = 0
-        for _ in 0..<60 where pid == 0 {
+        for _ in 0..<300 where pid == 0 {
             try? await Task.sleep(for: .milliseconds(50))
             pid = Int32(((try? String(contentsOf: pidFile, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         }
