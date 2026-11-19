@@ -105,14 +105,23 @@ public struct ExecResult: Sendable, Hashable {
     public var timedOut = false
     /// The program was not found.
     public var missing = false
-    public init(code: Int32?, stdout: String = "", stderr: String = "", timedOut: Bool = false, missing: Bool = false) {
-        self.code = code; self.stdout = stdout; self.stderr = stderr; self.timedOut = timedOut; self.missing = missing
+    /// False: nothing ran (herdr-core could not be reached, or the run was called off before its request went).
+    public var sent = true
+    public init(code: Int32?, stdout: String = "", stderr: String = "", timedOut: Bool = false, missing: Bool = false, sent: Bool = true) {
+        self.code = code; self.stdout = stdout; self.stderr = stderr; self.timedOut = timedOut; self.missing = missing; self.sent = sent
     }
 }
 
 /// Runs one program once, without a terminal and without a shell.
 public protocol SummaryRunner: Sendable {
     func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult
+    func run(argv: [String], input: String, cwd: String, timeout: Int, go: @escaping @Sendable () async -> Bool) async -> ExecResult
+}
+
+extension SummaryRunner {
+    public func run(argv: [String], input: String, cwd: String, timeout: Int, go: @escaping @Sendable () async -> Bool) async -> ExecResult {
+        await run(argv: argv, input: input, cwd: cwd, timeout: timeout)
+    }
 }
 
 /// On this Mac, as a child of the app. The app may have a short PATH (started from Finder): the usual folders of
@@ -241,10 +250,12 @@ public struct HCExecRunner: SummaryRunner {
         try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
         let p = HCJSON(Self.payload(argv: argv, input: input, cwd: cwd, timeout: timeout))
         do {
-            let r = try await client.call("machine.exec", json: p, timeout: TimeInterval(timeout + 5))
+            let r = try await client.run("machine.exec", json: p, timeout: TimeInterval(timeout + 5))
             let dec = { (k: String) in String(decoding: Data(base64Encoded: r[k] as? String ?? "") ?? Data(), as: UTF8.self) }
             if r["timed_out"] as? Bool == true { return ExecResult(code: nil, stdout: dec("stdout"), timedOut: true) }
             return ExecResult(code: (r["code"] as? NSNumber).map { Int32(truncating: $0) }, stdout: dec("stdout"), stderr: dec("stderr"))
+        } catch is HCNotSent {
+            return ExecResult(code: nil, sent: false)   // herdr-core not reached: nothing ran, ask again later
         } catch {
             let missing = "\(error)".contains("spawn_failed")
             return ExecResult(code: nil, stderr: missing ? "" : "herdr-core: \(error)", missing: missing)
@@ -258,6 +269,18 @@ extension Summary {
         case unsupported(String)
         case none(String)
         case failed(String)
+        /// Nothing ran (herdr-core could not be reached, or the run was called off first): no failure, asked again.
+        case notSent
+    }
+
+    /// What to keep for the turn `id` after `ask`: the answer, or a failed mark (that turn is not asked again). Nil
+    /// when nothing ran: the turn is asked again (herdr-core back, the next round).
+    public static func keep(_ r: Result<(id: String, state: String, needs: String?, model: String), Failure>, id: String, by: String) -> Kept? {
+        switch r {
+        case .success(let a): return Kept(id: a.id, by: by, state: a.state, needs: a.needs, model: a.model)
+        case .failure(.notSent): return nil
+        case .failure: return Kept(id: id, by: by, failed: true)
+        }
     }
 
     /// Asks the model once for the last turn in `items`. `kind`: the agent that wrote it; `settings`: the person's
@@ -275,6 +298,7 @@ extension Summary {
         let sent = stdin(by, text)
         let began = Date()
         let r = await runner.run(argv: args, input: sent, cwd: cwd, timeout: timeoutS)
+        if !r.sent { return .failure(.notSent) }
         let used = { (got: Int, ok: Bool) in
             store.noteRun(at: now(), by: by, model: named, sent: sent.unicodeScalars.count + (by == "codex" ? 0 : system.unicodeScalars.count),
                           got: got, ms: Int(Date().timeIntervalSince(began) * 1000), ok: ok)

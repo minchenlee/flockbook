@@ -88,6 +88,13 @@ final class FakeHC: @unchecked Sendable {
     private var _execReplies: [(String, String)] = []
     /// `machine.exec`: the stdout of the first reply whose key occurs in the line (or argv joined); else empty, code 1.
     var execReplies: [(String, String)] { get { lock.withLock { _execReplies } } set { lock.withLock { _execReplies = newValue } } }
+    /// Seconds `machine.exec` holds its answer (a model that thinks), or until the caller goes away: `execGone` counts
+    /// those, as the core ends the program then.
+    var execHold: Double = 0
+    private var _execGone = 0
+    var execGone: Int { lock.withLock { _execGone } }
+    /// Connections open now.
+    var openCount: Int { lock.withLock { open.count } }
     private var _files: [String: String] = [:]
     /// `file.read`: contents by `<on>:<path>` (`:<path>` here).
     var files: [String: String] { get { lock.withLock { _files } } set { lock.withLock { _files = newValue } } }
@@ -221,6 +228,16 @@ final class FakeHC: @unchecked Sendable {
         case "machine.exec":
             let cmd = (params["line"] as? String) ?? ((params["argv"] as? [String]) ?? []).joined(separator: " ")
             let hit = lock.withLock { _execReplies.first { cmd.contains($0.0) }?.1 }
+            if execHold > 0 {
+                let end = Date().addingTimeInterval(execHold)
+                while Date() < end {
+                    var p = pollfd(fd: c, events: Int16(POLLIN), revents: 0)
+                    if Darwin.poll(&p, 1, 50) > 0 {
+                        var b: UInt8 = 0
+                        if recv(c, &b, 1, MSG_PEEK) <= 0 { lock.withLock { _execGone += 1 }; break }
+                    }
+                }
+            }
             return (reply(id: id, result: ["stdout": Data((hit ?? "").utf8).base64EncodedString(), "stderr": "", "code": hit == nil ? 1 : 0,
                                            "truncated": false, "timed_out": false, "ms": 1]), nil)
         case "file.read":

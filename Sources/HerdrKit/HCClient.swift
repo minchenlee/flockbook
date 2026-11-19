@@ -90,6 +90,27 @@ public actor HCClient {
         return try HCRPC.result(o)
     }
 
+    /// `call` for a run of a program (`machine.exec`): `HCNotSent` when nothing was written, as herdr-core could not
+    /// be reached (not started yet, restarting). Nothing ran then; any other error came after the request went.
+    func run(_ method: String, json params: HCJSON, timeout: TimeInterval) async throws -> HCJSON {
+        seq += 1
+        let id = seq
+        let path = session.socketPath
+        let body = try HCRPC.request(id: id, method: method, params: params.object)
+        let line = try await Task.detached(priority: .userInitiated) { () throws -> Data in
+            let sock: LineSocket
+            do { sock = try LineSocket(path: path, timeout: timeout) } catch { throw HCNotSent() }
+            defer { sock.close() }
+            try sock.writeLine(body)
+            while true {
+                let line = try sock.readLine()
+                if let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any], HCRPC.id(of: o) == id { return line }
+            }
+        }.value
+        guard let o = try JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw HerdrError.protocolError("hc reply is not an object") }
+        return try HCRPC.result(o)
+    }
+
     /// The shared framed connection, opened on first use and reopened after it drops.
     public func framedConnection() async throws -> HCFramedConnection {
         if let f = framed, !f.isClosed { return f }
@@ -329,6 +350,9 @@ public actor HCClient {
         _ = try await call("terminal.keys", ["terminal": try address(paneId), "keys": keys.map(HCKeys.translate)])
     }
 }
+
+/// A run's request never went to herdr-core: nothing ran.
+public struct HCNotSent: Error, Sendable {}
 
 extension HCClient: HerdrBackend {
     nonisolated public var backend: BackendKind { .hc }

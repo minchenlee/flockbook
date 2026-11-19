@@ -180,29 +180,31 @@ final class SinceModel {
         // At most `Summary.batch` side by side; calling the round off calls each run off.
         batch = Task { @MainActor [weak self, weak model] in
             let tasks = runs.map { (c, pane, items, id, run) in
-                Task { @MainActor [weak self, weak model] in
-                    guard let self, let model, !Task.isCancelled else { return }
+                Task { @MainActor [weak self, weak model] () -> Bool in
+                    guard let self, let model, !Task.isCancelled else { return false }
                     // Checked again when the run starts: no await between here and the program's start.
-                    guard self.settings == s, let st = self.status(pane, model), st != .working, st != .blocked else { return }
+                    guard self.settings == s, let st = self.status(pane, model), st != .working, st != .blocked else { return false }
                     let r = await Summary.ask(items: items, kind: c.kind, settings: s, runner: run, store: self.store, program: program)
-                    guard !Task.isCancelled else { return }   // called off: the turn is asked again later
-                    switch r {
-                    case .success(let a): self.store.keep(c.key, .init(id: a.id, by: s.writer, state: a.state, needs: a.needs, model: a.model))
-                    case .failure: self.store.keep(c.key, .init(id: id, by: s.writer, failed: true))   // not asked again
-                    }
+                    guard !Task.isCancelled else { return false }   // called off: the turn is asked again later
+                    // A failed run is marked (not asked again); nothing ran (herdr-core not reached): asked again later.
+                    guard let k = Summary.keep(r, id: id, by: s.writer) else { return false }
+                    self.store.keep(c.key, k)
                     self.kept += 1
+                    return true
                 }
             }
-            await withTaskCancellationHandler {
-                for t in tasks { await t.value }
+            let ran = await withTaskCancellationHandler {
+                var ran = false
+                for t in tasks where await t.value { ran = true }
+                return ran
             } onCancel: {
                 for t in tasks { t.cancel() }
             }
             guard let self else { return }
             self.busy = false
             self.batch = nil
-            // The next agents now, not after the next 5 s.
-            if let model, !Task.isCancelled, self.loop != nil, model.screen == .tab, self.appVisible { await self.tick(model) }
+            // The next agents now, not after the next 5 s; when nothing ran (herdr-core down), the next round in 5 s.
+            if ran, let model, !Task.isCancelled, self.loop != nil, model.screen == .tab, self.appVisible { await self.tick(model) }
         }
     }
 
