@@ -39,9 +39,9 @@ Left to right:
      Flockbook settings dialog), and **Settings**.
    While the sidebar is hidden and a newer Flockbook is out, the top bar's sidebar button has a 7 px
    `accent` dot, until the sidebar opens (docked or floating) or **Not now**.
-2. **Work area**: a stack of four screens. The bar floats over the first three.
-   - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
-     round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
+2. **Work area**: the top bar, then a stack of four screens under it.
+   - **Top bar** (56 px, `background`, the only part that moves the window). The sidebar button (28 px,
+     round) sits right of the window buttons while the sidebar is hidden.
      Centered: a tab capsule and a tools capsule, both 38 px tall, fully round, `chrome` with a 1 px
      border and a small shadow.
      - The tab capsule has one 30 px pill per tab that is not put away: a status mark, then the
@@ -187,9 +187,9 @@ per 900 ms, as Herdr's own); done is a check
   background `canvas`, theme light `flockbook-light` / dark `flockbook`) with:
   - `sidebar`: a `column`, 250 px (min 220, max 320), `hidden`, `chrome`, a 1 px divider, holding
     one block `side`.
-  - `work`: a `column` holding the `stack` `screen` (active `chat`) with the blocks `chat`,
-    `needs`, `overview` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
-    `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
+  - `work`: a `column` holding the block `top` (56 px, `window_drag`, the only one) above the
+    `stack` `screen` (active `chat`) with the blocks `chat`, `needs`, `overview` and the `column`
+    `tab` holding `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
     padding 8).
   - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
 - **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked

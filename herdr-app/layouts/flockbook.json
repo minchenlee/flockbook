@@ -41,6 +41,20 @@
       "resizable": false,
       "children": [
         {
+          "id": "top",
+          "type": "block",
+          "size": {
+            "px": 56
+          },
+          "window_drag": true,
+          "content": {
+            "mod": "flockbook",
+            "props": {
+              "view": "top"
+            }
+          }
+        },
+        {
           "id": "screen",
           "type": "stack",
           "active": "chat",
@@ -53,8 +67,7 @@
                 "props": {
                   "view": "chat"
                 }
-              },
-              "window_drag": true
+              }
             },
             {
               "id": "needs",
@@ -64,8 +77,7 @@
                 "props": {
                   "view": "needs"
                 }
-              },
-              "window_drag": true
+              }
             },
             {
               "id": "overview",
@@ -75,27 +87,12 @@
                 "props": {
                   "view": "overview"
                 }
-              },
-              "window_drag": true
+              }
             },
             {
               "id": "tab",
               "type": "column",
               "children": [
-                {
-                  "id": "top",
-                  "type": "block",
-                  "size": {
-                    "px": 56
-                  },
-                  "window_drag": true,
-                  "content": {
-                    "mod": "flockbook",
-                    "props": {
-                      "view": "top"
-                    }
-                  }
-                },
                 {
                   "id": "tab-panes",
                   "type": "block",
