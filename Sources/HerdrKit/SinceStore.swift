@@ -148,11 +148,34 @@ public struct ProcessRunner: SummaryRunner {
         var timedOut = false
     }
 
+    /// The program of one run, so the task that asked can end it.
+    private final class Running: @unchecked Sendable {
+        let lock = NSLock()
+        var process: Process?
+        var cancelled = false
+        /// Ends the program (TERM, then KILL after 2 s), now or as soon as it starts.
+        func stop() {
+            let p: Process? = lock.withLock { cancelled = true; return process }
+            guard let p, p.isRunning else { return }
+            let pid = p.processIdentifier
+            p.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if p.isRunning { kill(pid, SIGKILL) } }
+        }
+    }
+
+    /// Ends with the task: a run called off (the app quits, Summaries is turned off) stops its program.
     public func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult {
         let env = Self.environment()
         guard let first = argv.first, let exe = Self.find(first, path: env["PATH"] ?? "") else { return ExecResult(code: nil, missing: true) }
         _ = Self.noSigpipe
-        return await withCheckedContinuation { (k: CheckedContinuation<ExecResult, Never>) in
+        let running = Running()
+        return await withTaskCancellationHandler(operation: {
+            await start(exe: exe, argv: argv, env: env, input: input, cwd: cwd, timeout: timeout, running: running)
+        }, onCancel: { running.stop() })
+    }
+
+    private func start(exe: String, argv: [String], env: [String: String], input: String, cwd: String, timeout: Int, running: Running) async -> ExecResult {
+        await withCheckedContinuation { (k: CheckedContinuation<ExecResult, Never>) in
             DispatchQueue.global().async {
                 let p = Process(), out = Pipe(), err = Pipe(), inp = Pipe(), got = Output()
                 p.executableURL = URL(fileURLWithPath: exe)
@@ -172,9 +195,15 @@ public struct ProcessRunner: SummaryRunner {
                         got.lock.withLock { if isOut { got.out.append(d) } else { got.err.append(d) } }
                     }
                 }
-                do { try p.run() } catch {
+                let off: Bool = running.lock.withLock {
+                    if running.cancelled { return true }
+                    do { try p.run() } catch { return true }
+                    running.process = p
+                    return false
+                }
+                if off {
                     out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
-                    k.resume(returning: ExecResult(code: nil, missing: true)); return
+                    k.resume(returning: ExecResult(code: nil, missing: !running.lock.withLock { running.cancelled })); return
                 }
                 let pid = p.processIdentifier
                 let timer = DispatchWorkItem {
@@ -189,7 +218,8 @@ public struct ProcessRunner: SummaryRunner {
                 _ = g.wait(timeout: .now() + 2)
                 out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
                 let (o, e, timedOut) = got.lock.withLock { (got.out, got.err, got.timedOut) }
-                k.resume(returning: ExecResult(code: timedOut ? nil : p.terminationStatus, stdout: String(decoding: o, as: UTF8.self),
+                let called = running.lock.withLock { running.cancelled }
+                k.resume(returning: ExecResult(code: timedOut || called ? nil : p.terminationStatus, stdout: String(decoding: o, as: UTF8.self),
                                                stderr: String(decoding: e, as: UTF8.self), timedOut: timedOut))
             }
         }
@@ -277,9 +307,21 @@ public final class LogTails: @unchecked Sendable {
         defer { try? fh.close() }
         let from = size > UInt64(bytes) ? size - UInt64(bytes) : 0
         try? fh.seek(toOffset: from)
-        guard var data = try? fh.readToEnd() else { return nil }
-        if from > 0, let nl = data.firstIndex(of: 0x0A) { data = Data(data[(nl + 1)...]) }
-        let items = SessionLog.parse(lines: String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init))
+        guard let data = try? fh.readToEnd() else { return nil }
+        // Each line with the place where it starts in the file, as the app's tailer feeds it: Codex rows take their
+        // ids from it, and a kept summary must match the card's turn.
+        var p = ConversationParser()
+        var start = data.startIndex
+        if from > 0 { guard let nl = data.firstIndex(of: 0x0A) else { return [] }; start = nl + 1 }
+        while start < data.endIndex {
+            let end = data[start...].firstIndex(of: 0x0A) ?? data.endIndex
+            if end == data.endIndex { break }   // a line still being written: the tailer waits for its end too
+            if let line = String(data: data[start..<end], encoding: .utf8) {
+                p.feed(line: line, offset: from + UInt64(start - data.startIndex))
+            }
+            start = end + 1
+        }
+        let items = p.items()
         lock.withLock { kept[url.path] = (size, modified, items) }
         return items
     }

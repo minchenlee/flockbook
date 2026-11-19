@@ -261,7 +261,6 @@ extension Summary {
         /// A key in the field. Returns the name to keep, when it changes.
         public mutating func type(_ t: String) -> String? {
             typed = t
-            if modelName(t) != nil || t.isEmpty { return keep(t) }
             return nil
         }
         /// Return, or the field loses the keys.
@@ -278,14 +277,15 @@ extension Summary {
 
     /// Where a summary's program runs.
     public enum Route: Sendable, Hashable {
-        /// Through herdr-core's `machine.exec` on this Mac, as the Herdr app's helper runs it.
+        /// Through herdr-core's `machine.exec` on this Mac, with herdr-core's environment, as the Herdr app's
+        /// helper runs it (summary.rs). The agent's own environment is not passed on, there as here.
         case core
-        /// As the app's own child.
-        case app
     }
 
-    /// The route for a pane of this backend; nil: no summary.
+    /// The route for a local pane of this backend (`core`: herdr-core answers on this Mac); nil: no summary, and
+    /// the card shows the line from the log alone. Never the app's own environment: an app started from the Finder
+    /// may not have the settings the agents run with (another provider or account).
     public static func route(backend: BackendKind, core: Bool) -> Route? {
-        backend == .hc && core ? .core : .app
+        core ? .core : nil
     }
 }

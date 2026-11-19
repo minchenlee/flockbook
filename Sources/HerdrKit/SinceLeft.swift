@@ -171,7 +171,7 @@ extension SinceLeft {
     /// A question, stop or approval card holds the reply box's place, or an approval card stands in the conversation:
     /// the Since you left card waits, so the two never take more than the pane's height.
     public static func waits(question: Bool, stopCard: Bool, composerCard: Bool, conversationCard: Bool) -> Bool {
-        question || stopCard || composerCard
+        question || stopCard || composerCard || conversationCard
     }
 
     /// The way in to a conversation, as the mod's chat (`arriving`): the card is decided on a read of the log made
@@ -179,15 +179,27 @@ extension SinceLeft {
     public struct Arrival: Sendable, Hashable {
         /// The turn the card was decided on; nil until then.
         public private(set) var decided: String?
+        /// The turn the app's copy of the log showed then, when it was older: marked as the decided turn until the
+        /// copy moves on.
+        private var behind: String?
         public init() {}
 
-        /// `read`: the newest turn in a read of the log made now (nil: no log yet). Once: the time away, if any.
+        /// `read`: the newest turn in a read of the log made now (nil: no log, or no turn yet: wait for the next read).
+        /// `shown`: the turn the app's copy shows now. Once: the time away, if any.
         public mutating func first(_ read: String?, shown: String?, seen: Seen?, now: Int64) -> (decided: Bool, away: Away?) {
-            decided = read ?? ""
-            return (true, read.flatMap { SinceLeft.arrive(seen: seen, id: $0, now: now) })
+            guard decided == nil else { return (true, nil) }
+            guard let read else { return (false, nil) }
+            decided = read
+            behind = shown == read ? nil : shown
+            return (true, SinceLeft.arrive(seen: seen, id: read, now: now))
         }
 
-        /// What to mark as seen when the conversation shows the turn `shown` (the app's copy of the log).
-        public mutating func mark(_ shown: String?) -> String? { shown }
+        /// What to mark as seen when the app's copy shows the turn `shown`; nil: nothing yet.
+        public mutating func mark(_ shown: String?) -> String? {
+            guard let decided else { return nil }
+            if let b = behind, shown == nil || shown == b { return decided }
+            behind = nil
+            return shown ?? decided
+        }
     }
 }
