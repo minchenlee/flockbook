@@ -16,6 +16,16 @@ test("every layout block shows the flockbook mod with a known view, or the shown
   assert.deepEqual(blocks(layout).filter((b) => !b.content.mod).map((b) => [b.id, b.content.tab]), [["tab-panes", "active"]]);
 });
 
+test("only the top bar moves the window: it sits above the screens, and no screen block has window_drag (#16)", () => {
+  // A drag that selects chat text must not move the window. A press stop above the text would keep the window
+  // still but makes the text unselectable (Herdr 0.1.13+), so the screens must not be window_drag at all.
+  const drag = []; const walk = (n) => { if (n.window_drag) drag.push(n.id); (n.children || []).forEach(walk); };
+  walk(layout);
+  assert.deepEqual(drag, ["top"]);
+  const work = layout.children.find((c) => c.id === "work");
+  assert.deepEqual(work.children.map((c) => c.id).slice(0, 2), ["top", "screen"], "the bar is above the screen stack");
+});
+
 test("keys.json binds only commands that exist, in the flockbook layout's section only", () => {
   const keys = JSON.parse(readFileSync(new URL("../keys.json", import.meta.url)));
   // Not mod:flockbook: with it, no key worked at all.

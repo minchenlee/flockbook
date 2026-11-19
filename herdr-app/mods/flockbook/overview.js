@@ -4,7 +4,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, shared, setShared } from "herdr";
 import { tabLabel, tabAgents, agentName, openTab, icon, FADE, watchEdge, noteWindowHeight } from "./state.js";
 import { openMenu, tabItems } from "./menu.js";
-import { statusMark, startTop, overBar, BAR_H } from "./top.js";
+import { statusMark, startTop } from "./top.js";
 
 export const KEY_GROUP = "flockbook.overview.group";   // "status" | "space"
 const CARD_MIN = 300, GAP = 12, MAX_W = 1220;
@@ -99,7 +99,7 @@ export class OverviewView {
       .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child(g.title))
       .child(h_flex().flex_wrap().gap(GAP).children(g.items.map((it) => this.card(it, t, w))));
 
-    const body = v_flex().w(inner).gap(28).pt(BAR_H + 20).pb(48)
+    const body = v_flex().w(inner).gap(28).pt(20).pb(48)
       .child(h_flex().items_start()
         .child(v_flex().flex_1().gap(4)
           .child(div().text_size(26).font_semibold().text_color(t.foreground).child(greeting(new Date().getHours())))
@@ -113,8 +113,6 @@ export class OverviewView {
       
       .on_size_change((size, cx) => { noteWindowHeight(size); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
       .relative()
-      .child(v_flex().id("overview-scroll").size_full().items_center().overflow_y_scrollbar()
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(body))
-      .child(overBar(t));
+      .child(v_flex().id("overview-scroll").size_full().items_center().overflow_y_scrollbar().child(body));
   }
 }

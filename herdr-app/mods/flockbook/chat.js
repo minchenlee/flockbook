@@ -20,7 +20,7 @@ import { textScale } from "./config.js";
 const appZoom = () => { const z = Number(settings?.()?.zoom); return z > 0 ? z : 1; };
 import { openMenu } from "./menu.js";
 import { Cards, wanted } from "./cards.js";
-import { startTop, overBar, BAR_H } from "./top.js";
+import { startTop } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
 import { pollGlance, glanceOn, glanceFor, glancedAt, seenFor, markSeen, summaryFor } from "./glance.js";
 import { arrive, sinceLeft, sinceCard } from "./since.js";
@@ -292,7 +292,7 @@ export class ChatView {
     const w = this.colWidth();
     const at = typeof y0 !== "number" ? null : row.k === "assistant" ? { y: y0 - ROW_PAD_Y, w }
       : row.from == null ? { y: y0 - ROW_PAD_Y - BUBBLE_PAD_Y, w: bubbleTextWidth(w) } : null;
-    const code = at ? codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0), textScale(), appZoom()) : null;
+    const code = at ? codeBlockAt(row.text || "", at.w, at.y, textScale(), appZoom()) : null;
     if (code !== null) items.push({ label: "Copy code", act: "copy", args: { text: code } });
     items.push({ label: "Copy message", act: "copy", args: { text: row.text || "" } });
     return openMenu(items);
@@ -333,8 +333,7 @@ export class ChatView {
 
   list(t, f) {
     const rows = f.rows, n = rows.length;
-    // The first row starts below the bar; the rest scroll up under it.
-    const sizes = rows.map((r, i) => this.height(r) + (i === 0 ? BAR_H : 0));
+    const sizes = rows.map((r) => this.height(r));
     const box = v_flex().relative().flex_1().min_h(0)
       .on_scroll_wheel((e, cx) => {
         const up = e?.delta?.y > 0;
@@ -352,7 +351,7 @@ export class ChatView {
           this.autoOlder++; this.wantOlder = true;
         }
         const out = [];
-        for (let i = range.start; i < range.end; i++) out.push(i === 0 ? div().w_full().pt(BAR_H).child(this.item(rows[i], t)) : this.item(rows[i], t));
+        for (let i = range.start; i < range.end; i++) out.push(this.item(rows[i], t));
         record("chat.rows", now() - t0, range.end - range.start);
         return out;
       }).track_scroll(this.scroll).on_item_click((key, cx) => this.click(key, cx))
@@ -369,7 +368,7 @@ export class ChatView {
           .child(svg(icon("arrow-down")).size(15))));
     }
     // While older rows load: a small note under the bar's tabs. Drawn only then: a hidden spinner still costs frames.
-    if (this.olderBusy) box.child(h_flex().absolute().top(BAR_H + 6).left(0).right(0).justify_center()
+    if (this.olderBusy) box.child(h_flex().absolute().top(6).left(0).right(0).justify_center()
       .child(h_flex().id("older").h(26).px(12).gap(6).items_center().rounded(13).bg(t.raised).border(1).border_color(t.border)
         .text_size(12).text_color(t.muted)
         .child(svg(icon("spinner")).size(11).spin(SPIN_MS)).child("Loading earlier messages")));
@@ -397,9 +396,9 @@ export class ChatView {
       // The chat input keeps ⌘⌥↑/↓ from the app's keys, so the chat switches spaces itself.
       .on_key_down((e, cx) => { const go = spaceKey(e); if (go) { cx.stop_propagation?.(); run(go); } })
       // Another agent's chat fades in; a new card fades in and rises into place.
-      // No press stop on the content: under Herdr 0.1.13 an ancestor's stop_propagation on the left press
-      // makes TextView text unselectable. Put the stop back (so content presses don't drag the window; the
-      // block has window_drag for the bar) once Herdr fixes that. The reply box and the cards keep theirs.
+      // No press stop on the content: an ancestor's stop_propagation on the left press makes TextView text
+      // unselectable (Herdr 0.1.13 to 0.1.16 at least). No stop is needed: the block has no window_drag, only
+      // the top bar above the screens moves the window.
       .child(v_flex().flex_1().min_h(0)
         .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
       .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
@@ -412,6 +411,5 @@ export class ChatView {
         if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
         return el.child(div().w_full().on_mouse_down("left", stop).child(this.composer.render(currentAgent(), t)));
       })
-      .child(overBar(t));
   }
 }
