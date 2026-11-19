@@ -251,3 +251,41 @@ public enum Summary {
         return kept
     }
 }
+
+extension Summary {
+    /// The Model field: what is typed, and the name kept in the settings.
+    public struct ModelField: Sendable, Hashable {
+        public var typed: String
+        public private(set) var saved: String
+        public init(saved: String) { self.saved = saved; typed = saved }
+        /// A key in the field. Returns the name to keep, when it changes.
+        public mutating func type(_ t: String) -> String? {
+            typed = t
+            if modelName(t) != nil || t.isEmpty { return keep(t) }
+            return nil
+        }
+        /// Return, or the field loses the keys.
+        public mutating func commit() -> String? { keep(typed) }
+        /// A click on a model in the list.
+        public mutating func pick(_ id: String) -> String? { typed = id; return keep(id) }
+        private mutating func keep(_ t: String) -> String? {
+            let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard v != saved else { return nil }
+            saved = v
+            return v
+        }
+    }
+
+    /// Where a summary's program runs.
+    public enum Route: Sendable, Hashable {
+        /// Through herdr-core's `machine.exec` on this Mac, as the Herdr app's helper runs it.
+        case core
+        /// As the app's own child.
+        case app
+    }
+
+    /// The route for a pane of this backend; nil: no summary.
+    public static func route(backend: BackendKind, core: Bool) -> Route? {
+        backend == .hc && core ? .core : .app
+    }
+}

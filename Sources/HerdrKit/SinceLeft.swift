@@ -166,3 +166,28 @@ public enum SinceLeft {
     /// "You said at 14:02: Fix the importer".
     public static func saidLine(_ s: Said) -> String { "You said\(s.at.isEmpty ? "" : " at \(s.at)"): \(s.text)" }
 }
+
+extension SinceLeft {
+    /// A question, stop or approval card holds the reply box's place, or an approval card stands in the conversation:
+    /// the Since you left card waits, so the two never take more than the pane's height.
+    public static func waits(question: Bool, stopCard: Bool, composerCard: Bool, conversationCard: Bool) -> Bool {
+        question || stopCard || composerCard
+    }
+
+    /// The way in to a conversation, as the mod's chat (`arriving`): the card is decided on a read of the log made
+    /// after the conversation came on screen, never on what was shown before. Until that read: no card and no mark.
+    public struct Arrival: Sendable, Hashable {
+        /// The turn the card was decided on; nil until then.
+        public private(set) var decided: String?
+        public init() {}
+
+        /// `read`: the newest turn in a read of the log made now (nil: no log yet). Once: the time away, if any.
+        public mutating func first(_ read: String?, shown: String?, seen: Seen?, now: Int64) -> (decided: Bool, away: Away?) {
+            decided = read ?? ""
+            return (true, read.flatMap { SinceLeft.arrive(seen: seen, id: $0, now: now) })
+        }
+
+        /// What to mark as seen when the conversation shows the turn `shown` (the app's copy of the log).
+        public mutating func mark(_ shown: String?) -> String? { shown }
+    }
+}

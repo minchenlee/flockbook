@@ -202,9 +202,14 @@ public struct HCExecRunner: SummaryRunner {
     let client: HCClient
     public init(client: HCClient) { self.client = client }
 
+    /// What goes to `machine.exec`: the helper's own fields (summary.rs), and no environment of the app's.
+    public static func payload(argv: [String], input: String, cwd: String, timeout: Int) -> [String: Any] {
+        ["argv": argv, "input": Data(input.utf8).base64EncodedString(), "timeout": timeout, "cwd": cwd]
+    }
+
     public func run(argv: [String], input: String, cwd: String, timeout: Int) async -> ExecResult {
         try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
-        let p = HCJSON(["argv": argv, "input": Data(input.utf8).base64EncodedString(), "timeout": timeout, "cwd": cwd])
+        let p = HCJSON(Self.payload(argv: argv, input: input, cwd: cwd, timeout: timeout))
         do {
             let r = try await client.call("machine.exec", json: p, timeout: TimeInterval(timeout + 5))
             let dec = { (k: String) in String(decoding: Data(base64Encoded: r[k] as? String ?? "") ?? Data(), as: UTF8.self) }
