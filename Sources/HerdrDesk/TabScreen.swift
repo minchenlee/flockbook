@@ -127,7 +127,10 @@ struct PaneView: View {
                                 QueuedStrip(queue: q, canPull: model.writesEnabled, pulling: model.pulling.contains(pane.id),
                                             onPull: { model.pullQueued(pane) })
                             }
-                            if let line = model.statusLines[pane.id] { StatusLineBar(record: line) }
+                            if let line = model.statusLines[pane.id] {
+                                StatusLineBar(record: line)
+                                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.status = $0 } }
+                            }
                             composer(agent)
                                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.composer = $0 } }
                         }
@@ -238,6 +241,7 @@ extension PaneView {
                           onJump: { jump = SinceJump(id: $0, token: (jump?.token ?? 0) + 1) },
                           onHide: { model.since.away[key] = nil })
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.card = $0 } }
+                    .onAppear { if SinceProbe.on { SinceProbe.appeared += 1 } }
                     .inputColumn()
                     .padding(.bottom, 8)
             }

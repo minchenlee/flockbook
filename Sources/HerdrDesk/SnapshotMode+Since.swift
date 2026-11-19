@@ -114,6 +114,19 @@ extension SnapshotRunner {
             step("real pane \(dark ? "dark" : "light"): back after 47 minutes, the pane's own way in shows the card right over its reply box (gap \(Int(r.gap)) pt, \(Int(r.card.width)) × \(Int(r.card.height)) pt)",
                  r.away && r.shown && r.gap >= 0 && r.gap <= 32 && r.card.height > 60)
         }
+        do {
+            // The pane's own approval card in the conversation (the log's pending call, its prompt on screen): no Since card.
+            let r = await shotRealPane(model: AppModel(store: store), agent: agent, log: log, now: now, dark: false, path: "\(dir)/since-pane-approval.png", approval: true)
+            step("real pane: an approval card in the conversation holds the place: no Since card (approval card \(r.live), Since cards that came \(SinceProbe.appeared))", r.away && r.live && !r.shown && SinceProbe.appeared == 0)
+        }
+        do {
+            // Claude Code's status row over the reply box: the card stands right over that row, the row stays on the box.
+            let line = StatusLineRecord(lines: ANSIText.lines("Opus 5.5 · ⎇ main · ctx 42%"), info: nil, time: now)
+            let r = await shotRealPane(model: AppModel(store: store), agent: agent, log: log, now: now, dark: false, path: "\(dir)/since-pane-status.png", status: line)
+            let over = r.status.minY - r.card.maxY, under = r.composer.minY - r.status.maxY
+            step("real pane with a status row: the card right over the row (gap \(Int(over)) pt), the row on the reply box (gap \(Int(under)) pt)",
+                 r.away && r.shown && r.status.height > 0 && over >= 0 && over <= 32 && under >= 0 && under <= 8)
+        }
         for dark in [false, true] {
             let mode = dark ? "dark" : "light"
             for (n, c, s) in [("log", card, nil), ("summary", card, kept), ("nothing-new", quiet, nil)] as [(String, SinceLeft.Card, Summary.Kept?)] {
@@ -246,23 +259,34 @@ extension SnapshotRunner {
     /// A real pane of the preview tree, its conversation on screen: the pane's own way in decides the card from the log
     /// (`logFor`), the owner last saw the conversation 47 minutes ago. Returns the card's frame and gap over the
     /// pane's reply box (`SinceProbe`), whether the card showed, and whether the window touched no screen.
-    @MainActor private static func shotRealPane(model: AppModel, agent: Agent, log: URL, now: Date, dark: Bool, path: String) async
-        -> (card: CGRect, gap: CGFloat, shown: Bool, away: Bool) {
-        guard let pane = model.store.workspaces.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.agent?.name == agent.name }) else { return (.zero, 0, false, false) }
+    /// `approval`: the prompt of the log's pending call is on screen, so its approval card stands in the conversation.
+    /// `status`: Claude Code's status row over the reply box. `live`: the approval card stood in the conversation.
+    @MainActor private static func shotRealPane(model: AppModel, agent: Agent, log: URL, now: Date, dark: Bool, path: String,
+                                                approval: Bool = false, status: StatusLineRecord? = nil) async
+        -> (card: CGRect, gap: CGFloat, shown: Bool, away: Bool, status: CGRect, composer: CGRect, live: Bool) {
+        guard let pane = model.store.workspaces.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.agent?.name == agent.name }) else { return (.zero, 0, false, false, .zero, .zero, false) }
         let since = model.since
         since.logFor = { a, _ in a.name == agent.name ? log : nil }
         let key = since.key(pane, session: model.store.session)
         since.away[key] = nil
         since.store.markSeen(key, id: "a1", now: Int64(now.timeIntervalSince1970 * 1000) - 47 * 60_000)
-        SinceProbe.on = true; SinceProbe.card = .zero; SinceProbe.composer = .zero
-        defer { SinceProbe.on = false }
+        SinceProbe.on = true; SinceProbe.card = .zero; SinceProbe.composer = .zero; SinceProbe.status = .zero; SinceProbe.appeared = 0
+        let savedLines = StatusLineProbe.injected
+        if let status, let sid = pane.agent?.sessionId { StatusLineProbe.injected[sid] = status; model.checkStatusLine(for: pane) }
+        defer { SinceProbe.on = false; StatusLineProbe.injected = savedLines }
+        var live = false
+        // The prompt stays on screen while the window renders (the pane's own screen check finds none in the preview).
+        if approval { SinceProbe.prompt.insert(pane.id); model.promptVisible.insert(pane.id) }
+        defer { SinceProbe.prompt.remove(pane.id) }
         let size = NSSize(width: 1020, height: 768)
         let view = ZStack { WindowSurface(glass: .off); PaneView(pane: pane, showLabel: false, focused: true) }
             .environment(model).environment(\.flatGlass, true).environment(\.colorScheme, dark ? .dark : .light)
             .frame(width: size.width, height: size.height)
-        let away = await renderSince(view, size: size, dark: dark, path: path)
-        let shown = since.away[key] != nil && SinceProbe.card.height > 0
-        return (SinceProbe.card, SinceProbe.composer.minY - SinceProbe.card.maxY, shown, away)
+        let away = await renderSince(view, size: size, dark: dark, path: path) {
+            live = model.liveCardInConversation(pane) != nil
+        }
+        let shown = since.away[key] != nil && SinceProbe.appeared > 0 && SinceProbe.card.height > 0
+        return (SinceProbe.card, SinceProbe.composer.minY - SinceProbe.card.maxY, shown, away, SinceProbe.status, SinceProbe.composer, live)
     }
 
     /// A pane's conversation, the card and the reply box, as in a tab. Returns the card's frame, its gap over the reply

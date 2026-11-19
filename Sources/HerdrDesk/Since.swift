@@ -270,7 +270,11 @@ final class SinceModel {
 /// Snapshots: where the card and the reply box of a real pane stand (global frames), while `on`.
 @MainActor enum SinceProbe {
     static var on = false
-    static var card = CGRect.zero, composer = CGRect.zero
+    static var card = CGRect.zero, composer = CGRect.zero, status = CGRect.zero
+    /// Cards that came on screen (a frame stays after its card goes; a closed window's card only goes).
+    static var appeared = 0
+    /// Panes whose permission prompt stays on screen (the preview has no screen to read): `checkPrompt` keeps them.
+    static var prompt: Set<String> = []
 }
 
 /// A press of the card's Jump: a new token each time, so the same message can be jumped to again.

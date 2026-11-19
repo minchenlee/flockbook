@@ -209,6 +209,7 @@ final class AppModel {
     /// tool call); otherwise clears the flag. Also keeps the prompt read from the screen (`screenPrompts`) for a blocked
     /// Claude, Grok or agy. A prompt whose answer is on the way stays off (its buttons stay off).
     func checkPrompt(for pane: Pane) async {
+        if SinceProbe.prompt.contains(pane.id) { promptVisible.insert(pane.id); return }
         guard PermissionGate.checkApproval(pane.agent, pendingTool: hasPending(pane)), let reader = screen(for: pane) else {
             promptVisible.remove(pane.id); screenPrompts[pane.id] = nil; return
         }
