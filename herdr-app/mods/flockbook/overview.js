@@ -4,7 +4,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, spaces, shared, setShared } from "herdr";
 import { tabLabel, tabAgents, agentName, openTab, icon, FADE, watchEdge, noteWindowHeight } from "./state.js";
 import { openMenu, tabItems } from "./menu.js";
-import { statusMark, startTop } from "./top.js";
+import { statusMark, startTop, BAR_H } from "./top.js";
 
 export const KEY_GROUP = "flockbook.overview.group";   // "status" | "space"
 const CARD_MIN = 300, GAP = 12, MAX_W = 1220;
@@ -111,7 +111,7 @@ export class OverviewView {
 
     return watchEdge(v_flex().id("overview").size_full().bg(t.background))
       
-      .on_size_change((size, cx) => { noteWindowHeight(size); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
+      .on_size_change((size, cx) => { noteWindowHeight(size, BAR_H); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
       .relative()
       .child(v_flex().id("overview-scroll").size_full().items_center().overflow_y_scrollbar().child(body));
   }

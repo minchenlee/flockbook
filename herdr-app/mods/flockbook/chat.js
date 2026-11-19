@@ -20,7 +20,7 @@ import { textScale } from "./config.js";
 const appZoom = () => { const z = Number(settings?.()?.zoom); return z > 0 ? z : 1; };
 import { openMenu } from "./menu.js";
 import { Cards, wanted } from "./cards.js";
-import { startTop } from "./top.js";
+import { startTop, BAR_H } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
 import { pollGlance, glanceOn, glanceFor, glancedAt, seenFor, markSeen, summaryFor } from "./glance.js";
 import { arrive, sinceLeft, sinceCard } from "./since.js";
@@ -391,7 +391,7 @@ export class ChatView {
     else main = this.list(t, f);
     const stop = (_e, cx) => cx.stop_propagation();
     return watchEdge(v_flex().id("root").relative().size_full().min_w(0).bg(t.background))
-      .on_size_change((size, cx) => { noteWindowHeight(size); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
+      .on_size_change((size, cx) => { noteWindowHeight(size, BAR_H); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
       .on_drop((e, cx) => this.composer.addFiles(e?.paths, cx))
       // The chat input keeps ⌘⌥↑/↓ from the app's keys, so the chat switches spaces itself.
       .on_key_down((e, cx) => { const go = spaceKey(e); if (go) { cx.stop_propagation?.(); run(go); } })

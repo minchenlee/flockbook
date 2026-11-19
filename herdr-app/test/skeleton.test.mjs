@@ -44,3 +44,19 @@ test("each view renders, and an unknown view says so", () => {
   fake.props = { view: "nope" }; const m = new Flockbook(); m.init(undefined, fakeCx());
   assert.match(textOf(m.render(fakeCx())), /unknown view "nope"/);
 });
+
+test("the screens under the top bar note the whole window's height, bar included (the floating sidebar uses it)", async () => {
+  const { reset, fake: f } = await import("./stub/herdr.mjs");
+  const { BAR_H } = await import("../mods/flockbook/top.js");
+  const { KEY_WIN_H } = await import("../mods/flockbook/state.js");
+  for (const view of ["chat", "needs", "overview"]) {
+    reset(); f.props = { view }; const m = new Flockbook(); const cx = fakeCx(); m.init(undefined, cx);
+    const root = m.render(cx);
+    const find = (el) => { if (!el || typeof el !== "object") return null; if (el._h?.on_size_change) return el;
+      for (const k of el.kids || []) { const r = find(k); if (r) return r; } return null; };
+    const el = find(root);
+    assert.ok(el, `${view} listens for its size`);
+    el._h.on_size_change({ width: 900, height: 764 }, cx);
+    assert.equal(f.shared[KEY_WIN_H], 764 + BAR_H, view);
+  }
+});

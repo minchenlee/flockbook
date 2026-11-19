@@ -5,7 +5,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme } from "herdr";
 import { needing, agentName, showAgent, icon, watchEdge, noteWindowHeight } from "./state.js";
 import { Cards } from "./cards.js";
-import { startTop } from "./top.js";
+import { startTop, BAR_H } from "./top.js";
 
 export class NeedsView {
   constructor(cx) {
@@ -26,7 +26,7 @@ export class NeedsView {
   // The top bar sits above the screens (layout block "top"), so presses here never move the window.
   render(cx) {
     const t = theme();
-    return v_flex().id("needs-screen").relative().size_full().bg(t.background).on_size_change((size) => noteWindowHeight(size))
+    return v_flex().id("needs-screen").relative().size_full().bg(t.background).on_size_change((size) => noteWindowHeight(size, BAR_H))
       .child(div().size_full().child(this.content(t)));
   }
 

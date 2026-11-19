@@ -49,8 +49,9 @@ export const EDGE_PX = 4;
 export const PEEK_W = 260, PEEK_GAP = 8;
 // A popup is as tall as its content unless given px, so the views note the window's height.
 export const KEY_WIN_H = "flockbook.window.height";
-export function noteWindowHeight(size) {
-  const h = Math.round(size?.height ?? 0);
+// `above`: px of the window above the view (the top bar's 56 for the screens under it).
+export function noteWindowHeight(size, above = 0) {
+  const h = Math.round(size?.height ?? 0) + (size?.height > 0 ? above : 0);
   if (h > 0 && shared(KEY_WIN_H) !== h) setShared(KEY_WIN_H, h);
 }
 export function peekAtEdge(e) {
