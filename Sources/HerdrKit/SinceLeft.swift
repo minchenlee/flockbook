@@ -179,8 +179,7 @@ extension SinceLeft {
     public struct Arrival: Sendable, Hashable {
         /// The turn the card was decided on; nil until then.
         public private(set) var decided: String?
-        /// The turn the app's copy of the log showed then, when it was older: marked as the decided turn until the
-        /// copy moves on.
+        /// The turn the app's copy of the log showed then, when it was older: nothing is marked until the copy moves on.
         private var behind: String?
         public init() {}
 
@@ -194,10 +193,24 @@ extension SinceLeft {
             return (true, SinceLeft.arrive(seen: seen, id: read, now: now))
         }
 
+        /// A mirrored log's finished copies when it was first asked for (nil: not yet, or no mirror).
+        private var syncsAtStart: Int?
+
+        /// Whether a read of the log now may decide: a log on this Mac (`syncs` nil) at once; a mirror (an agent on
+        /// another machine, `MirrorSyncs`) only after a copy that finished after the first ask, so a copy that is
+        /// behind does not use the one decision.
+        public mutating func fresh(syncs: Int?) -> Bool {
+            guard let syncs else { return true }
+            guard let base = syncsAtStart else { syncsAtStart = syncs; return false }
+            return syncs > base
+        }
+
         /// What to mark as seen when the app's copy shows the turn `shown`; nil: nothing yet.
         public mutating func mark(_ shown: String?) -> String? {
             guard let decided else { return nil }
-            if let b = behind, shown == nil || shown == b { return decided }
+            // The app's copy still shows the older turn: the newer one is not marked until it shows (left before that,
+            // the card comes again next time).
+            if let b = behind, shown == nil || shown == b { return nil }
             behind = nil
             return shown ?? decided
         }

@@ -245,6 +245,8 @@ checksSummaryRoute()
 try await checksSummaryNotSent()
 try await checksHCExecCancel()
 try await checksHCExecGate()
+checksSinceArrivalMirror()
+try await checksMirrorSyncs()
 
 print(failures == 0 ? "OK \(total) checks passed" : "\(failures) of \(total) checks FAILED")
 exit(failures == 0 ? 0 : 1)

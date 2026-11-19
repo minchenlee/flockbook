@@ -57,11 +57,13 @@ public actor RemoteLogMirror {
         self.url = url; self.path = path; self.host = host; self.fd = fd
         self.files = RemoteFiles(host: host)
         Self.live.update { _ = $0.insert(name) }
+        MirrorSyncs.register(url.path)
     }
 
     deinit {
         close(fd)
         unlink(url.path)
+        MirrorSyncs.drop(url.path)
         let name = url.lastPathComponent
         Self.live.update { _ = $0.remove(name) }
     }
@@ -90,7 +92,9 @@ public actor RemoteLogMirror {
 
     /// Brings the mirror up to the host file's size. The first call fetches the last `tail` bytes (holes before them).
     public func sync(tail: UInt64) async -> Change {
-        await serial { await self.doSync(tail: tail) }
+        let c = await serial { await self.doSync(tail: tail) }
+        if c == .grew || c == .unchanged || c == .reset { MirrorSyncs.bump(url.path) }   // the host answered: caught up
+        return c
     }
 
     /// Makes sure `[from, to)` is fetched. False when the host did not give it all, or `to` is past the mirrored end.

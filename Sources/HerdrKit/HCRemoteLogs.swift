@@ -243,6 +243,7 @@ extension HCClient {
         }
         try? fm.createDirectory(atPath: (local as NSString).deletingLastPathComponent, withIntermediateDirectories: true, attributes: owner)
         fm.createFile(atPath: local, contents: Data(), attributes: [.posixPermissions: 0o600])
+        MirrorSyncs.register(local)
         let poll = mirrorPoll
         mirrors[key] = Task { [weak self] in
             var st = MirrorState()
@@ -302,7 +303,7 @@ extension HCClient {
             return .grew
         }
         let text = r["text"] as? String ?? ""
-        guard let cut = text.lastIndex(of: "\n") else { return .idle }
+        guard let cut = text.lastIndex(of: "\n") else { MirrorSyncs.bump(local); return .idle }   // caught up
         let whole = text[...cut]
         guard let fh = FileHandle(forWritingAtPath: local) else { return .idle }
         defer { try? fh.close() }
@@ -310,7 +311,9 @@ extension HCClient {
             try fh.seekToEnd()
             try fh.write(contentsOf: Data(whole.utf8))
         } catch { return .idle }
-        st.next += whole.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        let got = whole.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        st.next += got
+        if got < MirrorState.chunk { MirrorSyncs.bump(local) }   // read to the end: caught up
         return .grew
     }
 }

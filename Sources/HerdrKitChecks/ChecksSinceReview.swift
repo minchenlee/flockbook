@@ -81,7 +81,8 @@ func checksSinceArrival() {
     check(!none.decided && none.away == nil && a.mark("a1") == nil, "since arrival: no read of the log yet: no card, no mark")
     let back = a.first("a2", shown: "a1", seen: seen, now: now + 1000)
     check(back.decided && back.away == .init(from: seen.at, back: now + 1000), "since arrival: the first read decides: back after 47 minutes with a new turn")
-    check(a.mark("a1") == "a2", "since arrival: the app's copy still shows the old turn: the read's turn is marked (\(a.mark("a1") ?? "nil"))")
+    check(a.mark("a1") == nil && a.mark(nil) == nil, "since arrival: the app's copy still shows the old turn: nothing is marked yet (\(a.mark("a1") ?? "nil"))")
+    check(a.mark("a2") == "a2", "since arrival: once the read's turn shows, it is marked")
     check(a.mark("a3") == "a3", "since arrival: a newer turn in the app's copy is marked")
     let again = a.first("a3", shown: "a3", seen: seen, now: now + 2000)
     check(again.away == nil, "since arrival: decided once")
@@ -109,4 +110,67 @@ func checksSummaryRoute() {
     check(Summary.route(backend: .tui, core: false) == nil && Summary.route(backend: .hc, core: false) == nil, "summary route: no herdr-core: no summary")
     let p = HCExecRunner.payload(argv: ["claude", "-p"], input: "T", cwd: "/tmp/x", timeout: 60)
     check(Set(p.keys) == ["argv", "input", "timeout", "cwd"] && p["input"] as? String == "VA==", "summary route: machine.exec gets the helper's fields and no environment")
+}
+
+/// A mirrored log (an agent on another machine, copied here) is read for the way in only after a copy that finished
+/// after the conversation came on screen: a copy that is behind does not use the one decision.
+func checksSinceArrivalMirror() {
+    var local = SinceLeft.Arrival()
+    check(local.fresh(syncs: nil), "since arrival mirror: a log on this Mac: read now")
+    var m = SinceLeft.Arrival()
+    check(!m.fresh(syncs: 3) && !m.fresh(syncs: 3), "since arrival mirror: no copy since it came on screen: wait")
+    check(m.fresh(syncs: 4), "since arrival mirror: a copy finished since then: read")
+}
+
+/// Each kind of mirror counts its finished copies: herdr over ssh (`RemoteLogMirror`) and hc's other machines.
+@MainActor func checksMirrorSyncs() async throws {
+    do {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hkmsync-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // herdr over ssh: `Via.local` plays the host.
+        let saved = RemoteLogMirror.directory
+        RemoteLogMirror.directory = dir.appendingPathComponent("cache", isDirectory: true)
+        defer { RemoteLogMirror.directory = saved }
+        let hostFile = dir.appendingPathComponent("host.jsonl").path
+        try "{\"a\":1}\n".write(toFile: hostFile, atomically: false, encoding: .utf8)
+        let m = try RemoteLogMirror(host: RemoteHost(via: .local), path: hostFile)
+        let c0 = MirrorSyncs.count(m.url.path)
+        let s1 = await m.sync(tail: 1 << 20)
+        let c1 = MirrorSyncs.count(m.url.path)
+        try? FileManager.default.removeItem(atPath: hostFile)
+        let s2 = await m.sync(tail: 1 << 20)
+        let c2 = MirrorSyncs.count(m.url.path)
+        check(c0 == 0 && s1 == .grew && c1 == 1, "mirror syncs: ssh: a finished copy counts (\(String(describing: c0)), \(s1), \(String(describing: c1)))")
+        check(s2 == .gone && c2 == 1, "mirror syncs: ssh: a copy that did not finish does not count (\(s2), \(String(describing: c2)))")
+        check(MirrorSyncs.count(hostFile) == nil, "mirror syncs: a file that is no mirror: nil")
+
+        // hc: an agent on the machine box.
+        let fake = FakeHC(path: fakeHCPath())
+        try fake.start()
+        defer { fake.kill() }
+        fake.machines = [FakeHC.machine("box")]
+        fake.terminals = [FakeHC.terminal("box/t7", argv: ["claude"], pid: 700, cwd: "/home/b/w")]
+        let sid = "0b1c2d3e-aaaa-bbbb-cccc-000000000077"
+        let log = "/home/b/.claude/projects/-home-b-w/\(sid).jsonl"
+        fake.execReplies = [
+            ("ps ", "/home/b\n  700     1 Mon Nov  2 10:00:00 2026 claude --resume\n"),
+            (".claude/sessions", "700\t{\"pid\":700,\"sessionId\":\"\(sid)\",\"procStart\":\"Mon Nov  2 10:00:00 2026\"}\n"),
+            (".claude/projects", log + "\n"),
+        ]
+        fake.files = ["box:\(log)": "{\"type\":\"user\",\"n\":1}\n"]
+        let hc = HCClient(session: HCSession(socketPath: fake.path))
+        await hc.setMirror(root: dir.appendingPathComponent("hcm").path, poll: 0.05)
+        let found = await hc.resolveRemote([SessionResolver.Need(paneId: "hc:box/t7", kind: "claude", cwd: "/home/b/w")], claimed: [])
+        let p = found["hc:box/t7"] ?? ""
+        for _ in 0..<60 where (MirrorSyncs.count(p) ?? 0) == 0 { try? await Task.sleep(for: .milliseconds(50)) }
+        let h1 = MirrorSyncs.count(p) ?? 0
+        check(!p.isEmpty && h1 >= 1, "mirror syncs: hc: a finished copy counts (\(h1))")
+        fake.files = [:]   // reads fail now
+        try? await Task.sleep(for: .milliseconds(150))
+        let h2 = MirrorSyncs.count(p) ?? 0
+        try? await Task.sleep(for: .milliseconds(400))
+        check(MirrorSyncs.count(p) == h2, "mirror syncs: hc: failing reads do not count (\(h2) then \(MirrorSyncs.count(p) ?? -1))")
+        await hc.stopMirrors()
+    }
 }

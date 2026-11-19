@@ -106,7 +106,9 @@ final class SinceModel {
             if arrival.decided == nil, state != .loading {
                 let tails = tails
                 let url = logURL(agent, sid: sid, store: model.store)
-                let read = await Task.detached { url.flatMap { tails.items($0) } }.value
+                // A mirror (an agent on another machine) only after a copy made since the conversation came on screen.
+                let fresh = arrival.fresh(syncs: url.flatMap { MirrorSyncs.count($0.path) })
+                let read = fresh ? await Task.detached { url.flatMap { tails.items($0) } }.value : nil
                 guard !Task.isCancelled else { return }
                 let r = arrival.first(read.flatMap { Glance.facts($0, agent: agent.kind).id }, shown: shown, seen: store.seen[key], now: now())
                 if r.decided { away[key] = r.away }
