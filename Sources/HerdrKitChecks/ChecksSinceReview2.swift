@@ -89,3 +89,12 @@ func checksSummaryNotSent() async throws {
         check(failed?.failed == true && failed?.id == "a3", "summary keep: a run that failed is marked, not asked again")
     }
 }
+
+/// "Each agent's own" says how it runs on this Mac: in herdr-core, with herdr-core's environment and provider settings,
+/// which can differ from the ones the agent started with (no promise that a turn goes only where it already goes).
+func checksSummaryOwnNote() {
+    let own = Summary.Texts.byNotes["own"] ?? ""
+    check(!own.contains("goes only where"), "summary own note: no promise that a turn goes only where the conversation goes (\(own))")
+    check(own.contains("herdr-core") && own.contains("environment") && own.contains("provider") && own.contains("differ"),
+          "summary own note: it runs in herdr-core, with its environment and provider settings, which can differ")
+}

@@ -38,7 +38,9 @@ public enum Summary {
         public static let byAbout = "The program that writes the summaries, on its own account."
         public static let byChoices: [(String, String)] = [("own", "Each agent's own"), ("claude", "Claude Code"), ("codex", "Codex"), ("pi", "pi")]
         public static let byNotes: [String: String] = [
-            "own": "Claude Code, Codex and pi agents each use their own program. A turn goes only where that conversation already goes. Other agents get no summary.",
+            // Not the mod's words (since-vectors.json): the mod still says "A turn goes only where that conversation
+            // already goes". Here the program runs in herdr-core, as the mod's helper runs it, and that is said.
+            "own": "Claude Code, Codex and pi agents each use their own program. It runs in herdr-core on this Mac, with herdr-core's environment and provider settings, which can differ from the ones the agent started with. Other agents get no summary.",
             "claude": "Claude Code writes for every agent. The turns of other agents go to Claude Code's provider too.",
             "codex": "Codex writes for every agent. The turns of other agents go to Codex's provider too.",
             "pi": "pi writes for every agent. The turns of other agents go to pi's provider too.",

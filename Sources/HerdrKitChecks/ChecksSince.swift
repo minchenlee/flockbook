@@ -67,10 +67,13 @@ func checksSinceVectors() throws {
           && t["needs_prefix"] as? String == SinceLeft.Texts.needsPrefix && t["from_log"] as? String == SinceLeft.Texts.fromLog
           && t["from_log_with_summary"] as? String == SinceLeft.Texts.fromLogWithSummary && t["jump"] as? String == SinceLeft.Texts.jump, "since vectors: the card's words")
     check(t["summaries_about"] as? String == Summary.Texts.summariesAbout && t["summaries_sent"] as? String == Summary.Texts.sent
-          && t["by_about"] as? String == Summary.Texts.byAbout && t["by_notes"] as? [String: String] == Summary.Texts.byNotes
+          && t["by_about"] as? String == Summary.Texts.byAbout && (t["by_notes"] as? [String: String])?.filter { $0.key != "own" } == Summary.Texts.byNotes.filter { $0.key != "own" }
           && t["model_about"] as? String == Summary.Texts.modelAbout && t["model_empty"] as? [String: String] == Summary.Texts.modelEmpty
           && t["model_source"] as? [String: String] == Summary.Texts.modelSource, "since vectors: the settings' words")
     check((t["model_empty"] as? [String: String])?["claude"] == Summary.claudeModel, "since vectors: Claude Code's default model")
+    // One known difference: "Each agent's own" says on the Mac that the program runs in herdr-core (checksSummaryOwnNote).
+    check((t["by_notes"] as? [String: String])?["own"] != Summary.Texts.byNotes["own"] && Summary.Texts.byNotes.keys == (t["by_notes"] as? [String: String])?.keys,
+          "since vectors: the settings' words: only the note of Each agent's own differs, on purpose")
     for c in v["usage_text"] as! [[Any]] {
         let u = c[0] as! [String: [String: Int]]
         func use(_ x: [String: Int]) -> Summary.Usage { .init(runs: x["runs"]!, failed: x["failed"]!, sent: x["sent"]!, got: x["got"]!) }
