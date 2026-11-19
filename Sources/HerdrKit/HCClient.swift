@@ -92,21 +92,29 @@ public actor HCClient {
 
     /// `call` for a run of a program (`machine.exec`): `HCNotSent` when nothing was written, as herdr-core could not
     /// be reached (not started yet, restarting). Nothing ran then; any other error came after the request went.
+    /// Called off with its task: the connection closes, and herdr-core ends the program and all it started ("when the
+    /// caller goes away", `machine.exec`). hc has no other way to end a run; its `timeout` is the last limit.
     func run(_ method: String, json params: HCJSON, timeout: TimeInterval) async throws -> HCJSON {
         seq += 1
         let id = seq
         let path = session.socketPath
         let body = try HCRPC.request(id: id, method: method, params: params.object)
-        let line = try await Task.detached(priority: .userInitiated) { () throws -> Data in
-            let sock: LineSocket
-            do { sock = try LineSocket(path: path, timeout: timeout) } catch { throw HCNotSent() }
-            defer { sock.close() }
-            try sock.writeLine(body)
-            while true {
-                let line = try sock.readLine()
-                if let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any], HCRPC.id(of: o) == id { return line }
-            }
-        }.value
+        let conn = HCRunConnection()
+        let line = try await withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) { () throws -> Data in
+                let sock: LineSocket
+                do { sock = try LineSocket(path: path, timeout: timeout) } catch { throw HCNotSent() }
+                defer { sock.close() }
+                guard conn.open(sock) else { throw HCNotSent() }   // called off before the request went
+                try sock.writeLine(body)
+                while true {
+                    let line = try sock.readLine()
+                    if let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any], HCRPC.id(of: o) == id { return line }
+                }
+            }.value
+        } onCancel: {
+            conn.cancel()
+        }
         guard let o = try JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw HerdrError.protocolError("hc reply is not an object") }
         return try HCRPC.result(o)
     }
@@ -353,6 +361,20 @@ public actor HCClient {
 
 /// A run's request never went to herdr-core: nothing ran.
 public struct HCNotSent: Error, Sendable {}
+
+/// The connection of one run, closed when the run is called off (also before it is open: then it is never used).
+final class HCRunConnection: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sock: LineSocket?
+    private var cancelled = false
+    /// Keeps `s` for `cancel`; false when the run was called off already.
+    func open(_ s: LineSocket) -> Bool { lock.withLock { guard !cancelled else { return false }; sock = s; return true } }
+    var isCancelled: Bool { lock.withLock { cancelled } }
+    func cancel() {
+        let s = lock.withLock { cancelled = true; return sock }
+        s?.close()
+    }
+}
 
 extension HCClient: HerdrBackend {
     nonisolated public var backend: BackendKind { .hc }
