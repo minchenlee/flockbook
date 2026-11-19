@@ -9,6 +9,5 @@ One short line: what this release is about.
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
-- Herdr app: dragging to select text in the chat no longer moves the window. Only the top bar moves it now, on every screen (#16).
 
 ### ⚙️ Changes
