@@ -86,7 +86,8 @@ function inMarkup(s, start, end) {
 // Whether `at` is inside a code span: a run of backticks up to the next run of the same length.
 function inCodeSpan(s, at) {
   const run = (i) => { let j = i; while (s[j] === "`") j++; return j - i; };
-  // After an odd number of backslashes a backtick is escaped: it neither opens nor closes a span.
+  // After an odd number of backslashes a backtick is escaped: it does not open a span. Inside a span a backslash
+  // escapes nothing (CommonMark): a run of backticks of the same length closes it.
   const escaped = (i) => { let n = 0; while (i - n - 1 >= 0 && s[i - n - 1] === "\\") n++; return n % 2 === 1; };
   for (let i = 0; i < at;) {
     if (s[i] !== "`") { i++; continue; }
@@ -94,8 +95,7 @@ function inCodeSpan(s, at) {
     const n = run(i);
     let j = i + n, close = -1;
     while (j < s.length) {
-      if (s[j] === "`" && escaped(j)) j++;
-      else if (s[j] === "`") { const m = run(j); if (m === n) { close = j; break; } j += m; } else j++;
+      if (s[j] === "`") { const m = run(j); if (m === n) { close = j; break; } j += m; } else j++;
     }
     if (close < 0) { i += n; continue; }
     if (at < close) return true;

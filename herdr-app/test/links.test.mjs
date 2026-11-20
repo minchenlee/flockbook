@@ -173,3 +173,8 @@ test("an escaped backtick does not open or close a code span", () => {
   const esc = "\\`https://x.com\\` ok";
   assert.equal(linkedMarkdown(esc, [at(esc, "https://x.com")]), "\\`[https://x.com](https://x.com)\\` ok", "both escaped: text");
 });
+
+test("in a code span a backslash escapes nothing: `a\\` closes, the next span is code", () => {
+  const t = "`a\\` `https://x.com`";
+  assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t);
+});
