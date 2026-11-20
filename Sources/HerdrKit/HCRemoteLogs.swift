@@ -90,6 +90,7 @@ extension HCClient {
         guard parts.count == 2 else { return }
         let local = mirrorPath(parts[0], parts[1])
         try? FileManager.default.removeItem(atPath: local)
+        MirrorSyncs.drop(local)
         mirrorIssues[local] = nil
     }
 

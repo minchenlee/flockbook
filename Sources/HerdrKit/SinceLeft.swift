@@ -205,6 +205,8 @@ extension SinceLeft {
         public mutating func fresh(syncs: Int?) -> Bool {
             guard let syncs else { return true }
             guard let base = syncsAtStart else { syncsAtStart = syncs; return false }
+            // Fewer than then: the mirror was made again (it counts from 0): wait for its own next copy.
+            if syncs < base { syncsAtStart = syncs; return false }
             return syncs > base
         }
 

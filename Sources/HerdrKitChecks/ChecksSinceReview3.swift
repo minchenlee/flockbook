@@ -65,3 +65,19 @@ private final class ReadPlan: @unchecked Sendable {
     await step("after a reset", [true, false], want: .reset)
 }
 
+/// A mirror that is stopped is no mirror any more (count nil), and a late copy of its poller does not bring it back.
+/// A mirror made again at the same path starts at 0, and a read that waits on it is not stuck on the old count.
+func checksMirrorSyncsDrop() {
+    let p = "/tmp/hk-mirror-drop-\(UUID().uuidString).jsonl"
+    MirrorSyncs.register(p); MirrorSyncs.bump(p); MirrorSyncs.bump(p)
+    check(MirrorSyncs.count(p) == 2, "mirror drop: two copies counted")
+    MirrorSyncs.drop(p); MirrorSyncs.bump(p)
+    check(MirrorSyncs.count(p) == nil, "mirror drop: a late copy of a stopped mirror does not bring it back (\(MirrorSyncs.count(p) ?? -1))")
+    MirrorSyncs.bump(p); MirrorSyncs.register(p)
+    check(MirrorSyncs.count(p) == 0, "mirror drop: made again: it starts at 0 (\(MirrorSyncs.count(p) ?? -1))")
+    MirrorSyncs.drop(p)
+    var a = SinceLeft.Arrival()
+    check(!a.fresh(syncs: 3), "mirror drop: arrival: the count when it came on screen")
+    check(!a.fresh(syncs: 0), "mirror drop: arrival: the mirror was made again (0): wait for its own copy")
+    check(a.fresh(syncs: 1), "mirror drop: arrival: the new mirror's first finished copy: read (not stuck waiting for 4)")
+}

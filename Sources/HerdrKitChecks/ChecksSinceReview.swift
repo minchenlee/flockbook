@@ -172,5 +172,8 @@ func checksSinceArrivalMirror() {
         try? await Task.sleep(for: .milliseconds(400))
         check(MirrorSyncs.count(p) == h2, "mirror syncs: hc: failing reads do not count (\(h2) then \(MirrorSyncs.count(p) ?? -1))")
         await hc.stopMirrors()
+        check(MirrorSyncs.count(p) == nil, "mirror syncs: hc: a stopped mirror is no mirror any more (\(MirrorSyncs.count(p) ?? -1))")
+        try? await Task.sleep(for: .milliseconds(200))
+        check(MirrorSyncs.count(p) == nil, "mirror syncs: hc: its poller does not bring it back (\(MirrorSyncs.count(p) ?? -1))")
     }
 }
