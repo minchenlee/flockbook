@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn reference_links_are_left_alone() {
-        assert!(detect("[1]:\n  https://x.com/docs").is_empty(), "a definition's address on the next line");
+        assert!(detect("[1]:\n  https://x.com/docs").is_empty(), "skipped to be safe: the line after an empty definition is never searched (it may be text; a missed link, the text as it is)");
         assert!(detect("See [https://x.com][ref].\n\n[ref]: https://y.com").is_empty(), "a full reference");
         assert!(detect("See [https://x.com][].").is_empty(), "a collapsed reference");
         assert!(detect("See [https://x.com].\n\n[https://x.com]: https://y.com").is_empty(), "a shortcut reference");
