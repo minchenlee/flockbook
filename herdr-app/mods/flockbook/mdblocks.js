@@ -52,10 +52,24 @@ function inMarkup(s, start, end) {
   const before = s.slice(Math.max(0, start - 3), start);
   if (before.endsWith("](") || before.endsWith("](<")) return true;
   if (before.endsWith("<") && s[end] === ">") return true;
-  let a = start - 1, b = end;
-  while (a >= 0 && s[a] === " ") a--;
-  while (b < s.length && s[b] === " ") b++;
-  return s[a] === "`" && s[b] === "`";
+  return inCodeSpan(s, start);
+}
+
+// Whether `at` is inside a code span: a run of backticks up to the next run of the same length.
+function inCodeSpan(s, at) {
+  const run = (i) => { let j = i; while (s[j] === "`") j++; return j - i; };
+  for (let i = 0; i < at;) {
+    if (s[i] !== "`") { i++; continue; }
+    const n = run(i);
+    let j = i + n, close = -1;
+    while (j < s.length) {
+      if (s[j] === "`") { const m = run(j); if (m === n) { close = j; break; } j += m; } else j++;
+    }
+    if (close < 0) { i += n; continue; }
+    if (at < close) return true;
+    i = close + n;
+  }
+  return false;
 }
 
 // The block as written, for Copy: CRs dropped, normal spaces and tabs.

@@ -37,6 +37,13 @@ test("a URL already in a Markdown link, an autolink or code is left alone", () =
   assert.equal(linkedMarkdown(padded, [at(padded, "https://x.com")]), padded);
 });
 
+test("a URL between two code spans is not code", () => {
+  const t = "`a` https://x.com `b`";
+  assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), "`a` [https://x.com](https://x.com) `b`");
+  const multi = "``a ` b`` https://x.com";
+  assert.equal(linkedMarkdown(multi, [at(multi, "https://x.com")]), "``a ` b`` [https://x.com](https://x.com)");
+});
+
 test("the address it opens: a scheme for bare hosts; files and anything else none", () => {
   assert.equal(linkHref({ res: "local" }, "localhost:3000"), "http://localhost:3000");
   assert.equal(linkHref({ res: "artifact" }, "claude.ai/artifact/x"), "https://claude.ai/artifact/x");

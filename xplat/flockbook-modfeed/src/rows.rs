@@ -257,7 +257,12 @@ pub fn row(it: &ConversationItem) -> FeedRow {
         ItemKind::AssistantText(s) => {
             r.k = "assistant".into();
             let text = cut(s, TEXT_CAP);
-            let links = crate::resources::links(&text);
+            let mut links = crate::resources::links(&text);
+            // A target that runs into the cut's "…" is cut too: not a link.
+            if text.len() != s.len() {
+                let cut_at = text.encode_utf16().count() - 1;
+                links.retain(|l| l.end < cut_at);
+            }
             r.links = (!links.is_empty()).then_some(links);
             r.text = Some(text);
         }

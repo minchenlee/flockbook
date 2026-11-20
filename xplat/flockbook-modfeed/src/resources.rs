@@ -1,4 +1,4 @@
-//! Resources: what an agent points the human to in its reply (contract: herdr-app/docs/protocol.md, "Resources").
+//! Resources: what an agent points the human to in its reply (contract: herdr-app/docs/protocol.md, `row`, `links`).
 //! Pure. `detect` finds the targets in an assistant text; feed rows carry them as `links`, and the `resources`
 //! command (P1) collects them with the same rules.
 
@@ -39,7 +39,7 @@ pub fn detect(text: &str) -> Vec<Found> {
     let b = text.as_bytes();
     let mut taken = vec![false; b.len()];
     let mut hits: Vec<(usize, usize, &'static str, String)> = vec![];
-    for (s, e) in fences(text) {
+    for (s, e) in fences(text).into_iter().chain(definitions(text)) {
         taken[s..e].iter_mut().for_each(|x| *x = true);
     }
     markup(text, &mut taken, &mut hits);
@@ -83,6 +83,24 @@ fn fences(text: &str) -> Vec<(usize, usize)> {
     }
     if let Some((s, _, _)) = open {
         out.push((s, text.len()));
+    }
+    out
+}
+
+/// Reference definitions (`[1]: https://…`), whole lines: drawing their address as a link would break `[text][1]`.
+fn definitions(text: &str) -> Vec<(usize, usize)> {
+    let mut out = vec![];
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_start_matches(' ');
+        if line.len() - t.len() <= 3 && t.starts_with('[') {
+            if let Some(k) = t.find("]:") {
+                if k > 1 && !t[1..k].contains(['[', ']']) {
+                    out.push((pos, pos + line.len()));
+                }
+            }
+        }
+        pos += line.len();
     }
     out
 }
@@ -326,8 +344,8 @@ fn bare_urls(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'sta
             i += 1;
             continue;
         }
-        let rest = &text[i..];
-        let l = rest.get(..12).unwrap_or(rest).to_ascii_lowercase();
+        let rest = &b[i..];
+        let l = String::from_utf8_lossy(&rest[..rest.len().min(12)]).to_ascii_lowercase();
         let schemed = l.starts_with("http://") || l.starts_with("https://");
         let hosty = ["localhost:", "127.0.0.1:", "claude.ai/", "github.com/"].iter().any(|h| l.starts_with(h));
         if !schemed && !hosty {
@@ -513,6 +531,13 @@ mod tests {
     }
 
     #[test]
+    fn reference_definitions_are_not_found() {
+        assert!(detect("See [the docs][1].\n\n[1]: https://x.com/docs").is_empty(), "rewriting it would break [text][1]");
+        assert!(detect("   [a]: <https://x.com> \"t\"").is_empty());
+        assert_eq!(kinds("[1]: https://x.com\nthen https://y.com"), vec!["link"], "the next line is searched");
+    }
+
+    #[test]
     fn not_collected() {
         for t in ["docs/a.md", "./a.md", "../a.md", "/usr/bin/env", "a/b/c.md", "//comment.md", "https://", "mail@x.com", "/tmp/a.md5", "/tmp/a.mdx", "/tmp/a.md/b"] {
             assert!(detect(t).is_empty(), "{t}: {:?}", detect(t));
@@ -525,6 +550,15 @@ mod tests {
         let f = detect("a https://a.com b /tmp/x.md c https://github.com/o/r/issues/2 d localhost:8080");
         assert_eq!(f.iter().map(|x| x.kind).collect::<Vec<_>>(), vec!["link", "doc", "issue", "local"]);
         assert!(f.windows(2).all(|w| w[0].end <= w[1].start));
+    }
+
+    #[test]
+    fn a_url_cut_by_the_text_cap_is_not_a_link() {
+        use herdr_core::*;
+        let long = format!("{} https://x.com/abcdef", "a".repeat(crate::rows::TEXT_CAP - 12));
+        let r = crate::rows::row(&ConversationItem { id: "a1".into(), kind: ItemKind::AssistantText(long), ..Default::default() });
+        assert!(r.text.as_deref().unwrap().ends_with('…'));
+        assert_eq!(r.links, None, "{:?}", r.links);
     }
 
     #[test]
