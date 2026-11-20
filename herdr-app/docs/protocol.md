@@ -325,7 +325,8 @@ the helper (`resources.rs`). Each: `start` and `end`, UTF-16 offsets into `text`
 
 Found: bare URLs and paths, a Markdown link's address (once, not its label), an autolink `<…>`, and a code span that
 holds only the target. Not found: user rows, tool output, code blocks, other text in code spans, pictures
-(`![a](src)`), reference definitions (`[1]: https://…`), relative paths, paths with spaces. A target cut by the
+(`![a](src)`), reference definitions (`[1]: https://…`, also in a quote), labels with nested brackets (`[a [b] c](url)`),
+lines indented 4 or more after a blank line or a heading (in a list too: when in doubt, no link), relative paths, paths with spaces. A target cut by the
 `…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
 The mod draws the web kinds as Markdown links in prose (not in code boxes or tables; TextView opens them); `doc` stays
 text for now. A mod that does not know `links` ignores it. After the helper is updated, a chat read before keeps its
