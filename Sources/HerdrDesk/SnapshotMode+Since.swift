@@ -118,6 +118,20 @@ extension SnapshotRunner {
             // The pane's own approval card in the conversation (the log's pending call, its prompt on screen): no Since card.
             let r = await shotRealPane(model: AppModel(store: store), agent: agent, log: log, now: now, dark: false, path: "\(dir)/since-pane-approval.png", approval: true)
             step("real pane: an approval card in the conversation holds the place: no Since card (approval card \(r.live), Since cards that came \(SinceProbe.appeared))", r.away && r.live && !r.shown && SinceProbe.appeared == 0)
+            // Only the approval card keeps it away: the way in decided a card, and the conversation has its rows.
+            step("real pane with an approval card: the way in decided a card (\(r.decided)) and the conversation has rows (\(r.rows))", r.decided && r.rows > 0)
+            let a = r.approval
+            step("real pane: the approval card is laid out in the conversation, over the reply box (\(Int(a.width)) × \(Int(a.height)) pt, bottom \(Int(a.maxY)), reply box top \(Int(r.composer.minY)))",
+                 a.height > 0 && a.width > 0 && r.composer.height > 0 && a.maxY <= r.composer.minY)
+            // The offscreen picture does not draw what scrolls under a macOS 26 pane bar (safeAreaBar, soft scroll edge):
+            // the rows are laid out (the frame above) but the picture is empty there. With the pre-26 bars the same pane
+            // draws them: the approval card's own pixels are counted inside its frame.
+            let legacyPath = "\(dir)/since-pane-approval-legacy.png"
+            let legacy = await shotRealPane(model: AppModel(store: store), agent: agent, log: log, now: now, dark: false, path: legacyPath, approval: true, legacy: true)
+            // Inside the card (12 pt in): the reply box's shadow reaches into the bottom of the frame.
+            let drawn = inked(legacyPath, legacy.approval.insetBy(dx: 12, dy: 12)), drawn26 = inked("\(dir)/since-pane-approval.png", a.insetBy(dx: 12, dy: 12))
+            step("real pane, pre-26 bars: the approval card is drawn in the conversation, over the reply box (\(drawn) inked pt² in its frame; macOS 26 bars offscreen: \(drawn26))",
+                 legacy.away && legacy.live && !legacy.shown && legacy.approval.height > 0 && legacy.approval.maxY <= legacy.composer.minY && drawn > 400)
         }
         do {
             // Claude Code's status row over the reply box: the card stands right over that row, the row stays on the box.
@@ -262,31 +276,35 @@ extension SnapshotRunner {
     /// `approval`: the prompt of the log's pending call is on screen, so its approval card stands in the conversation.
     /// `status`: Claude Code's status row over the reply box. `live`: the approval card stood in the conversation.
     @MainActor private static func shotRealPane(model: AppModel, agent: Agent, log: URL, now: Date, dark: Bool, path: String,
-                                                approval: Bool = false, status: StatusLineRecord? = nil) async
-        -> (card: CGRect, gap: CGFloat, shown: Bool, away: Bool, status: CGRect, composer: CGRect, live: Bool) {
-        guard let pane = model.store.workspaces.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.agent?.name == agent.name }) else { return (.zero, 0, false, false, .zero, .zero, false) }
+                                                approval: Bool = false, status: StatusLineRecord? = nil, legacy: Bool = false) async
+        -> (card: CGRect, gap: CGFloat, shown: Bool, away: Bool, status: CGRect, composer: CGRect, live: Bool, approval: CGRect, decided: Bool, rows: Int) {
+        guard let pane = model.store.workspaces.flatMap(\.tabs).flatMap(\.panes).first(where: { $0.agent?.name == agent.name }) else { return (.zero, 0, false, false, .zero, .zero, false, .zero, false, 0) }
         let since = model.since
         since.logFor = { a, _ in a.name == agent.name ? log : nil }
         let key = since.key(pane, session: model.store.session)
         since.away[key] = nil
         since.store.markSeen(key, id: "a1", now: Int64(now.timeIntervalSince1970 * 1000) - 47 * 60_000)
-        SinceProbe.on = true; SinceProbe.card = .zero; SinceProbe.composer = .zero; SinceProbe.status = .zero; SinceProbe.appeared = 0
+        SinceProbe.on = true; SinceProbe.card = .zero; SinceProbe.composer = .zero; SinceProbe.status = .zero; SinceProbe.approval = .zero; SinceProbe.appeared = 0
         let savedLines = StatusLineProbe.injected
         if let status, let sid = pane.agent?.sessionId { StatusLineProbe.injected[sid] = status; model.checkStatusLine(for: pane) }
         defer { SinceProbe.on = false; StatusLineProbe.injected = savedLines }
-        var live = false
+        var live = false, decided = false, rows = 0
         // The prompt stays on screen while the window renders (the pane's own screen check finds none in the preview).
         if approval { SinceProbe.prompt.insert(pane.id); model.promptVisible.insert(pane.id) }
         defer { SinceProbe.prompt.remove(pane.id) }
         let size = NSSize(width: 1020, height: 768)
         let view = ZStack { WindowSurface(glass: .off); PaneView(pane: pane, showLabel: false, focused: true) }
             .environment(model).environment(\.flatGlass, true).environment(\.colorScheme, dark ? .dark : .light)
+            .transformEnvironment(\.legacyLook) { if legacy { $0 = true } }
             .frame(width: size.width, height: size.height)
         let away = await renderSince(view, size: size, dark: dark, path: path) {
             live = model.liveCardInConversation(pane) != nil
+            decided = since.away[key] != nil
+            rows = pane.agent.map { model.store.conversation(for: $0.sessionId).count } ?? 0
         }
         let shown = since.away[key] != nil && SinceProbe.appeared > 0 && SinceProbe.card.height > 0
-        return (SinceProbe.card, SinceProbe.composer.minY - SinceProbe.card.maxY, shown, away, SinceProbe.status, SinceProbe.composer, live)
+        return (SinceProbe.card, SinceProbe.composer.minY - SinceProbe.card.maxY, shown, away, SinceProbe.status, SinceProbe.composer, live,
+                SinceProbe.approval, decided, rows)
     }
 
     /// A pane's conversation, the card and the reply box, as in a tab. Returns the card's frame, its gap over the reply
@@ -319,6 +337,32 @@ extension SnapshotRunner {
         let size = NSSize(width: width, height: max(80, fit.height))
         return await renderSince(ZStack(alignment: .top) { Color(nsColor: .windowBackgroundColor); v }
             .environment(\.colorScheme, dark ? .dark : .light).frame(width: size.width, height: size.height), size: size, dark: dark, path: path, inspect: inspect)
+    }
+
+    /// Area in square points of `rect` (points, top left origin) in the picture at `path` that differs clearly from the
+    /// rect's top left pixel (its background), both as seen on white: 0 when nothing is drawn there. Square points, not
+    /// pixels, so a 1x and a 2x screen give the same number.
+    /// `width`: the view's width in points (the picture has no point size of its own).
+    @MainActor private static func inked(_ path: String, _ rect: CGRect, width: CGFloat = 1020) -> Int {
+        guard rect.width > 0, rect.height > 0, let rep = NSImage(contentsOfFile: path)?.representations.first as? NSBitmapImageRep else { return 0 }
+        let scale = CGFloat(rep.pixelsWide) / width
+        let x0 = Int(rect.minX * scale), y0 = Int(rect.minY * scale), x1 = min(rep.pixelsWide, Int(rect.maxX * scale)), y1 = min(rep.pixelsHigh, Int(rect.maxY * scale))
+        guard x0 < x1, y0 < y1, let bg = rep.colorAt(x: x0 + 2, y: y0 + 2) else { return 0 }
+        // As seen on a white page: a see-through background is white, a soft shadow a light grey.
+        func seen(_ c: NSColor) -> (CGFloat, CGFloat, CGFloat) {
+            let a = c.alphaComponent
+            return (c.redComponent * a + 1 - a, c.greenComponent * a + 1 - a, c.blueComponent * a + 1 - a)
+        }
+        let b = seen(bg)
+        var n = 0
+        for y in stride(from: y0, to: y1, by: 1) {
+            for x in stride(from: x0, to: x1, by: 1) {
+                guard let c = rep.colorAt(x: x, y: y) else { continue }
+                let s = seen(c)
+                if abs(s.0 - b.0) + abs(s.1 - b.1) + abs(s.2 - b.2) > 0.3 { n += 1 }
+            }
+        }
+        return Int(CGFloat(n) / (scale * scale))
     }
 
     @MainActor private static func renderSince(_ view: some View, size: NSSize, dark: Bool, path: String, inspect: () -> Void = {}) async -> Bool {

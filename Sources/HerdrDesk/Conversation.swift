@@ -704,6 +704,7 @@ private struct EntryRow: View, Equatable {
 
     @ViewBuilder private func approval(_ r: PermissionRequest) -> some View {
         ApprovalCard(request: r, agentName: agentName, canRespond: true, onAllow: { onAllow(r) }, onDeny: { onDeny(r) }, onOpen: onOpenTerminal)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.approval = $0 } }
     }
 }
 

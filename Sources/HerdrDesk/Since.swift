@@ -271,6 +271,8 @@ final class SinceModel {
 @MainActor enum SinceProbe {
     static var on = false
     static var card = CGRect.zero, composer = CGRect.zero, status = CGRect.zero
+    /// The approval card in the conversation (`ConversationView`), as drawn.
+    static var approval = CGRect.zero
     /// Cards that came on screen (a frame stays after its card goes; a closed window's card only goes).
     static var appeared = 0
     /// Panes whose permission prompt stays on screen (the preview has no screen to read): `checkPrompt` keeps them.
