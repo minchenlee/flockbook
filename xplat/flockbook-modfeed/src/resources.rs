@@ -96,11 +96,16 @@ fn definitions(text: &str) -> (Vec<(usize, usize)>, Vec<String>) {
     let mut pos = 0;
     let mut next = false;
     for line in text.split_inclusive('\n') {
-        let t = line.trim_start_matches(' ');
+        // In a quote ("> ", "> > "), after its markers.
+        let mut q = line;
+        while let Some(r) = q.trim_start_matches(' ').strip_prefix('>') {
+            q = r.strip_prefix(' ').unwrap_or(r);
+        }
+        let t = q.trim_start_matches(' ');
         if next {
             out.push((pos, pos + line.len()));
             next = false;
-        } else if line.len() - t.len() <= 3 && t.starts_with('[') {
+        } else if q.len() - t.len() <= 3 && t.starts_with('[') {
             if let Some(k) = t.find("]:") {
                 if k > 1 && !t[1..k].contains(['[', ']']) {
                     out.push((pos, pos + line.len()));
@@ -280,14 +285,49 @@ fn link_at(text: &str, i: usize) -> Option<(usize, usize, usize)> {
 }
 
 /// A reference link at `[` at `i`: `[text][ref]`, `[text][]`, or `[text]` with a definition. The end past it.
+/// A label with brackets inside (`[a [b] c][ref]`, `[a [b] c](url)`) is skipped whole, to be safe.
 fn reference_at(text: &str, i: usize, labels: &[String]) -> Option<usize> {
-    let close = text[i + 1..].find(']')? + i + 1;
+    let b = text.as_bytes();
+    let (mut depth, mut nested, mut close) = (0i32, false, None);
+    for (k, &c) in b.iter().enumerate().skip(i) {
+        match c {
+            b'[' => {
+                depth += 1;
+                nested |= depth > 1;
+            }
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(k);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close = close?;
     if text[i + 1..close].contains("\n\n") {
         return None;
     }
-    if text.as_bytes().get(close + 1) == Some(&b'[') {
+    if b.get(close + 1) == Some(&b'[') {
         let end = text[close + 2..].find(']')? + close + 2;
         return (!text[close + 2..end].contains('\n')).then_some(end + 1);
+    }
+    if nested && b.get(close + 1) == Some(&b'(') {
+        let mut d = 0i32;
+        for (k, &c) in b.iter().enumerate().skip(close + 1) {
+            match c {
+                b'(' => d += 1,
+                b')' => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(k + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        return None;
     }
     labels.contains(&text[i + 1..close].trim().to_lowercase()).then_some(close + 1)
 }
@@ -641,6 +681,16 @@ mod tests {
         assert_eq!(kinds("```x``` then https://x.com"), vec!["link"]);
         assert!(detect("```sh\nhttps://x.com\n```").is_empty(), "still a fence");
         assert!(detect("~~~ a`b\nhttps://x.com\n~~~").is_empty(), "a tilde fence's info may have one");
+    }
+
+    #[test]
+    fn quoted_definitions_and_nested_labels_are_skipped() {
+        // Skipped to be safe: rewriting a URL there could break the reference.
+        assert!(detect("> [1]: https://x.com/docs").is_empty(), "a definition in a quote");
+        assert!(detect("> > [1]:\n> https://x.com/docs").is_empty(), "nested quote, address on the next line");
+        assert!(detect("See [a [https://x.com] b][ref].\n\n[ref]: https://y.com").is_empty(), "nested brackets in a full reference");
+        assert!(detect("See [a [b] https://x.com](https://y.com).").is_empty(), "nested brackets in an inline link");
+        assert_eq!(kinds("> quote https://x.com"), vec!["link"], "other quoted text is searched");
     }
 
     #[test]
