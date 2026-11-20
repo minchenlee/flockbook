@@ -49,9 +49,13 @@ export function linkedMarkdown(text, links, offset = 0) {
 // Already drawn as a link or as code: an address in "](…)" or "](<…>)", an autolink "<…>", or a code span (the
 // helper finds a span only when it holds nothing but the target, maybe with spaces).
 function inMarkup(s, start, end) {
-  const before = s.slice(Math.max(0, start - 3), start);
-  if (before.endsWith("](") || before.endsWith("](<")) return true;
-  if (before.endsWith("<") && s[end] === ">") return true;
+  // A link's address may follow "](" after spaces or a line break, and may be in <…>.
+  let a = start;
+  if (s[a - 1] === "<") a--;
+  while (a > 0 && /[ \t\n]/.test(s[a - 1])) a--;
+  if (s.slice(Math.max(0, a - 2), a) === "](") return true;
+  const before = s.slice(Math.max(0, start - 1), start);
+  if (before === "<" && s[end] === ">") return true;
   return inCodeSpan(s, start);
 }
 

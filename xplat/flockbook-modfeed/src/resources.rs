@@ -39,10 +39,11 @@ pub fn detect(text: &str) -> Vec<Found> {
     let b = text.as_bytes();
     let mut taken = vec![false; b.len()];
     let mut hits: Vec<(usize, usize, &'static str, String)> = vec![];
-    for (s, e) in fences(text).into_iter().chain(definitions(text)) {
+    let (defs, labels) = definitions(text);
+    for (s, e) in fences(text).into_iter().chain(defs) {
         taken[s..e].iter_mut().for_each(|x| *x = true);
     }
-    markup(text, &mut taken, &mut hits);
+    markup(text, &labels, &mut taken, &mut hits);
     bare_urls(text, &mut taken, &mut hits);
     bare_paths(text, &mut taken, &mut hits);
     hits.sort_by_key(|h| h.0);
@@ -87,22 +88,29 @@ fn fences(text: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// Reference definitions (`[1]: https://…`), whole lines: drawing their address as a link would break `[text][1]`.
-fn definitions(text: &str) -> Vec<(usize, usize)> {
-    let mut out = vec![];
+/// Reference definitions (`[1]: https://…`), whole lines, and the next line when the address is there: drawing
+/// their address as a link would break `[text][1]`. Also their labels, lowercased, for shortcut references.
+fn definitions(text: &str) -> (Vec<(usize, usize)>, Vec<String>) {
+    let (mut out, mut labels) = (vec![], vec![]);
     let mut pos = 0;
+    let mut next = false;
     for line in text.split_inclusive('\n') {
         let t = line.trim_start_matches(' ');
-        if line.len() - t.len() <= 3 && t.starts_with('[') {
+        if next {
+            out.push((pos, pos + line.len()));
+            next = false;
+        } else if line.len() - t.len() <= 3 && t.starts_with('[') {
             if let Some(k) = t.find("]:") {
                 if k > 1 && !t[1..k].contains(['[', ']']) {
                     out.push((pos, pos + line.len()));
+                    labels.push(t[1..k].trim().to_lowercase());
+                    next = t[k + 2..].trim().is_empty();
                 }
             }
         }
         pos += line.len();
     }
-    out
+    (out, labels)
 }
 
 fn mark(taken: &mut [bool], s: usize, e: usize) {
@@ -110,7 +118,7 @@ fn mark(taken: &mut [bool], s: usize, e: usize) {
 }
 
 /// Code spans, Markdown links, pictures and autolinks: each is taken whole; a target in it is found once.
-fn markup(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'static str, String)>) {
+fn markup(text: &str, labels: &[String], taken: &mut [bool], hits: &mut Vec<(usize, usize, &'static str, String)>) {
     let b = text.as_bytes();
     let mut i = 0;
     while i < b.len() {
@@ -163,7 +171,13 @@ fn markup(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'static
                     mark(taken, i, end);
                     i = end;
                 }
-                None => i += 1,
+                None => match reference_at(text, i, labels) {
+                    Some(end) => {
+                        mark(taken, i, end);
+                        i = end;
+                    }
+                    None => i += 1,
+                },
             },
             b'<' => {
                 let k = text[i + 1..].find(|c: char| c == '>' || c.is_whitespace()).map(|k| i + 1 + k);
@@ -217,6 +231,19 @@ fn link_at(text: &str, i: usize) -> Option<(usize, usize, usize)> {
         k += 1;
     }
     None
+}
+
+/// A reference link at `[` at `i`: `[text][ref]`, `[text][]`, or `[text]` with a definition. The end past it.
+fn reference_at(text: &str, i: usize, labels: &[String]) -> Option<usize> {
+    let close = text[i + 1..].find(']')? + i + 1;
+    if text[i + 1..close].contains("\n\n") {
+        return None;
+    }
+    if text.as_bytes().get(close + 1) == Some(&b'[') {
+        let end = text[close + 2..].find(']')? + close + 2;
+        return (!text[close + 2..end].contains('\n')).then_some(end + 1);
+    }
+    labels.contains(&text[i + 1..close].trim().to_lowercase()).then_some(close + 1)
 }
 
 fn is_url(s: &str) -> bool {
@@ -535,6 +562,15 @@ mod tests {
         assert!(detect("See [the docs][1].\n\n[1]: https://x.com/docs").is_empty(), "rewriting it would break [text][1]");
         assert!(detect("   [a]: <https://x.com> \"t\"").is_empty());
         assert_eq!(kinds("[1]: https://x.com\nthen https://y.com"), vec!["link"], "the next line is searched");
+    }
+
+    #[test]
+    fn reference_links_are_left_alone() {
+        assert!(detect("[1]:\n  https://x.com/docs").is_empty(), "a definition's address on the next line");
+        assert!(detect("See [https://x.com][ref].\n\n[ref]: https://y.com").is_empty(), "a full reference");
+        assert!(detect("See [https://x.com][].").is_empty(), "a collapsed reference");
+        assert!(detect("See [https://x.com].\n\n[https://x.com]: https://y.com").is_empty(), "a shortcut reference");
+        assert_eq!(kinds("See [https://x.com] there"), vec!["link"], "brackets without a definition are text");
     }
 
     #[test]
