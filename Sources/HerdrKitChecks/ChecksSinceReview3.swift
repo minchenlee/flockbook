@@ -21,3 +21,47 @@ func checksSinceArrivalNoCopy() {
     check(same.mark(nil) == "a2", "since arrival no copy: decided on the turn shown: a copy that shows nothing keeps it")
 }
 
+/// Outcomes of the next host reads, in order (true: read; false: fail); reads after them all succeed.
+private final class ReadPlan: @unchecked Sendable {
+    private let lock = NSLock()
+    private var plan: [Bool] = []
+    func set(_ p: [Bool]) { lock.withLock { plan = p } }
+    func next() -> Bool { lock.withLock { plan.isEmpty ? true : plan.removeFirst() } }
+}
+
+/// A copy over ssh that stops part way (a read fails after the first chunk) has not caught up: it does not count as a
+/// finished copy, on the first fill, after a reset, or when the log grew. The next copy that reads to the end counts.
+@MainActor func checksMirrorPartialSync() async throws {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hkmpart-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let hostFile = dir.appendingPathComponent("host.jsonl").path
+    let line = { (n: Int) in "{\"n\":\(n),\"pad\":\"\(String(repeating: "x", count: 20))\"}\n" }
+    try (0..<4).map(line).joined().write(toFile: hostFile, atomically: false, encoding: .utf8)
+    let plan = ReadPlan()
+    let m = try RemoteLogMirror(host: RemoteHost(via: .local), path: hostFile, dir: dir.appendingPathComponent("cache"), chunk: 16,
+                                read: { p, at, n in
+        guard plan.next(), let fh = FileHandle(forReadingAtPath: p) else { return nil }
+        defer { try? fh.close() }
+        try? fh.seek(toOffset: at)
+        return try? fh.read(upToCount: n) ?? Data()
+    })
+    let key = m.url.path
+    let bytes = { (p: String) in (try? Data(contentsOf: URL(fileURLWithPath: p))) ?? Data() }
+    func step(_ name: String, _ p: [Bool], want: RemoteLogMirror.Change) async {
+        let c0 = MirrorSyncs.count(key) ?? -1
+        plan.set(p)
+        let part = await m.sync(tail: 1 << 20)
+        let c1 = MirrorSyncs.count(key) ?? -1
+        check(part == want && c1 == c0, "mirror partial: \(name): a copy that stopped part way does not count (\(part), \(c0) then \(c1))")
+        let rest = await m.sync(tail: 1 << 20)
+        let c2 = MirrorSyncs.count(key) ?? -1
+        check(c2 == c1 + 1 && bytes(key) == bytes(hostFile), "mirror partial: \(name): the next copy reads to the end and counts (\(rest), \(c2))")
+    }
+    await step("first fill", [true, false], want: .grew)
+    try FileHandle(forWritingAtPath: hostFile).map { fh in defer { try? fh.close() }; try fh.seekToEnd(); try fh.write(contentsOf: Data((4..<7).map(line).joined().utf8)) }
+    await step("the log grew", [true, false], want: .grew)
+    try (10..<13).map(line).joined().write(toFile: hostFile, atomically: false, encoding: .utf8)   // smaller: replaced
+    await step("after a reset", [true, false], want: .reset)
+}
+
