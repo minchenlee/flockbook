@@ -496,7 +496,9 @@ extension ChromeTests {
         } else { step("a wheel over the hidden terminal: no terminal", false) }
         // Return in the hidden composer sends nothing and keeps the draft (its send is gated, so nothing goes out either way).
         if let composer {
-            composer.string = "a draft"
+            // Through the text view's change (as typing does): set only on the NSTextView, any SwiftUI update in the
+            // 200 ms below writes the empty binding back over it and the check fails for a reason of its own.
+            composer.string = "a draft"; composer.didChangeText()
             composer.insertNewline(nil)
             try? await Task.sleep(for: .milliseconds(200))
             step("Return in the hidden composer keeps the draft (\"\(composer.string)\")", composer.string == "a draft")
