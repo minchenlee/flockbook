@@ -64,10 +64,10 @@ function indented(s, start) {
 // Already drawn as a link or as code: an address in "](…)" or "](<…>)", an autolink "<…>", or a code span (the
 // helper finds a span only when it holds nothing but the target, maybe with spaces).
 function inMarkup(s, start, end) {
-  // A link's address may follow "](" after spaces or a line break, and may be in <…>.
+  // A link's address may follow "](" after spaces or a line break (LF or CRLF), and may be in <…>.
   let a = start;
   if (s[a - 1] === "<") a--;
-  while (a > 0 && /[ \t\n]/.test(s[a - 1])) a--;
+  while (a > 0 && /[ \t\r\n]/.test(s[a - 1])) a--;
   if (s.slice(Math.max(0, a - 2), a) === "](") return true;
   const before = s.slice(Math.max(0, start - 1), start);
   if (before === "<" && s[end] === ">") return true;

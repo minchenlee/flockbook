@@ -136,3 +136,11 @@ test("a link on a line indented 4 or more (a tab counts to the next 4) is left a
   const t = "   https://a.com\n    https://x.com";
   assert.equal(linkedMarkdown(t, [at(t, "https://a.com"), at(t, "https://x.com")]), "   [https://a.com](https://a.com)\n    https://x.com", "3 spaces is not 4");
 });
+
+// Resources P0 fix5 (Codex round 4).
+test("an address after CRLF in a link's destination is left alone", () => {
+  const t = "[Guide](\r\nhttps://x.com/guide)";
+  assert.equal(linkedMarkdown(t, [at(t, "https://x.com/guide")]), t);
+  const s = "[Guide]( \r\n <https://x.com/guide>)";
+  assert.equal(linkedMarkdown(s, [at(s, "https://x.com/guide")]), s);
+});
