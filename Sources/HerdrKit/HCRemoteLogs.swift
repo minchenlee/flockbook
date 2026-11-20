@@ -314,7 +314,8 @@ extension HCClient {
         } catch { return .idle }
         let got = whole.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
         st.next += got
-        if got < MirrorState.chunk { MirrorSyncs.bump(local) }   // read to the end: caught up
+        // Caught up only at the file's last line: a read cut short by hc's 8 MB cap gives fewer lines than asked too.
+        if st.next - 1 >= lines { MirrorSyncs.bump(local) }
         return .grew
     }
 }

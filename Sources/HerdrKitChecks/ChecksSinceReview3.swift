@@ -81,3 +81,38 @@ func checksMirrorSyncsDrop() {
     check(!a.fresh(syncs: 0), "mirror drop: arrival: the mirror was made again (0): wait for its own copy")
     check(a.fresh(syncs: 1), "mirror drop: arrival: the new mirror's first finished copy: read (not stuck waiting for 4)")
 }
+
+/// hc gives at most 8 MB per read: a read cut short by that cap ends before the file does, so it is not a finished copy
+/// of an agent on another machine. Only the read that reaches the file's last line counts.
+@MainActor func checksMirrorByteCap() async throws {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hkmcap-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let fake = FakeHC(path: fakeHCPath())
+    try fake.start()
+    defer { fake.kill() }
+    fake.machines = [FakeHC.machine("box")]
+    fake.terminals = [FakeHC.terminal("box/t8", argv: ["claude"], pid: 800, cwd: "/home/b/w")]
+    let sid = "0b1c2d3e-aaaa-bbbb-cccc-000000000088"
+    let log = "/home/b/.claude/projects/-home-b-w/\(sid).jsonl"
+    fake.execReplies = [
+        ("ps ", "/home/b\n  800     1 Mon Nov  2 10:00:00 2026 claude --resume\n"),
+        (".claude/sessions", "800\t{\"pid\":800,\"sessionId\":\"\(sid)\",\"procStart\":\"Mon Nov  2 10:00:00 2026\"}\n"),
+        (".claude/projects", log + "\n"),
+    ]
+    let whole = (0..<6).map { "{\"type\":\"user\",\"n\":\($0)}\n" }.joined()   // 25 bytes a line
+    fake.files = ["box:\(log)": whole]
+    fake.fileByteCap = 60   // two lines a read: three reads to the end
+    fake.readDelays = ["box:\(log)": 0.15]   // slow reads: the count is seen between them
+    let hc = HCClient(session: HCSession(socketPath: fake.path))
+    await hc.setMirror(root: dir.appendingPathComponent("hcm").path, poll: 0.05)
+    defer { Task { await hc.stopMirrors() } }
+    let found = await hc.resolveRemote([SessionResolver.Need(paneId: "hc:box/t8", kind: "claude", cwd: "/home/b/w")], claimed: [])
+    let p = found["hc:box/t8"] ?? ""
+    for _ in 0..<600 where (MirrorSyncs.count(p) ?? 0) == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+    let copy = (try? String(contentsOfFile: p, encoding: .utf8)) ?? ""
+    let n = copy.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+    check(!p.isEmpty && (MirrorSyncs.count(p) ?? 0) >= 1 && copy == whole,
+          "mirror byte cap: hc: the first copy that counts holds the whole file (\(n) of 6 lines, count \(MirrorSyncs.count(p) ?? -1))")
+    await hc.stopMirrors()
+}
