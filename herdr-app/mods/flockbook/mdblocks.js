@@ -40,7 +40,9 @@ export function linkedMarkdown(text, links, offset = 0) {
     if (l.start < at || s[l.start - 1] === "!" || inMarkup(s, l.start, l.end)) continue;
     const seen = s.slice(l.start, l.end), href = linkHref(l, seen);
     if (!href) continue;
-    const dest = /[()\s<>]/.test(href) ? `<${href}>` : href;
+    // Backslash before & and \ so an entity ("&amp;") or an escape is not read in the address.
+    const raw = href.replace(/[\\&]/g, (c) => "\\" + c);
+    const dest = /[()\s<>]/.test(href) ? `<${raw}>` : raw;
     out += s.slice(at, l.start) + "[" + seen.replace(/[\\[\]*_~`<>]/g, (c) => "\\" + c) + "](" + dest + ")";
     at = l.end;
   }

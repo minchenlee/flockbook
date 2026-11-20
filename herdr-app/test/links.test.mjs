@@ -55,6 +55,14 @@ test("a URL after ! is not rewritten: it would become a picture", () => {
   assert.equal(linkedMarkdown(t, [at(t, "https://x.com/a")]), t);
 });
 
+test("the address is written so it opens exactly what the helper found: & and \\ escaped", () => {
+  const u = "https://x.com/?a=1&amp;b=2&copy=3";
+  const t = `go ${u}`;
+  assert.equal(linkedMarkdown(t, [at(t, u)]), `go [${u}](https://x.com/?a=1\\&amp;b=2\\&copy=3)`);
+  const p = "https://x.com/a(b)&amp;";
+  assert.equal(linkedMarkdown(p, [at(p, p)]), `[${p}](<https://x.com/a(b)\\&amp;>)`);
+});
+
 test("the address it opens: a scheme for bare hosts; files and anything else none", () => {
   assert.equal(linkHref({ res: "local" }, "localhost:3000"), "http://localhost:3000");
   assert.equal(linkHref({ res: "artifact" }, "claude.ai/artifact/x"), "https://claude.ai/artifact/x");

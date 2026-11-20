@@ -384,7 +384,7 @@ fn trim_end(s: &str) -> &str {
     loop {
         let Some(c) = s.chars().last() else { return s };
         let drop = match c {
-            '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' | '*' | '_' | '~' => true,
+            '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' | '*' | '~' => true,
             ')' => s.matches('(').count() < s.matches(')').count(),
             ']' => s.matches('[').count() < s.matches(']').count(),
             _ => false,
@@ -626,6 +626,12 @@ mod tests {
         assert_eq!(kinds("Text\n    https://x.com"), vec!["link"], "a paragraph's next line is not code");
         assert_eq!(kinds("- item\n\n    https://x.com"), vec!["link"], "a list item's paragraph");
         assert_eq!(kinds("    code\n\nafter https://x.com"), vec!["link"]);
+    }
+
+    #[test]
+    fn a_trailing_underscore_is_part_of_the_url() {
+        assert_eq!(one("https://x.com/a_").3, "https://x.com/a_");
+        assert_eq!(one("see https://x.com/snake_case_ now").3, "https://x.com/snake_case_");
     }
 
     #[test]
