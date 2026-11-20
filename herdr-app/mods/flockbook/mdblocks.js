@@ -73,23 +73,42 @@ function indented(s, start) {
 // Already drawn as a link or as code: an address in "](…)" or "](<…>)", an autolink "<…>", or a code span (the
 // helper finds a span only when it holds nothing but the target, maybe with spaces).
 function inMarkup(s, start, end) {
+  const [ps, pe] = paragraph(s, start);
   // A link's address may follow "](" after spaces or a line break (LF or CRLF), and may be in <…>.
   let a = start;
   if (s[a - 1] === "<") a--;
-  while (a > 0 && /[ \t\r\n]/.test(s[a - 1])) a--;
+  while (a > ps && /[ \t\r\n]/.test(s[a - 1])) a--;
   if (s.slice(Math.max(0, a - 2), a) === "](") return true;
   const before = s.slice(Math.max(0, start - 1), start);
   if (before === "<" && s[end] === ">") return true;
-  return inCodeSpan(s, start);
+  return inCodeSpan(s.slice(0, pe), start, ps);
+}
+
+// The paragraph around `at`: [its start, its end], between blank lines (lines of spaces only). Markup does not cross one.
+function paragraph(s, at) {
+  const blank = (a, b) => !s.slice(a, b).trim();
+  let ps = s.lastIndexOf("\n", at - 1) + 1;
+  while (ps > 0) {
+    const prev = s.lastIndexOf("\n", ps - 2) + 1;
+    if (blank(prev, ps - 1)) break;
+    ps = prev;
+  }
+  let pe = s.indexOf("\n", at);
+  while (pe >= 0) {
+    const next = s.indexOf("\n", pe + 1);
+    if (blank(pe + 1, next < 0 ? s.length : next)) break;
+    pe = next;
+  }
+  return [ps, pe < 0 ? s.length : pe];
 }
 
 // Whether `at` is inside a code span: a run of backticks up to the next run of the same length.
-function inCodeSpan(s, at) {
+function inCodeSpan(s, at, from = 0) {
   const run = (i) => { let j = i; while (s[j] === "`") j++; return j - i; };
   // After an odd number of backslashes a backtick is escaped: it does not open a span. Inside a span a backslash
   // escapes nothing (CommonMark): a run of backticks of the same length closes it.
   const escaped = (i) => { let n = 0; while (i - n - 1 >= 0 && s[i - n - 1] === "\\") n++; return n % 2 === 1; };
-  for (let i = 0; i < at;) {
+  for (let i = from; i < at;) {
     if (s[i] !== "`") { i++; continue; }
     if (escaped(i)) { i++; continue; }
     const n = run(i);

@@ -178,3 +178,10 @@ test("in a code span a backslash escapes nothing: `a\\` closes, the next span is
   const t = "`a\\` `https://x.com`";
   assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t);
 });
+
+test("a code span does not cross a blank line: a backtick at a paragraph's end is text", () => {
+  const t = "`a\\` means `\n\n`https://x.com`";
+  assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t, "the second paragraph's span is code");
+  const u = "a `\n \t\nsee https://x.com `b`";
+  assert.equal(linkedMarkdown(u, [at(u, "https://x.com")]), "a `\n \t\nsee [https://x.com](https://x.com) `b`", "a line of spaces is blank too");
+});
