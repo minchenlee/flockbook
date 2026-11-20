@@ -16,6 +16,7 @@ func checksSinceArrivalNoCopy() {
     var older = SinceLeft.Arrival()
     _ = older.first("a2", shown: nil, seen: seen, now: now)
     check(older.mark("a1") == "a1", "since arrival no copy: the copy shows an older turn: that turn is marked (the card comes again)")
+    check(older.mark(nil) == "a1", "since arrival no copy: then a copy that shows nothing keeps the older turn, not the one never shown (\(older.mark(nil) ?? "nil"))")
     var same = SinceLeft.Arrival()
     _ = same.first("a2", shown: "a2", seen: seen, now: now)
     check(same.mark(nil) == "a2", "since arrival no copy: decided on the turn shown: a copy that shows nothing keeps it")

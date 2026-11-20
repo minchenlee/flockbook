@@ -183,6 +183,8 @@ extension SinceLeft {
         private var behind: String?
         /// Decided while the app's copy showed another turn, or none (`behind` nil): nothing is marked until it moves on.
         private var waiting = false
+        /// The last turn the app's copy showed (nil: none yet): a copy that shows nothing keeps it, never a turn not shown.
+        private var lastShown: String?
         public init() {}
 
         /// `read`: the newest turn in a read of the log made now (nil: no log, or no turn yet: wait for the next read).
@@ -193,6 +195,7 @@ extension SinceLeft {
             decided = read
             waiting = shown != read
             behind = shown
+            lastShown = shown
             return (true, SinceLeft.arrive(seen: seen, id: read, now: now))
         }
 
@@ -219,7 +222,8 @@ extension SinceLeft {
                 if shown == nil || shown == behind { return nil }
                 waiting = false
             }
-            return shown ?? decided
+            if let shown { lastShown = shown }
+            return lastShown ?? decided
         }
     }
 }
