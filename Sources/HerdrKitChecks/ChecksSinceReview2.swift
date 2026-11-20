@@ -98,3 +98,36 @@ func checksSummaryOwnNote() {
     check(own.contains("herdr-core") && own.contains("environment") && own.contains("provider") && own.contains("differ"),
           "summary own note: it runs in herdr-core, with its environment and provider settings, which can differ")
 }
+
+/// herdr-core takes the connection and goes down before the request is written (the first write fails, nothing went):
+/// the run did not go, as when it could not be reached.
+func checksSummaryClosedOnConnect() async throws {
+    try await scratch { dir in
+        let fake = FakeHC(path: fakeHCPath())
+        fake.closeOnAccept = true
+        try fake.start()
+        defer { fake.kill() }
+        let store = await MainActor.run { SinceStore(dir: dir.appendingPathComponent("app")) }
+        let run = HCExecRunner(client: HCClient(session: HCSession(socketPath: fake.path)))
+        let s = Summary.Settings(on: true)
+        let down = await Summary.ask(items: turn, kind: "claude", settings: s, runner: run, store: store, cwd: dir.path, go: {
+            // Write only once the fake has closed this connection: then the first write fails and sends nothing.
+            for _ in 0..<80 where fake.closedOnAccept == 0 { try? await Task.sleep(for: .milliseconds(25)) }
+            try? await Task.sleep(for: .milliseconds(50))
+            return true
+        })
+        var notSent = false
+        if case .failure(.notSent) = down { notSent = true }
+        let u = await MainActor.run { store.usage(since: [0], now: Int64(Date().timeIntervalSince1970 * 1000) + 1) }
+        check(fake.closedOnAccept >= 1, "summary closed on connect: herdr-core took the connection and closed it (\(fake.closedOnAccept))")
+        check(notSent, "summary closed on connect: the first write sent nothing: the run did not go (\(down))")
+        check(Summary.keep(down, id: "a3", by: s.writer) == nil, "summary closed on connect: nothing is kept, so the turn is asked again")
+        check((u.first?.runs ?? 0) == 0, "summary closed on connect: no model run is counted (\(u))")
+        fake.closeOnAccept = false
+        fake.execReplies = [("claude", "STATE: Done.\n")]
+        let up = await Summary.ask(items: turn, kind: "claude", settings: s, runner: run, store: store, cwd: dir.path)
+        var ok = false
+        if case .success(let a) = up { ok = a.state == "Done." }
+        check(ok, "summary closed on connect: herdr-core back: the same turn is asked (\(up))")
+    }
+}

@@ -95,6 +95,11 @@ final class FakeHC: @unchecked Sendable {
     var execGone: Int { lock.withLock { _execGone } }
     /// Connections open now.
     var openCount: Int { lock.withLock { open.count } }
+    /// Each connection is closed as soon as it is accepted (herdr-core going down right after connect): `closedOnAccept`
+    /// counts them.
+    var closeOnAccept = false
+    private var _closedOnAccept = 0
+    var closedOnAccept: Int { lock.withLock { _closedOnAccept } }
     private var _files: [String: String] = [:]
     /// `file.read`: contents by `<on>:<path>` (`:<path>` here).
     var files: [String: String] { get { lock.withLock { _files } } set { lock.withLock { _files = newValue } } }
@@ -147,6 +152,7 @@ final class FakeHC: @unchecked Sendable {
                 let c = accept(fd, nil, nil)
                 if lock.withLock({ activeGeneration != gen }) { if c >= 0 { close(c) }; close(fd); return }
                 if c < 0 { if errno == EINTR || errno == ECONNABORTED { continue }; close(fd); return }
+                if closeOnAccept { close(c); lock.withLock { _closedOnAccept += 1 }; continue }
                 var one: Int32 = 1
                 setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
                 lock.withLock { open.append(c) }

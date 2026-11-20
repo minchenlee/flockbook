@@ -111,7 +111,10 @@ public actor HCClient {
                 guard await go(), !conn.isCancelled else { throw HCNotSent() }
                 // Known limit: Summaries turned off after go() said yes and before this write still sends the request.
                 // A request once written cannot be taken back; closing the connection then makes herdr-core end the run.
-                try sock.writeLine(body)
+                var sent = 0
+                do { try sock.writeLine(body, sent: &sent) } catch where sent == 0 {
+                    throw HCNotSent()   // herdr-core closed before it took a byte (going down): nothing went
+                }
                 while true {
                     let line = try sock.readLine()
                     if let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any], HCRPC.id(of: o) == id { return line }
