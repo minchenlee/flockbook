@@ -36,7 +36,8 @@ export function linkedMarkdown(text, links, offset = 0) {
     .sort((a, b) => a.start - b.start);
   let out = "", at = 0;
   for (const l of ls) {
-    if (l.start < at || inMarkup(s, l.start, l.end)) continue;
+    // After "!", [text](url) would be a picture.
+    if (l.start < at || s[l.start - 1] === "!" || inMarkup(s, l.start, l.end)) continue;
     const seen = s.slice(l.start, l.end), href = linkHref(l, seen);
     if (!href) continue;
     const dest = /[()\s<>]/.test(href) ? `<${href}>` : href;

@@ -50,6 +50,11 @@ test("an address after spaces in a Markdown link is left alone", () => {
   }
 });
 
+test("a URL after ! is not rewritten: it would become a picture", () => {
+  const t = "Wow!https://x.com/a";
+  assert.equal(linkedMarkdown(t, [at(t, "https://x.com/a")]), t);
+});
+
 test("the address it opens: a scheme for bare hosts; files and anything else none", () => {
   assert.equal(linkHref({ res: "local" }, "localhost:3000"), "http://localhost:3000");
   assert.equal(linkHref({ res: "artifact" }, "claude.ai/artifact/x"), "https://claude.ai/artifact/x");

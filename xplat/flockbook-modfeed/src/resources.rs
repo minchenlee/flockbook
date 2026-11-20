@@ -40,7 +40,7 @@ pub fn detect(text: &str) -> Vec<Found> {
     let mut taken = vec![false; b.len()];
     let mut hits: Vec<(usize, usize, &'static str, String)> = vec![];
     let (defs, labels) = definitions(text);
-    for (s, e) in fences(text).into_iter().chain(defs) {
+    for (s, e) in fences(text).into_iter().chain(indented(text)).chain(defs) {
         taken[s..e].iter_mut().for_each(|x| *x = true);
     }
     markup(text, &labels, &mut taken, &mut hits);
@@ -111,6 +111,51 @@ fn definitions(text: &str) -> (Vec<(usize, usize)>, Vec<String>) {
         pos += line.len();
     }
     (out, labels)
+}
+
+/// Indented code blocks (4 spaces or a tab), as byte ranges: a line after a blank line (or the start, or more code),
+/// not in a list (a list item's indented lines are its paragraphs).
+fn indented(text: &str) -> Vec<(usize, usize)> {
+    let mut out = vec![];
+    let (mut pos, mut prev_blank, mut in_code, mut in_list) = (0, true, false, false);
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        if body.trim().is_empty() {
+            prev_blank = true;
+            pos += line.len();
+            continue;
+        }
+        let mut indent = 0;
+        for c in body.chars() {
+            match c {
+                ' ' => indent += 1,
+                '\t' => indent += 4 - indent % 4,
+                _ => break,
+            }
+        }
+        if indent >= 4 && !in_list && (in_code || prev_blank) {
+            out.push((pos, pos + line.len()));
+            in_code = true;
+        } else {
+            in_code = false;
+            let t = body.trim_start();
+            if indent < 4 && list_marker(t) {
+                in_list = true;
+            } else if indent == 0 && prev_blank {
+                in_list = false;
+            }
+        }
+        prev_blank = false;
+        pos += line.len();
+    }
+    out
+}
+
+/// A list item's start: "- ", "* ", "+ ", "1. ", "1) ".
+fn list_marker(t: &str) -> bool {
+    let d = t.bytes().take_while(|c| c.is_ascii_digit()).count();
+    let rest = if d > 0 && d <= 9 { t[d..].strip_prefix(['.', ')']) } else { t.strip_prefix(['-', '*', '+']) };
+    rest.is_some_and(|r| r.is_empty() || r.starts_with([' ', '\t']))
 }
 
 fn mark(taken: &mut [bool], s: usize, e: usize) {
@@ -571,6 +616,16 @@ mod tests {
         assert!(detect("See [https://x.com][].").is_empty(), "a collapsed reference");
         assert!(detect("See [https://x.com].\n\n[https://x.com]: https://y.com").is_empty(), "a shortcut reference");
         assert_eq!(kinds("See [https://x.com] there"), vec!["link"], "brackets without a definition are text");
+    }
+
+    #[test]
+    fn indented_code_is_code() {
+        assert!(detect("Run:\n\n    curl https://x.com\n    open /tmp/a.md").is_empty());
+        assert!(detect("    https://x.com").is_empty(), "at the start");
+        assert!(detect("\thttps://x.com").is_empty(), "a tab");
+        assert_eq!(kinds("Text\n    https://x.com"), vec!["link"], "a paragraph's next line is not code");
+        assert_eq!(kinds("- item\n\n    https://x.com"), vec!["link"], "a list item's paragraph");
+        assert_eq!(kinds("    code\n\nafter https://x.com"), vec!["link"]);
     }
 
     #[test]
