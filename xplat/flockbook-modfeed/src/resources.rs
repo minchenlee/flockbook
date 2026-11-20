@@ -73,7 +73,8 @@ fn fences(text: &str) -> Vec<(usize, usize)> {
         let c = t.as_bytes().first().copied().unwrap_or(0);
         let run = t.bytes().take_while(|&x| x == c).count();
         match open {
-            None if (c == b'\x60' || c == b'~') && run >= 3 => open = Some((pos, c, run)),
+            // A backtick fence's info has no backtick ("```x``` …" is inline code), as blocks.js.
+            None if run >= 3 && (c == b'~' || c == b'\x60' && !t[run..].contains('\x60')) => open = Some((pos, c, run)),
             Some((s, fc, n)) if c == fc && run >= n && t[run..].trim().is_empty() => {
                 out.push((s, pos + line.len()));
                 open = None;
@@ -632,6 +633,14 @@ mod tests {
     fn a_trailing_underscore_is_part_of_the_url() {
         assert_eq!(one("https://x.com/a_").3, "https://x.com/a_");
         assert_eq!(one("see https://x.com/snake_case_ now").3, "https://x.com/snake_case_");
+    }
+
+    #[test]
+    fn three_backticks_with_more_on_the_line_are_inline_code() {
+        // As blocks.js: a backtick fence's info has no backtick.
+        assert_eq!(kinds("```x``` then https://x.com"), vec!["link"]);
+        assert!(detect("```sh\nhttps://x.com\n```").is_empty(), "still a fence");
+        assert!(detect("~~~ a`b\nhttps://x.com\n~~~").is_empty(), "a tilde fence's info may have one");
     }
 
     #[test]

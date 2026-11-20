@@ -63,6 +63,12 @@ test("the address is written so it opens exactly what the helper found: & and \\
   assert.equal(linkedMarkdown(p, [at(p, p)]), `[${p}](<https://x.com/a(b)\\&amp;>)`);
 });
 
+test("fences: the chat and the helper agree on what opens one", async () => {
+  const { splitBlocks } = await import("../mods/flockbook/blocks.js");
+  assert.deepEqual(splitBlocks("```x``` then https://x.com").map((b) => b.k), ["md"]);
+  assert.deepEqual(splitBlocks("~~~ a`b\nhttps://x.com\n~~~").map((b) => b.k), ["code"]);
+});
+
 test("the address it opens: a scheme for bare hosts; files and anything else none", () => {
   assert.equal(linkHref({ res: "local" }, "localhost:3000"), "http://localhost:3000");
   assert.equal(linkHref({ res: "artifact" }, "claude.ai/artifact/x"), "https://claude.ai/artifact/x");
