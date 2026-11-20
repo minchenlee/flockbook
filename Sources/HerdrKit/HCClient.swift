@@ -109,6 +109,8 @@ public actor HCClient {
                 defer { sock.close() }
                 guard conn.open(sock) else { throw HCNotSent() }   // called off before the request went
                 guard await go(), !conn.isCancelled else { throw HCNotSent() }
+                // Known limit: Summaries turned off after go() said yes and before this write still sends the request.
+                // A request once written cannot be taken back; closing the connection then makes herdr-core end the run.
                 try sock.writeLine(body)
                 while true {
                     let line = try sock.readLine()
