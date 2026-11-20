@@ -115,3 +115,24 @@ test("markdownView: one block, and no links, stay as they were", () => {
   assert.equal(views(markdownView("r", t, T, 600, 1, [at(t, "https://x.com")]))[0].text, "Just [https://x.com](https://x.com)");
   assert.equal(views(markdownView("r", t, T, 600))[0].text, t);
 });
+
+// Resources P0 fix4: a line indented 4 or more may be code when its block is drawn alone (splitBlocks cuts at a fence
+// or a table, also in a list item); the helper reads the whole reply, so it may send a link there.
+test("markdownView: a 4-space line after a fence or a table in a list item is not rewritten", () => {
+  const fence = "- a\n  ```\n  x\n  ```\n    more https://x.com";
+  const table = "- a\n  | h |\n  | --- |\n    more https://x.com";
+  // The helper's offsets for these texts (resources.rs): 29..42 and 31..44.
+  for (const [text, start] of [[fence, 29], [table, 31]]) {
+    assert.equal(text.slice(start, start + 13), "https://x.com");
+    const v = views(markdownView("r", text, T, 600, 1, [{ start, end: start + 13, res: "link" }]));
+    assert.ok(!v.some((x) => x.text.includes("](https://x.com)")), JSON.stringify(v.map((x) => x.text)));
+  }
+});
+
+test("a link on a line indented 4 or more (a tab counts to the next 4) is left alone; other lines are not", () => {
+  for (const t of ["- item\n\n    https://x.com", "    https://x.com", "\thttps://x.com", "  \thttps://x.com", "x\n     see https://x.com"]) {
+    assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t, JSON.stringify(t));
+  }
+  const t = "   https://a.com\n    https://x.com";
+  assert.equal(linkedMarkdown(t, [at(t, "https://a.com"), at(t, "https://x.com")]), "   [https://a.com](https://a.com)\n    https://x.com", "3 spaces is not 4");
+});

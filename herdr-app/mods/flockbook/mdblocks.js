@@ -37,7 +37,7 @@ export function linkedMarkdown(text, links, offset = 0) {
   let out = "", at = 0;
   for (const l of ls) {
     // After "!", [text](url) would be a picture.
-    if (l.start < at || s[l.start - 1] === "!" || inMarkup(s, l.start, l.end)) continue;
+    if (l.start < at || s[l.start - 1] === "!" || indented(s, l.start) || inMarkup(s, l.start, l.end)) continue;
     const seen = s.slice(l.start, l.end), href = linkHref(l, seen);
     if (!href) continue;
     // Backslash before & and \ so an entity ("&amp;") or an escape is not read in the address.
@@ -47,6 +47,18 @@ export function linkedMarkdown(text, links, offset = 0) {
     at = l.end;
   }
   return out + s.slice(at);
+}
+
+// On a line indented 4 or more (a tab to the next 4) in this block: TextView may draw it as code, as when the block
+// starts after a fence or a table in a list item (the helper read the whole text, where it is a paragraph). Left alone.
+function indented(s, start) {
+  let col = 0;
+  for (let i = s.lastIndexOf("\n", start - 1) + 1; i < start; i++) {
+    if (s[i] === " ") col++;
+    else if (s[i] === "\t") col += 4 - (col % 4);
+    else break;
+  }
+  return col >= 4;
 }
 
 // Already drawn as a link or as code: an address in "](…)" or "](<…>)", an autolink "<…>", or a code span (the
