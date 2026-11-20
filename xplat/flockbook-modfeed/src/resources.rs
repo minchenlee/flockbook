@@ -119,11 +119,12 @@ fn definitions(text: &str) -> (Vec<(usize, usize)>, Vec<String>) {
     (out, labels)
 }
 
-/// Indented code blocks (4 spaces or a tab), as byte ranges: a line after a blank line (or the start, or more code),
-/// not in a list (a list item's indented lines are its paragraphs).
+/// Indented code, as byte ranges, judged to be safe: a line with 4 or more spaces (a tab to the next 4) after a blank
+/// line, a heading, the start, or another such line. In a list item that may be a paragraph; it is skipped all the
+/// same (a missed link, the text as it is).
 fn indented(text: &str) -> Vec<(usize, usize)> {
     let mut out = vec![];
-    let (mut pos, mut prev_blank, mut in_code, mut in_list) = (0, true, false, false);
+    let (mut pos, mut prev_blank, mut in_code, mut prev_heading) = (0, true, false, false);
     for line in text.split_inclusive('\n') {
         let body = line.trim_end_matches(['\n', '\r']);
         if body.trim().is_empty() {
@@ -139,17 +140,13 @@ fn indented(text: &str) -> Vec<(usize, usize)> {
                 _ => break,
             }
         }
-        if indent >= 4 && !in_list && (in_code || prev_blank) {
+        if indent >= 4 && (in_code || prev_blank || prev_heading) {
             out.push((pos, pos + line.len()));
             in_code = true;
+            prev_heading = false;
         } else {
             in_code = false;
-            let t = body.trim_start();
-            if indent < 4 && list_marker(t) {
-                in_list = true;
-            } else if indent == 0 && prev_blank {
-                in_list = false;
-            }
+            prev_heading = indent < 4 && heading(body.trim_start());
         }
         prev_blank = false;
         pos += line.len();
@@ -157,11 +154,10 @@ fn indented(text: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// A list item's start: "- ", "* ", "+ ", "1. ", "1) ".
-fn list_marker(t: &str) -> bool {
-    let d = t.bytes().take_while(|c| c.is_ascii_digit()).count();
-    let rest = if d > 0 && d <= 9 { t[d..].strip_prefix(['.', ')']) } else { t.strip_prefix(['-', '*', '+']) };
-    rest.is_some_and(|r| r.is_empty() || r.starts_with([' ', '\t']))
+/// An ATX heading: 1 to 6 "#", then a space or nothing.
+fn heading(t: &str) -> bool {
+    let n = t.bytes().take_while(|&c| c == b'#').count();
+    (1..=6).contains(&n) && (t.len() == n || t[n..].starts_with([' ', '\t']))
 }
 
 fn mark(taken: &mut [bool], s: usize, e: usize) {
@@ -665,7 +661,7 @@ mod tests {
         assert!(detect("    https://x.com").is_empty(), "at the start");
         assert!(detect("\thttps://x.com").is_empty(), "a tab");
         assert_eq!(kinds("Text\n    https://x.com"), vec!["link"], "a paragraph's next line is not code");
-        assert_eq!(kinds("- item\n\n    https://x.com"), vec!["link"], "a list item's paragraph");
+        assert!(detect("- item\n\n    https://x.com").is_empty(), "skipped to be safe: may be a list item's paragraph (a missed link; the text is not changed)");
         assert_eq!(kinds("    code\n\nafter https://x.com"), vec!["link"]);
     }
 
@@ -691,6 +687,14 @@ mod tests {
         assert!(detect("See [a [https://x.com] b][ref].\n\n[ref]: https://y.com").is_empty(), "nested brackets in a full reference");
         assert!(detect("See [a [b] https://x.com](https://y.com).").is_empty(), "nested brackets in an inline link");
         assert_eq!(kinds("> quote https://x.com"), vec!["link"], "other quoted text is searched");
+    }
+
+    #[test]
+    fn indented_lines_after_a_blank_or_a_heading_are_skipped() {
+        // Skipped to be safe: code in a list item, or right after a heading.
+        assert!(detect("- item\n\n      curl https://x.com").is_empty(), "code in a list item");
+        assert!(detect("# Title\n    https://x.com").is_empty(), "right after a heading");
+        assert!(detect("1. step\n\n   - sub\n\n         https://x.com").is_empty(), "a nested list");
     }
 
     #[test]
