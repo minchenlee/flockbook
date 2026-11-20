@@ -8,6 +8,56 @@ import { splitBlocks, tableCells } from "./blocks.js";
 
 export { splitBlocks, tableCells };
 
+// Links (Resources P0). The helper finds the targets in an assistant text and sends their places as the row's
+// `links` ([{start, end, res}], UTF-16 offsets into `text`; docs/protocol.md). The chat draws them as Markdown
+// links, and TextView opens them on a click (list rows cannot have handlers, so not cx.open_url). Only http(s):
+// a file (`doc`) has no way to open from a mod yet and stays text. Pure: tests open nothing.
+const WEB = new Set(["artifact", "pr", "issue", "ci", "link", "local"]);
+
+// What a click opens: the target as written, with a scheme when the helper found it without one
+// ("localhost:3000", "github.com/o/r/pull/3"). Null when it does not open.
+export function linkHref(link, target) {
+  if (!WEB.has(link?.res)) return null;
+  const s = String(target ?? "");
+  if (/^https?:\/\/[^\s/?#]/i.test(s)) return s;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[a-z]+:[^0-9]/i.test(s)) return null;
+  return (link.res === "local" ? "http://" : "https://") + s;
+}
+
+// The text with each link's range written as [visible](href). The visible text stays the same (markup in it
+// escaped). A range that is already a Markdown link's address, an autolink or in a code span is left alone:
+// TextView links or shows it as it is. Bad, overlapping or unknown ranges are skipped. `offset`: where `text`
+// starts in the row's text (a block of it).
+export function linkedMarkdown(text, links, offset = 0) {
+  const s = String(text ?? "");
+  if (!Array.isArray(links) || !links.length) return s;
+  const ls = links.map((l) => ({ ...l, start: l?.start - offset, end: l?.end - offset }))
+    .filter((l) => Number.isInteger(l.start) && Number.isInteger(l.end) && l.start >= 0 && l.end <= s.length && l.start < l.end)
+    .sort((a, b) => a.start - b.start);
+  let out = "", at = 0;
+  for (const l of ls) {
+    if (l.start < at || inMarkup(s, l.start, l.end)) continue;
+    const seen = s.slice(l.start, l.end), href = linkHref(l, seen);
+    if (!href) continue;
+    const dest = /[()\s<>]/.test(href) ? `<${href}>` : href;
+    out += s.slice(at, l.start) + "[" + seen.replace(/[\\[\]*_~`<>]/g, (c) => "\\" + c) + "](" + dest + ")";
+    at = l.end;
+  }
+  return out + s.slice(at);
+}
+
+// Already drawn as a link or as code: an address in "](…)" or "](<…>)", an autolink "<…>", or a code span (the
+// helper finds a span only when it holds nothing but the target, maybe with spaces).
+function inMarkup(s, start, end) {
+  const before = s.slice(Math.max(0, start - 3), start);
+  if (before.endsWith("](") || before.endsWith("](<")) return true;
+  if (before.endsWith("<") && s[end] === ">") return true;
+  let a = start - 1, b = end;
+  while (a >= 0 && s[a] === " ") a--;
+  while (b < s.length && s[b] === " ") b++;
+  return s[a] === "`" && s[b] === "`";
+}
+
 // The block as written, for Copy: CRs dropped, normal spaces and tabs.
 export function codeCopyText(b) {
   return b.text.split("\n").map((l) => l.replace(/\r$/, "")).join("\n");
@@ -62,15 +112,17 @@ function table(id, b, t, width, k) {
 // width in px (tables need it). A text block's id is always md-<id>-<i>, one block or many: a message that
 // grows a code box while the agent writes keeps its first view (and the selection in it).
 // `k`: the chat's text size over the default 16 px (settings: text_size). At 1 nothing sets a size.
-export function markdownView(id, text, t, width, k = 1) {
+// `links`: the row's links (assistant rows), drawn in prose blocks only. Heights and Copy use the text as it is.
+export function markdownView(id, text, t, width, k = 1, links = null) {
   const blocks = splitBlocks(text);
   const prose = (key, md) => {
     const view = TextView.markdown(key, md).selectable(true);
     return k === 1 ? view : view.text_size(16 * k);
   };
-  if (blocks.length === 1 && blocks[0].k === "md") return prose(`md-${id}-0`, blocks[0].text);
+  const linked = (b) => linkedMarkdown(b.text, links, b.start ?? 0);
+  if (blocks.length === 1 && blocks[0].k === "md") return prose(`md-${id}-0`, linked(blocks[0]));
   return v_flex().w_full().children(blocks.map((b, i) =>
     b.k === "code" ? codeBox(`md-${id}-k${i}`, b, t, k)
       : b.k === "table" ? table(`md-${id}-t${i}`, b, t, width, k)
-        : prose(`md-${id}-${i}`, b.text)));
+        : prose(`md-${id}-${i}`, linked(b))));
 }
