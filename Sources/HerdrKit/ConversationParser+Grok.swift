@@ -57,6 +57,7 @@ extension ConversationParser {
             openToolUses[id] = summary
             openOrder.append(id)
             callById[id] = ToolCall(id: id, toolName: name, summary: summary, input: Self.cut(Self.prettyJSON(input)))
+            callSeq += 1; callById[id]?.seq = callSeq
         case "tool_call_update":
             grok.open = nil
             guard let id = u["toolCallId"] as? String else { return }

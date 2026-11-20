@@ -4,7 +4,7 @@
 One short line: what this release is about.
 
 ### ✨ New
-
+- The Mac app has the Since you left card and Summaries too, as in the Herdr app (Summaries is off by default).
 
 ### 🔒 Security
 

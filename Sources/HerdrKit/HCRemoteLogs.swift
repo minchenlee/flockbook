@@ -90,6 +90,7 @@ extension HCClient {
         guard parts.count == 2 else { return }
         let local = mirrorPath(parts[0], parts[1])
         try? FileManager.default.removeItem(atPath: local)
+        MirrorSyncs.drop(local)
         mirrorIssues[local] = nil
     }
 
@@ -243,6 +244,7 @@ extension HCClient {
         }
         try? fm.createDirectory(atPath: (local as NSString).deletingLastPathComponent, withIntermediateDirectories: true, attributes: owner)
         fm.createFile(atPath: local, contents: Data(), attributes: [.posixPermissions: 0o600])
+        MirrorSyncs.register(local)
         let poll = mirrorPoll
         mirrors[key] = Task { [weak self] in
             var st = MirrorState()
@@ -302,7 +304,7 @@ extension HCClient {
             return .grew
         }
         let text = r["text"] as? String ?? ""
-        guard let cut = text.lastIndex(of: "\n") else { return .idle }
+        guard let cut = text.lastIndex(of: "\n") else { MirrorSyncs.bump(local); return .idle }   // caught up
         let whole = text[...cut]
         guard let fh = FileHandle(forWritingAtPath: local) else { return .idle }
         defer { try? fh.close() }
@@ -310,7 +312,10 @@ extension HCClient {
             try fh.seekToEnd()
             try fh.write(contentsOf: Data(whole.utf8))
         } catch { return .idle }
-        st.next += whole.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        let got = whole.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        st.next += got
+        // Caught up only at the file's last line: a read cut short by hc's 8 MB cap gives fewer lines than asked too.
+        if st.next - 1 >= lines { MirrorSyncs.bump(local) }
         return .grew
     }
 }

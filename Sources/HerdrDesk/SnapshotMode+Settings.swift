@@ -83,7 +83,7 @@ extension SnapshotRunner {
             for dark in [false, true] {
                 let path = "\(dir)/settings-\(name)-\(dark ? "dark" : "light").png"
                 let r = await shoot(SettingsSplit(fixed: .general, reduceTransparency: reduce ? true : nil), glass: glass, reduce: reduce, dark: dark, to: path)
-                let ok = r.ink > 0.02 && r.bytes > 5_000 && abs(r.size.width - width) < 4 && r.size.height >= 420 && r.size.height < 900
+                let ok = r.ink > 0.02 && r.bytes > 5_000 && abs(r.size.width - width) < 4 && r.size.height >= 420 && r.size.height < 1000   // General ends with Summaries: 918 pt
                 if !ok { failures += 1 }
                 print("snapshot-settings: \(name)-\(dark ? "dark" : "light") \(Int(r.size.width))x\(Int(r.size.height)) pt, \(r.bytes / 1024) KB, window \(String(format: "%.1f", r.ink * 100))% ink \(ok ? "ok" : "FAIL")")
             }
@@ -113,7 +113,8 @@ extension SnapshotRunner {
         _ = await shoot(SettingsSplit(fixed: .agents, remote: RemoteHub.preview(running: false, devices: [], offer: false)), dark: false, to: nil) { _ in offAgents = shown() }
         step("agents with Remote access off: [\(names(offAgents))], no question hook", offAgents == [.allowInput, .statusLine, .grokStatusLine])
         // Sparkle never starts in a check run (UpdaterGate), so the automatic-update switch cannot show here.
-        let missing = Set(SettingsControl.allCases).subtracting(seen).subtracting([.autoUpdate])
+        // Written by and Model show only with Summaries on (off by default); --snapshot-since checks them.
+        let missing = Set(SettingsControl.allCases).subtracting(seen).subtracting([.autoUpdate, .summaryBy, .summaryModel])
         step("every control shows in some tab (missing: [\(names(missing))])", missing.isEmpty)
 
         // Backend (General): a pop-up with the four choices that shows the stored one. A pick (what the pop-up's
@@ -166,7 +167,7 @@ extension SnapshotRunner {
         AppDefaults.store.removeObject(forKey: SettingsTab.key)
         var fresh: Set<SettingsControl> = []
         _ = await shoot(SettingsSplit(), dark: false, to: nil) { _ in fresh = shown() }
-        step("nothing stored: Settings opens on General ([\(names(fresh))])", fresh == Set(SettingsTab.general.controls))
+        step("nothing stored: Settings opens on General ([\(names(fresh))])", fresh == Set(SettingsTab.general.controls).subtracting([.summaryBy, .summaryModel]))
 
         print("snapshot-settings: \(failures == 0 ? "PASS" : "FAIL x\(failures)")")
         exit(failures == 0 ? 0 : 1)
@@ -235,6 +236,8 @@ enum SettingsProbe {
     nonisolated(unsafe) static var tabs: [SettingsTab: CGRect] = [:]
     /// The rows on screen now (`settingsControl`).
     nonisolated(unsafe) static var controls: [SettingsControl: CGRect] = [:]
+    /// Which view put each row in `controls`: a view that leaves removes only its own row, not the one a newer view put there.
+    nonisolated(unsafe) static var owners: [SettingsControl: UUID] = [:]
     /// The terminal colours row's value (the theme's names, or why it is not used).
     nonisolated(unsafe) static var terminalColors: String?
     /// The Back row (the sidebar's while Settings has it, or the page's own list while the sidebar is hidden).

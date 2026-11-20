@@ -154,6 +154,7 @@ extension ConversationParser {
         openToolUses[id] = Self.commandText(name: name, input: input)
         openOrder.append(id)
         callById[id] = ToolCall(id: id, toolName: name, summary: Self.summary(name: name, input: input), input: Self.cut(Self.prettyJSON(input)))
+        callSeq += 1; callById[id]?.seq = callSeq
     }
 
     /// pi's built-in tools under Claude Code's names, so chips and verbs read the same.

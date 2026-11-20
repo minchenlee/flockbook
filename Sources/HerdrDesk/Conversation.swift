@@ -25,6 +25,8 @@ struct ConversationView: View {
     /// Changes when the user sends a message: back to the bottom whatever the position, following from there
     /// (the log shows the sent message a moment later).
     var scrollToken = 0
+    /// The Since you left card's Jump: the row `id` comes into the window and to the top of the view (each new token).
+    var jump: SinceJump? = nil
     /// The session the rows come from. Another session in the pane starts over: it may have older rows to read.
     var session: String? = nil
     /// Reads an older part of the log, distinguishing the start from a failed read. nil hides the button.
@@ -319,6 +321,7 @@ struct ConversationView: View {
             }
             .onScrollPhaseChange { _, phase in tracker.scrolling = phase != .idle }
             .onChange(of: scrollToken) { _, _ in jumpToLatest() }
+            .onChange(of: jump) { _, j in if let j { reveal(j.id) } }
             .onChange(of: items.first?.id) { _, _ in
                 // Older rows arrived in front after "Show earlier" read the log: the window takes a page of them.
                 // A few at a time, like rows at hand (all at once is one long layout pass).
@@ -482,6 +485,22 @@ struct ConversationView: View {
             let offset = a.offset + top - a.top
             position.scrollTo(y: offset + tracker.inset)
             tracker.anchor = (a.key, top, offset, a.until)
+        }
+    }
+
+    /// The owner's message the Since you left card names: into the window (`ConversationWindow.reveal`), then to the top
+    /// of the view once its row has a place. The view stops following the bottom, as after a scroll of the reader's own.
+    private func reveal(_ id: String) {
+        tracker.batches += 1; tracker.adding = false
+        guard window.reveal(id, items.map(\.id), page: Self.page) else { return }
+        tracker.atBottom = false
+        tracker.anchor = nil
+        let key = "r-\(id)"
+        Task { @MainActor in
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .milliseconds(50))   // the rows that came in report their tops first
+                if let top = tracker.tops[key] { position.scrollTo(y: max(0, top + Self.listPadding - 12)); return }
+            }
         }
     }
 
@@ -685,6 +704,7 @@ private struct EntryRow: View, Equatable {
 
     @ViewBuilder private func approval(_ r: PermissionRequest) -> some View {
         ApprovalCard(request: r, agentName: agentName, canRespond: true, onAllow: { onAllow(r) }, onDeny: { onDeny(r) }, onOpen: onOpenTerminal)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.approval = $0 } }
     }
 }
 
