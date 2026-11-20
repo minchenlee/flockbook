@@ -84,9 +84,9 @@ function inMarkup(s, start, end) {
   return inCodeSpan(s.slice(0, pe), start, ps);
 }
 
-// The paragraph around `at`: [its start, its end], between blank lines (lines of spaces only). Markup does not cross one.
+// The paragraph around `at`: [its start, its end], between blank lines (spaces and tabs only, as CommonMark; a CR before the LF). Markup does not cross one.
 function paragraph(s, at) {
-  const blank = (a, b) => !s.slice(a, b).trim();
+  const blank = (a, b) => /^[ \t]*\r?$/.test(s.slice(a, b));
   let ps = s.lastIndexOf("\n", at - 1) + 1;
   while (ps > 0) {
     const prev = s.lastIndexOf("\n", ps - 2) + 1;

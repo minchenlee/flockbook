@@ -185,3 +185,12 @@ test("a code span does not cross a blank line: a backtick at a paragraph's end i
   const u = "a `\n \t\nsee https://x.com `b`";
   assert.equal(linkedMarkdown(u, [at(u, "https://x.com")]), "a `\n \t\nsee [https://x.com](https://x.com) `b`", "a line of spaces is blank too");
 });
+
+test("a line of no-break or em spaces is not blank (CommonMark: spaces and tabs only)", () => {
+  for (const sp of ["\u00a0", "\u2003"]) {
+    const t = "`a\n" + sp + "\nsee https://x.com `";
+    assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t, JSON.stringify(sp) + ": one paragraph, the URL is in the span");
+  }
+  const crlf = "a `\r\n\r\nsee https://x.com `b`";
+  assert.equal(linkedMarkdown(crlf, [at(crlf, "https://x.com")]), "a `\r\n\r\nsee [https://x.com](https://x.com) `b`", "CRLF: an empty line is blank");
+});
