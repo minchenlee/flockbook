@@ -329,7 +329,8 @@ only plain text is searched. Not found: user rows, tool output, code blocks, oth
 (`![a](src)`), HTML (and the rest of a paragraph after an inline tag), reference links and definitions (`[a][1]`, `[1]: https://…`), a target that runs into an escape or
 an entity (`\_`, `&amp;`), relative paths, paths with spaces. A target cut by the
 `…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
-The mod draws the web kinds as Markdown links in prose (not in code boxes or tables; TextView opens them); `doc` stays
+The mod draws the web kinds as Markdown links in prose (not in code boxes or tables, nor on a line indented 4 or
+more in its block: drawn alone, that block may show it as code; TextView opens them); `doc` stays
 text for now. A mod that does not know `links` ignores it. After the helper is updated, a chat read before keeps its
 rows for its `--cursor` (`unchanged`): their links show once the log changes and the rows come again in a `splice`.
 
