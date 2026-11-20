@@ -291,7 +291,7 @@ heights by it.
 | `user` | `text`, `ts`, `images` (count, when any) | A right-aligned bubble. |
 | | `pics` (with `--pictures` only) | Where the pictures are in the log, for `serve`. |
 | | `from` (a note from another agent) | One line, "↳ docs-worker: first line", that opens to the whole note. |
-| `assistant` | `text` (markdown), `ts` | Full-width markdown. |
+| `assistant` | `text` (markdown), `ts`, `links` (when it has any) | Full-width markdown; the links can be clicked. |
 | `tools` | `chips`, `ts` | A chip: "Ran 3 commands", expands to the calls. |
 | `perm` | `perm`, `text` (the title), `ts` | The approval card (when `perm.state` is `pending`). |
 | `question` | `question`, `ts` | The question card. |
@@ -309,6 +309,33 @@ without one) and `text` without the tag. A mod that does not know `from` shows t
 {"id":"a1","k":"assistant","text":"Looking at it now.","ts":1793670005000,"type":"row"}
 {"chips":[{"calls":[{"done":true,"error":false,"name":"Bash","output":"ok","summary":"swift test"}],"symbol":"terminal","text":"Ran a command"}],"id":"a1-t3","k":"tools","ts":1793670006000,"type":"row"}
 {"id":"f-a2","k":"footer","text":"01:40 · Worked 36s · 1 tool","type":"row"}
+```
+
+`links[]` (assistant rows only, left out when there are none): what the agent points the human to in its reply, found by
+the helper (`resources.rs`). Each: `start` and `end`, UTF-16 offsets into `text` (the text as sent, after the cut), and
+`res`, the kind:
+
+| `res` | What | Example |
+|---|---|---|
+| `doc` | An absolute path (`/…`, `~/…`) ending `.md .html .htm .pdf .png .svg` | `/home/me/plan.md` |
+| `artifact` | A claude.ai artifact | `https://claude.ai/artifact/…`, also without `https://` |
+| `pr` / `issue` / `ci` | A GitHub PR, issue or Actions run | `github.com/o/r/pull/12`, `/issues/7`, `/actions/runs/1870` |
+| `local` | localhost, 127.0.0.1, a LAN address or `.local` host | `http://localhost:5173`, `localhost:3000` |
+| `link` | Any other `http(s)` URL | `https://example.com/a` |
+
+Found: bare URLs and paths, a Markdown link's address (once, not its label), an autolink `<…>`, and a code span that
+holds only the target. The reply is read as CommonMark (pulldown-cmark, with tables);
+only plain text is searched. Not found: user rows, tool output, code blocks, other text in code spans, pictures
+(`![a](src)`), HTML (and the rest of a paragraph after an inline tag), reference links and definitions (`[a][1]`, `[1]: https://…`), a target that runs into an escape or
+an entity (`\_`, `&amp;`), relative paths, paths with spaces. A target cut by the
+`…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
+The mod draws the web kinds as Markdown links in prose (not in code boxes or tables, nor on a line indented 4 or
+more in its block: drawn alone, that block may show it as code; TextView opens them); `doc` stays
+text for now. A mod that does not know `links` ignores it. After the helper is updated, a chat read before keeps its
+rows for its `--cursor` (`unchanged`): their links show once the log changes and the rows come again in a `splice`.
+
+```json
+{"id":"a2","k":"assistant","links":[{"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
 ```
 
 `chips[]`: `symbol` (an SF Symbols name such as `terminal` or `doc.text`; the mod maps it to its own icon), `text` (the chip label), `calls[]`. Each call: `name` (the

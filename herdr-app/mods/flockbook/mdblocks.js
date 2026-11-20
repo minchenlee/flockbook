@@ -8,6 +8,121 @@ import { splitBlocks, tableCells } from "./blocks.js";
 
 export { splitBlocks, tableCells };
 
+// Links (Resources P0). The helper finds the targets in an assistant text and sends their places as the row's
+// `links` ([{start, end, res}], UTF-16 offsets into `text`; docs/protocol.md). The chat draws them as Markdown
+// links, and TextView opens them on a click (list rows cannot have handlers, so not cx.open_url). Only http(s):
+// a file (`doc`) has no way to open from a mod yet and stays text. Pure: tests open nothing.
+const WEB = new Set(["artifact", "pr", "issue", "ci", "link", "local"]);
+
+// What a click opens: the target as written, with a scheme when the helper found it without one
+// ("localhost:3000", "github.com/o/r/pull/3"). Null when it does not open.
+export function linkHref(link, target) {
+  if (!WEB.has(link?.res)) return null;
+  const s = String(target ?? "");
+  if (/^https?:\/\/[^\s/?#]/i.test(s)) return s;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[a-z]+:[^0-9]/i.test(s)) return null;
+  return (link.res === "local" ? "http://" : "https://") + s;
+}
+
+// The text with each link's range written as [visible](href). The visible text stays the same (markup in it
+// escaped). A range that is already a Markdown link's address, an autolink or in a code span is left alone:
+// TextView links or shows it as it is. Bad, overlapping or unknown ranges are skipped. `offset`: where `text`
+// starts in the row's text (a block of it).
+export function linkedMarkdown(text, links, offset = 0) {
+  const s = String(text ?? "");
+  if (!Array.isArray(links) || !links.length) return s;
+  const ls = links.map((l) => ({ ...l, start: l?.start - offset, end: l?.end - offset }))
+    .filter((l) => Number.isInteger(l.start) && Number.isInteger(l.end) && l.start >= 0 && l.end <= s.length && l.start < l.end)
+    .sort((a, b) => a.start - b.start);
+  let out = "", at = 0;
+  for (const l of ls) {
+    // After "!", [text](url) would be a picture.
+    if (l.start < at || s[l.start - 1] === "!" || indented(s, l.start) || inMarkup(s, l.start, l.end)) continue;
+    const seen = s.slice(l.start, l.end), href = linkHref(l, seen);
+    if (!href) continue;
+    // Backslash before & and \ so an entity ("&amp;") or an escape is not read in the address.
+    const raw = href.replace(/[\\&]/g, (c) => "\\" + c);
+    const dest = /[()\s<>]/.test(href) ? `<${raw}>` : raw;
+    out += s.slice(at, l.start) + "[" + seen.replace(/[\\[\]*_~`<>]/g, (c) => "\\" + c) + "](" + dest + ")";
+    at = l.end;
+  }
+  return out + s.slice(at);
+}
+
+// On a line indented 4 or more (a tab to the next 4) in this block, after its quote markers: TextView may draw it as code, as when the block
+// starts after a fence or a table in a list item (the helper read the whole text, where it is a paragraph). Left alone.
+function indented(s, start) {
+  let i = s.lastIndexOf("\n", start - 1) + 1;
+  // Quote markers first: each ">" (after up to 3 spaces) and at most one space after it.
+  for (;;) {
+    let j = i;
+    while (j < start && j - i < 3 && s[j] === " ") j++;
+    if (s[j] !== ">" || j >= start) break;
+    i = j + 1;
+    if (s[i] === " " && i < start) i++;
+  }
+  let col = 0;
+  for (; i < start; i++) {
+    if (s[i] === " ") col++;
+    else if (s[i] === "\t") col += 4 - (col % 4);
+    else break;
+  }
+  return col >= 4;
+}
+
+// Already drawn as a link or as code: an address in "](…)" or "](<…>)", an autolink "<…>", or a code span (the
+// helper finds a span only when it holds nothing but the target, maybe with spaces).
+function inMarkup(s, start, end) {
+  const [ps, pe] = paragraph(s, start);
+  // A link's address may follow "](" after spaces or a line break (LF or CRLF), and may be in <…>.
+  let a = start;
+  if (s[a - 1] === "<") a--;
+  while (a > ps && /[ \t\r\n]/.test(s[a - 1])) a--;
+  if (s.slice(Math.max(0, a - 2), a) === "](") return true;
+  const before = s.slice(Math.max(0, start - 1), start);
+  if (before === "<" && s[end] === ">") return true;
+  return inCodeSpan(s.slice(0, pe), start, ps);
+}
+
+// The paragraph around `at`: [its start, its end], between blank lines (spaces and tabs only, as CommonMark; a CR before the LF). Markup does not cross one.
+function paragraph(s, at) {
+  const blank = (a, b) => /^[ \t]*\r?$/.test(s.slice(a, b));
+  let ps = s.lastIndexOf("\n", at - 1) + 1;
+  while (ps > 0) {
+    const prev = s.lastIndexOf("\n", ps - 2) + 1;
+    if (blank(prev, ps - 1)) break;
+    ps = prev;
+  }
+  let pe = s.indexOf("\n", at);
+  while (pe >= 0) {
+    const next = s.indexOf("\n", pe + 1);
+    if (blank(pe + 1, next < 0 ? s.length : next)) break;
+    pe = next;
+  }
+  return [ps, pe < 0 ? s.length : pe];
+}
+
+// Whether `at` is inside a code span: a run of backticks up to the next run of the same length.
+function inCodeSpan(s, at, from = 0) {
+  const run = (i) => { let j = i; while (s[j] === "`") j++; return j - i; };
+  // After an odd number of backslashes a backtick is escaped: it does not open a span. Inside a span a backslash
+  // escapes nothing (CommonMark): a run of backticks of the same length closes it.
+  const escaped = (i) => { let n = 0; while (i - n - 1 >= 0 && s[i - n - 1] === "\\") n++; return n % 2 === 1; };
+  for (let i = from; i < at;) {
+    if (s[i] !== "`") { i++; continue; }
+    if (escaped(i)) { i++; continue; }
+    const n = run(i);
+    let j = i + n, close = -1;
+    while (j < s.length) {
+      if (s[j] === "`") { const m = run(j); if (m === n) { close = j; break; } j += m; } else j++;
+    }
+    if (close < 0) { i += n; continue; }
+    if (at < close) return true;
+    i = close + n;
+  }
+  return false;
+}
+
 // The block as written, for Copy: CRs dropped, normal spaces and tabs.
 export function codeCopyText(b) {
   return b.text.split("\n").map((l) => l.replace(/\r$/, "")).join("\n");
@@ -62,15 +177,17 @@ function table(id, b, t, width, k) {
 // width in px (tables need it). A text block's id is always md-<id>-<i>, one block or many: a message that
 // grows a code box while the agent writes keeps its first view (and the selection in it).
 // `k`: the chat's text size over the default 16 px (settings: text_size). At 1 nothing sets a size.
-export function markdownView(id, text, t, width, k = 1) {
+// `links`: the row's links (assistant rows), drawn in prose blocks only. Heights and Copy use the text as it is.
+export function markdownView(id, text, t, width, k = 1, links = null) {
   const blocks = splitBlocks(text);
   const prose = (key, md) => {
     const view = TextView.markdown(key, md).selectable(true);
     return k === 1 ? view : view.text_size(16 * k);
   };
-  if (blocks.length === 1 && blocks[0].k === "md") return prose(`md-${id}-0`, blocks[0].text);
+  const linked = (b) => linkedMarkdown(b.text, links, b.start ?? 0);
+  if (blocks.length === 1 && blocks[0].k === "md") return prose(`md-${id}-0`, linked(blocks[0]));
   return v_flex().w_full().children(blocks.map((b, i) =>
     b.k === "code" ? codeBox(`md-${id}-k${i}`, b, t, k)
       : b.k === "table" ? table(`md-${id}-t${i}`, b, t, width, k)
-        : prose(`md-${id}-${i}`, b.text)));
+        : prose(`md-${id}-${i}`, linked(b))));
 }

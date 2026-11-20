@@ -39,13 +39,16 @@ export function tableCells(line) {
   return out;
 }
 
-// [{k:"md", text}, {k:"code", lang, text, lines}, {k:"table", head, align, rows}] in order. A code block's
+// [{k:"md", text, start}, {k:"code", lang, text, lines}, {k:"table", head, align, rows}] in order. A markdown
+// block's `start` is where its text begins in `text` (UTF-16), for the helper's link offsets. A code block's
 // `lines` are its source lines (none for an empty box; `text` cannot tell that from one empty line). An
 // unclosed fence runs to the end. A markdown block of blank lines only is left out.
 export function splitBlocks(text) {
   const lines = String(text ?? "").split("\n");
-  const out = []; let md = [];
-  const flush = () => { if (md.length && md.join("\n").trim()) out.push({ k: "md", text: md.join("\n") }); md = []; };
+  const out = []; let md = [], mdStart = 0, pos = 0;
+  const flush = () => { if (md.length && md.join("\n").trim()) out.push({ k: "md", text: md.join("\n"), start: mdStart }); md = []; };
+  // Where each line starts in the text.
+  const starts = []; for (const l of lines) { starts.push(pos); pos += l.length + 1; }
   for (let i = 0; i < lines.length; i++) {
     const f = OPEN.exec(lines[i]) ?? TILDE_OPEN.exec(lines[i]);
     if (f) {
@@ -65,6 +68,7 @@ export function splitBlocks(text) {
       out.push({ k: "table", head, align, rows });
       continue;
     }
+    if (!md.length) mdStart = starts[i];
     md.push(lines[i]);
   }
   flush();

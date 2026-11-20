@@ -202,7 +202,8 @@ export class ChatView {
 
   // A row's content, without the list's fixed height. No handlers: list rows cannot have any.
   body(row, t) {
-    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w, textScale());
+    // Links only on the agent's replies (the helper sends them for no other row).
+    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w, textScale(), row.k === "assistant" ? row.links : null);
     switch (row.k) {
       case "user":
         if (row.from != null) return this.agentNote(row, t, md);

@@ -433,3 +433,21 @@ test("Copy message copies the row's markdown as written, for user, assistant and
   assert.equal(copy("n1"), "Notes updated.\nSee notes.md");
   assert.equal(copy("s1"), null, "a status row has no menu");
 });
+
+test("links in a reply: drawn as Markdown links; the row's height, Copy message and user rows stay as they were", async () => {
+  const text = "PR: https://github.com/o/r/pull/9 and /home/me/plan.md";
+  const links = [{ start: 4, end: 33, res: "pr" }, { start: 38, end: 54, res: "doc" }];
+  fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 2 }, user("u1", "see https://x.com"),
+    { ...asst("a1", text), links }, end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  v.render(cx);
+  const rows = lastList._args.render({ start: 0, end: lastList._args.n });
+  const views = (el) => { const out = []; (function walk(n) { if (!n) return; if (n.tag === "md") out.push(n._a.text); (n.kids ?? []).forEach(walk); })(el); return out; };
+  const all = rows.flatMap(views);
+  assert.ok(all.includes("PR: [https://github.com/o/r/pull/9](https://github.com/o/r/pull/9) and /home/me/plan.md"), JSON.stringify(all));
+  assert.ok(all.includes("see https://x.com"), "a user row is not rewritten");
+  const plain = rowHeight({ ...asst("a1", text) }, v.colWidth());
+  assert.equal(v.height(v.feed().rows.find((r) => r.id === "a1")), plain, "the height is guessed from the text as written");
+  lastList._h.on_item_secondary_click("a1", { button: "right", position: { x: 0, y: 10 }, local_position: { x: 50, y: 10 } }, cx);
+  assert.equal(log.overlays.at(-1).props.items.at(-1).args.text, text, "Copy message copies the text as written");
+});
