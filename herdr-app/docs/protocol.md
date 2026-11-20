@@ -328,7 +328,8 @@ holds only the target. Not found: user rows, tool output, code blocks, other tex
 (`![a](src)`), reference definitions (`[1]: https://…`), relative paths, paths with spaces. A target cut by the
 `…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
 The mod draws the web kinds as Markdown links in prose (not in code boxes or tables; TextView opens them); `doc` stays
-text for now. A mod that does not know `links` ignores it.
+text for now. A mod that does not know `links` ignores it. After the helper is updated, a chat read before keeps its
+rows for its `--cursor` (`unchanged`): their links show once the log changes and the rows come again in a `splice`.
 
 ```json
 {"id":"a2","k":"assistant","links":[{"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
