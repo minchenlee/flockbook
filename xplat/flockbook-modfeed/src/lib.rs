@@ -14,6 +14,7 @@ pub mod paste;
 pub mod protocol;
 pub mod queue;
 pub mod remote;
+pub mod resources;
 pub mod rows;
 pub mod serve;
 pub mod status;

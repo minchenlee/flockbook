@@ -37,11 +37,14 @@ pub struct FeedRow {
     pub perm: Option<FeedPerm>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<FeedQuestion>,
+    /// An assistant row's targets (resources.rs): UTF-16 offsets into `text` and the kind. None when there are none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<crate::resources::FeedLink>>,
 }
 
 impl FeedRow {
     pub fn new(k: &str, id: &str, text: Option<String>, ts: Option<i64>) -> FeedRow {
-        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, images: None, pics: None, chips: None, perm: None, question: None }
+        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, images: None, pics: None, chips: None, perm: None, question: None, links: None }
     }
 }
 
@@ -253,7 +256,10 @@ pub fn row(it: &ConversationItem) -> FeedRow {
         }
         ItemKind::AssistantText(s) => {
             r.k = "assistant".into();
-            r.text = Some(cut(s, TEXT_CAP));
+            let text = cut(s, TEXT_CAP);
+            let links = crate::resources::links(&text);
+            r.links = (!links.is_empty()).then_some(links);
+            r.text = Some(text);
         }
         ItemKind::Status(s) => r.text = Some(s.clone()),
         ItemKind::ToolChips(chips) => {
