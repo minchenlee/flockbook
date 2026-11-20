@@ -20,6 +20,8 @@ serde.workspace = true
 serde_json.workspace = true
 chrono = { version = "0.4.43", default-features = false, features = ["clock", "std"] }
 unicode-segmentation = "1"
+# resources: the reply read as CommonMark, to find links in plain text only (the version xplat/flockbook uses).
+pulldown-cmark = { version = "0.12", default-features = false }
 sha2 = "0.10"
 indexmap = { version = "2", features = ["serde"] }
 base64 = "0.22.1"

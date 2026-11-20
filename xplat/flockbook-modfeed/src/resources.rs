@@ -2,6 +2,7 @@
 //! Pure. `detect` finds the targets in an assistant text; feed rows carry them as `links`, and the `resources`
 //! command (P1) collects them with the same rules.
 
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 use serde::Serialize;
 
 /// A target in a row's `text`: UTF-16 offsets (what the mod's JavaScript strings count) and its kind.
@@ -26,24 +27,68 @@ const DOC_EXT: [&str; 6] = ["md", "html", "htm", "pdf", "png", "svg"];
 /// Full-width punctuation that ends a path or a URL (Chinese and Japanese text has no space before them).
 const CJK_PUNCT: &str = "。，、；：！？「」『』（）《》【】…—“”‘’";
 
-/// The targets in `text`, in order, none overlapping. What is found:
-/// - Markdown links `[label](dest)` and autolinks `<url>`: the address only, once (the label is not searched).
+/// The targets in `text`, in order, none overlapping. The text is read as CommonMark (pulldown-cmark, with tables,
+/// strikethrough and task lists); what is found:
+/// - Inline links `[label](dest)` and autolinks `<url>`: the address only, once (the label is not searched).
 /// - A code span that holds only a target; nothing else inside code spans or code blocks.
-/// - Bare `http(s)://` URLs; `localhost:<port>` and `127.0.0.1:<port>`, and `claude.ai/artifact/…` and GitHub
-///   PR/issue/run addresses, also without a scheme.
-/// - Absolute paths (`/…`, `~/…`) that end in a doc extension.
+/// - In plain text only: bare `http(s)://` URLs; `localhost:<port>` and `127.0.0.1:<port>`, and
+///   `claude.ai/artifact/…` and GitHub PR/issue/run addresses, also without a scheme; absolute paths (`/…`, `~/…`)
+///   that end in a doc extension.
 ///
-/// Punctuation at the end (`.` `,` `)` without its `(`, `。`…) is not part of a target. Pictures (`![a](src)`)
-/// and relative paths are not found.
+/// Not searched: code, HTML, pictures, reference links (`[a][b]`, `[a][]`, `[a]` with a definition) and reference
+/// definitions (the parser takes them; they are not text). Text whose source differs from what it reads (an escape
+/// `\[`, an entity `&amp;`) is not searched, and a target that runs into it is not found: to be safe.
+/// Punctuation at the end (`.` `,` `)` without its `(`, `。`…) is not part of a target.
 pub fn detect(text: &str) -> Vec<Found> {
-    let b = text.as_bytes();
-    let mut taken = vec![false; b.len()];
+    // Only plain text is searched: everything starts taken, a text event as written is freed.
+    let mut taken = vec![true; text.len()];
     let mut hits: Vec<(usize, usize, &'static str, String)> = vec![];
-    let (defs, labels) = definitions(text);
-    for (s, e) in fences(text).into_iter().chain(indented(text)).chain(defs) {
-        taken[s..e].iter_mut().for_each(|x| *x = true);
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    // Inside a code block, a link, a picture or an HTML block: nothing is searched.
+    let mut inside = 0usize;
+    for (ev, r) in Parser::new_ext(text, opts).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::Link { link_type, dest_url, .. }) => {
+                if inside == 0 {
+                    let dest = match link_type {
+                        LinkType::Inline => inline_dest(text, r.clone(), &dest_url),
+                        // "<url>": the address is the text between the brackets.
+                        LinkType::Autolink if text[r.clone()].len() == dest_url.len() + 2 && text[r.start + 1..r.end - 1] == *dest_url => {
+                            Some((r.start + 1, r.end - 1))
+                        }
+                        _ => None,
+                    };
+                    if let Some((ds, de)) = dest {
+                        if let Some((kind, target)) = whole(&text[ds..de]) {
+                            hits.push((ds, de, kind, target));
+                        }
+                    }
+                }
+                inside += 1;
+            }
+            Event::Start(Tag::CodeBlock(_) | Tag::Image { .. } | Tag::HtmlBlock) => inside += 1,
+            Event::End(TagEnd::Link | TagEnd::CodeBlock | TagEnd::Image | TagEnd::HtmlBlock) => inside = inside.saturating_sub(1),
+            Event::Text(t) if inside == 0 && text[r.clone()] == *t => mark(&mut taken, r.start, r.end, false),
+            Event::Code(c) if inside == 0 => {
+                // A span that holds only a target: "`x`", "`` x ``".
+                let src = &text[r.clone()];
+                let n = src.bytes().take_while(|&x| x == b'\x60').count();
+                if src.len() < 2 * n {
+                    continue;
+                }
+                let inner = &src[n..src.len() - n];
+                let lead = inner.len() - inner.trim_start().len();
+                let tok = inner.trim();
+                if tok == c.trim() {
+                    if let Some((kind, target)) = whole(tok) {
+                        let s = r.start + n + lead;
+                        hits.push((s, s + tok.len(), kind, target));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
-    markup(text, &labels, &mut taken, &mut hits);
     bare_urls(text, &mut taken, &mut hits);
     bare_paths(text, &mut taken, &mut hits);
     hits.sort_by_key(|h| h.0);
@@ -63,269 +108,25 @@ pub fn detect(text: &str) -> Vec<Found> {
     out
 }
 
-/// Fenced code blocks, as byte ranges (an unclosed one runs to the end).
-fn fences(text: &str) -> Vec<(usize, usize)> {
-    let mut out = vec![];
-    let mut open: Option<(usize, u8, usize)> = None;
-    let mut pos = 0;
-    for line in text.split_inclusive('\n') {
-        let t = line.trim_start();
-        let c = t.as_bytes().first().copied().unwrap_or(0);
-        let run = t.bytes().take_while(|&x| x == c).count();
-        match open {
-            // A backtick fence's info has no backtick ("```x``` …" is inline code), as blocks.js.
-            None if run >= 3 && (c == b'~' || c == b'\x60' && !t[run..].contains('\x60')) => open = Some((pos, c, run)),
-            Some((s, fc, n)) if c == fc && run >= n && t[run..].trim().is_empty() => {
-                out.push((s, pos + line.len()));
-                open = None;
-            }
-            _ => {}
-        }
-        pos += line.len();
-    }
-    if let Some((s, _, _)) = open {
-        out.push((s, text.len()));
-    }
-    out
-}
-
-/// Reference definitions (`[1]: https://…`), whole lines, and the next line when the address is there: drawing
-/// their address as a link would break `[text][1]`. Also their labels, lowercased, for shortcut references.
-fn definitions(text: &str) -> (Vec<(usize, usize)>, Vec<String>) {
-    let (mut out, mut labels) = (vec![], vec![]);
-    let mut pos = 0;
-    let mut next = false;
-    for line in text.split_inclusive('\n') {
-        // In a quote ("> ", "> > "), after its markers.
-        let mut q = line;
-        while let Some(r) = q.trim_start_matches(' ').strip_prefix('>') {
-            q = r.strip_prefix(' ').unwrap_or(r);
-        }
-        let t = q.trim_start_matches(' ');
-        if next {
-            out.push((pos, pos + line.len()));
-            next = false;
-        } else if q.len() - t.len() <= 3 && t.starts_with('[') {
-            if let Some(k) = t.find("]:") {
-                if k > 1 && !t[1..k].contains(['[', ']']) {
-                    out.push((pos, pos + line.len()));
-                    labels.push(t[1..k].trim().to_lowercase());
-                    next = t[k + 2..].trim().is_empty();
-                }
-            }
-        }
-        pos += line.len();
-    }
-    (out, labels)
-}
-
-/// Indented code, as byte ranges, judged to be safe: a line with 4 or more spaces (a tab to the next 4) after a blank
-/// line, a heading, the start, or another such line. In a list item that may be a paragraph; it is skipped all the
-/// same (a missed link, the text as it is).
-fn indented(text: &str) -> Vec<(usize, usize)> {
-    let mut out = vec![];
-    let (mut pos, mut prev_blank, mut in_code, mut prev_heading) = (0, true, false, false);
-    for line in text.split_inclusive('\n') {
-        let body = line.trim_end_matches(['\n', '\r']);
-        if body.trim().is_empty() {
-            prev_blank = true;
-            pos += line.len();
-            continue;
-        }
-        let mut indent = 0;
-        for c in body.chars() {
-            match c {
-                ' ' => indent += 1,
-                '\t' => indent += 4 - indent % 4,
-                _ => break,
-            }
-        }
-        if indent >= 4 && (in_code || prev_blank || prev_heading) {
-            out.push((pos, pos + line.len()));
-            in_code = true;
-            prev_heading = false;
-        } else {
-            in_code = false;
-            prev_heading = indent < 4 && heading(body.trim_start());
-        }
-        prev_blank = false;
-        pos += line.len();
-    }
-    out
-}
-
-/// An ATX heading: 1 to 6 "#", then a space or nothing.
-fn heading(t: &str) -> bool {
-    let n = t.bytes().take_while(|&c| c == b'#').count();
-    (1..=6).contains(&n) && (t.len() == n || t[n..].starts_with([' ', '\t']))
-}
-
-fn mark(taken: &mut [bool], s: usize, e: usize) {
-    taken[s..e].iter_mut().for_each(|x| *x = true);
-}
-
-/// Code spans, Markdown links, pictures and autolinks: each is taken whole; a target in it is found once.
-fn markup(text: &str, labels: &[String], taken: &mut [bool], hits: &mut Vec<(usize, usize, &'static str, String)>) {
-    let b = text.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if taken[i] {
-            i += 1;
-            continue;
-        }
-        match b[i] {
-            b'\x60' => {
-                let n = b[i..].iter().take_while(|&&x| x == b'\x60').count();
-                let mut j = i + n;
-                let mut close = None;
-                while j < b.len() && !taken[j] {
-                    if b[j] == b'\x60' {
-                        let m = b[j..].iter().take_while(|&&x| x == b'\x60').count();
-                        if m == n {
-                            close = Some(j);
-                            break;
-                        }
-                        j += m;
-                    } else {
-                        j += 1;
-                    }
-                }
-                let Some(j) = close else {
-                    i += n;
-                    continue;
-                };
-                let inner = &text[i + n..j];
-                let lead = inner.len() - inner.trim_start().len();
-                let tok = inner.trim();
-                if let Some((kind, target)) = whole(tok) {
-                    hits.push((i + n + lead, i + n + lead + tok.len(), kind, target));
-                }
-                mark(taken, i, j + n);
-                i = j + n;
-            }
-            b'!' if b.get(i + 1) == Some(&b'[') => match link_at(text, i + 1) {
-                Some((end, _, _)) => {
-                    mark(taken, i, end);
-                    i = end;
-                }
-                None => i += 1,
-            },
-            b'[' => match link_at(text, i) {
-                Some((end, ds, de)) => {
-                    if let Some((kind, target)) = whole(&text[ds..de]) {
-                        hits.push((ds, de, kind, target));
-                    }
-                    mark(taken, i, end);
-                    i = end;
-                }
-                None => match reference_at(text, i, labels) {
-                    Some(end) => {
-                        mark(taken, i, end);
-                        i = end;
-                    }
-                    None => i += 1,
-                },
-            },
-            b'<' => {
-                let k = text[i + 1..].find(|c: char| c == '>' || c.is_whitespace()).map(|k| i + 1 + k);
-                match k {
-                    Some(k) if b[k] == b'>' && is_url(&text[i + 1..k]) => {
-                        if let Some((kind, target)) = whole(&text[i + 1..k]) {
-                            hits.push((i + 1, k, kind, target));
-                        }
-                        mark(taken, i, k + 1);
-                        i = k + 1;
-                    }
-                    _ => i += 1,
-                }
-            }
-            _ => i += 1,
-        }
-    }
-}
-
-/// A Markdown link starting at `[` at `i`: (end past its `)`, the address's start and end).
-fn link_at(text: &str, i: usize) -> Option<(usize, usize, usize)> {
-    let b = text.as_bytes();
-    let close = text[i + 1..].find(']')? + i + 1;
-    if text[i + 1..close].contains("\n\n") || b.get(close + 1) != Some(&b'(') {
+/// The address of an inline link `[label](dest)` in `text[r]`, as written: after "](", spaces or a line break, and
+/// maybe "<". None when it is not written as the parser read it (an escape or an entity in it).
+fn inline_dest(text: &str, r: std::ops::Range<usize>, dest: &str) -> Option<(usize, usize)> {
+    if dest.is_empty() {
         return None;
     }
-    let mut k = close + 2;
-    while k < b.len() && b[k] == b' ' {
-        k += 1;
-    }
-    if b.get(k) == Some(&b'<') {
-        let e = text[k + 1..].find('>')? + k + 1;
-        let end = text[e..].find(')')? + e + 1;
-        return Some((end, k + 1, e));
-    }
-    let ds = k;
-    let mut depth = 0i32;
-    while k < b.len() {
-        match b[k] {
-            b'(' => depth += 1,
-            b')' if depth == 0 => return Some((k + 1, ds, k)),
-            b')' => depth -= 1,
-            b'\n' => return None,
-            c if c.is_ascii_whitespace() => {
-                let de = k;
-                let end = text[k..].find(')')? + k + 1;
-                return Some((end, ds, de));
-            }
-            _ => {}
+    let src = &text[r.clone()];
+    for (p, _) in src.match_indices(dest) {
+        let before = src[..p].trim_end_matches('<').trim_end_matches([' ', '\t', '\n', '\r']);
+        let after = src[p + dest.len()..].trim_start_matches('>');
+        if before.ends_with("](") && after.starts_with([' ', '\t', '\n', '\r', ')']) {
+            return Some((r.start + p, r.start + p + dest.len()));
         }
-        k += 1;
     }
     None
 }
 
-/// A reference link at `[` at `i`: `[text][ref]`, `[text][]`, or `[text]` with a definition. The end past it.
-/// A label with brackets inside (`[a [b] c][ref]`, `[a [b] c](url)`) is skipped whole, to be safe.
-fn reference_at(text: &str, i: usize, labels: &[String]) -> Option<usize> {
-    let b = text.as_bytes();
-    let (mut depth, mut nested, mut close) = (0i32, false, None);
-    for (k, &c) in b.iter().enumerate().skip(i) {
-        match c {
-            b'[' => {
-                depth += 1;
-                nested |= depth > 1;
-            }
-            b']' => {
-                depth -= 1;
-                if depth == 0 {
-                    close = Some(k);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let close = close?;
-    if text[i + 1..close].contains("\n\n") {
-        return None;
-    }
-    if b.get(close + 1) == Some(&b'[') {
-        let end = text[close + 2..].find(']')? + close + 2;
-        return (!text[close + 2..end].contains('\n')).then_some(end + 1);
-    }
-    if nested && b.get(close + 1) == Some(&b'(') {
-        let mut d = 0i32;
-        for (k, &c) in b.iter().enumerate().skip(close + 1) {
-            match c {
-                b'(' => d += 1,
-                b')' => {
-                    d -= 1;
-                    if d == 0 {
-                        return Some(k + 1);
-                    }
-                }
-                _ => {}
-            }
-        }
-        return None;
-    }
-    labels.contains(&text[i + 1..close].trim().to_lowercase()).then_some(close + 1)
+fn mark(taken: &mut [bool], s: usize, e: usize, to: bool) {
+    taken[s..e].iter_mut().for_each(|x| *x = to);
 }
 
 fn is_url(s: &str) -> bool {
@@ -462,16 +263,23 @@ fn bare_urls(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'sta
             continue;
         }
         let mut j = i;
-        while j < b.len() && !taken[j] && url_byte(b[j]) {
+        while j < b.len() && url_byte(b[j]) {
             j += 1;
         }
         let tok = trim_end(&text[i..j]);
         let e = i + tok.len();
+        // A target that runs into markup, an escape or an entity is not found: its end is not sure. "\\_" after it
+        // reads as "_", a part of it (a "\\" that ends the line is a line break).
+        let escaped = b.get(j) == Some(&b'\\') && !matches!(b.get(j + 1), None | Some(b'\n' | b'\r'));
+        if escaped || taken[i..e].iter().any(|&x| x) {
+            i = j.max(i + 1);
+            continue;
+        }
         let found = if schemed { host_of(tok).map(|_| (url_kind(tok), tok.to_string())) } else { bare_host(tok).map(|t| (url_kind(&t), t)) };
         match found {
             Some((kind, target)) => {
                 hits.push((i, e, kind, target));
-                mark(taken, i, e);
+                mark(taken, i, e, true);
                 i = e;
             }
             None => i = j.max(i + 1),
@@ -525,15 +333,16 @@ fn bare_paths(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'st
         }
         let mut j = i;
         for (k, c) in text[i..].char_indices() {
-            if taken[i + k] || !path_char(c) {
+            if !path_char(c) {
                 break;
             }
             j = i + k + c.len_utf8();
         }
         match doc_end(text, i, j) {
+            Some(e) if taken[i..e].iter().any(|&x| x) => i = j.max(i + 1),
             Some(e) => {
                 hits.push((i, e, "doc", text[i..e].to_string()));
-                mark(taken, i, e);
+                mark(taken, i, e, true);
                 i = e;
             }
             None => i = j.max(i + 1),
@@ -650,7 +459,8 @@ mod tests {
     fn reference_links_are_left_alone() {
         assert!(detect("[1]:\n  https://x.com/docs").is_empty(), "skipped to be safe: the line after an empty definition is never searched (it may be text; a missed link, the text as it is)");
         assert!(detect("See [https://x.com][ref].\n\n[ref]: https://y.com").is_empty(), "a full reference");
-        assert!(detect("See [https://x.com][].").is_empty(), "a collapsed reference");
+        assert!(detect("See [https://x.com][].\n\n[https://x.com]: https://y.com").is_empty(), "a collapsed reference");
+        assert_eq!(kinds("See [https://x.com][draft]."), vec!["link"], "without a definition it is text (CommonMark), not a reference");
         assert!(detect("See [https://x.com].\n\n[https://x.com]: https://y.com").is_empty(), "a shortcut reference");
         assert_eq!(kinds("See [https://x.com] there"), vec!["link"], "brackets without a definition are text");
     }
@@ -661,7 +471,7 @@ mod tests {
         assert!(detect("    https://x.com").is_empty(), "at the start");
         assert!(detect("\thttps://x.com").is_empty(), "a tab");
         assert_eq!(kinds("Text\n    https://x.com"), vec!["link"], "a paragraph's next line is not code");
-        assert!(detect("- item\n\n    https://x.com").is_empty(), "skipped to be safe: may be a list item's paragraph (a missed link; the text is not changed)");
+        assert_eq!(kinds("- item\n\n    https://x.com"), vec!["link"], "a list item's paragraph, not code (CommonMark)");
         assert_eq!(kinds("    code\n\nafter https://x.com"), vec!["link"]);
     }
 
@@ -685,7 +495,9 @@ mod tests {
         assert!(detect("> [1]: https://x.com/docs").is_empty(), "a definition in a quote");
         assert!(detect("> > [1]:\n> https://x.com/docs").is_empty(), "nested quote, address on the next line");
         assert!(detect("See [a [https://x.com] b][ref].\n\n[ref]: https://y.com").is_empty(), "nested brackets in a full reference");
-        assert!(detect("See [a [b] https://x.com](https://y.com).").is_empty(), "nested brackets in an inline link");
+        let t = "See [a [b] https://x.com](https://y.com).";
+        let f = detect(t);
+        assert_eq!((f.len(), f.first().map(|x| x.target.as_str())), (1, Some("https://y.com")), "nested brackets: the address only, not the label: {f:?}");
         assert_eq!(kinds("> quote https://x.com"), vec!["link"], "other quoted text is searched");
     }
 
@@ -695,6 +507,35 @@ mod tests {
         assert!(detect("- item\n\n      curl https://x.com").is_empty(), "code in a list item");
         assert!(detect("# Title\n    https://x.com").is_empty(), "right after a heading");
         assert!(detect("1. step\n\n   - sub\n\n         https://x.com").is_empty(), "a nested list");
+    }
+
+    // Codex round 3 (t122): each one rewrote a link or code before the parser.
+    #[test]
+    fn an_escaped_bracket_in_a_reference_text_is_left_alone() {
+        let t = "[https://example.com/guide Guide \\[draft][ref]\n\n[ref]: https://y.com";
+        assert!(detect(t).is_empty(), "{:?}", detect(t));
+    }
+
+    #[test]
+    fn a_definition_in_a_list_item_is_left_alone() {
+        let t = "- [ref]: https://example.com/guide\n\n[Guide][ref]";
+        assert!(detect(t).is_empty(), "{:?}", detect(t));
+    }
+
+    #[test]
+    fn indented_code_right_after_a_fence_is_code() {
+        let t = "\x60\x60\x60\ncode\n\x60\x60\x60\n    curl https://example.com/guide";
+        assert!(detect(t).is_empty(), "{:?}", detect(t));
+    }
+
+    #[test]
+    fn a_url_that_runs_into_an_entity_or_an_escape_is_not_found() {
+        // Its end is not sure: "&amp;" reads as "&", "\\_" as "_".
+        assert!(detect("see https://x.com/?a=1&amp;b=2 now").is_empty(), "{:?}", detect("see https://x.com/?a=1&amp;b=2 now"));
+        assert!(detect("see https://x.com/a\\_b now").is_empty());
+        assert_eq!(one("see https://x.com/?a=1&b=2 now").3, "https://x.com/?a=1&b=2", "a plain & is text");
+        assert!(detect("<a href=\"https://x.com\">x</a>").is_empty(), "HTML");
+        assert!(detect("<div>\nhttps://x.com\n</div>").is_empty(), "an HTML block");
     }
 
     #[test]
