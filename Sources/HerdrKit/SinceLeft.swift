@@ -181,6 +181,8 @@ extension SinceLeft {
         public private(set) var decided: String?
         /// The turn the app's copy of the log showed then, when it was older: nothing is marked until the copy moves on.
         private var behind: String?
+        /// Decided while the app's copy showed another turn, or none (`behind` nil): nothing is marked until it moves on.
+        private var waiting = false
         public init() {}
 
         /// `read`: the newest turn in a read of the log made now (nil: no log, or no turn yet: wait for the next read).
@@ -189,7 +191,8 @@ extension SinceLeft {
             guard decided == nil else { return (true, nil) }
             guard let read else { return (false, nil) }
             decided = read
-            behind = shown == read ? nil : shown
+            waiting = shown != read
+            behind = shown
             return (true, SinceLeft.arrive(seen: seen, id: read, now: now))
         }
 
@@ -210,8 +213,10 @@ extension SinceLeft {
             guard let decided else { return nil }
             // The app's copy still shows the older turn: the newer one is not marked until it shows (left before that,
             // the card comes again next time).
-            if let b = behind, shown == nil || shown == b { return nil }
-            behind = nil
+            if waiting {
+                if shown == nil || shown == behind { return nil }
+                waiting = false
+            }
             return shown ?? decided
         }
     }
