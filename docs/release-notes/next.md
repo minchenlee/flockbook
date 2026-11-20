@@ -5,6 +5,7 @@ One short line: what this release is about.
 
 ### ✨ New
 
+- Herdr mod: web addresses in the agent's replies (pages, GitHub PRs, issues and CI runs, claude.ai artifacts, localhost) are now links you can click.
 
 ### 🔒 Security
 
