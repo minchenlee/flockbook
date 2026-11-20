@@ -144,3 +144,21 @@ test("an address after CRLF in a link's destination is left alone", () => {
   const s = "[Guide]( \r\n <https://x.com/guide>)";
   assert.equal(linkedMarkdown(s, [at(s, "https://x.com/guide")]), s);
 });
+
+test("markdownView: a quoted 4-space line after a table or a fence is not rewritten", () => {
+  const table = "> intro\n| h |\n| --- |\n>     curl https://x.com/guide";
+  const fence = "> intro\n    ```\n    x\n    ```\n>     curl https://x.com/guide";
+  for (const text of [table, fence]) {
+    const v = views(markdownView("r", text, T, 600, 1, [at(text, "https://x.com/guide")]));
+    assert.ok(!v.some((x) => x.text.includes("](https://x.com/guide)")), JSON.stringify(v.map((x) => x.text)));
+  }
+});
+
+test("quote markers are taken off before the indent is counted", () => {
+  for (const t of [">     https://x.com", "> >     https://x.com", "  >  >     https://x.com", ">\thttps://x.com"]) {
+    assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t, JSON.stringify(t));
+  }
+  for (const t of ["> https://x.com", ">    https://x.com", "> > https://x.com"]) {
+    assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t.replace("https://x.com", "[https://x.com](https://x.com)"), JSON.stringify(t));
+  }
+});

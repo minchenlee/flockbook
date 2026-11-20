@@ -49,11 +49,20 @@ export function linkedMarkdown(text, links, offset = 0) {
   return out + s.slice(at);
 }
 
-// On a line indented 4 or more (a tab to the next 4) in this block: TextView may draw it as code, as when the block
+// On a line indented 4 or more (a tab to the next 4) in this block, after its quote markers: TextView may draw it as code, as when the block
 // starts after a fence or a table in a list item (the helper read the whole text, where it is a paragraph). Left alone.
 function indented(s, start) {
+  let i = s.lastIndexOf("\n", start - 1) + 1;
+  // Quote markers first: each ">" (after up to 3 spaces) and at most one space after it.
+  for (;;) {
+    let j = i;
+    while (j < start && j - i < 3 && s[j] === " ") j++;
+    if (s[j] !== ">" || j >= start) break;
+    i = j + 1;
+    if (s[i] === " " && i < start) i++;
+  }
   let col = 0;
-  for (let i = s.lastIndexOf("\n", start - 1) + 1; i < start; i++) {
+  for (; i < start; i++) {
     if (s[i] === " ") col++;
     else if (s[i] === "\t") col += 4 - (col % 4);
     else break;
