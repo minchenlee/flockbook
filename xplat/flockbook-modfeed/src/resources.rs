@@ -35,7 +35,7 @@ const CJK_PUNCT: &str = "。，、；：！？「」『』（）《》【】…�
 ///   `claude.ai/artifact/…` and GitHub PR/issue/run addresses, also without a scheme; absolute paths (`/…`, `~/…`)
 ///   that end in a doc extension.
 ///
-/// Not searched: code, HTML, pictures, reference links (`[a][b]`, `[a][]`, `[a]` with a definition) and reference
+/// Not searched: code, HTML (and the rest of a block after an inline tag: it may open code or a link), pictures, reference links (`[a][b]`, `[a][]`, `[a]` with a definition) and reference
 /// definitions (the parser takes them; they are not text). Text whose source differs from what it reads (an escape
 /// `\[`, an entity `&amp;`) is not searched, and a target that runs into it is not found: to be safe.
 /// Punctuation at the end (`.` `,` `)` without its `(`, `。`…) is not part of a target.
@@ -46,6 +46,8 @@ pub fn detect(text: &str) -> Vec<Found> {
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     // Inside a code block, a link, a picture or an HTML block: nothing is searched.
     let mut inside = 0usize;
+    // After an inline HTML tag, until its block ends: the tag may open code or a link.
+    let mut html = false;
     for (ev, r) in Parser::new_ext(text, opts).into_offset_iter() {
         match ev {
             Event::Start(Tag::Link { link_type, dest_url, .. }) => {
@@ -68,8 +70,10 @@ pub fn detect(text: &str) -> Vec<Found> {
             }
             Event::Start(Tag::CodeBlock(_) | Tag::Image { .. } | Tag::HtmlBlock) => inside += 1,
             Event::End(TagEnd::Link | TagEnd::CodeBlock | TagEnd::Image | TagEnd::HtmlBlock) => inside = inside.saturating_sub(1),
-            Event::Text(t) if inside == 0 && text[r.clone()] == *t => mark(&mut taken, r.start, r.end, false),
-            Event::Code(c) if inside == 0 => {
+            Event::InlineHtml(_) => html = true,
+            Event::End(TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::TableCell | TagEnd::Item) => html = false,
+            Event::Text(t) if inside == 0 && !html && text[r.clone()] == *t => mark(&mut taken, r.start, r.end, false),
+            Event::Code(c) if inside == 0 && !html => {
                 // A span that holds only a target: "`x`", "`` x ``".
                 let src = &text[r.clone()];
                 let n = src.bytes().take_while(|&x| x == b'\x60').count();
@@ -536,6 +540,15 @@ mod tests {
         assert_eq!(one("see https://x.com/?a=1&b=2 now").3, "https://x.com/?a=1&b=2", "a plain & is text");
         assert!(detect("<a href=\"https://x.com\">x</a>").is_empty(), "HTML");
         assert!(detect("<div>\nhttps://x.com\n</div>").is_empty(), "an HTML block");
+    }
+
+    #[test]
+    fn text_after_inline_html_is_not_searched() {
+        // An HTML tag may open code or a link ("<code>", "<a href>"): the rest of its block is skipped, to be safe.
+        assert!(detect("see <code>curl https://x.com</code> now").is_empty(), "{:?}", detect("see <code>curl https://x.com</code> now"));
+        assert!(detect("<a href=\"https://y.com\">https://x.com</a>").is_empty());
+        assert_eq!(kinds("see https://x.com <b>bold</b>"), vec!["link"], "before the tag");
+        assert_eq!(kinds("a <b>x</b>\n\nnext https://x.com"), vec!["link"], "the next block");
     }
 
     #[test]
