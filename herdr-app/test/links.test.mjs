@@ -162,3 +162,14 @@ test("quote markers are taken off before the indent is counted", () => {
     assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t.replace("https://x.com", "[https://x.com](https://x.com)"), JSON.stringify(t));
   }
 });
+
+test("an escaped backtick does not open or close a code span", () => {
+  const t = "\\` `https://x.com` now";
+  assert.equal(linkedMarkdown(t, [at(t, "https://x.com")]), t, "the real span starts after the escaped one");
+  const u = "`a\\` https://x.com";
+  assert.equal(linkedMarkdown(u, [at(u, "https://x.com")]), "`a\\` [https://x.com](https://x.com)", "after the span, text either way");
+  const two = "\\\\`https://x.com`";
+  assert.equal(linkedMarkdown(two, [at(two, "https://x.com")]), two, "two backslashes: the backtick is not escaped");
+  const esc = "\\`https://x.com\\` ok";
+  assert.equal(linkedMarkdown(esc, [at(esc, "https://x.com")]), "\\`[https://x.com](https://x.com)\\` ok", "both escaped: text");
+});
