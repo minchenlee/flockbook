@@ -237,6 +237,19 @@ pub fn question(q: &QuestionRequest) -> FeedQuestion {
     }
 }
 
+/// An assistant text's links, at their places in the text as sent (`cut` to TEXT_CAP). Where the text is cut, a
+/// target that goes on past the cut is not a link: found in the text as written (up to 4 KB past the cut), it ends
+/// after the cut's place.
+fn reply_links(s: &str) -> Vec<crate::resources::FeedLink> {
+    let Some((at, _)) = s.grapheme_indices(true).nth(TEXT_CAP) else { return crate::resources::links(s) };
+    let mut m = (at + 4096).min(s.len());
+    while !s.is_char_boundary(m) {
+        m += 1;
+    }
+    let end16 = s[..at].encode_utf16().count();
+    crate::resources::links(&s[..m]).into_iter().filter(|l| l.end <= end16).collect()
+}
+
 pub fn row(it: &ConversationItem) -> FeedRow {
     let mut r = FeedRow::new("status", &it.id, None, ms(it.timestamp));
     r.pics = pics(it);
@@ -256,15 +269,9 @@ pub fn row(it: &ConversationItem) -> FeedRow {
         }
         ItemKind::AssistantText(s) => {
             r.k = "assistant".into();
-            let text = cut(s, TEXT_CAP);
-            let mut links = crate::resources::links(&text);
-            // A target that runs into the cut's "…" is cut too: not a link.
-            if text.len() != s.len() {
-                let cut_at = text.encode_utf16().count() - 1;
-                links.retain(|l| l.end < cut_at);
-            }
+            let links = reply_links(s);
             r.links = (!links.is_empty()).then_some(links);
-            r.text = Some(text);
+            r.text = Some(cut(s, TEXT_CAP));
         }
         ItemKind::Status(s) => r.text = Some(s.clone()),
         ItemKind::ToolChips(chips) => {

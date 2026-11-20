@@ -659,6 +659,27 @@ mod tests {
     }
 
     #[test]
+    fn the_cut_is_found_by_its_place_not_by_lengths() {
+        use herdr_core::*;
+        let cap = crate::rows::TEXT_CAP;
+        let row = |s: String| crate::rows::row(&ConversationItem { id: "a1".into(), kind: ItemKind::AssistantText(s), ..Default::default() });
+        // Cut right after "a.": the URL in the text ends before the "." but went on ("a.html").
+        let u = "https://x.com/a.";
+        let r = row(format!("{} {u}html more", "a".repeat(cap - 1 - u.len())));
+        assert!(r.text.as_deref().unwrap().ends_with("a.…"));
+        assert_eq!(r.links, None, "cut after the dot");
+        // The cut takes off exactly 3 bytes and adds the 3-byte "…": the lengths are the same.
+        let u = "https://x.com/abc";
+        let s = format!("{} {u}def", "a".repeat(cap - 1 - u.len()));
+        let r = row(s.clone());
+        assert_eq!(r.text.as_deref().unwrap().len(), s.len());
+        assert_eq!(r.links, None, "same length after the cut");
+        // A URL that ends before the cut is kept.
+        let r = row(format!("https://x.com/ok {}", "a".repeat(cap)));
+        assert_eq!(r.links, Some(vec![FeedLink { start: 0, end: 16, res: "link" }]));
+    }
+
+    #[test]
     fn assistant_rows_carry_links_others_do_not() {
         use herdr_core::*;
         let item = |kind| ConversationItem { id: "a1".into(), kind, ..Default::default() };
