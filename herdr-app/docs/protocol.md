@@ -535,7 +535,7 @@ one reply, the later target first). Read only.
   home of the machine the agent runs on). `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
   GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`.
 - `title`: a doc's first `# ` heading (Markdown) or `<title>` (HTML) in its first 4 KB, else its file name; an
-  artifact's title; `o/r#12`, `CI run 1870`, `localhost:5173`, host and path. `detail`: a doc's folder (`~` for the
+  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path. `detail`: a doc's folder (`~` for the
   home), a URL's host, or `o/r`.
 - `row`: the `id` of the feed `row` with the last mention. `first_ts`, `last_ts`: ms, or null.
 - `exists`: docs only; the path is a file now.

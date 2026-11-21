@@ -7,7 +7,7 @@ use herdr_core::{ConversationItem, ItemKind};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A target in a row's `text`: UTF-16 offsets (what the mod's JavaScript strings count) and its kind.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -403,7 +403,9 @@ pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource>
             ItemKind::ToolChips(chips) => {
                 for c in chips.iter().flat_map(|c| &c.calls) {
                     let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
-                    let (action, title) = artifact_input(&c.input);
+                    let (action, title, file) = artifact_input(&c.input);
+                    // No title given: the published page's own <title>, when the file is here.
+                    let title = title.or_else(|| file.map(PathBuf::from).filter(|p| p.is_absolute() && p.is_file()).and_then(|p| file_title(&p)));
                     if action.as_deref().is_some_and(|a| a != "publish") {
                         continue;
                     }
@@ -452,11 +454,11 @@ pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource>
     acc.into_iter().map(|(r, _)| described(r, home)).collect()
 }
 
-/// The `action` and `title` of an Artifact call's input (JSON, maybe cut at 4 KB: then read as text).
-fn artifact_input(input: &str) -> (Option<String>, Option<String>) {
+/// The `action`, `title` and `file_path` of an Artifact call's input (JSON, maybe cut at 4 KB: then read as text).
+fn artifact_input(input: &str) -> (Option<String>, Option<String>, Option<String>) {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(input) {
         let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
-        return (s("action"), s("title").filter(|t| !t.trim().is_empty()).map(|t| t.trim().to_string()));
+        return (s("action"), s("title").filter(|t| !t.trim().is_empty()).map(|t| t.trim().to_string()), s("file_path"));
     }
     let field = |k: &str| -> Option<String> {
         let p = input.find(&format!("\"{k}\""))? + k.len() + 2;
@@ -478,7 +480,7 @@ fn artifact_input(input: &str) -> (Option<String>, Option<String>) {
         }
         None
     };
-    (field("action"), field("title").filter(|t| !t.trim().is_empty()).map(|t| t.trim().to_string()))
+    (field("action"), field("title").filter(|t| !t.trim().is_empty()).map(|t| t.trim().to_string()), field("file_path"))
 }
 
 /// A URL's parts: scheme (lowercase), authority without the user (host lowercase), path, query (with "?"), fragment.

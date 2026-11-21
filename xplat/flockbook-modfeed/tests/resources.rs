@@ -205,6 +205,22 @@ fn a_later_call_in_the_same_run_of_tools_is_not_missed() {
     assert!(more.items.iter().any(|r| r.target.ends_with("/two")), "{:?}", more.items);
 }
 
+#[test]
+fn an_artifact_without_a_title_takes_its_pages_title() {
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("p.html");
+    std::fs::write(&page, "<title>Weekly plan</title>").unwrap();
+    let lines = [
+        tool("a1", 1, "c1", "Artifact", json!({"action": "publish", "file_path": page.to_string_lossy()})),
+        result("r1", 2, "c1", "Published /x/p.html at https://claude.ai/artifact/abc", false),
+        tool("a2", 3, "c2", "Artifact", json!({"action": "publish", "file_path": "/nonexistent/q.html"})),
+        result("r2", 4, "c2", "Published at https://claude.ai/artifact/def", false),
+    ];
+    let rs = resources::collect(&tail::items(&lines), None);
+    let t = |id: &str| rs.iter().find(|r| r.target.ends_with(id)).map(|r| r.title.clone());
+    assert_eq!((t("abc").as_deref(), t("def").as_deref()), (Some("Weekly plan"), Some("Artifact")));
+}
+
 /// Shared with the Swift side (next release): Tests/Fixtures/resources/.
 #[test]
 fn the_shared_fixture() {
