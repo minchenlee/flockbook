@@ -405,7 +405,7 @@ pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource>
                     let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
                     let (action, title, file) = artifact_input(&c.input);
                     // No title given: the published page's own <title>, when the file is here.
-                    let title = title.or_else(|| file.map(PathBuf::from).filter(|p| p.is_absolute() && p.is_file()).and_then(|p| file_title(&p)));
+                    let title = title.or_else(|| file.map(PathBuf::from).filter(|p| p.is_absolute()).and_then(|p| openable(&p).ok()).and_then(|p| file_title(&p)));
                     if action.as_deref().is_some_and(|a| a != "publish") {
                         continue;
                     }

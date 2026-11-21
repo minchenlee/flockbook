@@ -277,6 +277,17 @@ test("row actions: hover shows them; jump, copy and remove; a click opens; Esc a
   assert.equal(fake.shared[R.KEY_OPEN], null);
 });
 
+test("a click on a web address row opens it with the click's cx", async () => {
+  const v = view([res("a", "link", 50)]);
+  const el = v.render(fakeCx());
+  const opened = [];
+  const cx = fakeCx(); cx.stop_propagation = () => {}; cx.open_url = (u) => opened.push(u);
+  cx.spawn = (f) => { const p = f({ notify() {} }); cx.tasks.push(p); return p; };   // a task's cx has no open_url
+  byId(el, "res-a")._h.on_click({}, cx);
+  await cx.settle();
+  assert.deepEqual(opened, ["https://x.com/a"]);
+});
+
 test("the chat scrolls to the row once, for its own agent", () => {
   const chat = new ChatView(fakeCx());
   const f = chat.feed();

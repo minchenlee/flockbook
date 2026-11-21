@@ -105,7 +105,8 @@ export function ago(ms, now = Date.now()) {
 }
 
 // What a click does: { url } for http(s); { cmd, args } for a file this computer may open (a doc of the
-// kinds above, that is there now, an absolute path, an agent on this computer); else { why }.
+// kinds above, listed as there, an absolute path, an agent on this computer; openItem asks the helper
+// again); else { why }.
 export function openPlan(item, address, platform = window()?.platform) {
   if (!item) return { why: "Nothing to open." };
   if (item.kind !== "doc") {
@@ -283,7 +284,11 @@ export class ResourcesView {
         .hover((s) => s.bg(t.hover))
         .on_hover((inside, cx) => { const was = this.hover; this.hover = inside ? it.id : this.hover === it.id ? null : this.hover; if (was !== this.hover) cx?.notify?.(); })
         .on_mouse_down("left", stop)
-        .on_click((_e, cx) => { cx?.spawn?.(async (cx) => { const p = await openItem(it, address, cx); this.note = p.why ? { id: it.id, text: p.why } : null; cx?.notify?.(); }); })
+        .on_click((_e, cx) => {
+          // Started here: a web address opens with the click's cx, before the first await.
+          const pending = openItem(it, address, cx);
+          cx?.spawn?.(async (acx) => { const p = await pending; this.note = p.why ? { id: it.id, text: p.why } : null; acx?.notify?.(); });
+        })
         .when(fresh, (el) => el.child(div().id(`res-new-${it.id}`).absolute().left(1).top(16).size(6).rounded(3).bg(t.accent)))
         .child(div().size(22).flex_none().mt(1).rounded(6).bg(t.raised).flex().items_center().justify_center()
           .when(gone, (el) => el.opacity(0.5)).child(svg(icon(ICON[it.kind] ?? "link")).size(12).text_color(t.muted)))
