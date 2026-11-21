@@ -12,6 +12,7 @@
 //!   flockbook-modfeed glance [--cache <file>]   (every agent on this machine: one `glance` line each; read only)
 //!   flockbook-modfeed summary --terminal <addr> [--cache <file>]   (two lines by the agent's small model; only with summaries on)
 //!   flockbook-modfeed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
+//!   flockbook-modfeed resources --terminal <addr> [--since <cursor>]   (what the agent pointed to: one `res` line each; read only)
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
 //!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
 //!   flockbook-modfeed helper remove --machine <m>
@@ -42,6 +43,16 @@ impl Run {
         self.out.emit_value(json!({"type": "end", "ok": ok, "ms": ms}));
         self.out.text()
     }
+    /// The end line with more fields (`resources`: `cursor`, `full`).
+    fn finish_with(mut self, extra: serde_json::Value) -> String {
+        let ms = self.t0.elapsed().as_millis() as i64;
+        let mut end = json!({"type": "end", "ok": true, "ms": ms});
+        if let (Some(e), Some(x)) = (end.as_object_mut(), extra.as_object()) {
+            e.extend(x.clone());
+        }
+        self.out.emit_value(end);
+        self.out.text()
+    }
     fn fail(mut self, code: &str, message: &str) -> String {
         self.out.emit_value(json!({"type": "error", "code": code, "message": message}));
         self.finish(false)
@@ -62,7 +73,7 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage", "resources"], "release": update::release()}));
             r.finish(true)
         }
         "paste-image" => {
@@ -171,7 +182,7 @@ pub fn run(argv: &[String]) -> String {
             }
             r.finish(true)
         }
-        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" | "summary" => {
+        "feed" | "status" | "card" | "approve" | "answer" | "send" | "queue" | "commands" | "summary" | "resources" => {
             let Some(terminal) = opt("--terminal") else { return r.fail("usage", &format!("{cmd} needs --terminal <addr>")) };
             let cache_path = opt("--cache").map(PathBuf::from);
             let cache_url = cache_path.as_deref();
@@ -278,6 +289,20 @@ pub fn run(argv: &[String]) -> String {
                     r.out.emit(&d);
                     return r.finish(true);
                 }
+                "resources" => {
+                    // Read only. `~/` is this machine's home (the agent's: a terminal elsewhere runs this there).
+                    let Some(path) = log else { return r.finish_with(json!({"cursor": null, "full": true})) };
+                    let user_home = std::env::var_os("HOME").map(PathBuf::from);
+                    return match crate::resources::answer(path, opt("--since").as_deref(), user_home.as_deref()) {
+                        Ok(a) => {
+                            for it in &a.items {
+                                r.out.emit(it);
+                            }
+                            r.finish_with(json!({"cursor": a.cursor, "full": a.full}))
+                        }
+                        Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
+                    };
+                }
                 _ => {}
             }
             let tz = chrono::Local;
@@ -309,7 +334,7 @@ pub fn run(argv: &[String]) -> String {
             }
         }
         // `queue` is serve's own, not offered to the mod.
-        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send"),
+        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, resources"),
     }
 }
 

@@ -64,7 +64,7 @@ fn collects_from_replies_and_artifact_results_only() {
     assert_eq!(doc[0].target, "/home/me/plans/plan.md", "~/ is the home, expanded");
     assert_eq!(doc[0].mentions, 2);
     assert_eq!((doc[0].first_ts, doc[0].last_ts), (Some(ms(5)), Some(ms(20))));
-    assert_eq!(doc[0].row, "a6", "the row of the last mention");
+    assert_eq!(doc[0].row, "a6-0", "the row of the last mention (the parser's item id)");
     assert_eq!(doc[0].title, "plan.md", "no file: the file name");
     assert_eq!(doc[0].detail, "~/plans");
     assert_eq!(doc[0].exists, Some(false));
@@ -81,7 +81,7 @@ fn collects_from_replies_and_artifact_results_only() {
 
     let art = by_kind(&rs, "artifact");
     assert_eq!(art.len(), 1, "{art:?}");
-    assert_eq!((art[0].target.as_str(), art[0].title.as_str(), art[0].row.as_str()), ("https://claude.ai/code/artifact/0f3a-11", "Launch plan", "a3"));
+    assert_eq!((art[0].target.as_str(), art[0].title.as_str(), art[0].row.as_str()), ("https://claude.ai/code/artifact/0f3a-11", "Launch plan", "tools-a3-0"));
 
     let link = by_kind(&rs, "link");
     assert_eq!(link.len(), 1, "host case, #fragment and the trailing / are the same link: {link:?}");

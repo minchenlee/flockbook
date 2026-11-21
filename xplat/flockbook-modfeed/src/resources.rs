@@ -3,7 +3,11 @@
 //! command (P1) collects them with the same rules.
 
 use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use herdr_core::{ConversationItem, ItemKind};
 use serde::Serialize;
+use std::collections::HashMap;
+use std::io::Read;
+use std::path::Path;
 
 /// A target in a row's `text`: UTF-16 offsets (what the mod's JavaScript strings count) and its kind.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -364,31 +368,272 @@ pub fn links(text: &str) -> Vec<FeedLink> {
 pub struct Resource {
     #[serde(rename = "type")]
     pub t: &'static str,
+    /// FNV-1a of the item's key (the normalized target): the same target is one item.
     pub id: String,
     pub kind: &'static str,
+    /// What opens: an absolute path for a doc (`~/` expanded), else a URL.
     pub target: String,
     pub title: String,
+    /// A doc's folder (the home as `~`); a URL's host, or "owner/repo" on GitHub.
     pub detail: String,
+    /// The feed row (`row` line `id`) of the last mention.
     pub row: String,
+    /// Milliseconds since 1970 of the first and the last mention; null when the log has no time.
     pub first_ts: Option<i64>,
     pub last_ts: Option<i64>,
     pub mentions: usize,
+    /// Docs only: the path is a file now.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exists: Option<bool>,
 }
 
-pub fn collect(_items: &[herdr_core::ConversationItem], _home: Option<&std::path::Path>) -> Vec<Resource> {
-    vec![]
+/// The resources in `items` (a session log as parsed), newest first: by the last mention, and in one reply the
+/// later target first. Collected: targets in assistant text (`detect`), and artifact URLs in the result of a
+/// successful Artifact publish. Not collected: what the person typed, other tools' input and output.
+/// `home`: the home `~/` stands for.
+pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource> {
+    let mut acc: Vec<(Resource, usize)> = vec![];
+    let mut at: HashMap<String, usize> = HashMap::new();
+    let mut seq = 0usize;
+    for it in crate::rows::merged(items) {
+        let ts = crate::rows::ms(it.timestamp);
+        let mut found: Vec<(&'static str, String, Option<String>)> = vec![];
+        match &it.kind {
+            ItemKind::AssistantText(s) => found.extend(detect(s).into_iter().map(|f| (f.kind, f.target, None))),
+            ItemKind::ToolChips(chips) => {
+                for c in chips.iter().flat_map(|c| &c.calls) {
+                    let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
+                    let (action, title) = artifact_input(&c.input);
+                    if action.as_deref().is_some_and(|a| a != "publish") {
+                        continue;
+                    }
+                    found.extend(detect(out).into_iter().filter(|f| f.kind == "artifact").map(|f| (f.kind, f.target, title.clone())));
+                }
+            }
+            _ => {}
+        }
+        for (kind, target, title) in found {
+            let (key, target) = normal(kind, &target, home);
+            seq += 1;
+            match at.get(&key) {
+                Some(&k) => {
+                    let (r, s) = &mut acc[k];
+                    r.mentions += 1;
+                    r.last_ts = ts.or(r.last_ts);
+                    r.first_ts = r.first_ts.or(ts);
+                    r.row = it.id.clone();
+                    r.target = target;
+                    if let Some(t) = title {
+                        r.title = t;
+                    }
+                    *s = seq;
+                }
+                None => {
+                    at.insert(key.clone(), acc.len());
+                    let r = Resource {
+                        t: "res",
+                        id: crate::protocol::fnv1a(&key),
+                        kind,
+                        target,
+                        title: title.unwrap_or_default(),
+                        detail: String::new(),
+                        row: it.id.clone(),
+                        first_ts: ts,
+                        last_ts: ts,
+                        mentions: 1,
+                        exists: None,
+                    };
+                    acc.push((r, seq));
+                }
+            }
+        }
+    }
+    acc.sort_by_key(|(r, s)| std::cmp::Reverse((r.last_ts.unwrap_or(i64::MIN), *s)));
+    acc.into_iter().map(|(r, _)| described(r, home)).collect()
 }
 
+/// The `action` and `title` of an Artifact call's input (JSON, maybe cut at 4 KB: then read as text).
+fn artifact_input(input: &str) -> (Option<String>, Option<String>) {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(input) {
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
+        return (s("action"), s("title").filter(|t| !t.trim().is_empty()).map(|t| t.trim().to_string()));
+    }
+    let field = |k: &str| -> Option<String> {
+        let p = input.find(&format!("\"{k}\""))? + k.len() + 2;
+        let rest = input[p..].trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
+        let mut out = String::new();
+        let mut esc = false;
+        for c in rest.chars() {
+            match (esc, c) {
+                (true, 'n') => out.push(' '),
+                (true, c) => out.push(c),
+                (false, '\\') => {
+                    esc = true;
+                    continue;
+                }
+                (false, '"') => return Some(out),
+                (false, c) => out.push(c),
+            }
+            esc = false;
+        }
+        None
+    };
+    (field("action"), field("title").filter(|t| !t.trim().is_empty()).map(|t| t.trim().to_string()))
+}
+
+/// A URL's parts: scheme (lowercase), authority without the user (host lowercase), path, query (with "?"), fragment.
+fn parts(url: &str) -> (String, String, String, String) {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("http", url));
+    let rest = rest.split('#').next().unwrap_or(rest);
+    let a = rest.find(['/', '?']).unwrap_or(rest.len());
+    let auth = &rest[..a];
+    let auth = auth.rsplit('@').next().unwrap_or(auth).to_ascii_lowercase();
+    let tail = &rest[a..];
+    let (path, query) = match tail.find('?') {
+        Some(q) => (&tail[..q], &tail[q..]),
+        None => (tail, ""),
+    };
+    (scheme.to_ascii_lowercase(), auth, path.to_string(), query.to_string())
+}
+
+/// The item's key and the target it opens. Docs: the absolute path. Local servers: one per host:port (the newest URL
+/// opens). GitHub PRs, issues and runs: their own page. Other URLs: host lowercase, without "#…" and a trailing "/".
+fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (String, String) {
+    match kind {
+        "doc" => {
+            let p = match (target.strip_prefix("~/"), home) {
+                (Some(rest), Some(h)) => h.join(rest).to_string_lossy().to_string(),
+                _ => target.to_string(),
+            };
+            (format!("doc:{p}"), p)
+        }
+        "local" => {
+            let (scheme, auth, _, _) = parts(target);
+            (format!("local:{}", host_port(&scheme, &auth)), target.to_string())
+        }
+        "pr" | "issue" | "ci" => {
+            let (_, _, path, _) = parts(target);
+            let seg: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+            let page = if kind == "ci" { format!("actions/runs/{}", seg.get(4).unwrap_or(&"")) } else { format!("{}/{}", seg[2], seg[3]) };
+            let u = format!("https://github.com/{}/{}/{page}", seg[0], seg[1]);
+            (u.clone(), u)
+        }
+        _ => {
+            let (scheme, auth, path, query) = parts(target);
+            let key = format!("{scheme}://{auth}{path}{query}");
+            (key.trim_end_matches('/').to_string(), target.to_string())
+        }
+    }
+}
+
+/// "host:port", the port the scheme's when none is written.
+fn host_port(scheme: &str, auth: &str) -> String {
+    let has_port = match auth.rfind(':') {
+        Some(k) => !auth[k..].contains(']'),
+        None => false,
+    };
+    if has_port {
+        auth.to_string()
+    } else {
+        format!("{auth}:{}", if scheme == "https" { 443 } else { 80 })
+    }
+}
+
+/// The home as "~" at the start of a path.
+fn tilde(p: &str, home: Option<&Path>) -> String {
+    if let Some(h) = home.map(|h| h.to_string_lossy().trim_end_matches('/').to_string()).filter(|h| !h.is_empty()) {
+        if p == h {
+            return "~".into();
+        }
+        if let Some(rest) = p.strip_prefix(&format!("{h}/")) {
+            return format!("~/{rest}");
+        }
+    }
+    p.to_string()
+}
+
+/// Title, detail and (docs) exists.
+fn described(mut r: Resource, home: Option<&Path>) -> Resource {
+    match r.kind {
+        "doc" => {
+            let p = Path::new(&r.target);
+            let is_file = std::fs::metadata(p).map(|m| m.is_file()).unwrap_or(false);
+            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| r.target.clone());
+            r.title = if is_file { file_title(p) } else { None }.unwrap_or(name);
+            r.detail = p.parent().map(|d| tilde(&d.to_string_lossy(), home)).unwrap_or_default();
+            r.exists = Some(is_file);
+        }
+        "pr" | "issue" | "ci" => {
+            let seg: Vec<&str> = r.target.trim_start_matches("https://github.com/").split('/').collect();
+            r.detail = format!("{}/{}", seg[0], seg[1]);
+            let n = seg.last().copied().unwrap_or("");
+            r.title = if r.kind == "ci" { format!("CI run {n}") } else { format!("{}#{n}", r.detail) };
+        }
+        "local" => {
+            let (scheme, auth, _, _) = parts(&r.target);
+            r.title = if auth.contains(':') { auth.clone() } else { host_port(&scheme, &auth) };
+            r.detail = auth.rsplit_once(':').map(|x| x.0.to_string()).unwrap_or(auth);
+        }
+        _ => {
+            let (_, auth, path, _) = parts(&r.target);
+            if r.title.is_empty() {
+                r.title = if r.kind == "artifact" { "Artifact".into() } else { format!("{auth}{}", path.trim_end_matches('/')) };
+            }
+            r.detail = auth;
+        }
+    }
+    r
+}
+
+/// A markdown file's first "# " heading, or an HTML file's <title>, in its first 4 KB.
+fn file_title(p: &Path) -> Option<String> {
+    let ext = p.extension()?.to_string_lossy().to_ascii_lowercase();
+    let mut buf = vec![0u8; 4096];
+    let n = std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)).ok()?;
+    let head = String::from_utf8_lossy(&buf[..n]).to_string();
+    let t = match ext.as_str() {
+        "md" => head.lines().find_map(|l| l.strip_prefix("# ")).map(|t| t.trim().to_string()),
+        "html" | "htm" => {
+            let low = head.to_ascii_lowercase();
+            let s = low.find("<title")?;
+            let s = s + low[s..].find('>')? + 1;
+            let e = s + low[s..].find("</title")?;
+            Some(head[s..e].split_whitespace().collect::<Vec<_>>().join(" "))
+        }
+        _ => None,
+    };
+    t.filter(|t| !t.is_empty())
+}
+
+/// The answer to `resources`: the items to send, the next cursor, and whether they are all of them (`full`) or only
+/// the ones newer than `since`.
 pub struct Answer {
     pub items: Vec<Resource>,
     pub cursor: String,
     pub full: bool,
 }
 
-pub fn answer(_log: &std::path::Path, _since: Option<&str>, _home: Option<&std::path::Path>) -> std::io::Result<Answer> {
-    Ok(Answer { items: vec![], cursor: String::new(), full: false })
+/// The resources in the last 2 MB of the log (`tail::BYTES`, as the chat). The cursor is
+/// "r1.<hash of the path>.<size>.<newest last_ts>". With a cursor of this log: the same size, no items; a bigger
+/// size, only the items mentioned after its newest one; else (another log, a shorter one, a bad cursor) all of them.
+pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::Result<Answer> {
+    let range = crate::tail::read(log, None, crate::tail::BYTES)?;
+    let all = collect(&crate::tail::items(&range.lines), home);
+    let hash = crate::protocol::fnv1a(&log.to_string_lossy());
+    let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
+    let cursor = format!("r1.{hash}.{}.{newest}", range.size);
+    let was = since.and_then(|c| {
+        let p: Vec<&str> = c.split('.').collect();
+        match p.as_slice() {
+            ["r1", h, size, ts] if *h == hash => Some((size.parse::<u64>().ok()?, ts.parse::<i64>().ok()?)),
+            _ => None,
+        }
+    });
+    Ok(match was {
+        Some((size, _)) if size == range.size => Answer { items: vec![], cursor, full: false },
+        Some((size, ts)) if size < range.size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t > ts)).collect(), cursor, full: false },
+        _ => Answer { items: all, cursor, full: true },
+    })
 }
 
 #[cfg(test)]

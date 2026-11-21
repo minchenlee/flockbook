@@ -22,7 +22,7 @@ fn run(sock: &str, args: &[&str]) -> Vec<Value> {
 fn protocol_lines() {
     let v = run("/nonexistent.sock", &["version"]);
     assert_eq!(v[0], serde_json::json!({"type":"header","protocol":1,"sidecar":"0.1.0","cmd":"version"}));
-    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage"]));
+    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage", "resources"]));
     assert_eq!(v.last().unwrap()["type"], "end");
     assert_eq!(v.last().unwrap()["ok"], true);
 
@@ -31,6 +31,8 @@ fn protocol_lines() {
     assert_eq!(u.last().unwrap()["ok"], false);
     assert_eq!(run("/nonexistent.sock", &["feed"])[1]["message"], "feed needs --terminal <addr>");
     assert_eq!(run("/nonexistent.sock", &["feed", "--terminal", "t1"])[1]["code"], "no-core");
+    assert_eq!(run("/nonexistent.sock", &["resources"])[1]["message"], "resources needs --terminal <addr>");
+    assert_eq!(run("/nonexistent.sock", &["resources", "--terminal", "t1"])[1]["code"], "no-core");
 
     let fake = FakeHc::start();
     fake.set_terminals(vec![claude("t1", "blocked", "permission"), common::terminal("t2", &["zsh"], Some(9), None, None)]);

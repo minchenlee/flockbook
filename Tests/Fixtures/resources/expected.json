@@ -3,35 +3,35 @@
     "kind": "ci",
     "target": "https://github.com/o/r/actions/runs/1870",
     "title": "CI run 1870",
-    "row": "a3",
+    "row": "a3-0",
     "mentions": 1
   },
   {
     "kind": "doc",
     "target": "/home/me/notes/plan.md",
     "title": "plan.md",
-    "row": "a3",
+    "row": "a3-0",
     "mentions": 2
   },
   {
     "kind": "local",
     "target": "http://localhost:5173",
     "title": "localhost:5173",
-    "row": "a3",
+    "row": "a3-0",
     "mentions": 1
   },
   {
     "kind": "artifact",
     "target": "https://claude.ai/code/artifact/0f3a-11",
     "title": "Launch plan",
-    "row": "a2",
+    "row": "tools-a2-0",
     "mentions": 1
   },
   {
     "kind": "pr",
     "target": "https://github.com/o/r/pull/12",
     "title": "o/r#12",
-    "row": "a1",
+    "row": "a1-0",
     "mentions": 1
   }
 ]
