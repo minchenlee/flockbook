@@ -80,7 +80,11 @@ pub fn run(argv: &[String]) -> String {
         "open-check" => {
             let Some(path) = opt("--path") else { return r.fail("usage", "open-check needs --path <file>") };
             match crate::resources::openable(Path::new(&path)) {
-                Ok(real) => r.out.emit_value(json!({"type": "openable", "ok": true, "path": real.to_string_lossy()})),
+                // A real path that is not UTF-8 (Linux): the path sent would not be the one checked; do not open.
+                Ok(real) => match real.to_str() {
+                    Some(p) => r.out.emit_value(json!({"type": "openable", "ok": true, "path": p})),
+                    None => r.out.emit_value(json!({"type": "openable", "ok": false, "why": "The file name is not plain text."})),
+                },
                 Err(why) => r.out.emit_value(json!({"type": "openable", "ok": false, "why": why})),
             }
             r.finish(true)

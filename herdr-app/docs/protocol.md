@@ -562,7 +562,9 @@ real file's extension (lowercase) a doc kind (`md`, `html`, `htm`, `pdf`, `png`,
 ```
 
 - `path`: the real file. The mod opens this path, not the one it asked about.
-- `why`: `File not found.`, `Not a file.` or `Flockbook does not open this kind of file.`, for the person to read.
+- `why`: `File not found.`, `Not a file.`, `Flockbook does not open this kind of file.` or `The file name is not plain text.`
+  (a real path that is not UTF-8, on Linux: it is not sent, so the mod never opens another path than the one checked), for
+  the person to read.
 - A helper without `open-check` (its `version` does not list it): the mod opens no file.
 
 ### `commands` (`commands`)

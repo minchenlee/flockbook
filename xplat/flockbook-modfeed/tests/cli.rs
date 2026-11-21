@@ -18,6 +18,22 @@ fn run(sock: &str, args: &[&str]) -> Vec<Value> {
     String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
+/// A real path that is not UTF-8 is not sent (the mod would open another path than the one checked).
+/// APFS does not allow such names, so Linux only.
+#[test]
+#[cfg(target_os = "linux")]
+fn open_check_refuses_a_real_path_that_is_not_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path().canonicalize().unwrap();
+    let bad = d.join(std::ffi::OsStr::from_bytes(b"r\xff.md"));
+    std::fs::write(&bad, "# R").unwrap();
+    std::os::unix::fs::symlink(&bad, d.join("a.md")).unwrap();
+    let v = run("/nonexistent.sock", &["open-check", "--path", d.join("a.md").to_str().unwrap()]);
+    assert_eq!((v[1]["type"].as_str(), v[1]["ok"].as_bool()), (Some("openable"), Some(false)), "{v:?}");
+    assert!(v[1].get("path").is_none());
+}
+
 #[test]
 fn protocol_lines() {
     let v = run("/nonexistent.sock", &["version"]);
