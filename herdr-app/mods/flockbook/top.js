@@ -8,6 +8,7 @@ import { spaceAgents, spaceTabs, activeTab, currentTerminal, tabLabel, screenFor
   SPIN_MS, FADE, sidebarShown, toggleSidebar, loadSidebar, showScreen, showOverview, showSettings, watchEdge } from "./state.js";
 import { loadConfig, pollUpdate, updateDot, stepTextSize } from "./config.js";
 import { dragger, dropPlace } from "./drag.js";
+import { toggleResources, pollResources, panelOpen, badgeFor, KEY_ON, KEY_WIN_W, KEY_SIDE_W } from "./resources.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -49,6 +50,7 @@ export function command(c) {
   if (c === "sidebar") return toggleSidebar();
   if (c === "overview") return showOverview();
   if (c === "settings") return showSettings();
+  if (c === "resources") return shared(KEY_ON) === true ? toggleResources() : null;
   if (c === "text-smaller" || c === "text-larger" || c === "text-default") return stepTextSize(c);
   if ((c === "move-left" || c === "move-right") && i >= 0) {
     const to = i + (c === "move-left" ? -1 : 1);
@@ -77,6 +79,9 @@ export function startTop(cx, owner) {
   const settings = async (cx) => { await loadConfig(); await pollUpdate(); cx.notify(); };
   cx?.spawn?.(settings);
   cx?.timer?.every(60_000, (cx) => cx.spawn(settings));
+  // The Resources badge: asked at most every few seconds over all copies (resources.js).
+  cx?.spawn?.((cx) => pollResources(cx));
+  cx?.timer?.every(SYNC_MS * 10, (cx) => cx.spawn((cx) => pollResources(cx)));
 }
 
 // Keeps the screen right for the shown tab: the chat for an agent, the tab's terminals for a
@@ -159,17 +164,30 @@ export function topBar(t, over = false) {
       : div().px(12).text_size(12.5).text_color(t.muted).child("No tabs in this space"));
   const tools = capsule("tools").px(5).gap(4)
     .child(button("new", svg(icon("plus")).size(15), () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 }), 30, "New tab (⌘T)"))
-    .when(Boolean(cur), (el) => el.child(button("terminal", svg(icon("terminal")).size(16), () => openTerminal(cur), 30, "Agent's terminal (⌃`)")));
+    .when(Boolean(cur), (el) => el.child(button("terminal", svg(icon("terminal")).size(16), () => openTerminal(cur), 30, "Agent's terminal (⌃`)")))
+    .when(shared(KEY_ON) === true && Boolean(cur), (el) => el.child(resourcesButton(t, cur, button)));
 
   // The right padding matches the left, so the capsules stay centred. The sidebar button gets a
   // round backing when drawn over content, like the capsules.
-  return watchEdge(h_flex().id("top-root").w_full().h(BAR_H).min_w(0)).pl(left).pr(left + (side ? 0 : 36)).gap(8).items_center()
+  return watchEdge(h_flex().id("top-root").w_full().h(BAR_H).min_w(0))
+    // The window's width, for where the Resources window opens (window() has no size).
+    .on_size_change((size) => { const w = Math.round(size?.width ?? 0); if (w > 0 && shared(KEY_WIN_W) !== w) setShared(KEY_WIN_W, w); })
+    .pl(left).pr(left + (side ? 0 : 36)).gap(8).items_center()
     .when(!over, (el) => el.bg(t.background))
     // A newer Flockbook while the sidebar is hidden: a small dot on its button, until it opens or Not now.
     .when(!side, (el) => el.child(button("sidebar", svg(icon("sidebar")).size(16), () => toggleSidebar(), 28, "Sidebar (⌘B)")
       .relative().when(updateDot(), (b) => b.child(div().id("update-dot").absolute().top(4).right(4).size(7).rounded(4).bg(t.accent)))
       .when(over, (b) => b.bg(t.chrome).border(1).border_color(t.border))))
     .child(h_flex().flex_1().min_w(0).justify_center().gap(10).child(strip).child(tools));
+}
+
+// The Resources button: accent while its window is open; a badge with the count of newer ones.
+function resourcesButton(t, cur, button) {
+  const on = panelOpen(), n = badgeFor(cur.address);
+  return button("resources", svg(icon("link")).size(15), () => toggleResources(), 30, "Resources (⌘⇧R)").relative()
+    .when(on, (b) => b.bg(t.selected).text_color(t.accent))
+    .when(n > 0, (b) => b.child(div().id("resources-badge").absolute().top(2).right(1).min_w(15).h(15).px(3).rounded(8).flex().items_center().justify_center()
+      .bg(t.accent).text_color(t.background).text_size(9.5).font_weight(600).child(n > 99 ? "99+" : String(n))));
 }
 
 // Puts the bar over a screen's content (absolute, at the top).

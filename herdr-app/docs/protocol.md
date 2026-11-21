@@ -55,12 +55,14 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `summary` | `--terminal <addr> [--cache <file>]` (Rust sidecar only) | `summary`, only with the setting `summaries` on |
 | `summary-models` | `--by <claude\|codex\|pi>` (Rust sidecar only) | `models` |
 | `summary-usage` | `--cache <file> [--since <ms>]…` (Rust sidecar only) | one `summary-usage` per `--since` |
+| `resources` | `--terminal <addr>` `[--since <cursor>]` `[--cache <file>]` (Rust sidecar only) | one `res` per resource; `end` has `cursor` and `full` |
+| `open-check` | `--path <file>` (Rust sidecar only; this machine) | `openable` |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
 
-`card`, `commands` and `glance` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
+`card`, `commands`, `glance`, `resources` and `open-check` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
@@ -164,7 +166,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands","glance","summary","summary-models","summary-usage"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands","glance","summary","summary-models","summary-usage","resources","open-check"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -516,6 +518,54 @@ while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` 
 - `items`: oldest first; `null` is a queued message whose text neither the log nor the screen shows.
 - `pullable`: the agent's input box is empty, so the queue can be pulled back now.
 - `pullsAll`: Claude Code (Up takes back every queued message as one text).
+
+### `res` (`resources`)
+
+What the agent pointed the human to in this conversation: one line per resource, newest first (by the last mention; in
+one reply, the later target first). Read only.
+
+```json
+{"type":"res","id":"9c1e…","kind":"doc","target":"/home/user/notes/plan.md","title":"The plan","detail":"~/notes","row":"a3-0","first_ts":1793670005000,"last_ts":1793670020000,"mentions":2,"exists":true}
+```
+
+- Collected with the same rules as a row's `links` (assistant text only), and the claude.ai artifact URL in the result of
+  a successful Artifact publish (its `title` from the call's input). Not collected: what the person typed, other
+  tools' input and output, relative paths.
+- `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`.
+- `id`: FNV-1a (hex) of the normalized target; the same target is one item. A doc: its absolute path (`~/` is the
+  home of the machine the agent runs on). `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
+  GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`.
+- `title`: a doc's first `# ` heading (Markdown) or `<title>` (HTML) in its first 4 KB, else its file name; an
+  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path. `detail`: a doc's folder (`~` for the
+  home), a URL's host, or `o/r`.
+- `row`: the `id` of the feed `row` with the last mention. `first_ts`, `last_ts`: ms, or null.
+- `exists`: docs only; the path's real file (links followed) is a file now, and the real file's extension is a doc kind
+  (`md`, `html`, `htm`, `pdf`, `png`, `svg`). A `preview.md` link to `notes.txt` or to a folder: `false`. It can be old
+  by the time the person clicks: the mod asks `open-check` before it opens a file.
+- Only the last 2 MB of the log are read (as `feed` shows first): older mentions are not counted.
+- `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,
+  unchanged, gives no `res`; the same log, grown, gives only the resources mentioned after the cursor's newest one
+  (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).
+
+```json
+{"type":"end","ok":true,"ms":4,"cursor":"r1.af63…ce1.48213.1793670020000","full":false}
+```
+
+### `openable` (`open-check`)
+
+The real file a doc path opens, looked at now: links followed (`canonicalize`), the real path must be a file, and the
+real file's extension (lowercase) a doc kind (`md`, `html`, `htm`, `pdf`, `png`, `svg`). Read only; on this machine.
+
+```json
+{"type":"openable","ok":true,"path":"/home/user/notes/b.md"}
+{"type":"openable","ok":false,"why":"Flockbook does not open this kind of file."}
+```
+
+- `path`: the real file. The mod opens this path, not the one it asked about.
+- `why`: `File not found.`, `Not a file.`, `Flockbook does not open this kind of file.` or `The file name is not plain text.`
+  (a real path that is not UTF-8, on Linux: it is not sent, so the mod never opens another path than the one checked), for
+  the person to read.
+- A helper without `open-check` (its `version` does not list it): the mod opens no file.
 
 ### `commands` (`commands`)
 

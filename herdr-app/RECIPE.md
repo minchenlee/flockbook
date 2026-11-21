@@ -118,6 +118,23 @@ Status marks: working is a 13 px spinner (`working` color: a quarter arc over a 
 per 900 ms, as Herdr's own); done is a check
 (`done`); blocked is a 9 px dot (`blocked`); idle is a 12 px empty ring (`dim`).
 
+**Resources** (a link button in the tools capsule, right of the terminal button, with the tooltip
+"Resources (⌘⇧R)"; only with a helper that has `resources`, and an agent in the tab). The button is
+`selected` with `accent` text while its window is open; a badge (`accent`, 15 px, 9.5 px semibold, top 2
+right 1) counts the resources newer than you last saw. ⌘⇧R or the button opens or closes a frameless
+window, 340 px wide, 12 px from the right edge under the bar (y 60), as tall as its list up to the window's
+height − 72; under 720 px a drawer down the right side, full height. A click beside it does not close it;
+Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
+**Docs**, **Artifacts**, **PRs & CI**, **Links** (local servers too), each with its count; one row per
+resource: a 22 px icon square, the title (13 px 550), the time since its last mention ("4m"), and a
+second line (11.5 px muted; a doc's folder in mono). New since you last opened it: a 6 px `accent` dot
+on the left. A doc that is not there: dim and struck through, its icon half clear, "· File not found";
+a click on it does nothing but say why. Hovering a row shows **Show in chat** (the chat scrolls to the
+reply that mentioned it, when loaded), **Copy** and **Remove from list**. A click opens a web address in
+the browser, or a doc (md, html, htm, pdf, png, svg; there now; an agent on this computer) with
+`open` (`xdg-open` off macOS). Footer: "N items · M removed". Empty: "No resources yet" and "Docs,
+artifacts and links the agent mentions in its replies show up here."
+
 ## How it behaves
 
 - **Tabs**: click a pill to show that tab. A tab with one agent shows the chat; a split tab or a
@@ -194,14 +211,21 @@ per 900 ms, as Herdr's own); done is a check
   - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
 - **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked
   by `props.view`: `side`, `chat`, `needs`, `overview`, `top`; overlays use `settings` (the Flockbook
-  settings dialog), `termbar` (the terminal window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
+  settings dialog), `termbar` (the terminal window's bar), `menu` (right-click menus), `resources` (the Resources window) and `side` with `peek: true` (the floating sidebar).
   All views are in one folder because a mod cannot import another mod's files.
 - **Shared state** (`shared` / `setShared`): `flockbook.agent` (the agent shown),
   `flockbook.screen` (the shown screen; an old `settings` shows the chat), `flockbook.settings` (the
   open settings dialog), `flockbook.sidebar`, `flockbook.sidebar.peek`,
   `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
   `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
-  last update line, and when the mod asked).
+  last update line, and when the mod asked). Resources: `flockbook.res.data` ({terminal, cursor, items, at}: the
+  last `resources` answer, for the shown agent), `flockbook.res.on` (the helper has the command), `flockbook.res.open`
+  and `flockbook.res.alive` (the open window and when it last drew: an id left from before a restart is not open),
+  `flockbook.res.scope` ("agent"), `flockbook.res.seen.<t>` (the newest `last_ts` seen in the window; the first
+  look at an agent sets it to its newest, so an old conversation has no badge), `flockbook.res.removed.<t>`
+  ([{id, last_ts}] taken off the list; one mentioned again later, with a newer `last_ts`, comes back; a bare id
+  stays removed), `flockbook.res.jump` ({terminal, row, at}: the chat scrolls to that row once),
+  `flockbook.res.polled`, `flockbook.window.width`, `flockbook.sidebar.width`.
 - **herdr functions**: `spaces`, `agents`, `panes`, `focused`, `theme`, `layout`, `window`,
   `settings`, `props`, `run`, `nextCommand`, `setAgentOrder`, `openOverlay`, `closeOverlay`,
   `exec`, `appHome`, `home`, `readTextFile`, `writeTextFile` (config.json only).
@@ -210,7 +234,7 @@ per 900 ms, as Herdr's own); done is a check
   `pane.split`, `space.select`, `space.new`, `space.rename`, `space.close`, `agent.focus`,
   `app.settings`. Its own key commands: `flockbook.terminal`, `flockbook.needs`,
   `flockbook.sidebar`, `flockbook.overview`, `flockbook.settings`, `flockbook.move-left`,
-  `flockbook.move-right`.
+  `flockbook.move-right`, `flockbook.resources` (⌘⇧R).
 - **Shipped mods**: `new-menu` (the + popup, 250 × 512).
 - **Programs**:
   - `flockbook-modfeed`, a helper program at `<herdr-app home>/flockbook/bin/flockbook-modfeed`

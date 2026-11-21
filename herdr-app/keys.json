@@ -22,6 +22,7 @@
     "cmd-ctrl-shift-right": "flockbook.move-right",
     "ctrl-`": "flockbook.terminal",
     "cmd-shift-i": "flockbook.needs",
+    "cmd-shift-r": "flockbook.resources",
     "cmd-b": "flockbook.sidebar",
     "cmd-=": "app.zoom_in",
     "cmd--": "app.zoom_out",
