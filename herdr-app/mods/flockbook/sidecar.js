@@ -103,3 +103,5 @@ export const summaryModels = (by) => call("summary-models", ["--by", by]);
 // (docs/protocol.md, summary-usage). It reads the helper's count; nothing is sent.
 export const summaryUsage = (since) => call("summary-usage", ["--cache", cachePath(), ...since.flatMap((s) => ["--since", String(s)])]);
 export const summary = (terminal) => call("summary", ["--terminal", terminal, "--cache", cachePath()]);
+// What the agent pointed to (Rust helper only; ask hasCommand("resources") first). `since`: the last `end` cursor.
+export const resources = (terminal, since = null) => call("resources", ["--terminal", terminal, "--cache", cachePath(), ...(since ? ["--since", since] : [])]);

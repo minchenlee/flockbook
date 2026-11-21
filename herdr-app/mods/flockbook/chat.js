@@ -24,6 +24,7 @@ import { startTop, BAR_H } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
 import { pollGlance, glanceOn, glanceFor, glancedAt, seenFor, markSeen, summaryFor } from "./glance.js";
 import { arrive, sinceLeft, sinceCard } from "./since.js";
+import { KEY_JUMP, term } from "./resources.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
@@ -89,6 +90,7 @@ export class ChatView {
     this.composer.onNewConversation = (_address, cx) => this.refresh(cx);
     this.cards.canFocus = () => this.composer?.empty !== false;
     this.switchTo(currentAgent()?.address ?? null);
+    this.jumped = shared(KEY_JUMP)?.at ?? null;   // a jump from before this copy started is done
     cx.spawn((cx) => this.poll(cx));
     cx.timer.every(CHECK_MS, (cx) => this.tick(cx));
     cx.spawn(async () => { if (await loadTiming()) cx.timer.every(1000, () => flush()); });
@@ -135,6 +137,10 @@ export class ChatView {
     const screen = shownScreen();
     if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.arriving = Date.now(); this.toNewest(); cx.notify(); }
     this.screen = screen;
+    // "Show in chat" in the Resources window: once, for this agent, when its row is loaded (after the
+    // way-in above, which opens at the newest).
+    const j = shared(KEY_JUMP);
+    if (j?.at && j.at !== this.jumped) { this.jumped = j.at; if (term(j.terminal) === term(this.address)) this.jumpTo(j.row, cx); }
     // On the way in, the glance is asked now, not after the usual wait.
     if (screen === "chat") { const force = Boolean(this.arriving) && this.forced !== this.arriving; if (force) this.forced = this.arriving; cx.spawn((cx) => pollGlance(cx, force)); this.see(cx); }
     if (this.helper.changed()) cx.notify();
