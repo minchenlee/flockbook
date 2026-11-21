@@ -86,6 +86,21 @@ test("the first look at an agent marks what is there as seen: no badge for an ol
   assert.equal(R.badgeFor("t1"), 0, "a removed one is not counted");
 });
 
+test("the window, when it opens, reads all again (a file written after it was mentioned)", async () => {
+  const asked = helper(() => [[res("a", "doc", 10, { exists: false })], "c1", true]);
+  await R.pollResources(fakeCx(), true);
+  helper(() => [[res("a", "doc", 10, { exists: true })], "c1", true]);
+  const cx = fakeCx();
+  fake.props = { view: "resources", overlay: "o7" };
+  new R.ResourcesView(cx);
+  await cx.settle();
+  const last = log.exec.at(-1)[1];
+  assert.equal(last[0], "resources");
+  assert.ok(!last.includes("--since"), String(last));
+  assert.equal(R.dataFor("t1").items[0].exists, true);
+  assert.equal(asked.length, 1);
+});
+
 test("asked at most every few seconds over all copies, and not at all by an older helper", async () => {
   const asked = helper(() => [[res("a", "link", 10)], "c1", true]);
   await R.pollResources(fakeCx(), true);

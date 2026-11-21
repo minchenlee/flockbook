@@ -180,6 +180,31 @@ fn since_a_cursor_only_what_is_newer() {
     assert_eq!(o.items.len(), 1);
 }
 
+#[test]
+fn a_github_url_with_an_odd_path_is_a_link_not_a_panic() {
+    let rs = resources::collect(&tail::items(&[say("a1", 0, "see https://github.com?x=/o/r/pull/1 and https://github.com/o/r/pull/2")]), None);
+    assert!(rs.iter().all(|r| r.kind == "link" || r.target == "https://github.com/o/r/pull/2"), "{rs:?}");
+}
+
+#[test]
+fn a_later_call_in_the_same_run_of_tools_is_not_missed() {
+    // A run of tool calls is one row with its first call's time: a second publish there has the cursor's time.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    let publish = |n: u32, id: &str| {
+        vec![
+            tool(&format!("a{n}"), 1, &format!("c{n}"), "Artifact", json!({"action": "publish", "title": format!("P{n}")})),
+            result(&format!("r{n}"), 2, &format!("c{n}"), &format!("Published https://claude.ai/code/artifact/{id}"), false),
+        ]
+    };
+    write(&log, &publish(1, "one"), false);
+    let first = resources::answer(&log, None, None).unwrap();
+    assert_eq!(first.items.len(), 1);
+    write(&log, &publish(2, "two"), true);
+    let more = resources::answer(&log, Some(&first.cursor), None).unwrap();
+    assert!(more.items.iter().any(|r| r.target.ends_with("/two")), "{:?}", more.items);
+}
+
 /// Shared with the Swift side (next release): Tests/Fixtures/resources/.
 #[test]
 fn the_shared_fixture() {

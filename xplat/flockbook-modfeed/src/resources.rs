@@ -413,7 +413,7 @@ pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource>
             _ => {}
         }
         for (kind, target, title) in found {
-            let (key, target) = normal(kind, &target, home);
+            let (kind, key, target) = normal(kind, &target, home);
             seq += 1;
             match at.get(&key) {
                 Some(&k) => {
@@ -498,30 +498,34 @@ fn parts(url: &str) -> (String, String, String, String) {
 
 /// The item's key and the target it opens. Docs: the absolute path. Local servers: one per host:port (the newest URL
 /// opens). GitHub PRs, issues and runs: their own page. Other URLs: host lowercase, without "#…" and a trailing "/".
-fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (String, String) {
+fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (&'static str, String, String) {
     match kind {
         "doc" => {
             let p = match (target.strip_prefix("~/"), home) {
                 (Some(rest), Some(h)) => h.join(rest).to_string_lossy().to_string(),
                 _ => target.to_string(),
             };
-            (format!("doc:{p}"), p)
+            ("doc", format!("doc:{p}"), p)
         }
         "local" => {
             let (scheme, auth, _, _) = parts(target);
-            (format!("local:{}", host_port(&scheme, &auth)), target.to_string())
+            ("local", format!("local:{}", host_port(&scheme, &auth)), target.to_string())
         }
         "pr" | "issue" | "ci" => {
             let (_, _, path, _) = parts(target);
             let seg: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-            let page = if kind == "ci" { format!("actions/runs/{}", seg.get(4).unwrap_or(&"")) } else { format!("{}/{}", seg[2], seg[3]) };
+            // url_kind reads the path its own way: a URL it calls a PR whose path here is too short is a link.
+            if seg.len() < if kind == "ci" { 5 } else { 4 } {
+                return normal("link", target, home);
+            }
+            let page = if kind == "ci" { format!("actions/runs/{}", seg[4]) } else { format!("{}/{}", seg[2], seg[3]) };
             let u = format!("https://github.com/{}/{}/{page}", seg[0], seg[1]);
-            (u.clone(), u)
+            (kind, u.clone(), u)
         }
         _ => {
             let (scheme, auth, path, query) = parts(target);
             let key = format!("{scheme}://{auth}{path}{query}");
-            (key.trim_end_matches('/').to_string(), target.to_string())
+            (kind, key.trim_end_matches('/').to_string(), target.to_string())
         }
     }
 }
@@ -615,11 +619,21 @@ pub struct Answer {
 
 /// The resources in the last 2 MB of the log (`tail::BYTES`, as the chat). The cursor is
 /// "r1.<hash of the path>.<size>.<newest last_ts>". With a cursor of this log: the same size, no items; a bigger
-/// size, only the items mentioned after its newest one; else (another log, a shorter one, a bad cursor) all of them.
+/// size, only the items mentioned at or after its newest one (a run of tool calls has its first call's time, so a
+/// later call in it can have that same time; sent again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
 pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::Result<Answer> {
+    let hash = crate::protocol::fnv1a(&log.to_string_lossy());
+    // Unchanged: nothing is read or parsed.
+    if let Some(c) = since {
+        let p: Vec<&str> = c.split('.').collect();
+        if let ["r1", h, size, _] = p.as_slice() {
+            if *h == hash && size.parse::<u64>().ok() == Some(std::fs::metadata(log)?.len()) {
+                return Ok(Answer { items: vec![], cursor: c.to_string(), full: false });
+            }
+        }
+    }
     let range = crate::tail::read(log, None, crate::tail::BYTES)?;
     let all = collect(&crate::tail::items(&range.lines), home);
-    let hash = crate::protocol::fnv1a(&log.to_string_lossy());
     let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
     let cursor = format!("r1.{hash}.{}.{newest}", range.size);
     let was = since.and_then(|c| {
@@ -631,7 +645,7 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
     });
     Ok(match was {
         Some((size, _)) if size == range.size => Answer { items: vec![], cursor, full: false },
-        Some((size, ts)) if size < range.size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t > ts)).collect(), cursor, full: false },
+        Some((size, ts)) if size < range.size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
         _ => Answer { items: all, cursor, full: true },
     })
 }

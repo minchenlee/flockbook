@@ -35,7 +35,8 @@ export const RES_MS = 5000;           // one ask at most this often, over every 
 export const PANEL_W = 340;
 export const NARROW_W = 720;          // below it: a drawer down the right side
 const GAP = 12, TOP = 60;             // under the 56 px bar
-const ALIVE_MS = 3000;                // a window that has not drawn for this long is gone (a restart)
+const ALIVE_EVERY = 2000;             // the open window says it is there this often
+const ALIVE_MS = 6000;                // a window that has not said so for this long is gone (a restart)
 
 export const GROUPS = [
   { id: "docs", label: "Docs", kinds: ["doc"] },
@@ -157,7 +158,8 @@ export function badgeFor(address) {
 // only when something changed.
 let busy = false, last = 0;
 export const forgetResources = () => { busy = false; last = 0; };
-export async function pollResources(cx, force = false) {
+// `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title).
+export async function pollResources(cx, force = false, full = false) {
   const address = currentAgent()?.address ?? null;
   if (!address || busy) return;
   const t = term(address);
@@ -169,8 +171,8 @@ export async function pollResources(cx, force = false) {
     const on = await sidecar.hasCommand("resources");
     if (shared(KEY_ON) !== on) { setShared(KEY_ON, on); cx?.notify?.(); }
     if (!on) return;
-    const r = await sidecar.resources(address, same ? was.cursor : null);
-    const next = applyAnswer(same ? was : null, t, r);
+    const r = await sidecar.resources(address, same && !full ? was.cursor : null);
+    const next = applyAnswer(same && !full ? was : null, t, r);
     if (!next) return;
     if (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null) setShared(seenKey(t), newest(next.items));
     if (!same || JSON.stringify(was.items) !== JSON.stringify(next.items) || was.cursor !== next.cursor) {
@@ -213,14 +215,16 @@ export class ResourcesView {
     // The "new" dots: newer than what was seen when the window opened.
     this.seenAtOpen = this.address ? shared(seenKey(term(this.address))) ?? null : null;
     this.note = null;   // why the last click did not open
-    this.focused = false;
     this.hover = null;  // the row the pointer is on: its actions show
-    cx?.spawn?.((cx) => pollResources(cx, true));
+    cx?.spawn?.((cx) => pollResources(cx, true, true));
     cx?.timer?.every?.(1000, (cx) => this.tick(cx));
+    // A window does not take the keyboard when it opens: focus it, after the first frame, so Esc reaches it.
+    cx?.timer?.after?.(16, () => this.h?.focus?.());
   }
 
   tick(cx) {
-    setShared(KEY_ALIVE, Date.now());
+    // Not every second: each set redraws every copy.
+    if (Date.now() - (shared(KEY_ALIVE) ?? 0) >= ALIVE_EVERY) setShared(KEY_ALIVE, Date.now());
     const a = currentAgent()?.address ?? null;
     if (a !== this.address) { this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; cx?.notify?.(); }
     cx?.spawn?.((cx) => pollResources(cx));
@@ -245,7 +249,6 @@ export class ResourcesView {
 
   render(cx) {
     const t = theme();
-    if (this.h && !this.focused) { this.focused = true; this.h.focus?.(); }
     const stop = (_e, cx) => cx?.stop_propagation?.();
     const address = this.address, tk = term(address);
     const d = dataFor(address);
