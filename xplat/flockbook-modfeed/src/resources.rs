@@ -358,6 +358,39 @@ pub fn links(text: &str) -> Vec<FeedLink> {
     detect(text).into_iter().map(|f| FeedLink { start: f.start, end: f.end, res: f.kind }).collect()
 }
 
+
+/// One thing the agent pointed the human to, as the `resources` command gives it (a `res` line).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Resource {
+    #[serde(rename = "type")]
+    pub t: &'static str,
+    pub id: String,
+    pub kind: &'static str,
+    pub target: String,
+    pub title: String,
+    pub detail: String,
+    pub row: String,
+    pub first_ts: Option<i64>,
+    pub last_ts: Option<i64>,
+    pub mentions: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
+}
+
+pub fn collect(_items: &[herdr_core::ConversationItem], _home: Option<&std::path::Path>) -> Vec<Resource> {
+    vec![]
+}
+
+pub struct Answer {
+    pub items: Vec<Resource>,
+    pub cursor: String,
+    pub full: bool,
+}
+
+pub fn answer(_log: &std::path::Path, _since: Option<&str>, _home: Option<&std::path::Path>) -> std::io::Result<Answer> {
+    Ok(Answer { items: vec![], cursor: String::new(), full: false })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
