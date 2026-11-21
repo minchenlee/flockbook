@@ -148,6 +148,31 @@ fn write(path: &Path, lines: &[String], append: bool) {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_doc_opens_only_when_its_real_file_is_a_kind_flockbook_opens() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().canonicalize().unwrap();
+    std::fs::write(d.join("notes.txt"), "# Not a doc").unwrap();
+    std::fs::write(d.join("b.md"), "# Real").unwrap();
+    std::fs::create_dir(d.join("x.md")).unwrap();
+    symlink(d.join("notes.txt"), d.join("preview.md")).unwrap();
+    symlink(d.join("b.md"), d.join("a.md")).unwrap();
+    symlink(d.join("x.md"), d.join("dir-link.md")).unwrap();
+    assert!(resources::openable(&d.join("preview.md")).is_err(), "a .md link to a .txt does not open");
+    assert_eq!(resources::openable(&d.join("a.md")), Ok(d.join("b.md")), "a .md link to a .md opens its real file");
+    assert!(resources::openable(&d.join("x.md")).is_err(), "a folder does not open");
+    assert!(resources::openable(&d.join("dir-link.md")).is_err(), "a link to a folder does not open");
+    assert_eq!(resources::openable(&d.join("gone.md")), Err("File not found."));
+    let p = |n: &str| d.join(n).to_string_lossy().to_string();
+    let text = format!("{} {}", p("preview.md"), p("a.md"));
+    let rs = resources::collect(&tail::items(&[say("a1", 0, &text)]), None);
+    let get = |n: &str| rs.iter().find(|r| r.target == p(n)).unwrap_or_else(|| panic!("{n} in {rs:?}"));
+    assert_eq!(get("preview.md").exists, Some(false), "the link to a .txt is not shown as there");
+    assert_eq!((get("a.md").title.as_str(), get("a.md").exists), ("Real", Some(true)));
+}
+
+#[test]
 fn since_a_cursor_only_what_is_newer() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("s.jsonl");

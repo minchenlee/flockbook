@@ -124,14 +124,53 @@ test("what a click opens: web addresses in the browser; a doc file only when it 
   assert.match(R.openPlan(doc("/home/me/plan.md"), "box/t1").why, /on box/, "an agent on another machine: its files are there");
   assert.match(R.openPlan(doc("/home/me/run.sh"), "t1").why, /does not open/);
   assert.match(R.openPlan(doc("~/plan.md"), "t1").why, /full path/);
-  // openItem: the URL through cx, a file through the runner given (tests never open anything).
+});
+
+// A helper whose open-check answers `check(path)` ({ ok, path } or { ok: false, why }).
+function checker(check, commands = ["version", "resources", "open-check"]) {
+  const asked = [];
+  fake.exec = (_cmd, args) => {
+    if (args[0] === "version") return jl(header("version"), { type: "version", commands }, end());
+    if (args[0] === "open-check") { const p = args[args.indexOf("--path") + 1]; asked.push(p); return jl(header("open-check"), { type: "openable", ...check(p) }, { type: "end", ok: true, ms: 1 }); }
+    return jl(header(args[0]), { type: "end", ok: true, ms: 1 });
+  };
+  return asked;
+}
+
+test("a click opens a file only after the helper says its real file opens, and opens the real file", async () => {
+  const doc = (target, exists = true) => res("d", "doc", 1, { target, exists });
   const opened = [], ran = [];
   const cx = { open_url: (u) => opened.push(u) };
-  R.openItem(res("a", "link", 1), "t1", cx, (c, a) => ran.push([c, a]));
-  R.openItem(doc("/home/me/plan.md"), "t1", cx, (c, a) => ran.push([c, a]));
-  R.openItem(doc("/home/me/plan.md", false), "t1", cx, (c, a) => ran.push([c, a]));
+  const run = (c, a) => ran.push([c, a]);
+  const asked = checker((p) => (p === "/home/me/a.md" ? { ok: true, path: "/real/b.md" } : { ok: false, why: "Flockbook does not open this kind of file." }));
+  assert.ok((await R.openItem(res("a", "link", 1), "t1", cx, run)).url);
   assert.deepEqual(opened, ["https://x.com/a"]);
-  assert.deepEqual(ran, [["open", ["/home/me/plan.md"]]]);
+  // A link to a .txt that is named .md: the helper says no; nothing runs.
+  const no = await R.openItem(doc("/home/me/preview.md"), "t1", cx, run);
+  assert.match(no.why, /does not open/);
+  // A link to a .md: the real file opens.
+  const ok = await R.openItem(doc("/home/me/a.md"), "t1", cx, run);
+  assert.deepEqual(ok, { cmd: "open", args: ["/real/b.md"] });
+  // Not there (the cached exists): not even asked.
+  assert.match((await R.openItem(doc("/home/me/a.md", false), "t1", cx, run)).why, /not found/);
+  assert.deepEqual(asked, ["/home/me/preview.md", "/home/me/a.md"]);
+  assert.deepEqual(ran, [["open", ["/real/b.md"]]]);
+});
+
+test("a helper without open-check opens no file", async () => {
+  const asked = checker(() => ({ ok: true, path: "/real/b.md" }), ["version", "resources"]);
+  const ran = [];
+  const p = await R.openItem(res("d", "doc", 1, { target: "/home/me/a.md", exists: true }), "t1", {}, (c, a) => ran.push([c, a]));
+  assert.match(p.why, /Update the Flockbook helper/);
+  assert.deepEqual([asked, ran], [[], []]);
+});
+
+test("a helper that fails to answer opens no file", async () => {
+  fake.exec = (_cmd, args) => (args[0] === "version" ? jl(header("version"), { type: "version", commands: ["version", "open-check"] }, end()) : { code: 1, stdout: "", stderr: "boom" });
+  const ran = [];
+  const p = await R.openItem(res("d", "doc", 1, { target: "/home/me/a.md", exists: true }), "t1", {}, (c, a) => ran.push([c, a]));
+  assert.ok(p.why);
+  assert.deepEqual(ran, []);
 });
 
 test("the window: under the bar's right edge, or a full-height drawer in a narrow window", () => {

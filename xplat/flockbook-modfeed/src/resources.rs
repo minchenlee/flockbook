@@ -558,6 +558,11 @@ fn tilde(p: &str, home: Option<&Path>) -> String {
     p.to_string()
 }
 
+/// TODO
+pub fn openable(_p: &Path) -> Result<PathBuf, &'static str> {
+    Err("not yet")
+}
+
 /// Title, detail and (docs) exists.
 fn described(mut r: Resource, home: Option<&Path>) -> Resource {
     match r.kind {
