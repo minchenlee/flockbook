@@ -247,7 +247,7 @@ test("shown is seen: the badge goes while the window is open", () => {
   assert.ok(byId(v.render(fakeCx()), "res-new-a"), "the dot stays until the window opens again");
 });
 
-test("row actions: hover shows them; jump, copy and remove; a click opens; Esc and Close close", () => {
+test("row actions: hover shows them; jump, copy and remove; a click opens; Esc and Close close", async () => {
   const v = view([res("a", "doc", 50, { target: "/home/me/a.md", exists: false })]);
   let el = v.render(fakeCx());
   assert.equal(byId(el, "res-acts-a"), null, "hidden until hovered");
@@ -263,6 +263,7 @@ test("row actions: hover shows them; jump, copy and remove; a click opens; Esc a
   // A click on a missing file says why, and runs nothing.
   const n = log.exec.length;
   byId(el, "res-a")._h.on_click({}, cx);
+  await cx.settle();
   assert.equal(log.exec.length, n);
   assert.match(textOf(byId(v.render(fakeCx()), "res-a")), /File not found\./);
   byId(el, "res-remove-a")._h.on_click({}, cx);

@@ -558,9 +558,18 @@ fn tilde(p: &str, home: Option<&Path>) -> String {
     p.to_string()
 }
 
-/// TODO
-pub fn openable(_p: &Path) -> Result<PathBuf, &'static str> {
-    Err("not yet")
+/// The real file a doc path opens (links followed), when it is a file of a kind in DOC_EXT; else why not. The
+/// extension that counts is the real file's: a `preview.md` link to `notes.txt` does not open.
+pub fn openable(p: &Path) -> Result<PathBuf, &'static str> {
+    let real = std::fs::canonicalize(p).map_err(|_| "File not found.")?;
+    if !std::fs::metadata(&real).map(|m| m.is_file()).unwrap_or(false) {
+        return Err("Not a file.");
+    }
+    let ext = real.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !DOC_EXT.contains(&ext.as_str()) {
+        return Err("Flockbook does not open this kind of file.");
+    }
+    Ok(real)
 }
 
 /// Title, detail and (docs) exists.
@@ -568,11 +577,11 @@ fn described(mut r: Resource, home: Option<&Path>) -> Resource {
     match r.kind {
         "doc" => {
             let p = Path::new(&r.target);
-            let is_file = std::fs::metadata(p).map(|m| m.is_file()).unwrap_or(false);
+            let real = openable(p).ok();
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| r.target.clone());
-            r.title = if is_file { file_title(p) } else { None }.unwrap_or(name);
+            r.title = real.as_deref().and_then(file_title).unwrap_or(name);
             r.detail = p.parent().map(|d| tilde(&d.to_string_lossy(), home)).unwrap_or_default();
-            r.exists = Some(is_file);
+            r.exists = Some(real.is_some());
         }
         "pr" | "issue" | "ci" => {
             let seg: Vec<&str> = r.target.trim_start_matches("https://github.com/").split('/').collect();

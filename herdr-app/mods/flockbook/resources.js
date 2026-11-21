@@ -121,12 +121,21 @@ export function openPlan(item, address, platform = window()?.platform) {
   return { cmd: platform === "macos" ? "open" : "xdg-open", args: [path] };
 }
 
-// Opens it. `run`: how a file opens (tests pass their own). Returns the plan.
-export function openItem(item, address, cx, run = exec) {
+// Opens it. A file: the helper looks at it now (`open-check`: links followed, the real file must be a kind
+// above) and the real file opens; `exists` in the list may be old. `run`: how a file opens (tests pass their
+// own). Resolves the plan that ran, or { why }.
+export async function openItem(item, address, cx, run = exec) {
   const p = openPlan(item, address);
-  if (p.url) cx?.open_url?.(p.url);
-  else if (p.cmd) run(p.cmd, p.args);
-  return p;
+  if (p.url) { cx?.open_url?.(p.url); return p; }
+  if (!p.cmd) return p;
+  if (!(await sidecar.hasCommand("open-check"))) return { why: "Update the Flockbook helper to open files." };
+  const a = await sidecar.openCheck(p.args[0]);
+  const o = a.lines?.find((l) => l.type === "openable");
+  if (a.error || !o) return { why: a.error?.message ?? "Could not look at the file." };
+  if (o.ok !== true || typeof o.path !== "string" || !o.path.startsWith("/")) return { why: o.why || "Flockbook does not open this file." };
+  const plan = { cmd: p.cmd, args: [o.path] };
+  run(plan.cmd, plan.args);
+  return plan;
 }
 
 export function removeItem(item, terminal) {
@@ -274,7 +283,7 @@ export class ResourcesView {
         .hover((s) => s.bg(t.hover))
         .on_hover((inside, cx) => { const was = this.hover; this.hover = inside ? it.id : this.hover === it.id ? null : this.hover; if (was !== this.hover) cx?.notify?.(); })
         .on_mouse_down("left", stop)
-        .on_click((_e, cx) => { const p = openItem(it, address, cx); this.note = p.why ? { id: it.id, text: p.why } : null; cx?.notify?.(); })
+        .on_click((_e, cx) => { cx?.spawn?.(async (cx) => { const p = await openItem(it, address, cx); this.note = p.why ? { id: it.id, text: p.why } : null; cx?.notify?.(); }); })
         .when(fresh, (el) => el.child(div().id(`res-new-${it.id}`).absolute().left(1).top(16).size(6).rounded(3).bg(t.accent)))
         .child(div().size(22).flex_none().mt(1).rounded(6).bg(t.raised).flex().items_center().justify_center()
           .when(gone, (el) => el.opacity(0.5)).child(svg(icon(ICON[it.kind] ?? "link")).size(12).text_color(t.muted)))

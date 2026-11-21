@@ -13,6 +13,7 @@
 //!   flockbook-modfeed summary --terminal <addr> [--cache <file>]   (two lines by the agent's small model; only with summaries on)
 //!   flockbook-modfeed paste-image --dir <folder>   (copied files, else the clipboard's image as a PNG there; path null when none)
 //!   flockbook-modfeed resources --terminal <addr> [--since <cursor>]   (what the agent pointed to: one `res` line each; read only)
+//!   flockbook-modfeed open-check --path <file>   (the real file a doc opens, links followed; one `openable` line; read only)
 //!   flockbook-modfeed send   --terminal <addr> --text <s> [--file <path>]... [--expect-kind <k>] [--expect-path <log>]
 //!   flockbook-modfeed helper install --machine <m> --sha256 <hex>   (the helper on another machine; after the user's yes)
 //!   flockbook-modfeed helper remove --machine <m>
@@ -73,7 +74,15 @@ pub fn run(argv: &[String]) -> String {
     r.out.emit_value(json!({"type": "header", "protocol": PROTOCOL_VERSION, "sidecar": SIDECAR_VERSION, "cmd": cmd}));
     match cmd.as_str() {
         "version" => {
-            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage", "resources"], "release": update::release()}));
+            r.out.emit_value(json!({"type": "version", "commands": ["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage", "resources", "open-check"], "release": update::release()}));
+            r.finish(true)
+        }
+        "open-check" => {
+            let Some(path) = opt("--path") else { return r.fail("usage", "open-check needs --path <file>") };
+            match crate::resources::openable(Path::new(&path)) {
+                Ok(real) => r.out.emit_value(json!({"type": "openable", "ok": true, "path": real.to_string_lossy()})),
+                Err(why) => r.out.emit_value(json!({"type": "openable", "ok": false, "why": why})),
+            }
             r.finish(true)
         }
         "paste-image" => {
@@ -334,7 +343,7 @@ pub fn run(argv: &[String]) -> String {
             }
         }
         // `queue` is serve's own, not offered to the mod.
-        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, resources"),
+        _ => r.fail("usage", "commands: version, feed, status, card, approve, answer, send, resources, open-check"),
     }
 }
 

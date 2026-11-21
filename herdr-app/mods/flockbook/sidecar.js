@@ -104,4 +104,6 @@ export const summaryModels = (by) => call("summary-models", ["--by", by]);
 export const summaryUsage = (since) => call("summary-usage", ["--cache", cachePath(), ...since.flatMap((s) => ["--since", String(s)])]);
 export const summary = (terminal) => call("summary", ["--terminal", terminal, "--cache", cachePath()]);
 // What the agent pointed to (Rust helper only; ask hasCommand("resources") first). `since`: the last `end` cursor.
+// The real file a doc path opens (links followed), or why not: one `openable` line. Ask hasCommand("open-check") first.
+export const openCheck = (path) => call("open-check", ["--path", path]);
 export const resources = (terminal, since = null) => call("resources", ["--terminal", terminal, "--cache", cachePath(), ...(since ? ["--since", since] : [])]);
