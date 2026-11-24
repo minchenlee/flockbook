@@ -2,7 +2,9 @@
 //! `HC_SOCKET` overrides the endpoint; else `$XDG_RUNTIME_DIR/herdr-core/<session>.sock` when that variable is set;
 //! else `/run/user/<uid>/herdr-core/` when it exists (Linux only in practice); else the session's state directory,
 //! `${XDG_STATE_HOME:-~/.local/state}/herdr-core/<session>/<session>.sock`. The session name comes from
-//! `HC_SESSION`, default `default`. Flockbook's overrides on top: `--hc-socket <path>` and `HERDR_DESK_HC_SOCKET`.
+//! `HC_SESSION`, default `default`. On Windows hc listens on the named pipe
+//! `\\.\pipe\herdr-core-<USERNAME>-<session>.sock` instead. Flockbook's overrides on top: `--hc-socket <path>` and
+//! `HERDR_DESK_HC_SOCKET`.
 
 use std::collections::HashMap;
 
@@ -50,10 +52,10 @@ impl HcSession {
         }
         let session = non_empty(env, "HC_SESSION").unwrap_or("default");
         if cfg!(windows) {
-            // TODO(windows): herdr-core's endpoint on Windows is not documented upstream (docs/security.md names Unix
-            // sockets only). Until it is, only an explicit HC_SOCKET / HERDR_DESK_HC_SOCKET is used; this path never
-            // exists, so the sidecar answers `no-core`.
-            return HcSession::new(&format!("<no herdr-core endpoint on Windows yet: set HC_SOCKET> ({session})"));
+            // hc on Windows listens on a named pipe of the user's and the session's name (hc 0.1.22; upstream
+            // docs/security.md names the Unix sockets only). hc writes the same name to the session's `core.lock`.
+            let user = non_empty(env, "USERNAME").unwrap_or_default();
+            return HcSession::new(&format!(r"\\.\pipe\herdr-core-{user}-{session}.sock"));
         }
         if let Some(r) = non_empty(env, "XDG_RUNTIME_DIR") {
             return HcSession::new(&format!("{r}/herdr-core/{session}.sock"));
@@ -65,16 +67,20 @@ impl HcSession {
         HcSession::new(&format!("{state}/herdr-core/{session}/{session}.sock"))
     }
 
-    /// True when a socket file is there. Missing is normal (hc not installed or not running), not an error.
+    /// True when a socket file is there (on Windows: a server has the named pipe open). Missing is normal (hc not
+    /// installed or not running), not an error.
     pub fn is_available(&self) -> bool {
         #[cfg(unix)]
         {
             use std::os::unix::fs::FileTypeExt;
             std::fs::symlink_metadata(&self.socket_path).map(|m| m.file_type().is_socket()).unwrap_or(false)
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            // TODO(windows): see `resolve`; no endpoint kind is known, so nothing counts as available.
+            crate::transport::pipe_exists(&self.socket_path)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
             false
         }
     }

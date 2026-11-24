@@ -6,7 +6,7 @@ use crate::error::HerdrError;
 use crate::model::*;
 use crate::screen::{DeliveryOutcome, PaneScreen};
 use crate::transport::{Connector, LineSocket};
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use crate::transport::Transport;
 use serde_json::{json, Value};
 use std::cell::Cell;
@@ -58,9 +58,14 @@ fn connector_for(session: &HcSession) -> Box<dyn Connector> {
     Box::new(crate::transport::UnixConnector { path: session.socket_path.clone() })
 }
 
-/// TODO(windows): herdr-core's endpoint on Windows is not documented upstream (docs/security.md names Unix sockets
-/// only). Until it is, every call fails closed with a socket error.
-#[cfg(not(unix))]
+/// The named pipe of the session's name (hc on Windows).
+#[cfg(windows)]
+fn connector_for(session: &HcSession) -> Box<dyn Connector> {
+    Box::new(crate::transport::PipeConnector { path: session.socket_path.clone() })
+}
+
+/// No endpoint kind is known on other systems: every call fails closed with a socket error.
+#[cfg(not(any(unix, windows)))]
 fn connector_for(_session: &HcSession) -> Box<dyn Connector> {
     struct NoEndpoint(String);
     impl Connector for NoEndpoint {
