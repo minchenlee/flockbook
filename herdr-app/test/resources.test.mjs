@@ -190,7 +190,7 @@ test("⌘⇧R toggles the window; one left from before a restart does not count 
   fake.shared[R.KEY_WIN_W] = 1000; fake.shared["flockbook.window.height"] = 800;
   command("resources");
   const spec = log.overlays.at(-1);
-  assert.deepEqual([spec.mod, spec.kind, spec.frame, spec.key, spec.props.view, spec.width], ["flockbook", "window", "none", "flockbook.resources", "resources", 320]);
+  assert.deepEqual([spec.mod, spec.kind, spec.frame, spec.key, spec.props.view, spec.width], ["flockbook", "window", "none", undefined, "resources", 320]);
   assert.deepEqual(spec.at, { x: 1000 - 320 - 12, y: 60 });
   assert.equal(fake.shared[R.KEY_OPEN], "o1");
   command("resources");
@@ -391,18 +391,49 @@ test("the open window follows the item count and the shown agent: reopened in pl
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n + 1);
   const spec = log.overlays.at(-1);
-  assert.equal(spec.key, "flockbook.resources");
+  assert.equal(spec.key, undefined, "no key: Herdr would keep a key's old place");
   assert.ok(spec.height > R.placement(1400, 900, 1, 1).height, "taller");
   assert.deepEqual([spec.props.view, spec.props.refit, spec.props.focus, spec.props.seenAtOpen], ["resources", true, false, 10]);
-  assert.deepEqual(log.closed ?? [], [], "replaced by the same key, not closed first");
+  assert.deepEqual(log.closed, ["o7"], "the old one closed, after the new one opened");
   assert.equal(fake.shared[R.KEY_FRAME].height, spec.height);
-  v.close(fakeCx());   // the host closes the replaced one
+  v.close(fakeCx());   // the host tells the old one it closed
   assert.equal(fake.shared[R.KEY_OPEN], "o1", "the new window still counts as open");
   // Another agent in the tab, with nothing listed yet: the small height.
   fake.agents = [agent("t2", "idle", { tab: "tb-t1" })];
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n + 2);
   assert.equal(log.overlays.at(-1).height, R.placement(1400, 900, 0, 0).height);
+});
+
+test("the window moves where the chat made room: a wider window, a second refit (Codex round 1 High)", () => {
+  fake.shared[R.KEY_WIN_W] = 1100; fake.shared["flockbook.window.height"] = 900; fake.shared[R.KEY_ON] = true;
+  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c1", items: [res("a", "link", 50)], at: 1 };
+  command("resources");
+  assert.deepEqual(log.shown.at(-1).at, { x: 1100 - 332, y: 60 });
+  // Wider: the chat makes room at the new right edge, and the window must be there too.
+  fake.shared[R.KEY_WIN_W] = 1470;
+  fake.props = { view: "resources", overlay: "o1" };
+  const v = new R.ResourcesView(fakeCx());
+  v.tick(fakeCx());
+  const want = R.placement(1470, 900, 1, 1);
+  assert.deepEqual(log.shown.at(-1).at, want.at, "where the frame says");
+  assert.deepEqual(fake.shared[R.KEY_FRAME].at, log.shown.at(-1).at, "the frame is where it is");
+  // Narrower again.
+  fake.shared[R.KEY_WIN_W] = 1100;
+  v.tick(fakeCx());
+  assert.deepEqual(log.shown.at(-1).at, { x: 1100 - 332, y: 60 });
+});
+
+test("the window cannot be dragged off its place: every press is stopped; close() without an id leaves the open one", () => {
+  const v = view([res("a", "link", 50)]);
+  const el = v.render(fakeCx());
+  let stopped = 0;
+  byId(el, "res-root")._h.on_mouse_down({}, { stop_propagation: () => stopped++ });
+  assert.equal(stopped, 1);
+  fake.props = { view: "resources" };
+  fake.shared[R.KEY_OPEN] = "o9";
+  v.close(fakeCx());
+  assert.equal(fake.shared[R.KEY_OPEN], "o9", "not this window's to clear");
 });
 
 test("a refit window: no full read again, no focus unless it had it, the dots as they were", () => {
