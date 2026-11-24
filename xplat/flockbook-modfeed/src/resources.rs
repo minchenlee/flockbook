@@ -418,11 +418,7 @@ pub fn commands(text: &str) -> Vec<Command> {
             Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. })
             | Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image) => {}
             // Another block between: the text before is not the command's.
-            Event::Start(_) | Event::End(_) | Event::Rule => {
-                if cur.is_none() {
-                    before = None;
-                }
-            }
+            Event::Start(_) | Event::End(_) | Event::Rule if cur.is_none() => before = None,
             _ => {}
         }
     }
