@@ -24,7 +24,7 @@ pub struct State {
 
 impl State {
     pub fn cursor(&self) -> String {
-        format!("1.{}.{}.{}.{}", fnv1a(&self.path), self.start, self.size, fnv1a(&self.hashes.join(",")))
+        format!("{CURSOR_V}.{}.{}.{}.{}", fnv1a(&self.path), self.start, self.size, fnv1a(&self.hashes.join(",")))
     }
 }
 
@@ -36,9 +36,13 @@ struct Cursor {
     rows_hash: String,
 }
 
+/// The cursor's first field. 2: Codex, Grok and Cursor row ids from line offsets (`cx@N`); a "1." cursor names rows
+/// with the old ids, so it gets everything again (the mod then drops the older rows it read with them).
+pub const CURSOR_V: &str = "2";
+
 fn parse(c: Option<&str>) -> Option<Cursor> {
     let p: Vec<&str> = c?.split('.').collect();
-    if p.len() != 5 || p[0] != "1" {
+    if p.len() != 5 || p[0] != CURSOR_V {
         return None;
     }
     Some(Cursor { path_hash: p[1].into(), start: p[2].parse().ok()?, size: p[3].parse().ok()?, rows_hash: p[4].into() })

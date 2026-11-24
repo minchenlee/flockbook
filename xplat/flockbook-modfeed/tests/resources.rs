@@ -180,7 +180,7 @@ fn since_a_cursor_only_what_is_newer() {
     let first = resources::answer(&log, None, None).unwrap();
     assert!(first.full);
     assert_eq!(first.items.len(), 2);
-    assert!(first.cursor.starts_with("r1."), "{}", first.cursor);
+    assert!(first.cursor.starts_with("r2."), "{}", first.cursor);
 
     let same = resources::answer(&log, Some(&first.cursor), None).unwrap();
     assert_eq!((same.full, same.items.len()), (false, 0), "nothing new");
@@ -203,6 +203,11 @@ fn since_a_cursor_only_what_is_newer() {
     let o = resources::answer(&other, Some(&c), None).unwrap();
     assert!(o.full);
     assert_eq!(o.items.len(), 1);
+    // An "r1." cursor of this very log (rows named with the old Codex ids): all of it again, not "nothing new".
+    let now = resources::answer(&log, None, None).unwrap().cursor;
+    let r1 = now.replacen("r2.", "r1.", 1);
+    let old = resources::answer(&log, Some(&r1), None).unwrap();
+    assert!(old.full && !old.items.is_empty(), "an r1 cursor gets everything again");
 }
 
 #[test]

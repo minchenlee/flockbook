@@ -7,6 +7,9 @@ export function emptyFeed(address) {
 // `rows` is what the chat draws: the older rows read on scroll-up, then the tail the feed keeps current.
 function join(state) { state.rows = state.older.concat(state.tail); }
 function dropOlder(state) { state.older = []; state.olderStart = null; state.first = false; }
+// A cursor's first field: the row id scheme ("2": Codex, Grok and Cursor ids from line offsets). Another one means
+// the older rows read before were named another way.
+const cursorV = (c) => (typeof c === "string" && c.includes(".") ? c.split(".")[0] : null);
 
 // Where the next `feed --before` reads up to; null when the log's first row is already shown.
 export function olderFrom(state) {
@@ -42,7 +45,9 @@ export function applyFeed(state, answer) {
   const rows = [];
   for (const l of answer.lines) {
     if (l.type === "log") {
-      if (l.path !== state.path || (l.start ?? null) !== state.start) {
+      const was = cursorV(state.cursor), now = cursorV(l.cursor);
+      const renamed = was !== null && now !== null && was !== now;
+      if (l.path !== state.path || (l.start ?? null) !== state.start || renamed) {
         if (l.path !== state.path) { state.tail = []; changedAt = 0; }
         if (state.older.length) changedAt = 0;
         dropOlder(state);

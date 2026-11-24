@@ -751,7 +751,7 @@ pub const BYTES: u64 = 64 * 1024 * 1024;
 
 /// The resources in the whole log up to `BYTES`, else in its last `BYTES` (an early report path is still listed in a
 /// long session; the chat shows only the last 2 MB first). The cursor is
-/// "r1.<hash of the path>.<size>.<newest last_ts>". With a cursor of this log: the same size, no items; a bigger
+/// "r2.<hash of the path>.<size>.<newest last_ts>" (r1: rows with the old Codex ids, so all of it again). With a cursor of this log: the same size, no items; a bigger
 /// size, only the items mentioned at or after its newest one (a run of tool calls has its first call's time, so a
 /// later call in it can have that same time; sent again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
 pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::Result<Answer> {
@@ -759,7 +759,7 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
     // Unchanged: nothing is read or parsed.
     if let Some(c) = since {
         let p: Vec<&str> = c.split('.').collect();
-        if let ["r1", h, size, _] = p.as_slice() {
+        if let ["r2", h, size, _] = p.as_slice() {
             if *h == hash && size.parse::<u64>().ok() == Some(std::fs::metadata(log)?.len()) {
                 return Ok(Answer { items: vec![], cursor: c.to_string(), full: false });
             }
@@ -768,11 +768,11 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
     let range = crate::tail::read(log, None, BYTES)?;
     let all = collect(&crate::tail::items_ids(&range), home);
     let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
-    let cursor = format!("r1.{hash}.{}.{newest}", range.size);
+    let cursor = format!("r2.{hash}.{}.{newest}", range.size);
     let was = since.and_then(|c| {
         let p: Vec<&str> = c.split('.').collect();
         match p.as_slice() {
-            ["r1", h, size, ts] if *h == hash => Some((size.parse::<u64>().ok()?, ts.parse::<i64>().ok()?)),
+            ["r2", h, size, ts] if *h == hash => Some((size.parse::<u64>().ok()?, ts.parse::<i64>().ok()?)),
             _ => None,
         }
     });
