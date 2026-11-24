@@ -2,7 +2,7 @@
 //! Pure. `detect` finds the targets in an assistant text; feed rows carry them as `links`, and the `resources`
 //! command (P1) collects them with the same rules.
 
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use herdr_core::{ConversationItem, ItemKind};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -358,6 +358,114 @@ fn bare_paths(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'st
     }
 }
 
+/// A one-line shell command the reply gives the human to run (`cmd`): where its block starts (UTF-16), what the
+/// reply says right before it, and the command as written.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Command {
+    pub start: usize,
+    pub title: String,
+    pub cmd: String,
+}
+
+/// A fenced block's language that holds shell commands (the info's first word, any case).
+const CMD_LANGS: [&str; 6] = ["", "sh", "bash", "zsh", "shell", "console"];
+/// A longer command is not one to keep.
+const CMD_MAX: usize = 400;
+const TITLE_MAX: usize = 80;
+const HEAD_MAX: usize = 60;
+
+/// The commands in `text`, in order: fenced code blocks in a shell language (`CMD_LANGS`) that hold one command, one
+/// line or lines joined by a `\` at their end, at most `CMD_MAX` characters; a leading `$ ` is dropped. Not commands:
+/// a block with more than one (a script, or a command and its output), other languages (text, log, json…), indented
+/// code, inline code, a comment. Title: the last line of the paragraph or heading right before the block (its
+/// ending `:` or `：` dropped, cut at `TITLE_MAX`); with none there, the command's start.
+pub fn commands(text: &str) -> Vec<Command> {
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let mut out = vec![];
+    // The text of the block right before (a paragraph or a heading), and of the one being read.
+    let (mut before, mut cur): (Option<String>, Option<String>) = (None, None);
+    // The fenced block being read: its start (bytes), language, body.
+    let mut code: Option<(usize, String, String)> = None;
+    for (ev, r) in Parser::new_ext(text, opts).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::Paragraph | Tag::Heading { .. }) => cur = Some(String::new()),
+            Event::End(TagEnd::Paragraph | TagEnd::Heading(_)) => before = cur.take(),
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                code = Some((r.start, info.split_whitespace().next().unwrap_or("").to_ascii_lowercase(), String::new()));
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some((start, lang, body)) = code.take() {
+                    if let Some(cmd) = CMD_LANGS.contains(&lang.as_str()).then(|| one_command(&body)).flatten() {
+                        let title = before.as_deref().map(title_of).filter(|t| !t.is_empty()).unwrap_or_else(|| cut(&one_line(&cmd), HEAD_MAX));
+                        out.push(Command { start: text[..start].encode_utf16().count(), title, cmd });
+                    }
+                }
+                before = None;
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(c) = code.as_mut() {
+                    c.2.push_str(&t);
+                } else if let Some(c) = cur.as_mut() {
+                    c.push_str(&t);
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(c) = cur.as_mut() {
+                    c.push('\n');
+                }
+            }
+            // Inside a paragraph: part of its text.
+            Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. })
+            | Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image) => {}
+            // Another block between: the text before is not the command's.
+            Event::Start(_) | Event::End(_) | Event::Rule => {
+                if cur.is_none() {
+                    before = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A block's body as one command, or None.
+fn one_command(body: &str) -> Option<String> {
+    let mut lines: Vec<&str> = body.lines().collect();
+    while lines.first().is_some_and(|l| l.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    let (last, rest) = lines.split_last()?;
+    if last.trim_end().ends_with('\\') || rest.iter().any(|l| !l.trim_end().ends_with('\\')) {
+        return None;
+    }
+    let all = lines.join("\n");
+    let all = all.trim();
+    let cmd = all.strip_prefix("$ ").map(str::trim_start).unwrap_or(all);
+    (!cmd.is_empty() && !cmd.starts_with('#') && cmd.chars().count() <= CMD_MAX).then(|| cmd.to_string())
+}
+
+/// A command on one line: each line's ending `\` dropped, the spaces made one.
+pub fn one_line(cmd: &str) -> String {
+    cmd.lines().map(|l| l.trim().trim_end_matches('\\')).collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn cut(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    format!("{}…", s.chars().take(max - 1).collect::<String>().trim_end())
+}
+
+/// The title a paragraph gives the command after it: its last line, without the ending colon.
+fn title_of(p: &str) -> String {
+    let line = p.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    cut(line.trim_end_matches([':', '：', ' ']).trim(), TITLE_MAX)
+}
+
 pub fn links(text: &str) -> Vec<FeedLink> {
     detect(text).into_iter().map(|f| FeedLink { start: f.start, end: f.end, res: f.kind }).collect()
 }
@@ -399,7 +507,13 @@ pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource>
         let ts = crate::rows::ms(it.timestamp);
         let mut found: Vec<(&'static str, String, Option<String>)> = vec![];
         match &it.kind {
-            ItemKind::AssistantText(s) => found.extend(detect(s).into_iter().map(|f| (f.kind, f.target, None))),
+            ItemKind::AssistantText(s) => {
+                // In the order they are written: a later one is newer.
+                let mut f: Vec<(usize, &'static str, String, Option<String>)> = detect(s).into_iter().map(|f| (f.start, f.kind, f.target, None)).collect();
+                f.extend(commands(s).into_iter().map(|c| (c.start, "cmd", c.cmd, Some(c.title))));
+                f.sort_by_key(|x| x.0);
+                found.extend(f.into_iter().map(|(_, k, t, title)| (k, t, title)));
+            }
             ItemKind::ToolChips(chips) => {
                 for c in chips.iter().flat_map(|c| &c.calls) {
                     let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
@@ -513,6 +627,7 @@ fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (&'static st
             let (scheme, auth, _, _) = parts(target);
             ("local", format!("local:{}", host_port(&scheme, &auth)), target.to_string())
         }
+        "cmd" => ("cmd", format!("cmd:{}", target.trim()), target.trim().to_string()),
         "pr" | "issue" | "ci" => {
             let (_, _, path, _) = parts(target);
             let seg: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -589,6 +704,7 @@ fn described(mut r: Resource, home: Option<&Path>) -> Resource {
             let n = seg.last().copied().unwrap_or("");
             r.title = if r.kind == "ci" { format!("CI run {n}") } else { format!("{}#{n}", r.detail) };
         }
+        "cmd" => r.detail = one_line(&r.target),
         "local" => {
             let (scheme, auth, _, _) = parts(&r.target);
             r.title = if auth.contains(':') { auth.clone() } else { host_port(&scheme, &auth) };
