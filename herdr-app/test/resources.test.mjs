@@ -9,6 +9,8 @@ import { forgetCommands } from "../mods/flockbook/sidecar.js";
 import { TopView, command } from "../mods/flockbook/top.js";
 import { ChatView } from "../mods/flockbook/chat.js";
 import { calls } from "./stub/ui.mjs";
+import { readFileSync } from "node:fs";
+import { columnWidth } from "../mods/flockbook/estimate.js";
 
 const jl = (...lines) => ({ code: 0, stdout: lines.map((l) => JSON.stringify(l)).join("\n") + "\n", stderr: "" });
 const header = (cmd) => ({ type: "header", protocol: 1, sidecar: "0.1.0", cmd });
@@ -175,12 +177,12 @@ test("a helper that fails to answer opens no file", async () => {
 
 test("the window: under the bar's right edge, or a full-height drawer in a narrow window", () => {
   const wide = R.placement(1400, 900, 3, 2);
-  assert.deepEqual(wide.at, { x: 1400 - 340 - 12, y: 60 });
-  assert.equal(wide.width, 340);
+  assert.deepEqual(wide.at, { x: 1400 - 320 - 12, y: 60 });
+  assert.equal(wide.width, 320);
   assert.ok(wide.height <= 900 - 72 && wide.height >= 180);
   assert.equal(R.placement(1400, 900, 500, 4).height, 900 - 72, "many: as tall as the window allows");
   const narrow = R.placement(700, 900, 3, 2);
-  assert.deepEqual([narrow.at, narrow.height, narrow.drawer], [{ x: 360, y: 0 }, 900, true]);
+  assert.deepEqual([narrow.at, narrow.height, narrow.drawer], [{ x: 380, y: 0 }, 900, true]);
 });
 
 test("⌘⇧R toggles the window; one left from before a restart does not count as open", () => {
@@ -188,8 +190,8 @@ test("⌘⇧R toggles the window; one left from before a restart does not count 
   fake.shared[R.KEY_WIN_W] = 1000; fake.shared["flockbook.window.height"] = 800;
   command("resources");
   const spec = log.overlays.at(-1);
-  assert.deepEqual([spec.mod, spec.kind, spec.frame, spec.key, spec.props.view, spec.width], ["flockbook", "window", "none", "flockbook.resources", "resources", 340]);
-  assert.deepEqual(spec.at, { x: 1000 - 340 - 12, y: 60 });
+  assert.deepEqual([spec.mod, spec.kind, spec.frame, spec.key, spec.props.view, spec.width], ["flockbook", "window", "none", "flockbook.resources", "resources", 320]);
+  assert.deepEqual(spec.at, { x: 1000 - 320 - 12, y: 60 });
   assert.equal(fake.shared[R.KEY_OPEN], "o1");
   command("resources");
   assert.equal(fake.shared[R.KEY_OPEN], null);
@@ -201,7 +203,7 @@ test("⌘⇧R toggles the window; one left from before a restart does not count 
   // The sidebar's width counts: the window is the bar plus the sidebar.
   fake.shared[R.KEY_OPEN] = null; fake.shared["flockbook.sidebar"] = true; fake.shared[R.KEY_SIDE_W] = 240;
   command("resources");
-  assert.deepEqual(log.overlays.at(-1).at, { x: 1240 - 340 - 12, y: 60 });
+  assert.deepEqual(log.overlays.at(-1).at, { x: 1240 - 320 - 12, y: 60 });
   // An older helper: the key does nothing.
   fake.shared[R.KEY_ON] = false; fake.shared[R.KEY_OPEN] = null;
   const n = log.overlays.length;
@@ -315,4 +317,123 @@ test("the bar: a Resources button with a badge, only with a helper that has the 
   assert.ok(byId(el, "resources"));
   assert.equal(textOf(byId(el, "resources-badge")), "1");
   assert.ok(byId(el, "resources")._a.tooltip.includes("⌘⇧R"));
+});
+
+// Where the reading column, the chat input and the window are, in window px: a window `winW` wide with a
+// sidebar `side` px wide shown left of the chat (0: hidden).
+function fit(winW, side) {
+  const paneW = winW - side;
+  const p = R.placement(winW, 900, 5, 2, paneW);
+  const r = R.readingLayout(paneW, { ...p, open: true });
+  return { p, r, panelX: p.at.x, colLeft: side + r.left, colRight: side + r.left + r.width, composerRight: side + r.composerRight };
+}
+
+test("the window open: the reading column and the chat input keep at least 24 px from it, or it is a drawer", () => {
+  for (const [winW, side] of [[1470, 0], [1470, 250], [1100, 0], [1100, 250], [800, 0], [1800, 0], [1800, 250]]) {
+    const f = fit(winW, side);
+    const what = `${winW} wide, sidebar ${side}`;
+    assert.equal(f.p.width, R.PANEL_W, what);
+    assert.equal(f.p.drawer, false, what);
+    assert.ok(f.panelX - f.colRight >= R.READ_GAP, `${what}: column gap ${f.panelX - f.colRight}`);
+    assert.ok(f.panelX - f.composerRight >= R.READ_GAP, `${what}: input gap ${f.panelX - f.composerRight}`);
+    assert.ok(f.r.width >= 240, `${what}: the column is not narrower than its least (240)`);
+  }
+  // Room enough: the column does not move, and is as wide as with the window closed.
+  const wide = fit(1800, 0), closed = R.readingLayout(1800, null);
+  assert.equal(wide.r.inset, 0);
+  assert.deepEqual([wide.r.left, wide.r.width], [closed.left, closed.width]);
+  assert.equal(closed.width, columnWidth(1800));
+  // Not room enough: the column moves left (and narrows only as far as it must).
+  const mid = fit(1100, 250);
+  assert.ok(mid.r.inset > 0);
+  assert.ok(mid.r.left < R.readingLayout(850, null).left, "moved left");
+  // No room for the column's least width beside it: a drawer, as below 720 px.
+  assert.equal(fit(800, 250).p.drawer, true);
+  assert.equal(fit(700, 0).p.drawer, true);
+  // A drawer, or no window open: the chat keeps its place.
+  assert.equal(R.readingLayout(550, { ...fit(800, 250).p, open: true }).inset, 0);
+});
+
+test("the chat reads the open window: its column narrows while it is open, and is back when it closes", () => {
+  const chat = new ChatView(fakeCx());
+  chat.width = 850;
+  const before = chat.colWidth();
+  fake.shared[R.KEY_FRAME] = R.placement(1100, 900, 5, 2, 850);
+  fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_ALIVE] = Date.now();
+  assert.ok(chat.colWidth() < before, `${chat.colWidth()} < ${before}`);
+  fake.shared[R.KEY_OPEN] = null;
+  assert.equal(chat.colWidth(), before);
+});
+
+test("refit: only a real change reopens; it does not shrink under the pointer", () => {
+  const a = R.placement(1400, 900, 2, 1), more = R.placement(1400, 900, 8, 2), none = R.placement(1400, 900, 0, 0);
+  assert.equal(R.needsRefit(a, a, false), false);
+  assert.equal(R.needsRefit(null, a, false), false, "nothing open");
+  assert.equal(R.needsRefit(a, more, false), true, "grows");
+  assert.equal(R.needsRefit(a, more, true), true, "grows also under the pointer");
+  assert.equal(R.needsRefit(a, none, false), true, "shrinks");
+  assert.equal(R.needsRefit(a, none, true), false, "not while the pointer is on it");
+  assert.equal(R.needsRefit(a, { ...a, height: a.height + 3 }, false), false, "a few px: no");
+  assert.equal(R.needsRefit(a, R.placement(700, 900, 2, 1), false), true, "a drawer now");
+  assert.equal(R.needsRefit(a, R.placement(1200, 900, 2, 1), false), true, "the window got narrower: another place");
+});
+
+test("the open window follows the item count and the shown agent: reopened in place, the keyboard not taken, dots kept", () => {
+  fake.shared[R.KEY_WIN_W] = 1400; fake.shared["flockbook.window.height"] = 900;
+  const v = view([res("a", "link", 50)], { seen: 10 });
+  fake.shared[R.KEY_FRAME] = R.placement(1400, 900, 1, 1);
+  fake.shared[R.KEY_ALIVE] = Date.now();
+  const n = log.overlays.length;
+  v.tick(fakeCx());
+  assert.equal(log.overlays.length, n, "nothing changed: not reopened");
+  // Six more mentioned.
+  fake.shared[R.KEY_DATA] = { ...fake.shared[R.KEY_DATA], items: ["b", "c", "d", "e", "f", "g", "a"].map((id, i) => res(id, "link", 60 - i)) };
+  v.tick(fakeCx());
+  assert.equal(log.overlays.length, n + 1);
+  const spec = log.overlays.at(-1);
+  assert.equal(spec.key, "flockbook.resources");
+  assert.ok(spec.height > R.placement(1400, 900, 1, 1).height, "taller");
+  assert.deepEqual([spec.props.view, spec.props.refit, spec.props.focus, spec.props.seenAtOpen], ["resources", true, false, 10]);
+  assert.equal(log.closed, undefined, "replaced by the same key, not closed first");
+  assert.equal(fake.shared[R.KEY_FRAME].height, spec.height);
+  // Another agent in the tab, with nothing listed yet: the small height.
+  fake.agents = [agent("t2", "idle", { tab: "tb-t1" })];
+  v.tick(fakeCx());
+  assert.equal(log.overlays.length, n + 2);
+  assert.equal(log.overlays.at(-1).height, R.placement(1400, 900, 0, 0).height);
+});
+
+test("a refit window: no full read again, no focus unless it had it, the dots as they were", () => {
+  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c1", items: [res("a", "link", 50)], at: 1 };
+  fake.shared[R.seenKey("t1")] = 50;
+  fake.props = { view: "resources", overlay: "o8", refit: true, focus: false, seenAtOpen: 10 };
+  const cx = fakeCx();
+  let focused = 0;
+  cx.focus_handle = () => ({ focus: () => focused++, is_focused: () => false });
+  const asked = helper(() => [[res("a", "link", 50)], "c2", false]);
+  const v = new R.ResourcesView(cx);
+  for (const t of cx.timers.filter((t) => t.once)) t.f(cx);
+  assert.equal(focused, 0, "the keyboard stays where it is");
+  assert.equal(v.seenAtOpen, 10);
+  assert.ok(byId(v.render(fakeCx()), "res-new-a"), "the dot stays");
+  return cx.settle().then(() => assert.ok(asked.every((a) => a.includes("--since")), "no full read"));
+});
+
+test("row actions use icons that say what they do", () => {
+  const v = view([res("a", "link", 50)]);
+  const cx = fakeCx(); cx.stop_propagation = () => {};
+  byId(v.render(fakeCx()), "res-a")._h.on_hover(true, cx);
+  const el = v.render(fakeCx());
+  const iconOf = (id) => byId(el, id).kids[0]._a.path;
+  assert.match(iconOf("res-jump-a"), /\/icons\/message\.svg$/);
+  assert.match(iconOf("res-copy-a"), /\/icons\/copy\.svg$/);
+  assert.match(iconOf("res-remove-a"), /\/icons\/eye-off\.svg$/);
+  assert.match(iconOf("res-close"), /\/icons\/close\.svg$/, "close the window: still the ×");
+  assert.deepEqual(["res-jump-a", "res-copy-a", "res-remove-a"].map((id) => byId(el, id)._a.tooltip), ["Show in chat", "Copy", "Remove from list"]);
+  for (const name of ["message", "copy", "eye-off"]) {
+    const s = readFileSync(new URL(`../mods/flockbook/icons/${name}.svg`, import.meta.url), "utf8");
+    assert.match(s, /Lucide.*ISC/, `${name}: says where it is from`);
+    assert.match(s, /viewBox="0 0 24 24"/);
+    assert.match(s, /stroke-width="2\.2"/, `${name}: as thin as the other icons (1.5 of 16)`);
+  }
 });
