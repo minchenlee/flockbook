@@ -3,7 +3,7 @@
 // cannot be scrolled from code, and the chat must open at the newest message. Every row shows in full.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { theme, run, shared, settings } from "herdr";
+import { theme, run, shared, setShared, settings } from "herdr";
 import { currentAgent, machineOf, icon, SPIN_MS, FADE, shownScreen, watchEdge, noteWindowHeight, KEY_WIN_H } from "./state.js";
 import { Appear } from "./motion.js";
 import { now, record, flush, loadTiming } from "./timing.js";
@@ -24,7 +24,7 @@ import { startTop, BAR_H } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
 import { pollGlance, glanceOn, glanceFor, glancedAt, seenFor, markSeen, summaryFor } from "./glance.js";
 import { arrive, sinceLeft, sinceCard } from "./since.js";
-import { KEY_JUMP, term, readingLayout } from "./resources.js";
+import { KEY_JUMP, KEY_INPUT_H, term, readingLayout } from "./resources.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
@@ -67,6 +67,12 @@ export function oneLine(text) {
 export function noteSender(from) {
   const [id, ...name] = String(from ?? "").trim().split(/\s+/);
   return name.join(" ") || id || "agent";
+}
+
+// The chat input's height, for the Resources window's bottom.
+function noteInputHeight(size) {
+  const h = Math.round(size?.height ?? 0);
+  if (h > 0 && shared(KEY_INPUT_H) !== h) setShared(KEY_INPUT_H, h);
 }
 
 export class ChatView {
@@ -195,7 +201,7 @@ export class ChatView {
     if (n) this.scroll.scroll_to_item(n - 1, "top");
   }
 
-  // Narrower, and moved left, while the Resources window is open beside it (resources.js readingLayout).
+  // The same with the Resources window open or closed (resources.js readingLayout).
   colWidth() { return readingLayout(this.width).width; }
 
   height(row) {
@@ -283,8 +289,8 @@ export class ChatView {
   // One list row: the guessed height and the reading column.
   item(row, t) {
     const r = readingLayout(this.width);
-    const pad = Math.max(GUTTER, Math.floor((this.width - r.inset - r.width) / 2));
-    return div().h(this.height(row)).w_full().pl(pad).pr(pad + r.inset).overflow_hidden().child(this.body(row, t));
+    const pad = Math.max(GUTTER, Math.floor((this.width - r.width) / 2));
+    return div().h(this.height(row)).w_full().pl(pad).pr(pad).overflow_hidden().child(this.body(row, t));
   }
 
   // Right-click on a message (the user's, the agent's, a note from another agent): "Copy message", its markdown
@@ -399,7 +405,6 @@ export class ChatView {
     else if (!f.rows.length) main = this.center(t, f.path ? "No messages yet." : "No conversation yet. Send the first message.");
     else main = this.list(t, f);
     const stop = (_e, cx) => cx.stop_propagation();
-    const inset = readingLayout(this.width).inset;   // room for the Resources window
     return watchEdge(v_flex().id("root").relative().size_full().min_w(0).bg(t.background))
       .on_size_change((size, cx) => { noteWindowHeight(size, BAR_H); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
       .on_drop((e, cx) => this.composer.addFiles(e?.paths, cx))
@@ -411,15 +416,16 @@ export class ChatView {
       // the top bar above the screens moves the window.
       .child(v_flex().flex_1().min_h(0)
         .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
-      .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pr(16 + inset).pt(8).justify_center()
+      .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
         .on_mouse_down("left", stop).child(this.helper.removeCard(t, this.refresh))))
-      .when(Boolean(f?.rows.length) && this.away?.address === this.address, (el) => el.child(h_flex().w_full().px(16).pr(16 + inset).pt(8).justify_center()
+      .when(Boolean(f?.rows.length) && this.away?.address === this.address, (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
         .on_mouse_down("left", stop).child(sinceCard(t, sinceLeft(f.rows, this.away, glanceFor(this.address)), summaryFor(this.address),
           (id, cx) => this.jumpTo(id, cx), (cx) => { this.away = null; cx.notify(); }))))
       .when(Boolean(f) && f.error?.code !== "not-agent" && !isRemoteProblem(f.error), (el) => {
         const card = this.cards.view(this.address, t, "chat-card");
-        if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pr(16 + inset).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
-        return el.child(div().w_full().pr(inset).on_mouse_down("left", stop).child(this.composer.render(currentAgent(), t)));
+        if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
+        // Its height: the Resources window ends above it (resources.js placement).
+        return el.child(div().w_full().on_mouse_down("left", stop).on_size_change(noteInputHeight).child(this.composer.render(currentAgent(), t)));
       })
   }
 }

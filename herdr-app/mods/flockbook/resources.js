@@ -6,7 +6,7 @@
 //   flockbook.res.data        { terminal, cursor, items, at }: the last answer, for the shown agent only
 //   flockbook.res.on          the helper has the command (older helpers: no button)
 //   flockbook.res.open        the open window's overlay id; flockbook.res.alive: when it last drew (ms)
-//   flockbook.res.frame       where it was opened (placement()): the chat makes room for it
+//   flockbook.res.frame       where it was opened (placement()); the chat does not move for it
 //   flockbook.res.scope       "agent" (P1 has only "This agent")
 //   flockbook.res.seen.<t>    the newest last_ts seen in the open window; set to the newest one the first
 //                             time an agent is seen, so an old conversation does not light the badge
@@ -18,7 +18,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, props, shared, setShared, openOverlay, closeOverlay, exec, window } from "herdr";
 import { currentAgent, machineOf, icon, showScreen, sidebarShown } from "./state.js";
 import * as sidecar from "./sidecar.js";
-import { READ_W, GUTTER, columnWidth } from "./estimate.js";
+import { GUTTER, columnWidth } from "./estimate.js";
 
 export const KEY_DATA = "flockbook.res.data";
 export const KEY_ON = "flockbook.res.on";
@@ -38,7 +38,8 @@ export const PANEL_W = 320;
 export const READ_GAP = 24;           // at least this between the window and the chat's column and input
 export const NARROW_W = 720;          // below it: a drawer down the right side
 const GAP = 12, TOP = 60;             // under the 56 px bar
-const MIN_COL = 240;                  // the reading column's least width (estimate.js columnWidth)
+const MIN_PANEL = 260;                // less room right of the column: PANEL_W wide over the chat
+export const KEY_INPUT_H = "flockbook.input.height"; // the chat input's height (chat.js), for the window's bottom
 const INPUT_W = 800, INPUT_SIDE = 16; // the chat input: max_w(800) inside px(16) (composer.js)
 const REFIT_PX = 8;                   // a smaller change in height does not reopen the window
 export const KEY_FRAME = "flockbook.res.frame";
@@ -204,42 +205,35 @@ export async function pollResources(cx, force = false, full = false) {
   } finally { busy = false; }
 }
 
-// The least right inset so a box at most `maxW` wide, centered between `side` and the pane's right edge less
-// the inset and `side`, ends at `right` px from the pane's right edge or before.
-function insetFor(paneW, right, maxW, side) {
-  const x = Math.max(0, Math.ceil(paneW + maxW - 2 * (paneW - right)));
-  return paneW - 2 * side - x >= maxW ? x : Math.max(0, right - side);
-}
-// How far the chat moves its content left from the pane's right edge for a window `right` px wide there.
-const insetBeside = (paneW, right) => Math.max(insetFor(paneW, right, READ_W, GUTTER), insetFor(paneW, right, INPUT_W, INPUT_SIDE));
-
-// Where the window goes: under the bar's right edge, or a drawer down the right side of a narrow window.
-// `paneW`: the chat's width (the window less the sidebar). A drawer too when the chat has no room for its
-// column's least width beside the window. `right`: px of the chat's right side the window covers (0: a drawer).
-export function placement(winW, winH, count = 0, groups = 0, paneW = winW) {
+// Where the window goes: right of the chat's reading column, or a drawer down the right side of a narrow window.
+// The chat never moves for it (owner 11-25): the window takes the room right of the column less READ_GAP and
+// GAP, MIN_PANEL to PANEL_W wide; with less room it is PANEL_W wide over the chat. `paneW`: the chat's width (the
+// window less the sidebar). `inputH`: the chat input's height (0: not known); the window ends GAP above it.
+export function placement(winW, winH, count = 0, groups = 0, paneW = winW, inputH = 0) {
   const h = winH > 0 ? winH : 800;
   const w = winW > 0 ? winW : 1200;
-  const pane = paneW > 0 ? paneW : w;
-  const right = PANEL_W + GAP;
-  const tight = pane - insetBeside(pane, right + READ_GAP) - 2 * GUTTER < MIN_COL;
-  if (w < NARROW_W || tight) return { at: { x: Math.max(0, w - PANEL_W), y: 0 }, width: PANEL_W, height: h, drawer: true, right: 0 };
+  const pane = paneW > 0 ? Math.min(paneW, w) : w;
+  if (w < NARROW_W) return { at: { x: Math.max(0, w - PANEL_W), y: 0 }, width: PANEL_W, height: h, drawer: true, right: 0 };
+  const r = readingLayout(pane, null);
+  const room = w - (w - pane + r.left + r.width) - READ_GAP - GAP;
+  const width = room >= MIN_PANEL ? Math.min(PANEL_W, room) : PANEL_W;
+  const bottom = inputH > 0 ? h - inputH - GAP : h - 12;
+  const most = Math.max(80, bottom - TOP);
   const want = 46 + 34 + Math.max(1, count) * 50 + groups * 30 + 16;
-  return { at: { x: Math.max(0, w - right), y: TOP }, width: PANEL_W, height: Math.max(180, Math.min(h - 72, count ? want : 200)), drawer: false, right };
+  const height = Math.min(most, Math.max(180, Math.min(h - 72, count ? want : 200)));
+  return { at: { x: Math.max(0, w - GAP - width), y: TOP }, width, height, drawer: false, right: width + GAP };
 }
 
 // The open window's frame, else null.
 export const openFrame = () => (panelOpen() ? shared(KEY_FRAME) ?? null : null);
 
-// The chat's reading column beside the window (`frame`, from placement(); null: none open): `left` and `width` of
-// the column, `inset` px the content keeps free on the right, `composerRight` where the input ends (pane px).
-// Room enough: as with no window. Else the column moves left, and narrows only as far as it must.
-export function readingLayout(paneW, frame = openFrame()) {
+// The chat's reading column: `left` and `width` of the column, `inset` (always 0: the chat no longer makes room for
+// the window), `composerRight` where the input ends (pane px). The same with the window open or closed.
+export function readingLayout(paneW, _frame = null) {
   const w = paneW || 800;
-  const right = frame && !frame.drawer && frame.right > 0 ? frame.right + READ_GAP : 0;
-  const inset = right ? insetBeside(w, right) : 0;
-  const width = columnWidth(w - inset);
-  const a = w - inset - 2 * INPUT_SIDE;
-  return { inset, left: Math.max(GUTTER, Math.floor((w - inset - width) / 2)), width, composerRight: INPUT_SIDE + (a + Math.min(INPUT_W, a)) / 2 };
+  const width = columnWidth(w);
+  const a = w - 2 * INPUT_SIDE;
+  return { inset: 0, left: Math.max(GUTTER, Math.floor((w - width) / 2)), width, composerRight: INPUT_SIDE + (a + Math.min(INPUT_W, a)) / 2 };
 }
 
 // Whether the open window (`prev`) must be opened again at `next`: another place or width, or a height
@@ -259,12 +253,12 @@ export function placeNow() {
   const items = d ? visible(d.items, shared(removedKey(term(address)))) : [];
   const paneW = shared(KEY_WIN_W) ?? 0;
   const winW = paneW + (sidebarShown() ? shared(KEY_SIDE_W) ?? 0 : 0);
-  return placement(winW, shared("flockbook.window.height") ?? 0, items.length, grouped(items).length, paneW);
+  return placement(winW, shared("flockbook.window.height") ?? 0, items.length, grouped(items).length, paneW, shared(KEY_INPUT_H) ?? 0);
 }
 
 // Opens the window at `p`, then closes `old` (a refit): the new one is open before the old one goes, and the old
 // one's close() sees that it is no longer the open one. No `key`: Herdr opens a keyed window where that key's
-// window was (dropped there, or the one it replaces), not at `p.at`, and the chat makes room where the frame says.
+// window was (dropped there, or the one it replaces), not at `p.at`.
 function openPanel(p, extra = {}, old = null) {
   setShared(KEY_ALIVE, Date.now());
   setShared(KEY_FRAME, p);

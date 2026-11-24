@@ -176,11 +176,11 @@ test("a helper that fails to answer opens no file", async () => {
 });
 
 test("the window: under the bar's right edge, or a full-height drawer in a narrow window", () => {
-  const wide = R.placement(1400, 900, 3, 2);
-  assert.deepEqual(wide.at, { x: 1400 - 320 - 12, y: 60 });
+  const wide = R.placement(1600, 900, 3, 2);
+  assert.deepEqual(wide.at, { x: 1600 - 320 - 12, y: 60 });
   assert.equal(wide.width, 320);
   assert.ok(wide.height <= 900 - 72 && wide.height >= 180);
-  assert.equal(R.placement(1400, 900, 500, 4).height, 900 - 72, "many: as tall as the window allows");
+  assert.equal(R.placement(1600, 900, 500, 4).height, 900 - 72, "many: as tall as the window allows");
   const narrow = R.placement(700, 900, 3, 2);
   assert.deepEqual([narrow.at, narrow.height, narrow.drawer], [{ x: 380, y: 0 }, 900, true]);
 });
@@ -319,50 +319,63 @@ test("the bar: a Resources button with a badge, only with a helper that has the 
   assert.ok(byId(el, "resources")._a.tooltip.includes("⌘⇧R"));
 });
 
-// Where the reading column, the chat input and the window are, in window px: a window `winW` wide with a
-// sidebar `side` px wide shown left of the chat (0: hidden).
-function fit(winW, side) {
+// Where the reading column and the window are, in window px: a window `winW` wide with a sidebar `side` px wide
+// shown left of the chat (0: hidden). The chat never moves for the window (owner 11-25).
+function fit(winW, side, inputH = 0) {
   const paneW = winW - side;
-  const p = R.placement(winW, 900, 5, 2, paneW);
+  const p = R.placement(winW, 900, 5, 2, paneW, inputH);
   const r = R.readingLayout(paneW, { ...p, open: true });
-  return { p, r, panelX: p.at.x, colLeft: side + r.left, colRight: side + r.left + r.width, composerRight: side + r.composerRight };
+  return { p, r, panelX: p.at.x, colRight: side + r.left + r.width };
 }
 
-test("the window open: the reading column and the chat input keep at least 24 px from it, or it is a drawer", () => {
-  for (const [winW, side] of [[1470, 0], [1470, 250], [1100, 0], [1100, 250], [800, 0], [1800, 0], [1800, 250]]) {
-    const f = fit(winW, side);
-    const what = `${winW} wide, sidebar ${side}`;
-    assert.equal(f.p.width, R.PANEL_W, what);
-    assert.equal(f.p.drawer, false, what);
-    assert.ok(f.panelX - f.colRight >= R.READ_GAP, `${what}: column gap ${f.panelX - f.colRight}`);
-    assert.ok(f.panelX - f.composerRight >= R.READ_GAP, `${what}: input gap ${f.panelX - f.composerRight}`);
-    assert.ok(f.r.width >= 240, `${what}: the column is not narrower than its least (240)`);
+test("the window open or closed: the reading column and the chat input do not move or narrow", () => {
+  for (const [winW, side] of [[1470, 0], [1470, 250], [1100, 0], [1100, 250], [800, 0], [1800, 0], [700, 0]]) {
+    const paneW = winW - side;
+    const p = R.placement(winW, 900, 5, 2, paneW);
+    assert.deepEqual(R.readingLayout(paneW, { ...p, open: true }), R.readingLayout(paneW, null), `${winW} wide, sidebar ${side}`);
   }
-  // Room enough: the column does not move, and is as wide as with the window closed.
-  const wide = fit(1800, 0), closed = R.readingLayout(1800, null);
-  assert.equal(wide.r.inset, 0);
-  assert.deepEqual([wide.r.left, wide.r.width], [closed.left, closed.width]);
-  assert.equal(closed.width, columnWidth(1800));
-  // Not room enough: the column moves left (and narrows only as far as it must).
-  const mid = fit(1100, 250);
-  assert.ok(mid.r.inset > 0);
-  assert.ok(mid.r.left < R.readingLayout(850, null).left, "moved left");
-  // No room for the column's least width beside it: a drawer, as below 720 px.
-  assert.equal(fit(800, 250).p.drawer, true);
-  assert.equal(fit(700, 0).p.drawer, true);
-  // A drawer, or no window open: the chat keeps its place.
-  assert.equal(R.readingLayout(550, { ...fit(800, 250).p, open: true }).inset, 0);
-});
-
-test("the chat reads the open window: its column narrows while it is open, and is back when it closes", () => {
   const chat = new ChatView(fakeCx());
   chat.width = 850;
-  const before = chat.colWidth();
+  const before = [chat.colWidth(), R.readingLayout(850).left];
   fake.shared[R.KEY_FRAME] = R.placement(1100, 900, 5, 2, 850);
   fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_ALIVE] = Date.now();
-  assert.ok(chat.colWidth() < before, `${chat.colWidth()} < ${before}`);
-  fake.shared[R.KEY_OPEN] = null;
-  assert.equal(chat.colWidth(), before);
+  assert.deepEqual([chat.colWidth(), R.readingLayout(850).left], before);
+});
+
+test("the window's width: the room right of the column less 24 and 12, 260 to 320; less room: 320 over the chat", () => {
+  // [window, sidebar] → [width, x, drawer]
+  const want = [
+    [[1470, 0], [319, 1139, false]],   // column ends at 1115: 355 px of room
+    [[1600, 0], [320, 1268, false]],   // more room than 320: 320 at the right
+    [[1470, 250], [320, 1138, false]], // column ends at 1240: 230 px, less than 260
+    [[1100, 0], [320, 768, false]],
+    [[800, 0], [320, 468, false]],
+    [[700, 0], [320, 380, true]],      // under 720: a drawer
+  ];
+  for (const [[winW, side], [w, x, drawer]] of want) {
+    const f = fit(winW, side);
+    assert.deepEqual([f.p.width, f.p.at.x, f.p.drawer], [w, x, drawer], `${winW} wide, sidebar ${side}`);
+    if (!drawer && f.p.width < R.PANEL_W) assert.ok(f.panelX - f.colRight >= R.READ_GAP, `${winW}: gap ${f.panelX - f.colRight}`);
+  }
+  // 1351 wide: the column ends at 1055, 260 px of room left; 1350: 259.
+  assert.equal(fit(1351, 0).p.width, 260);
+  assert.equal(fit(1350, 0).p.width, 320, "1 px short of 260: 320 over the chat");
+});
+
+test("the window placed now ends above the chat input's height (chat.js keeps it)", () => {
+  fake.shared[R.KEY_INPUT_H] = 150; fake.shared[R.KEY_WIN_W] = 1470; fake.shared["flockbook.window.height"] = 900;
+  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c", items: Array.from({ length: 30 }, (_, i) => res(`i${i}`, "link", 50 - i)), at: 1 };
+  const p = R.placeNow();
+  assert.ok(p.at.y + p.height <= 900 - 150 - 12, `bottom ${p.at.y + p.height}`);
+});
+
+test("the window's bottom stays 12 px above the chat input", () => {
+  const f = fit(1470, 0, 150);
+  assert.ok(f.p.at.y + f.p.height <= 900 - 150 - 12, `bottom ${f.p.at.y + f.p.height}`);
+  const many = R.placement(1470, 900, 40, 6, 1470, 150);
+  assert.equal(many.at.y + many.height, 900 - 150 - 12, "a long list: down to the input less 12");
+  const small = R.placement(1470, 900, 1, 1, 1470, 150);
+  assert.equal(small.height, R.placement(1470, 900, 1, 1).height, "a short list: as before");
 });
 
 test("refit: only a real change reopens; it does not shrink under the pointer", () => {
