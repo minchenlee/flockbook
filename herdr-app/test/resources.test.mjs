@@ -439,3 +439,24 @@ test("row actions use icons that say what they do", () => {
     assert.match(s, /stroke-width="2\.2"/, `${name}: as thin as the other icons (1.5 of 16)`);
   }
 });
+
+test("a command: its group, a click copies it (never runs it), hover has Show in chat and Remove, not Copy", async () => {
+  const c = res("c1", "cmd", 50, { target: "cd ~/x && \\\n  make", title: "Try (one line)", detail: "cd ~/x && make" });
+  assert.deepEqual(R.openPlan(c, "t1"), { copy: "cd ~/x && \\\n  make" });
+  assert.deepEqual(R.grouped([c, res("l", "link", 1)]).map((g) => g.label), ["Commands", "Links"]);
+  const v = view([c]);
+  let el = v.render(fakeCx());
+  assert.match(textOf(byId(el, "res-group-commands")), /^Commands 1 Try \(one line\)/);
+  const copied = [], opened = [];
+  const cx = fakeCx(); cx.stop_propagation = () => {}; cx.write_to_clipboard = (s) => copied.push(s); cx.open_url = (u) => opened.push(u);
+  const n = log.exec.length;
+  byId(el, "res-c1")._h.on_click({}, cx);
+  await cx.settle();
+  assert.deepEqual(copied, ["cd ~/x && \\\n  make"]);
+  assert.deepEqual([opened, log.exec.length], [[], n], "nothing opens or runs");
+  assert.match(textOf(byId(v.render(fakeCx()), "res-c1")), /Copied/);
+  byId(el, "res-c1")._h.on_hover(true, cx);
+  el = v.render(fakeCx());
+  assert.ok(byId(el, "res-jump-c1") && byId(el, "res-remove-c1"));
+  assert.equal(byId(el, "res-copy-c1"), null, "the click copies");
+});

@@ -258,3 +258,90 @@ fn the_shared_fixture() {
         .collect();
     assert_eq!(Value::Array(got), want);
 }
+
+
+// Commands: a one-line shell command in a fenced block of an assistant reply (`cmd`).
+fn cmds(text: &str) -> Vec<(String, String)> {
+    resources::commands(text).into_iter().map(|c| (c.title, c.cmd)).collect()
+}
+fn one_cmd(text: &str) -> Option<String> {
+    let c = resources::commands(text);
+    assert!(c.len() <= 1, "{text}: {c:?}");
+    c.into_iter().next().map(|c| c.cmd)
+}
+
+#[test]
+fn a_command_block_in_each_shell_language_is_collected() {
+    for lang in ["", "sh", "bash", "zsh", "shell", "console", "Bash", "sh title=x"] {
+        let t = format!("Try:\n\n```{lang}\nnpm test\n```\n");
+        assert_eq!(one_cmd(&t).as_deref(), Some("npm test"), "{lang:?}");
+    }
+    assert_eq!(one_cmd("```\n$ cargo build --release\n```").as_deref(), Some("cargo build --release"), "the leading \"$ \" goes");
+    assert_eq!(one_cmd("~~~sh\nls -la\n~~~").as_deref(), Some("ls -la"), "a tilde fence");
+    assert_eq!(one_cmd("- step:\n\n  ```sh\n  make\n  ```").as_deref(), Some("make"), "in a list item");
+}
+
+#[test]
+fn a_command_on_several_lines_joined_by_backslashes_is_one() {
+    let t = "```bash\ncd ~/x && \\\n  ./run.sh --fast \\\n  demo/README.md\n```";
+    assert_eq!(one_cmd(t).as_deref(), Some("cd ~/x && \\\n  ./run.sh --fast \\\n  demo/README.md"), "kept as written, so it pastes as it was");
+}
+
+#[test]
+fn not_commands() {
+    for (why, t) in [
+        ("a script: two commands", "```sh\nnpm ci\nnpm test\n```"),
+        ("output after the command", "```console\n$ ls\nREADME.md\n```"),
+        ("text", "```text\nnpm test\n```"),
+        ("a log", "```log\nerror: x\n```"),
+        ("json", "```json\n{\"a\": 1}\n```"),
+        ("python", "```python\nprint(1)\n```"),
+        ("inline code", "Run \x60npm test\x60 now."),
+        ("indented code", "Run:\n\n    npm test\n"),
+        ("empty", "```sh\n\n```"),
+        ("a comment only", "```sh\n# npm test\n```"),
+        ("a backslash on the last line", "```sh\nnpm test \\\n```"),
+    ] {
+        assert!(cmds(t).is_empty(), "{why}: {:?}", cmds(t));
+    }
+    let long = format!("```sh\necho {}\n```", "a".repeat(400));
+    assert!(cmds(&long).is_empty(), "over 400 characters");
+    let fits = format!("```sh\necho {}\n```", "a".repeat(395));
+    assert_eq!(cmds(&fits).len(), 1, "400 is fine");
+}
+
+#[test]
+fn a_commands_title_is_the_text_before_it() {
+    let t = "Done.\n\n試用（一行）：\n\n```\ncd ~/x && ./run demo/README.md\n```\n\nThen:\n\n```sh\nmake check\n```";
+    assert_eq!(cmds(t), vec![("試用（一行）".to_string(), "cd ~/x && ./run demo/README.md".to_string()), ("Then".to_string(), "make check".to_string())]);
+    assert_eq!(cmds("Build it with this:\n```sh\nmake\n```")[0].0, "Build it with this", "a block right after the line");
+    assert_eq!(cmds("First line.\nSecond line, the one that says it:\n\n```sh\nmake\n```")[0].0, "Second line, the one that says it", "the paragraph's last line");
+    let long = format!("{}:\n\n```sh\nmake\n```", "word ".repeat(40));
+    let title = &cmds(&long)[0].0;
+    assert!(title.chars().count() <= 80 && title.ends_with('…'), "{title}");
+    assert_eq!(cmds("```sh\nnpm run build -- --mode production --watch\n```")[0].0, "npm run build -- --mode production --watch", "no text before it: the command");
+    assert_eq!(cmds("# Heading\n\n- a list\n\n```sh\nmake\n```")[0].0, "make", "a list before it is not its title");
+    let head = cmds(&format!("```sh\nnpm {}\n```", "x".repeat(100)))[0].0.clone();
+    assert!(head.starts_with("npm xxx") && head.chars().count() <= 60 && head.ends_with('…'), "{head}");
+}
+
+#[test]
+fn commands_are_collected_from_replies_once_per_command() {
+    let lines = [
+        user("u1", 0, "```sh\nrm -rf /tmp/pasted\n```"),
+        say("a1", 1, "Run:\n\n```sh\nnpm test\n```\n\nSee https://x.com/a"),
+        say("a2", 5, "Again:\n\n```bash\n  npm test  \n```"),
+    ];
+    let rs = resources::collect(&tail::items(&lines), None);
+    let c: Vec<_> = rs.iter().filter(|r| r.kind == "cmd").collect();
+    assert_eq!(c.len(), 1, "the same command once; user text is not collected: {rs:?}");
+    assert_eq!((c[0].target.as_str(), c[0].title.as_str(), c[0].detail.as_str(), c[0].mentions), ("npm test", "Again", "npm test", 2));
+    assert_eq!((c[0].row.as_str(), c[0].last_ts), ("a2-0", Some(ms(5))));
+    assert_eq!(c[0].exists, None);
+    assert_eq!(c[0].id, modfeedkit::protocol::fnv1a("cmd:npm test"), "the hash of its key, as the other kinds");
+    let json = serde_json::to_value(c[0]).unwrap();
+    assert_eq!(json["kind"], "cmd");
+    // A command on several lines: the detail is one line.
+    let rs = resources::collect(&tail::items(&[say("a1", 1, "```sh\nmake \\\n  all\n```")]), None);
+    assert_eq!(rs[0].detail, "make all");
+}
