@@ -396,6 +396,8 @@ test("the open window follows the item count and the shown agent: reopened in pl
   assert.deepEqual([spec.props.view, spec.props.refit, spec.props.focus, spec.props.seenAtOpen], ["resources", true, false, 10]);
   assert.deepEqual(log.closed ?? [], [], "replaced by the same key, not closed first");
   assert.equal(fake.shared[R.KEY_FRAME].height, spec.height);
+  v.close(fakeCx());   // the host closes the replaced one
+  assert.equal(fake.shared[R.KEY_OPEN], "o1", "the new window still counts as open");
   // Another agent in the tab, with nothing listed yet: the small height.
   fake.agents = [agent("t2", "idle", { tab: "tb-t1" })];
   v.tick(fakeCx());
