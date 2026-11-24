@@ -38,6 +38,7 @@ export const PANEL_W = 320;
 export const READ_GAP = 24;           // at least this between the window and the chat's column and input
 export const NARROW_W = 720;          // below it: a drawer down the right side
 const GAP = 12, TOP = 60;             // under the 56 px bar
+export const INPUT_GUESS = 160;       // the chat input's height before chat.js has measured it (one line, status row: about 150)
 const MIN_PANEL = 260;                // less room right of the column: PANEL_W wide over the chat
 export const KEY_INPUT_H = "flockbook.input.height"; // the chat input's height (chat.js), for the window's bottom
 const INPUT_W = 800, INPUT_SIDE = 16; // the chat input: max_w(800) inside px(16) (composer.js)
@@ -208,16 +209,17 @@ export async function pollResources(cx, force = false, full = false) {
 // Where the window goes: right of the chat's reading column, or a drawer down the right side of a narrow window.
 // The chat never moves for it (owner 11-25): the window takes the room right of the column less READ_GAP and
 // GAP, MIN_PANEL to PANEL_W wide; with less room it is PANEL_W wide over the chat. `paneW`: the chat's width (the
-// window less the sidebar). `inputH`: the chat input's height (0: not known); the window ends GAP above it.
+// window less the sidebar). `inputH`: the chat input's height (0: not measured yet, INPUT_GUESS); the window, a drawer
+// too, ends GAP above it.
 export function placement(winW, winH, count = 0, groups = 0, paneW = winW, inputH = 0) {
   const h = winH > 0 ? winH : 800;
   const w = winW > 0 ? winW : 1200;
   const pane = paneW > 0 ? Math.min(paneW, w) : w;
-  if (w < NARROW_W) return { at: { x: Math.max(0, w - PANEL_W), y: 0 }, width: PANEL_W, height: h, drawer: true, right: 0 };
+  const bottom = h - (inputH > 0 ? inputH : INPUT_GUESS) - GAP;
+  if (w < NARROW_W) return { at: { x: Math.max(0, w - PANEL_W), y: 0 }, width: PANEL_W, height: Math.max(80, bottom), drawer: true, right: 0 };
   const r = readingLayout(pane, null);
   const room = w - (w - pane + r.left + r.width) - READ_GAP - GAP;
   const width = room >= MIN_PANEL ? Math.min(PANEL_W, room) : PANEL_W;
-  const bottom = inputH > 0 ? h - inputH - GAP : h - 12;
   const most = Math.max(80, bottom - TOP);
   const want = 46 + 34 + Math.max(1, count) * 50 + groups * 30 + 16;
   const height = Math.min(most, Math.max(180, Math.min(h - 72, count ? want : 200)));

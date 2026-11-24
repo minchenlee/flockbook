@@ -425,7 +425,7 @@ export class ChatView {
         const card = this.cards.view(this.address, t, "chat-card");
         if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
         // Its height: the Resources window ends above it (resources.js placement).
-        return el.child(div().w_full().on_mouse_down("left", stop).on_size_change(noteInputHeight).child(this.composer.render(currentAgent(), t)));
+        return el.child(div().id("composer-size").w_full().on_mouse_down("left", stop).on_size_change(noteInputHeight).child(this.composer.render(currentAgent(), t)));
       })
   }
 }

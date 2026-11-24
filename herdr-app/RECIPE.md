@@ -125,10 +125,11 @@ right 1) counts the resources newer than you last saw. ⌘⇧R or the button ope
 window 12 px from the right edge under the bar (y 60). The chat never moves for it: its reading column, input and
 cards keep their place and width. The window takes the room right of the reading column less 24 px (left) and
 12 px (right), 260 to 320 px wide; with less than 260 px there, it is 320 px wide over the chat. It is as tall as
-its list, up to the window's height − 72, and ends 12 px above the chat input at most. It is opened again (the new
+its list, up to the window's height − 72, and ends 12 px above the chat input at most (the input's measured height;
+before it is measured, 160 px). It is opened again (the new
 one first, then the old one closed) when its list, the agent or the window's size changes it by 8 px or more
 (smaller: not while the pointer is on it). It cannot be dragged. Under 720 px, a drawer down the right side,
-full height. A click beside it does not close it;
+from the top to 12 px above the chat input. A click beside it does not close it;
 Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
 **Docs**, **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each with its count; one row per
 resource: a 22 px icon square, the title (13 px 550), the time since its last mention ("4m"), and a

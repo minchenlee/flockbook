@@ -175,14 +175,14 @@ test("a helper that fails to answer opens no file", async () => {
   assert.deepEqual(ran, []);
 });
 
-test("the window: under the bar's right edge, or a full-height drawer in a narrow window", () => {
+test("the window: under the bar's right edge, or a drawer down to the input in a narrow window", () => {
   const wide = R.placement(1600, 900, 3, 2);
   assert.deepEqual(wide.at, { x: 1600 - 320 - 12, y: 60 });
   assert.equal(wide.width, 320);
   assert.ok(wide.height <= 900 - 72 && wide.height >= 180);
-  assert.equal(R.placement(1600, 900, 500, 4).height, 900 - 72, "many: as tall as the window allows");
+  assert.equal(R.placement(1600, 900, 500, 4).height, 900 - R.INPUT_GUESS - 12 - 60, "many: down to the input (not measured yet: INPUT_GUESS) less 12");
   const narrow = R.placement(700, 900, 3, 2);
-  assert.deepEqual([narrow.at, narrow.height, narrow.drawer], [{ x: 380, y: 0 }, 900, true]);
+  assert.deepEqual([narrow.at, narrow.height, narrow.drawer], [{ x: 380, y: 0 }, 900 - R.INPUT_GUESS - 12, true]);
 });
 
 test("⌘⇧R toggles the window; one left from before a restart does not count as open", () => {
@@ -503,4 +503,73 @@ test("a command: its group, a click copies it (never runs it), hover has Show in
   el = v.render(fakeCx());
   assert.ok(byId(el, "res-jump-c1") && byId(el, "res-remove-c1"));
   assert.equal(byId(el, "res-copy-c1"), null, "the click copies");
+});
+
+
+// The chat as the person sees it, with one row: the tree ChatView renders.
+async function chatTree() {
+  fake.exec = (_cmd, args) => args[0] === "feed"
+    ? jl(header("feed"), { type: "log", agent: "claude", path: "/l.jsonl", start: 0, size: 1, cursor: "c" }, { type: "splice", at: 0, count: 1 }, { type: "row", id: "u1", k: "user", text: "hi" }, end())
+    : jl(header(args[0]), end());
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  return { v, cx, root: v.render(cx) };
+}
+// The size props (padding, height, gap, border) of every element under `el`, by path.
+const SIZE = ["p", "px", "py", "pt", "pb", "pl", "pr", "m", "mx", "my", "mt", "mb", "h", "min_h", "max_h", "gap", "border", "w", "max_w", "size"];
+function geo(el, path = []) {
+  if (!el || typeof el !== "object") return [];
+  const here = [...path, el._a?.id ?? el.tag];
+  const own = SIZE.filter((k) => k in (el._a ?? {})).map((k) => `${k}=${JSON.stringify(el._a[k])}`);
+  return [...(own.length ? [`${here.join("/")} ${own.join(" ")}`] : []), ...(el.kids ?? []).flatMap((k) => geo(k, here))];
+}
+
+test("the drawer and the window ends 12 px above the chat input; not measured yet: INPUT_GUESS (Codex R1 High)", () => {
+  // 700 x 900, a drawer, the input 150 high: its bottom at 738 at most, not 900.
+  const d = R.placement(700, 900, 40, 6, 700, 150);
+  assert.equal(d.drawer, true);
+  assert.equal(d.at.y + d.height, 900 - 150 - 12);
+  // 800 x 900, a long list, the input not measured yet: not down to 888.
+  const w = R.placement(800, 900, 40, 6, 800, 0);
+  assert.equal(w.at.y + w.height, 900 - R.INPUT_GUESS - 12);
+  const dn = R.placement(700, 900, 40, 6, 700, 0);
+  assert.equal(dn.at.y + dn.height, 900 - R.INPUT_GUESS - 12);
+  assert.ok(R.INPUT_GUESS >= 150, "the guess is not below the one-line input's height");
+});
+
+test("the input's height measured on the rendered chat moves the window's bottom, in a drawer too (Codex R1 High)", async () => {
+  const { root, cx } = await chatTree();
+  const wrap = byId(root, "composer-size");
+  assert.ok(wrap?._h.on_size_change, "the measured element has the stable id Herdr needs for on_size_change");
+  assert.ok(byId(wrap, "composer"), "it holds the chat input");
+  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c", items: Array.from({ length: 40 }, (_, i) => res(`i${i}`, "link", 50 - i)), at: 1 };
+  fake.shared["flockbook.window.height"] = 900;
+  for (const [winW, inputH] of [[700, 150], [700, 270], [800, 150], [1470, 270]]) {
+    fake.shared[R.KEY_WIN_W] = winW;
+    wrap._h.on_size_change({ width: winW, height: inputH }, cx);
+    const p = R.placeNow();
+    assert.equal(p.at.y + p.height, 900 - inputH - 12, `${winW} wide, input ${inputH}: bottom ${p.at.y + p.height}`);
+  }
+});
+
+test("the window open or closed: the rendered chat is the same, and the input keeps its size (Codex R1 High)", async () => {
+  const closed = geo((await chatTree()).root);
+  fake.shared[R.KEY_WIN_W] = 1100; fake.shared["flockbook.window.height"] = 900; fake.shared[R.KEY_INPUT_H] = 150;
+  fake.shared[R.KEY_FRAME] = R.placement(1100, 900, 5, 2, 1100, 150);
+  fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_ALIVE] = Date.now();
+  assert.equal(R.openFrame() !== null, true, "the window counts as open");
+  assert.deepEqual(geo((await chatTree()).root), closed, "nothing in the chat moves or grows for the window");
+  // The input's own sizes: INPUT_GUESS is about this input. A change here (more padding, a taller row) must
+  // measure the input again and check INPUT_GUESS.
+  assert.deepEqual(geo(byId((await chatTree()).root, "composer-size")), [
+    "composer-size/composer px=16 pt=6 pb=14 gap=6",
+    "composer-size/composer/tags gap=5 max_w=800",
+    "composer-size/composer/tags/h px=8 h=22 gap=4 border=1",
+    "composer-size/composer/tags/h/div max_w=220",
+    "composer-size/composer/box px=12 pt=10 pb=8 gap=6 border=1 max_w=800",
+    "composer-size/composer/box/h gap=8",
+    "composer-size/composer/box/h/attach size=28",
+    "composer-size/composer/box/h/attach/svg size=15",
+    "composer-size/composer/box/h/send size=28",
+    "composer-size/composer/box/h/send/svg size=14",
+  ]);
 });
