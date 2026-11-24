@@ -155,6 +155,14 @@ fn feed_splices() {
     let mut o4 = JsonLines::new();
     feed::run(Some(&f), "claude", Some("1.bad.0.0.x"), s3.as_ref(), false, &mut o4, &now(), &Utc).unwrap();
     assert!(o4.lines.iter().any(|l| l.contains(r#""at":0"#) && l.contains(r#""type":"splice""#)), "an unknown cursor gets everything again");
+    // A "1." cursor (rows with the old Codex ids) for the same state and the same size: never unchanged, all rows again.
+    let c3 = s3.as_ref().unwrap().cursor();
+    assert!(c3.starts_with("2."), "{c3}");
+    let old = c3.replacen("2.", "1.", 1);
+    let mut o6 = JsonLines::new();
+    feed::run(Some(&f), "claude", Some(&old), s3.as_ref(), false, &mut o6, &now(), &Utc).unwrap();
+    assert!(!o6.lines.iter().any(|l| l.contains(r#""type":"unchanged""#)), "a 1. cursor is not unchanged: {:?}", o6.lines);
+    assert!(o6.lines.iter().any(|l| l.contains(r#""at":0"#) && l.contains(r#""type":"splice""#)), "a 1. cursor gets everything again");
     let mut o5 = JsonLines::new();
     feed::run(None, "codex", None, None, false, &mut o5, &now(), &Utc).unwrap();
     assert!(o5.lines[0].contains(r#""path":null"#), "no log, path null");

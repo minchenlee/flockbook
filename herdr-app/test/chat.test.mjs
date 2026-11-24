@@ -451,3 +451,25 @@ test("links in a reply: drawn as Markdown links; the row's height, Copy message 
   lastList._h.on_item_secondary_click("a1", { button: "right", position: { x: 0, y: 10 }, local_position: { x: 50, y: 10 } }, cx);
   assert.equal(log.overlays.at(-1).props.items.at(-1).args.text, text, "Copy message copies the text as written");
 });
+
+
+test("a feed with a new cursor version drops the rows read with the old ids; Show in chat then finds the row (Codex R2 P1)", async () => {
+  const { KEY_JUMP } = await import("../mods/flockbook/resources.js");
+  const chat = new ChatView(fakeCx());
+  const f = chat.feed();
+  const codex = (cursor, start) => ({ ...logLine(cursor), agent: "codex", start });
+  // Before the update: the tail and an older page, Codex ids numbered from each range's start.
+  applyFeed(f, parseAnswer(jl(header, codex("1.9c1d.5000.9000.aa", 5000), { type: "splice", at: 0, count: 2 }, user("cx1", "old tail"), asst("cx2", "x"), end).stdout));
+  applyOlder(f, parseAnswer(jl(header, { type: "older", path: "/logs/s.jsonl", start: 2000, count: 2 }, user("cx1-older", "a"), asst("cx3", "b"), end).stdout), 5000);
+  assert.equal(f.rows.length, 4);
+  // After it: the same log, the same start, a "2." cursor and offset ids. The older page had the old ids: gone.
+  applyFeed(f, parseAnswer(jl(header, codex("2.9c1d.5000.9000.bb", 5000), { type: "splice", at: 0, count: 2 }, user("cx@5000", "old tail"), asst("cx@6100", "x"), end).stdout));
+  assert.deepEqual(f.rows.map((r) => r.id), ["cx@5000", "cx@6100"]);
+  assert.equal(olderFrom(f), 5000, "older rows are read again from the tail's start, with the new ids");
+  // Resources names the row by its offset id: the chat scrolls to it.
+  calls.length = 0;
+  fake.shared[KEY_JUMP] = { terminal: "t1", row: "cx@6100", at: 7 };
+  chat.screen = "chat"; fake.shared["flockbook.screen"] = "chat";
+  chat.tick(fakeCx());
+  assert.deepEqual(calls.filter((c) => c[0] === "scroll_to_item"), [["scroll_to_item", 1, "top"]]);
+});

@@ -232,7 +232,7 @@ into PNG). Pastes older than a day in that folder are removed; other files never
 ### `log` (`feed`)
 
 ```json
-{"agent":"claude","cursor":"1.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
+{"agent":"claude","cursor":"2.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
 ```
 
 | Field | Meaning |
@@ -556,7 +556,7 @@ one reply, the later target first). Read only.
   (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).
 
 ```json
-{"type":"end","ok":true,"ms":4,"cursor":"r1.af63…ce1.48213.1793670020000","full":false}
+{"type":"end","ok":true,"ms":4,"cursor":"r2.af63…ce1.48213.1793670020000","full":false}
 ```
 
 ### `openable` (`open-check`)
