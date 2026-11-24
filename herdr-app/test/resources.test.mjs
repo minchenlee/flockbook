@@ -394,7 +394,7 @@ test("the open window follows the item count and the shown agent: reopened in pl
   assert.equal(spec.key, "flockbook.resources");
   assert.ok(spec.height > R.placement(1400, 900, 1, 1).height, "taller");
   assert.deepEqual([spec.props.view, spec.props.refit, spec.props.focus, spec.props.seenAtOpen], ["resources", true, false, 10]);
-  assert.equal(log.closed, undefined, "replaced by the same key, not closed first");
+  assert.deepEqual(log.closed ?? [], [], "replaced by the same key, not closed first");
   assert.equal(fake.shared[R.KEY_FRAME].height, spec.height);
   // Another agent in the tab, with nothing listed yet: the small height.
   fake.agents = [agent("t2", "idle", { tab: "tb-t1" })];

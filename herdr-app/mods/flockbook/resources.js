@@ -6,6 +6,7 @@
 //   flockbook.res.data        { terminal, cursor, items, at }: the last answer, for the shown agent only
 //   flockbook.res.on          the helper has the command (older helpers: no button)
 //   flockbook.res.open        the open window's overlay id; flockbook.res.alive: when it last drew (ms)
+//   flockbook.res.frame       where it was opened (placement()): the chat makes room for it
 //   flockbook.res.scope       "agent" (P1 has only "This agent")
 //   flockbook.res.seen.<t>    the newest last_ts seen in the open window; set to the newest one the first
 //                             time an agent is seen, so an old conversation does not light the badge
@@ -17,6 +18,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, props, shared, setShared, openOverlay, closeOverlay, exec, window } from "herdr";
 import { currentAgent, machineOf, icon, showScreen, sidebarShown } from "./state.js";
 import * as sidecar from "./sidecar.js";
+import { READ_W, GUTTER, columnWidth } from "./estimate.js";
 
 export const KEY_DATA = "flockbook.res.data";
 export const KEY_ON = "flockbook.res.on";
@@ -32,9 +34,14 @@ export const removedKey = (t) => `flockbook.res.removed.${t}`;
 export const term = (address) => String(address ?? "").replace(/^hc:/, "");
 
 export const RES_MS = 5000;           // one ask at most this often, over every copy
-export const PANEL_W = 340;
+export const PANEL_W = 320;
+export const READ_GAP = 24;           // at least this between the window and the chat's column and input
 export const NARROW_W = 720;          // below it: a drawer down the right side
 const GAP = 12, TOP = 60;             // under the 56 px bar
+const MIN_COL = 240;                  // the reading column's least width (estimate.js columnWidth)
+const INPUT_W = 800, INPUT_SIDE = 16; // the chat input: max_w(800) inside px(16) (composer.js)
+const REFIT_PX = 8;                   // a smaller change in height does not reopen the window
+export const KEY_FRAME = "flockbook.res.frame";
 const ALIVE_EVERY = 2000;             // the open window says it is there this often
 const ALIVE_MS = 6000;                // a window that has not said so for this long is gone (a restart)
 
@@ -44,6 +51,8 @@ export const GROUPS = [
   { id: "github", label: "PRs & CI", kinds: ["pr", "issue", "ci"] },
   { id: "links", label: "Links", kinds: ["link", "local"] },
 ];
+// The row actions' icons (Lucide, ISC: RECIPE.md "Art").
+export const ACT_ICONS = { jump: "message", copy: "copy", remove: "eye-off" };
 const ICON = { doc: "doc", artifact: "grid", pr: "branch", issue: "branch", ci: "refresh", local: "terminal", link: "link" };
 export const OPENS = ["md", "html", "htm", "pdf", "png", "svg"];
 
@@ -191,13 +200,70 @@ export async function pollResources(cx, force = false, full = false) {
   } finally { busy = false; }
 }
 
+// The least right inset so a box at most `maxW` wide, centered between `side` and the pane's right edge less
+// the inset and `side`, ends at `right` px from the pane's right edge or before.
+function insetFor(paneW, right, maxW, side) {
+  const x = Math.max(0, Math.ceil(paneW + maxW - 2 * (paneW - right)));
+  return paneW - 2 * side - x >= maxW ? x : Math.max(0, right - side);
+}
+// How far the chat moves its content left from the pane's right edge for a window `right` px wide there.
+const insetBeside = (paneW, right) => Math.max(insetFor(paneW, right, READ_W, GUTTER), insetFor(paneW, right, INPUT_W, INPUT_SIDE));
+
 // Where the window goes: under the bar's right edge, or a drawer down the right side of a narrow window.
-export function placement(winW, winH, count = 0, groups = 0) {
+// `paneW`: the chat's width (the window less the sidebar). A drawer too when the chat has no room for its
+// column's least width beside the window. `right`: px of the chat's right side the window covers (0: a drawer).
+export function placement(winW, winH, count = 0, groups = 0, paneW = winW) {
   const h = winH > 0 ? winH : 800;
   const w = winW > 0 ? winW : 1200;
-  if (w < NARROW_W) return { at: { x: Math.max(0, w - PANEL_W), y: 0 }, width: PANEL_W, height: h, drawer: true };
+  const pane = paneW > 0 ? paneW : w;
+  const right = PANEL_W + GAP;
+  const tight = pane - insetBeside(pane, right + READ_GAP) - 2 * GUTTER < MIN_COL;
+  if (w < NARROW_W || tight) return { at: { x: Math.max(0, w - PANEL_W), y: 0 }, width: PANEL_W, height: h, drawer: true, right: 0 };
   const want = 46 + 34 + Math.max(1, count) * 50 + groups * 30 + 16;
-  return { at: { x: Math.max(0, w - PANEL_W - GAP), y: TOP }, width: PANEL_W, height: Math.max(180, Math.min(h - 72, count ? want : 200)), drawer: false };
+  return { at: { x: Math.max(0, w - right), y: TOP }, width: PANEL_W, height: Math.max(180, Math.min(h - 72, count ? want : 200)), drawer: false, right };
+}
+
+// The open window's frame, else null.
+export const openFrame = () => (panelOpen() ? shared(KEY_FRAME) ?? null : null);
+
+// The chat's reading column beside the window (`frame`, from placement(); null: none open): `left` and `width` of
+// the column, `inset` px the content keeps free on the right, `composerRight` where the input ends (pane px).
+// Room enough: as with no window. Else the column moves left, and narrows only as far as it must.
+export function readingLayout(paneW, frame = openFrame()) {
+  const w = paneW || 800;
+  const right = frame && !frame.drawer && frame.right > 0 ? frame.right + READ_GAP : 0;
+  const inset = right ? insetBeside(w, right) : 0;
+  const width = columnWidth(w - inset);
+  const a = w - inset - 2 * INPUT_SIDE;
+  return { inset, left: Math.max(GUTTER, Math.floor((w - inset - width) / 2)), width, composerRight: INPUT_SIDE + (a + Math.min(INPUT_W, a)) / 2 };
+}
+
+// Whether the open window (`prev`) must be opened again at `next`: another place or width, or a height
+// REFIT_PX or more off. A smaller one waits while the pointer is on it (a removed row would move the rest).
+export function needsRefit(prev, next, inside = false) {
+  if (!prev || !next) return false;
+  if (prev.drawer !== next.drawer || prev.at?.x !== next.at?.x || prev.at?.y !== next.at?.y || prev.width !== next.width) return true;
+  const d = (next.height ?? 0) - (prev.height ?? 0);
+  if (Math.abs(d) < REFIT_PX) return false;
+  return d > 0 || !inside;
+}
+
+// Where the window goes now: the shown agent's items, the window's size.
+export function placeNow() {
+  const address = currentAgent()?.address ?? null;
+  const d = dataFor(address);
+  const items = d ? visible(d.items, shared(removedKey(term(address)))) : [];
+  const paneW = shared(KEY_WIN_W) ?? 0;
+  const winW = paneW + (sidebarShown() ? shared(KEY_SIDE_W) ?? 0 : 0);
+  return placement(winW, shared("flockbook.window.height") ?? 0, items.length, grouped(items).length, paneW);
+}
+
+// Opens the window at `p`. The same key: one open already is replaced, in its place.
+function openPanel(p, extra = {}) {
+  setShared(KEY_ALIVE, Date.now());
+  setShared(KEY_FRAME, p);
+  setShared(KEY_OPEN, openOverlay({ mod: "flockbook", props: { view: "resources", drawer: p.drawer, ...extra }, kind: "window", frame: "none",
+    key: "flockbook.resources", at: p.at, width: p.width, height: p.height }));
 }
 
 export const panelOpen = () => Boolean(shared(KEY_OPEN)) && Date.now() - (shared(KEY_ALIVE) ?? 0) < ALIVE_MS;
@@ -207,29 +273,25 @@ export function toggleResources() {
   const open = shared(KEY_OPEN);
   if (open && panelOpen()) { setShared(KEY_OPEN, null); closeOverlay(open); return; }
   if (open) closeOverlay(open);   // left from before a restart
-  const address = currentAgent()?.address ?? null;
-  const d = dataFor(address);
-  const items = d ? visible(d.items, shared(removedKey(term(address)))) : [];
-  const winW = (shared(KEY_WIN_W) ?? 0) + (sidebarShown() ? shared(KEY_SIDE_W) ?? 0 : 0);
-  const p = placement(winW, shared("flockbook.window.height") ?? 0, items.length, grouped(items).length);
   setShared(KEY_SCOPE, shared(KEY_SCOPE) ?? "agent");
-  setShared(KEY_ALIVE, Date.now());
-  setShared(KEY_OPEN, openOverlay({ mod: "flockbook", props: { view: "resources", drawer: p.drawer }, kind: "window", frame: "none",
-    key: "flockbook.resources", at: p.at, width: p.width, height: p.height }));
+  openPanel(placeNow());
 }
 
 export class ResourcesView {
   constructor(cx) {
     this.h = cx?.focus_handle?.() ?? null;
     this.address = currentAgent()?.address ?? null;
+    // Opened again to fit (refit()): the dots and the keyboard as they were, no full read.
+    const p = props() ?? {};
     // The "new" dots: newer than what was seen when the window opened.
-    this.seenAtOpen = this.address ? shared(seenKey(term(this.address))) ?? null : null;
+    this.seenAtOpen = p.refit ? p.seenAtOpen ?? null : this.address ? shared(seenKey(term(this.address))) ?? null : null;
+    this.inside = false; // the pointer is on the window
     this.note = null;   // why the last click did not open
     this.hover = null;  // the row the pointer is on: its actions show
-    cx?.spawn?.((cx) => pollResources(cx, true, true));
+    cx?.spawn?.((cx) => (p.refit ? pollResources(cx) : pollResources(cx, true, true)));
     cx?.timer?.every?.(1000, (cx) => this.tick(cx));
     // A window does not take the keyboard when it opens: focus it, after the first frame, so Esc reaches it.
-    cx?.timer?.after?.(16, () => this.h?.focus?.());
+    if (!p.refit || p.focus) cx?.timer?.after?.(16, () => this.h?.focus?.());
   }
 
   tick(cx) {
@@ -239,6 +301,16 @@ export class ResourcesView {
     if (a !== this.address) { this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; cx?.notify?.(); }
     cx?.spawn?.((cx) => pollResources(cx));
     this.markSeen();
+    this.refit();
+  }
+
+  // The item count, the shown agent or the window's size changed: open it again at its new size (no way to
+  // resize an open window). At most once a tick.
+  refit() {
+    if (!panelOpen()) return;
+    const p = placeNow();
+    if (!needsRefit(shared(KEY_FRAME), p, this.inside || this.hover !== null)) return;
+    openPanel(p, { refit: true, focus: Boolean(this.h?.is_focused?.()), seenAtOpen: this.seenAtOpen });
   }
 
   // Shown is seen: the badge goes.
@@ -300,9 +372,9 @@ export class ResourcesView {
           .child(div().truncate().text_size(11.5).text_color(t.muted).when(it.kind === "doc", (el) => el.font_family("mono")).child(sub || it.target))
           .when(this.note?.id === it.id, (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.note.text))))
         .when(this.hover === it.id, (el) => el.child(h_flex().id(`res-acts-${it.id}`).gap(2).flex_none()
-          .child(iconBtn(`res-jump-${it.id}`, "arrow-down", "Show in chat", () => jumpTo(it, tk)))
-          .child(iconBtn(`res-copy-${it.id}`, "doc", "Copy", (_e, cx) => cx?.write_to_clipboard?.(it.target)))
-          .child(iconBtn(`res-remove-${it.id}`, "close", "Remove from list", (_e, cx) => { removeItem(it, tk); cx?.notify?.(); }))));
+          .child(iconBtn(`res-jump-${it.id}`, ACT_ICONS.jump, "Show in chat", () => jumpTo(it, tk)))
+          .child(iconBtn(`res-copy-${it.id}`, ACT_ICONS.copy, "Copy", (_e, cx) => cx?.write_to_clipboard?.(it.target)))
+          .child(iconBtn(`res-remove-${it.id}`, ACT_ICONS.remove, "Remove from list", (_e, cx) => { removeItem(it, tk); cx?.notify?.(); }))));
     };
 
     const body = items.length
@@ -322,6 +394,7 @@ export class ResourcesView {
 
     const root = v_flex().id("res-root").size_full().bg(t.background).border(1).border_color(t.border).shadow_lg()
       .when(props()?.drawer !== true, (el) => el.rounded(14))
+      .on_hover((inside) => { this.inside = Boolean(inside); })
       // A press it does not stop drags the window.
       .on_mouse_down("left", (_e, cx) => { cx?.stop_propagation?.(); this.h?.focus?.(); })
       .on_key_down((e, cx) => { if (e?.key === "escape") { cx?.stop_propagation?.(); this.closeSelf(); } });
