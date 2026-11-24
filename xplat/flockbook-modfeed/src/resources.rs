@@ -745,7 +745,12 @@ pub struct Answer {
     pub full: bool,
 }
 
-/// The resources in the last 2 MB of the log (`tail::BYTES`, as the chat). The cursor is
+/// The most of a log `resources` reads: a grown log is read and parsed again each time (about 3 ms a MB), so a
+/// longer one is read from its last 64 MB.
+pub const BYTES: u64 = 64 * 1024 * 1024;
+
+/// The resources in the whole log up to `BYTES`, else in its last `BYTES` (an early report path is still listed in a
+/// long session; the chat shows only the last 2 MB first). The cursor is
 /// "r1.<hash of the path>.<size>.<newest last_ts>". With a cursor of this log: the same size, no items; a bigger
 /// size, only the items mentioned at or after its newest one (a run of tool calls has its first call's time, so a
 /// later call in it can have that same time; sent again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
@@ -760,7 +765,7 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
             }
         }
     }
-    let range = crate::tail::read(log, None, crate::tail::BYTES)?;
+    let range = crate::tail::read(log, None, BYTES)?;
     let all = collect(&crate::tail::items(&range.lines), home);
     let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
     let cursor = format!("r1.{hash}.{}.{newest}", range.size);

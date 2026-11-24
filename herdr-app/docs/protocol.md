@@ -549,7 +549,8 @@ one reply, the later target first). Read only.
 - `exists`: docs only; the path's real file (links followed) is a file now, and the real file's extension is a doc kind
   (`md`, `html`, `htm`, `pdf`, `png`, `svg`). A `preview.md` link to `notes.txt` or to a folder: `false`. It can be old
   by the time the person clicks: the mod asks `open-check` before it opens a file.
-- Only the last 2 MB of the log are read (as `feed` shows first): older mentions are not counted.
+- The whole log is read, up to 64 MB; a longer log, its last 64 MB (older mentions are not counted). `row` can be
+  older than the rows the chat has loaded: then "Show in chat" does nothing.
 - `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,
   unchanged, gives no `res`; the same log, grown, gives only the resources mentioned after the cursor's newest one
   (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).

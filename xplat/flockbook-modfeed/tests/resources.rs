@@ -206,6 +206,35 @@ fn since_a_cursor_only_what_is_newer() {
 }
 
 #[test]
+fn the_whole_log_is_read_not_only_its_last_2_mb() {
+    // A long session: what was pointed to early is still listed, also after a cursor (hg-res-older-log).
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    let mut lines = vec![
+        say("a1", 0, "Report: https://early.example.com/report"),
+        tool("a2", 1, "c1", "Artifact", json!({"action": "publish", "title": "Early page"})),
+        result("r2", 2, "c1", "Published https://claude.ai/code/artifact/early-1", false),
+    ];
+    let filler = "x".repeat(1000);
+    for i in 0..3000 {
+        lines.push(user(&format!("u{i}"), 10, &filler));
+    }
+    lines.push(say("a3", 20, "Again https://early.example.com/report"));
+    write(&log, &lines, false);
+    assert!(std::fs::metadata(&log).unwrap().len() > tail::BYTES + 512 * 1024);
+    assert!(std::fs::metadata(&log).unwrap().len() < resources::BYTES);
+    let first = resources::answer(&log, None, None).unwrap();
+    let get = |rs: &[resources::Resource], t: &str| rs.iter().find(|r| r.target == t).map(|r| r.mentions);
+    assert_eq!(get(&first.items, "https://early.example.com/report"), Some(2), "{:?}", first.items);
+    assert!(first.items.iter().any(|r| r.target.ends_with("/early-1")), "{:?}", first.items);
+
+    write(&log, &[say("a4", 30, "Once more https://early.example.com/report")], true);
+    let more = resources::answer(&log, Some(&first.cursor), None).unwrap();
+    assert!(!more.full);
+    assert_eq!(get(&more.items, "https://early.example.com/report"), Some(3), "mentions counted over the whole log: {:?}", more.items);
+}
+
+#[test]
 fn a_github_url_with_an_odd_path_is_a_link_not_a_panic() {
     let rs = resources::collect(&tail::items(&[say("a1", 0, "see https://github.com?x=/o/r/pull/1 and https://github.com/o/r/pull/2")]), None);
     assert!(rs.iter().all(|r| r.kind == "link" || r.target == "https://github.com/o/r/pull/2"), "{rs:?}");
