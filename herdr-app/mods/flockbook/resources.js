@@ -1,4 +1,4 @@
-// Resources: the docs, artifacts, PRs and links the shown agent pointed you to in its replies (the
+// Resources: the docs, artifacts, PRs, commands and links the shown agent pointed you to in its replies (the
 // helper's `resources` command, docs/protocol.md "res"). A window under the bar's right edge (⌘⇧R or
 // the bar's button); the button's badge counts the ones newer than you last saw.
 //
@@ -49,11 +49,12 @@ export const GROUPS = [
   { id: "docs", label: "Docs", kinds: ["doc"] },
   { id: "artifacts", label: "Artifacts", kinds: ["artifact"] },
   { id: "github", label: "PRs & CI", kinds: ["pr", "issue", "ci"] },
+  { id: "commands", label: "Commands", kinds: ["cmd"] },
   { id: "links", label: "Links", kinds: ["link", "local"] },
 ];
 // The row actions' icons (Lucide, ISC: RECIPE.md "Art").
 export const ACT_ICONS = { jump: "message", copy: "copy", remove: "eye-off" };
-const ICON = { doc: "doc", artifact: "grid", pr: "branch", issue: "branch", ci: "refresh", local: "terminal", link: "link" };
+const ICON = { doc: "doc", artifact: "grid", pr: "branch", issue: "branch", ci: "refresh", local: "terminal", link: "link", cmd: "terminal" };
 export const OPENS = ["md", "html", "htm", "pdf", "png", "svg"];
 
 const byNewest = (a, b) => (b.last_ts ?? -Infinity) - (a.last_ts ?? -Infinity);
@@ -113,11 +114,13 @@ export function ago(ms, now = Date.now()) {
   return `${Math.floor(s / 86400)}d`;
 }
 
-// What a click does: { url } for http(s); { cmd, args } for a file this computer may open (a doc of the
+// What a click does: { copy } for a command (copied, never run); { url } for http(s); { cmd, args } for a file this computer may open (a doc of the
 // kinds above, listed as there, an absolute path, an agent on this computer; openItem asks the helper
 // again); else { why }.
 export function openPlan(item, address, platform = window()?.platform) {
   if (!item) return { why: "Nothing to open." };
+  // A command is copied, never run.
+  if (item.kind === "cmd") return typeof item.target === "string" && item.target ? { copy: item.target } : { why: "Nothing to copy." };
   if (item.kind !== "doc") {
     return /^https?:\/\//i.test(item.target ?? "") ? { url: item.target } : { why: "Only web addresses open from here." };
   }
@@ -137,6 +140,7 @@ export function openPlan(item, address, platform = window()?.platform) {
 export async function openItem(item, address, cx, run = exec) {
   const p = openPlan(item, address);
   if (p.url) { cx?.open_url?.(p.url); return p; }
+  if (p.copy) { cx?.write_to_clipboard?.(p.copy); return p; }
   if (!p.cmd) return p;
   if (!(await sidecar.hasCommand("open-check"))) return { why: "Update the Flockbook helper to open files." };
   const a = await sidecar.openCheck(p.args[0]);
@@ -364,7 +368,7 @@ export class ResourcesView {
         .on_click((_e, cx) => {
           // Started here: a web address opens with the click's cx, before the first await.
           const pending = openItem(it, address, cx);
-          cx?.spawn?.(async (acx) => { const p = await pending; this.note = p.why ? { id: it.id, text: p.why } : null; acx?.notify?.(); });
+          cx?.spawn?.(async (acx) => { const p = await pending; this.note = p.why ? { id: it.id, text: p.why } : p.copy ? { id: it.id, text: "Copied.", ok: true } : null; acx?.notify?.(); });
         })
         .when(fresh, (el) => el.child(div().id(`res-new-${it.id}`).absolute().left(1).top(16).size(6).rounded(3).bg(t.accent)))
         .child(div().size(22).flex_none().mt(1).rounded(6).bg(t.raised).flex().items_center().justify_center()
@@ -374,11 +378,12 @@ export class ResourcesView {
             .child(div().flex_1().min_w(0).truncate().text_size(13).font_weight(550).text_color(gone ? t.dim : t.foreground)
               .when(gone, (el) => el.line_through()).child(it.title || it.target))
             .child(div().flex_none().text_size(11).text_color(t.dim).child(ago(it.last_ts, now))))
-          .child(div().truncate().text_size(11.5).text_color(t.muted).when(it.kind === "doc", (el) => el.font_family("mono")).child(sub || it.target))
-          .when(this.note?.id === it.id, (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.note.text))))
+          .child(div().truncate().text_size(11.5).text_color(t.muted).when(it.kind === "doc" || it.kind === "cmd", (el) => el.font_family("mono")).child(sub || it.target))
+          .when(this.note?.id === it.id, (el) => el.child(div().text_size(11.5).text_color(this.note.ok ? t.muted : t.blocked).child(this.note.text))))
         .when(this.hover === it.id, (el) => el.child(h_flex().id(`res-acts-${it.id}`).gap(2).flex_none()
           .child(iconBtn(`res-jump-${it.id}`, ACT_ICONS.jump, "Show in chat", () => jumpTo(it, tk)))
-          .child(iconBtn(`res-copy-${it.id}`, ACT_ICONS.copy, "Copy", (_e, cx) => cx?.write_to_clipboard?.(it.target)))
+          // A command's click copies it already.
+          .when(it.kind !== "cmd", (a) => a.child(iconBtn(`res-copy-${it.id}`, ACT_ICONS.copy, "Copy", (_e, cx) => cx?.write_to_clipboard?.(it.target))))
           .child(iconBtn(`res-remove-${it.id}`, ACT_ICONS.remove, "Remove from list", (_e, cx) => { removeItem(it, tk); cx?.notify?.(); }))));
     };
 
