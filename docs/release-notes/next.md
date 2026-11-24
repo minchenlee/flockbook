@@ -5,7 +5,7 @@ One short line: what this release is about.
 
 ### ✨ New
 - The Mac app has the Since you left card and Summaries too, as in the Herdr app (Summaries is off by default).
-- Herdr mod: a Resources window (⌘⇧R, or the new button in the top bar) lists the docs, artifacts, PRs and links the agent pointed you to in this conversation; a badge counts the new ones. The chat moves its column left to make room for it, and it grows and shrinks with its list.
+- Herdr mod: a Resources window (⌘⇧R, or the new button in the top bar) lists the docs, artifacts, PRs, one-line commands (a click copies one) and links the agent pointed you to in this conversation; a badge counts the new ones. The chat moves its column left to make room for it, and it grows and shrinks with its list.
 - Herdr mod: web addresses in the agent's replies (pages, GitHub PRs, issues and CI runs, claude.ai artifacts, localhost) are now links you can click.
 
 ### 🔒 Security

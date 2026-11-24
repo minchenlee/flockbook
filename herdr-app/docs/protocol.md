@@ -531,13 +531,20 @@ one reply, the later target first). Read only.
 - Collected with the same rules as a row's `links` (assistant text only), and the claude.ai artifact URL in the result of
   a successful Artifact publish (its `title` from the call's input). Not collected: what the person typed, other
   tools' input and output, relative paths.
-- `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`.
+- Commands (`cmd`, assistant text only): a fenced code block whose language (the info's first word, any case) is
+  none, `sh`, `bash`, `zsh`, `shell` or `console`, holding one command: one line, or lines joined by a `\` at
+  their end; a leading `$ ` is dropped; at most 400 characters. Not commands: a block with more lines (a script, a
+  command and its output), other languages (`text`, `log`, `json`…), indented code, inline code, a comment.
+  `target`: the command as written (its lines kept), trimmed.
+- `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`, `cmd`. A mod ignores kinds it does not know.
 - `id`: FNV-1a (hex) of the normalized target; the same target is one item. A doc: its absolute path (`~/` is the
   home of the machine the agent runs on). `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
-  GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`.
+  GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`. A
+  command: the command trimmed (key `cmd:<command>`).
 - `title`: a doc's first `# ` heading (Markdown) or `<title>` (HTML) in its first 4 KB, else its file name; an
-  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path. `detail`: a doc's folder (`~` for the
-  home), a URL's host, or `o/r`.
+  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path; a command's: the last line of the paragraph or heading right
+  before its block (an ending `:` or `：` dropped, at most 80 characters), else the command's start (60). `detail`: a
+  doc's folder (`~` for the home), a URL's host, or `o/r`; a command on one line (each line's ending `\` dropped).
 - `row`: the `id` of the feed `row` with the last mention. `first_ts`, `last_ts`: ms, or null.
 - `exists`: docs only; the path's real file (links followed) is a file now, and the real file's extension is a doc kind
   (`md`, `html`, `htm`, `pdf`, `png`, `svg`). A `preview.md` link to `notes.txt` or to a folder: `false`. It can be old

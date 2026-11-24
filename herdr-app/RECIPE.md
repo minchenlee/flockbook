@@ -122,15 +122,21 @@ per 900 ms, as Herdr's own); done is a check
 "Resources (⌘⇧R)"; only with a helper that has `resources`, and an agent in the tab). The button is
 `selected` with `accent` text while its window is open; a badge (`accent`, 15 px, 9.5 px semibold, top 2
 right 1) counts the resources newer than you last saw. ⌘⇧R or the button opens or closes a frameless
-window, 340 px wide, 12 px from the right edge under the bar (y 60), as tall as its list up to the window's
-height − 72; under 720 px a drawer down the right side, full height. A click beside it does not close it;
+window, 320 px wide, 12 px from the right edge under the bar (y 60), as tall as its list up to the window's
+height − 72; it is opened again (the new one first, then the old one closed) when its list, the agent or the
+window's size changes it by 8 px or more (smaller: not while the pointer is on it). It cannot be dragged. While
+it is open, the chat keeps its reading column and its input at least 24 px left of it: they move left, and
+the column narrows only as far as it must (240 px at least). Under 720 px, or with no room for a 240 px column
+beside it, a drawer down the right side, full height (the chat does not move). A click beside it does not close it;
 Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
-**Docs**, **Artifacts**, **PRs & CI**, **Links** (local servers too), each with its count; one row per
+**Docs**, **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each with its count; one row per
 resource: a 22 px icon square, the title (13 px 550), the time since its last mention ("4m"), and a
-second line (11.5 px muted; a doc's folder in mono). New since you last opened it: a 6 px `accent` dot
+second line (11.5 px muted; a doc's folder and a command in mono). New since you last opened it: a 6 px `accent` dot
 on the left. A doc that is not there: dim and struck through, its icon half clear, "· File not found";
 a click on it does nothing but say why. Hovering a row shows **Show in chat** (the chat scrolls to the
-reply that mentioned it, when loaded), **Copy** and **Remove from list**. A click opens a web address in
+reply that mentioned it, when loaded; a speech-bubble icon), **Copy** (a copy icon; not on a command) and
+**Remove from list** (an eye-off icon). A click on a command copies it (never runs it) and says "Copied.";
+a one-line shell command in a fenced block of a reply is one (docs/protocol.md `res`). A click opens a web address in
 the browser, or a doc (md, html, htm, pdf, png, svg; there now; an agent on this computer) with
 `open` (`xdg-open` off macOS). Footer: "N items · M removed". Empty: "No resources yet" and "Docs,
 artifacts and links the agent mentions in its replies show up here."
