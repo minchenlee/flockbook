@@ -256,30 +256,28 @@ mod tests {
     }
 }
 
-/// A fake herdr-core on a Unix socket for checks: answers each call from `reply(method, params)`.
-#[cfg(all(test, unix))]
+/// A fake herdr-core for checks: answers each call from `reply(method, params)`. On a Unix socket, or on Windows on a
+/// named pipe, as hc listens there.
+#[cfg(test)]
 pub mod fake_core {
     use serde_json::Value;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixListener;
     use std::sync::{Arc, Mutex};
 
     pub struct FakeCore {
         pub path: String,
         pub calls: Arc<Mutex<Vec<(String, Value)>>>,
-        _dir: tempfile::TempDir,
+        /// The Unix socket's folder; nothing on Windows (a pipe goes with its last handle).
+        _dir: Option<tempfile::TempDir>,
     }
 
     pub fn start(reply: impl Fn(&str, &Value) -> Option<Value> + Send + Sync + 'static) -> FakeCore {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("hc.sock").to_string_lossy().to_string();
-        let listener = UnixListener::bind(&path).unwrap();
+        let (path, clients, dir) = listen();
         let calls = Arc::new(Mutex::new(vec![]));
         let c2 = calls.clone();
         std::thread::spawn(move || {
             let mut held = vec![];
-            for stream in listener.incoming() {
-                let Ok(mut s) = stream else { continue };
+            for mut s in clients {
                 let mut line = String::new();
                 if BufReader::new(s.try_clone().unwrap()).read_line(&mut line).is_err() {
                     continue;
@@ -299,9 +297,66 @@ pub mod fake_core {
         });
         FakeCore { path, calls, _dir: dir }
     }
+
+    /// A socket in a new folder, and its clients as they connect.
+    #[cfg(unix)]
+    fn listen() -> (String, impl Iterator<Item = std::os::unix::net::UnixStream> + Send, Option<tempfile::TempDir>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hc.sock").to_string_lossy().to_string();
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let clients = std::iter::from_fn(move || Some(listener.accept())).filter_map(|r| r.ok().map(|(s, _)| s));
+        (path, clients, Some(dir))
+    }
+
+    /// A named pipe of this process, and its clients as they connect. The next instance of the pipe is made before
+    /// a client is served, so the name never goes missing between two calls.
+    #[cfg(windows)]
+    fn listen() -> (String, impl Iterator<Item = std::fs::File> + Send, Option<tempfile::TempDir>) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let path = format!(r"\\.\pipe\flockbook-check-{}-{}.sock", std::process::id(), N.fetch_add(1, Ordering::SeqCst));
+        let mut next = Some(pipe::instance(&path));
+        let name = path.clone();
+        let clients = std::iter::from_fn(move || {
+            let s = pipe::accept(next.take()?);
+            next = Some(pipe::instance(&name));
+            Some(s)
+        })
+        .flatten();
+        (path, clients, None)
+    }
+
+    #[cfg(windows)]
+    mod pipe {
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::Foundation::{GetLastError, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+        use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES};
+
+        /// One more instance of the pipe `path`, in byte mode with blocking calls.
+        pub fn instance(path: &str) -> OwnedHandle {
+            let name: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain([0]).collect();
+            // SAFETY: `name` is a NUL-terminated wide string that outlives the call; no security attributes.
+            let h = unsafe {
+                CreateNamedPipeW(name.as_ptr(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, std::ptr::null())
+            };
+            assert!(h != INVALID_HANDLE_VALUE, "CreateNamedPipeW {path}: {}", std::io::Error::last_os_error());
+            // SAFETY: a valid handle that nothing else owns.
+            unsafe { OwnedHandle::from_raw_handle(h) }
+        }
+
+        /// Waits for a client on the instance; `None` when that fails.
+        pub fn accept(h: OwnedHandle) -> Option<std::fs::File> {
+            // SAFETY: `h` is a pipe instance opened for blocking calls; no OVERLAPPED.
+            let ok = unsafe { ConnectNamedPipe(h.as_raw_handle(), std::ptr::null_mut()) } != 0;
+            // A client that came between CreateNamedPipeW and ConnectNamedPipe is connected too.
+            (ok || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED).then(|| std::fs::File::from(h))
+        }
+    }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod socket_tests {
     use super::*;
 
@@ -335,6 +390,17 @@ mod socket_tests {
     fn no_core_is_a_socket_error() {
         let c = HcClient::new(HcSession::new("/nonexistent/hc.sock"), 1, 1);
         assert!(matches!(c.snapshot(), Err(HerdrError::Socket(_))));
+        let c = HcClient::new(HcSession::new(r"\\.\pipe\flockbook-check-nobody-listens.sock"), 1, 1);
+        assert!(!c.session.is_available());
+        assert!(matches!(c.snapshot(), Err(HerdrError::Socket(_))));
+    }
+
+    #[test]
+    fn a_listening_core_is_available() {
+        let core = fake_core::start(|_, _| Some(json!({})));
+        assert!(HcSession::new(&core.path).is_available());
+        let c = HcClient::new(HcSession::new(&core.path), 2, 1);
+        assert_eq!(c.call("server.status", json!({}), None).unwrap(), json!({}));
     }
 
     #[test]

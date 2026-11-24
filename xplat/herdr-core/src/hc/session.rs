@@ -96,7 +96,6 @@ pub fn run_user_dir() -> Option<String> {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     fn env(kv: &[(&str, &str)]) -> HashMap<String, String> {
         kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
@@ -115,6 +114,21 @@ mod tests {
         assert_eq!(HcSession::resolve(&env(&[("HC_SOCKET", "")]), &["--hc-socket".into(), "/a.sock".into()], None).socket_path, "/a.sock");
         // Empty values count as unset.
         assert_eq!(HcSession::resolve(&env(&[("HOME", home), ("HC_SOCKET", ""), ("HC_SESSION", "")]), &[], None).socket_path, "/home/someone/.local/state/herdr-core/default/default.sock");
+    }
+
+    /// hc 0.1.22 on Windows: `\\.\pipe\herdr-core-<user>-<session>.sock`. The XDG variables do not move a pipe.
+    #[cfg(windows)]
+    #[test]
+    fn pipe_name_rules() {
+        let user = ("USERNAME", "someone");
+        assert_eq!(HcSession::resolve(&env(&[user]), &[], None).socket_path, r"\\.\pipe\herdr-core-someone-default.sock");
+        assert_eq!(HcSession::resolve(&env(&[user, ("HC_SESSION", "work")]), &[], None).socket_path, r"\\.\pipe\herdr-core-someone-work.sock");
+        assert_eq!(HcSession::resolve(&env(&[user, ("XDG_RUNTIME_DIR", r"C:\r"), ("XDG_STATE_HOME", r"C:\s")]), &[], None).socket_path, r"\\.\pipe\herdr-core-someone-default.sock");
+        assert_eq!(HcSession::resolve(&env(&[user, ("HC_SOCKET", r"\\.\pipe\h.sock")]), &[], None).socket_path, r"\\.\pipe\h.sock");
+        assert_eq!(HcSession::resolve(&env(&[user, ("HC_SOCKET", r"\\.\pipe\h.sock"), ("HERDR_DESK_HC_SOCKET", r"\\.\pipe\d.sock")]), &[], None).socket_path, r"\\.\pipe\d.sock");
+        assert_eq!(HcSession::resolve(&env(&[user]), &["--hc-socket".into(), r"\\.\pipe\a.sock".into()], None).socket_path, r"\\.\pipe\a.sock");
+        // Empty values count as unset.
+        assert_eq!(HcSession::resolve(&env(&[user, ("HC_SOCKET", ""), ("HC_SESSION", "")]), &[], None).socket_path, r"\\.\pipe\herdr-core-someone-default.sock");
     }
 
     #[test]
