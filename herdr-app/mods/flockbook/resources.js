@@ -258,12 +258,16 @@ export function placeNow() {
   return placement(winW, shared("flockbook.window.height") ?? 0, items.length, grouped(items).length, paneW);
 }
 
-// Opens the window at `p`. The same key: one open already is replaced, in its place.
-function openPanel(p, extra = {}) {
+// Opens the window at `p`, then closes `old` (a refit): the new one is open before the old one goes, and the old
+// one's close() sees that it is no longer the open one. No `key`: Herdr opens a keyed window where that key's
+// window was (dropped there, or the one it replaces), not at `p.at`, and the chat makes room where the frame says.
+function openPanel(p, extra = {}, old = null) {
   setShared(KEY_ALIVE, Date.now());
   setShared(KEY_FRAME, p);
-  setShared(KEY_OPEN, openOverlay({ mod: "flockbook", props: { view: "resources", drawer: p.drawer, ...extra }, kind: "window", frame: "none",
-    key: "flockbook.resources", at: p.at, width: p.width, height: p.height }));
+  const id = openOverlay({ mod: "flockbook", props: { view: "resources", drawer: p.drawer, ...extra }, kind: "window", frame: "none",
+    at: p.at, width: p.width, height: p.height });
+  setShared(KEY_OPEN, id);
+  if (old && old !== id) closeOverlay(old);
 }
 
 export const panelOpen = () => Boolean(shared(KEY_OPEN)) && Date.now() - (shared(KEY_ALIVE) ?? 0) < ALIVE_MS;
@@ -310,7 +314,7 @@ export class ResourcesView {
     if (!panelOpen()) return;
     const p = placeNow();
     if (!needsRefit(shared(KEY_FRAME), p, this.inside || this.hover !== null)) return;
-    openPanel(p, { refit: true, focus: Boolean(this.h?.is_focused?.()), seenAtOpen: this.seenAtOpen });
+    openPanel(p, { refit: true, focus: Boolean(this.h?.is_focused?.()), seenAtOpen: this.seenAtOpen }, props()?.overlay ?? shared(KEY_OPEN));
   }
 
   // Shown is seen: the badge goes.
@@ -327,7 +331,8 @@ export class ResourcesView {
     if (id) closeOverlay(id);
   }
 
-  close(_cx) { const id = props()?.overlay; if (!id || shared(KEY_OPEN) === id) setShared(KEY_OPEN, null); }
+  // Only this window's own id is cleared: a refit opens the new one before this one closes.
+  close(_cx) { const id = props()?.overlay; if (id && shared(KEY_OPEN) === id) setShared(KEY_OPEN, null); }
 
   render(cx) {
     const t = theme();
@@ -395,7 +400,7 @@ export class ResourcesView {
     const root = v_flex().id("res-root").size_full().bg(t.background).border(1).border_color(t.border).shadow_lg()
       .when(props()?.drawer !== true, (el) => el.rounded(14))
       .on_hover((inside) => { this.inside = Boolean(inside); })
-      // A press it does not stop drags the window.
+      // A press it does not stop drags the window: every press is stopped, so it stays where the chat made room.
       .on_mouse_down("left", (_e, cx) => { cx?.stop_propagation?.(); this.h?.focus?.(); })
       .on_key_down((e, cx) => { if (e?.key === "escape") { cx?.stop_propagation?.(); this.closeSelf(); } });
     if (this.h) root.track_focus(this.h);
