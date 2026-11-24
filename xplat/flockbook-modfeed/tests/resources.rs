@@ -235,6 +235,39 @@ fn the_whole_log_is_read_not_only_its_last_2_mb() {
 }
 
 #[test]
+fn a_codex_reply_has_the_same_row_id_in_resources_and_in_the_feed() {
+    // A Codex log over 2 MB: the feed reads from its last 2 MB, resources from the start. Codex lines have no ids,
+    // so a reply must get the same one both ways ("Show in chat" finds that row).
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("rollout.jsonl");
+    let line = |t: u32, payload: Value| json!({"timestamp": ts(t), "type": "response_item", "payload": payload}).to_string();
+    let msg = |t: u32, role: &str, text: &str| {
+        let kind = if role == "user" { "input_text" } else { "output_text" };
+        line(t, json!({"type": "message", "role": role, "content": [{"type": kind, "text": text}]}))
+    };
+    let filler = "x".repeat(1000);
+    let mut lines: Vec<String> = (0..3000).map(|_| msg(1, "user", &filler)).collect();
+    lines.push(msg(2, "user", "where is the report?"));
+    lines.push(msg(3, "assistant", "Here: https://report.example.com/r"));
+    write(&log, &lines, false);
+    assert!(std::fs::metadata(&log).unwrap().len() > tail::BYTES + 512 * 1024);
+    let a = resources::answer(&log, None, None).unwrap();
+    let row = &a.items.iter().find(|r| r.target == "https://report.example.com/r").expect("found").row;
+    let mut out = modfeedkit::protocol::JsonLines::new();
+    let now = Utc.timestamp_opt(1_793_670_000, 0).unwrap();
+    modfeedkit::feed::run(Some(&log), "codex", None, None, false, &mut out, &now, &Utc).unwrap();
+    let ids: Vec<String> = out.lines.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["type"] == "row").map(|v| v["id"].as_str().unwrap_or("").to_string()).collect();
+    assert!(ids.contains(row), "resources row {row} not among the feed's last rows {:?}", &ids[ids.len().saturating_sub(3)..]);
+    // The rows read with --before have ids of their own too: none is also in the tail.
+    let start = out.lines.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["type"] == "log").unwrap()["start"].as_u64().unwrap();
+    let mut older = modfeedkit::protocol::JsonLines::new();
+    modfeedkit::feed::older(&log, start, false, &mut older, &now, &Utc).unwrap();
+    let old: Vec<String> = older.lines.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["type"] == "row").map(|v| v["id"].as_str().unwrap_or("").to_string()).collect();
+    assert!(!old.is_empty());
+    assert!(old.iter().all(|i| !ids.contains(i)), "an older row has a tail row's id");
+}
+
+#[test]
 fn a_github_url_with_an_odd_path_is_a_link_not_a_panic() {
     let rs = resources::collect(&tail::items(&[say("a1", 0, "see https://github.com?x=/o/r/pull/1 and https://github.com/o/r/pull/2")]), None);
     assert!(rs.iter().all(|r| r.kind == "link" || r.target == "https://github.com/o/r/pull/2"), "{rs:?}");

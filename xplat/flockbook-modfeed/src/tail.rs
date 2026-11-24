@@ -139,6 +139,24 @@ pub fn items_at(range: &Range) -> Vec<ConversationItem> {
     p.items()
 }
 
+/// `items_at` without the picture offsets: rows then carry no pictures, as from `items`, but Codex, Grok and Cursor
+/// ids still come from line offsets. An id then names the same message whatever range was read (from the file's
+/// start in Resources, the last 2 MB in the feed, a page before it with --before).
+pub fn items_ids(range: &Range) -> Vec<ConversationItem> {
+    let mut items = items_at(range);
+    for it in &mut items {
+        for r in &mut it.images {
+            r.offset = None;
+        }
+        if let herdr_core::ItemKind::ToolChips(chips) = &mut it.kind {
+            for r in chips.iter_mut().flat_map(|c| &mut c.calls).flat_map(|x| &mut x.images) {
+                r.offset = None;
+            }
+        }
+    }
+    items
+}
+
 /// The model named by the newest assistant line, for logs with no status line.
 pub fn model(lines: &[String]) -> Option<String> {
     for l in lines.iter().rev().filter(|l| l.contains("\"model\"")) {

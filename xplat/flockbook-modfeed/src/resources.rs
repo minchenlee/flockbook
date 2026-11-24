@@ -766,7 +766,7 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
         }
     }
     let range = crate::tail::read(log, None, BYTES)?;
-    let all = collect(&crate::tail::items(&range.lines), home);
+    let all = collect(&crate::tail::items_ids(&range), home);
     let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
     let cursor = format!("r1.{hash}.{}.{newest}", range.size);
     let was = since.and_then(|c| {

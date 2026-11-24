@@ -167,7 +167,7 @@ pub fn run(client: &HcClient, terminal: &str, kind: &str, by: &str, model: Optio
     };
     let Some(path) = path else { return Err(("summary-none", "This agent has no conversation yet.".into())) };
     let read = tail::read(path, None, tail::BYTES).map_err(|_| ("read", "The agent's conversation could not be read.".to_string()))?;
-    let Some((id, text)) = input(&tail::items(&read.lines), kind) else {
+    let Some((id, text)) = input(&tail::items_ids(&read), kind) else {
         return Err(("summary-none", "The agent wrote nothing in its last turn.".into()));
     };
     let path_s = path.to_string_lossy().to_string();

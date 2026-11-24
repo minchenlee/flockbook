@@ -282,11 +282,11 @@ With `--pictures` (what `serve` asks for, also with `--before`), the log is pars
 `user` and `tools` rows with pictures get `pics`: one entry per picture, the owner's for a user row, the calls'
 result pictures in call order for a tools row. `{"format":"png","width":3,"height":4,"offset":1290,"index":0,
 "digest":"<16 hex digits>"}`: the line's file offset, the picture's place in that line, and the first 8 bytes of
-the SHA-256 of its base64. Codex, Grok and Cursor row ids then come from line offsets, so they differ from the
-rows without `--pictures`. The mod never passes it.
+the SHA-256 of its base64. The mod never passes it.
 
-One per conversation row, in order. `id` is stable for the same log and `start`: the mod keys row
-heights by it.
+One per conversation row, in order. `id` names the same message whatever range was read: the tail, a page
+with `--before`, or Resources (which reads from the file's start). Claude ids come from the log; Codex, Grok and
+Cursor ids from the message's line offset (`cx@1290`). The mod keys row heights by it.
 
 | `k` | Fields | Shown as |
 |---|---|---|

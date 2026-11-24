@@ -121,6 +121,6 @@ fn parsed(range: &tail::Range, pictures: bool) -> Vec<herdr_core::ConversationIt
     if pictures {
         tail::items_at(range)
     } else {
-        tail::items(&range.lines)
+        tail::items_ids(range)
     }
 }
