@@ -121,7 +121,9 @@ fn the_line_is_a_res_line() {
     assert!(v.get("exists").is_none(), "no exists for a URL");
 }
 
+// Unix only: a doc is a path from "/" or "~/" (detect), and a temp folder on Windows is "C:\…".
 #[test]
+#[cfg(unix)]
 fn titles_from_the_files() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
