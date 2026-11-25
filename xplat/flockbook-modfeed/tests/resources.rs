@@ -1016,7 +1016,9 @@ fn relative_mix(d: &Path) -> Vec<String> {
     ]
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn relative_docs_cut_at_every_line_the_same_as_the_whole_log() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
