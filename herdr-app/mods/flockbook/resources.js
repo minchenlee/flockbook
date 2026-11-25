@@ -326,7 +326,7 @@ export async function pollResources(cx, force = false, full = false) {
 // GAP, MIN_PANEL to PANEL_W wide; with less room it is PANEL_W wide over the chat. `paneW`: the chat's width (the
 // window less the sidebar). `inputH`: the chat input's height (0: not measured yet, INPUT_GUESS); the window, a drawer
 // too, ends GAP above it.
-export function placement(winW, winH, count = 0, groups = 0, paneW = winW, inputH = 0) {
+export function placement(winW, winH, _count = 0, _groups = 0, paneW = winW, inputH = 0) {
   const h = winH > 0 ? winH : 800;
   const w = winW > 0 ? winW : 1200;
   const pane = paneW > 0 ? Math.min(paneW, w) : w;
@@ -335,9 +335,8 @@ export function placement(winW, winH, count = 0, groups = 0, paneW = winW, input
   const r = readingLayout(pane, null);
   const room = w - (w - pane + r.left + r.width) - READ_GAP - GAP;
   const width = room >= MIN_PANEL ? Math.min(PANEL_W, room) : PANEL_W;
-  const most = Math.max(80, bottom - TOP);
-  const want = 46 + Math.max(1, count) * 50 + groups * 30 + 16;
-  const height = Math.min(most, Math.max(180, Math.min(h - 72, count ? want : 200)));
+  // One height for any list (owner 11-25): from under the bar to GAP above the input. `_count`, `_groups`: not used.
+  const height = Math.max(80, bottom - TOP);
   return { at: { x: Math.max(0, w - GAP - width), y: TOP }, width, height, drawer: false, right: width + GAP };
 }
 
@@ -363,7 +362,7 @@ export function needsRefit(prev, next, inside = false) {
   return d > 0 || !inside;
 }
 
-// Where the window goes now: the shown agent's rows as drawn (layoutGroups: a "Show N more" row counts as a
+// Where the window goes now (one height: the rows below do not change it; placement keeps the arguments): the shown agent's rows as drawn (layoutGroups: a "Show N more" row counts as a
 // group title), the window's size. `expanded`: the open window's groups shown in full.
 export function placeNow(expanded = []) {
   const address = currentAgent()?.address ?? null;
@@ -439,7 +438,7 @@ export class ResourcesView {
     this.refit();
   }
 
-  // The item count, the shown agent or the window's size changed: open it again at its new size (no way to
+  // The window's size changed (the list does not change it: one height): open it again at its new size (no way to
   // resize an open window). At most once a tick.
   refit() {
     if (!panelOpen()) return;

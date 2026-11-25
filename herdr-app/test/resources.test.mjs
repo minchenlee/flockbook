@@ -379,11 +379,12 @@ test("the window's bottom stays 12 px above the chat input", () => {
   const many = R.placement(1470, 900, 40, 6, 1470, 150);
   assert.equal(many.at.y + many.height, 900 - 150 - 12, "a long list: down to the input less 12");
   const small = R.placement(1470, 900, 1, 1, 1470, 150);
-  assert.equal(small.height, R.placement(1470, 900, 1, 1).height, "a short list: as before");
+  assert.equal(small.height, many.height, "a short list: the same height (one height)");
 });
 
 test("refit: only a real change reopens; it does not shrink under the pointer", () => {
-  const a = R.placement(1400, 900, 3, 1), more = R.placement(1400, 900, 8, 2), none = R.placement(1400, 900, 0, 0);
+  // The height changes only with the app window's (one height for any list): taller and shorter by hand.
+  const a = R.placement(1400, 900, 3, 1), more = { ...a, height: a.height + 40 }, none = { ...a, height: a.height - 40 };
   assert.equal(R.needsRefit(a, a, false), false);
   assert.equal(R.needsRefit(null, a, false), false, "nothing open");
   assert.equal(R.needsRefit(a, more, false), true, "grows");
@@ -395,7 +396,7 @@ test("refit: only a real change reopens; it does not shrink under the pointer", 
   assert.equal(R.needsRefit(a, R.placement(1200, 900, 2, 1), false), true, "the window got narrower: another place");
 });
 
-test("the open window follows the item count and the shown agent: reopened in place, the keyboard not taken, dots kept", () => {
+test("the open window: the item count and the shown agent do not reopen it; a wider window does, in place, the keyboard not taken, dots kept", () => {
   fake.shared[R.KEY_WIN_W] = 1400; fake.shared["flockbook.window.height"] = 900;
   const v = view([res("a", "link", 50)], { seen: 10 });
   fake.shared[R.KEY_FRAME] = R.placement(1400, 900, 1, 1);
@@ -403,23 +404,27 @@ test("the open window follows the item count and the shown agent: reopened in pl
   const n = log.overlays.length;
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n, "nothing changed: not reopened");
-  // Six more mentioned.
+  // Six more mentioned: the same size (one height).
   R.putData({ ...R.dataFor("t1"), items: ["b", "c", "d", "e", "f", "g", "a"].map((id, i) => res(id, "link", 60 - i)) });
+  v.tick(fakeCx());
+  assert.equal(log.overlays.length, n, "more items: not reopened");
+  // A wider app window: another place.
+  fake.shared[R.KEY_WIN_W] = 1600;
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n + 1);
   const spec = log.overlays.at(-1);
   assert.equal(spec.key, undefined, "no key: Herdr would keep a key's old place");
-  assert.ok(spec.height > R.placement(1400, 900, 1, 1).height, "taller");
+  assert.equal(spec.height, R.placement(1600, 900, 1, 1).height);
+  assert.deepEqual(spec.at, R.placement(1600, 900, 1, 1).at);
   assert.deepEqual([spec.props.view, spec.props.refit, spec.props.focus, spec.props.seenAtOpen], ["resources", true, false, 10]);
   assert.deepEqual(log.closed, ["o7"], "the old one closed, after the new one opened");
   assert.equal(fake.shared[R.KEY_FRAME].height, spec.height);
   v.close(fakeCx());   // the host tells the old one it closed
   assert.equal(fake.shared[R.KEY_OPEN], "o1", "the new window still counts as open");
-  // Another agent in the tab, with nothing listed yet: the small height.
+  // Another agent in the tab, with nothing listed yet: the same size, not reopened.
   fake.agents = [agent("t2", "idle", { tab: "tb-t1" })];
   v.tick(fakeCx());
-  assert.equal(log.overlays.length, n + 2);
-  assert.equal(log.overlays.at(-1).height, R.placement(1400, 900, 0, 0).height);
+  assert.equal(log.overlays.length, n + 1);
 });
 
 test("the window moves where the chat made room: a wider window, a second refit (Codex round 1 High)", () => {

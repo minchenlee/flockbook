@@ -190,11 +190,14 @@ test("at most ROW_LIMIT rows a group, then a Show N more row; a click shows the 
   el = v.render(fakeCx());
   assert.equal(rowsIn(byId(el, "res-group-markdown")).length, 436);
   assert.equal(byId(el, "res-more-markdown"), null);
-  // Taller now (a very tall window, so the height is not at its most): opened again, the new one keeps the group shown.
-  fake.shared["flockbook.window.height"] = 30000;
+  // Showing the rest does not change the window's size (one height); opened again for another reason (a wider
+  // window), the new one keeps the group shown.
   fake.shared[R.KEY_FRAME] = R.placeNow();
-  v.expanded = new Set(); assert.ok(R.placeNow(["markdown"]).height > R.placeNow().height);
-  v.expanded = new Set(["markdown"]);
+  assert.equal(R.placeNow(["markdown"]).height, R.placeNow().height);
+  const n = log.overlays.length;
+  v.refit();
+  assert.equal(log.overlays.length, n, "not opened again for it");
+  fake.shared[R.KEY_WIN_W] = 1600;
   v.refit();
   const spec = log.overlays.at(-1);
   assert.deepEqual(spec.props.expanded, ["markdown"]);
@@ -203,22 +206,16 @@ test("at most ROW_LIMIT rows a group, then a Show N more row; a click shows the 
   assert.equal(rowsIn(byId(again, "res-group-markdown")).length, 436);
 });
 
-test("the height counts the rows drawn, not all of them", () => {
+test("the height does not follow the rows drawn (one height, owner 11-25)", () => {
   open(long());
-  fake.shared["flockbook.window.height"] = 30000;   // tall enough that the height is not at its most
   const p = R.placeNow();
-  // 5 groups, each with ROW_LIMIT rows drawn: 150 rows; 5 titles and 5 "Show more" rows.
-  assert.equal(p.height, R.placement(1400, 30000, 150, 10).height);
-  assert.notEqual(p.height, R.placement(1400, 30000, 151, 10).height, "one row more is another height");
-  assert.notEqual(p.height, R.placement(1400, 30000, 150, 9).height);
-  assert.equal(R.placeNow(["markdown"]).height, R.placement(1400, 30000, 150 - 30 + 436, 9).height, "docs shown in full: no Show more there");
-  fake.shared["flockbook.window.height"] = 900;
-  const few = long().filter((i) => i.kind === "pr").slice(0, 3);
-  open(few);
-  assert.equal(R.placeNow().height, R.placement(1400, 900, 3, 1).height, "a short list: as before");
+  assert.equal(p.height, 900 - R.INPUT_GUESS - 12 - 60);
+  assert.equal(R.placeNow(["markdown"]).height, p.height, "a group shown in full");
+  open(long().filter((i) => i.kind === "pr").slice(0, 3));
+  assert.equal(R.placeNow().height, p.height, "a short list");
 });
 
-test("a group folds: a click on its title, a chevron, the count stays, kept for every agent and a restart, the window shorter", () => {
+test("a group folds: a click on its title, a chevron, the count stays, kept for every agent and a restart", () => {
   const v = open(long());
   let el = v.render(fakeCx());
   assert.match(byId(el, "res-chev-markdown")._a.path, /chevron-down\.svg$/);
@@ -230,13 +227,11 @@ test("a group folds: a click on its title, a chevron, the count stays, kept for 
   assert.equal(byId(el, "res-more-markdown"), null);
   assert.match(textOf(byId(el, "res-group-head-markdown")), /Markdown\s*436/, "the count is still there");
   assert.match(byId(el, "res-chev-markdown")._a.path, /chevron-right\.svg$/);
-  assert.ok(R.placeNow().height < tall || R.placeNow().height === tall && tall === 900 - R.INPUT_GUESS - 12 - 60, "not taller");
-  // Few rows: the fold makes it shorter for sure.
+  assert.equal(R.placeNow().height, tall, "the same height (one height)");
   const w = open(long().filter((i) => i.kind === "pr").slice(0, 5).concat(long().filter((i) => i.kind === "link").slice(0, 5)));
   fake.shared[R.KEY_COLLAPSED] = [];
-  const h1 = R.placeNow().height;
   byId(w.render(fakeCx()), "res-group-head-github")._h.on_click(null, fakeCx());
-  assert.ok(R.placeNow().height < h1, `${R.placeNow().height} < ${h1}`);
+  assert.deepEqual(fake.shared[R.KEY_COLLAPSED], ["github"]);
   // A new window (a restart: shared is persisted): still folded; another agent too.
   showAgent("t2");
   R.putData({ terminal: "t2", cursor: "c", items: long().filter((i) => i.kind === "pr").slice(0, 2).map(({ type: _t, ...r }) => r), at: 1 });

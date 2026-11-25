@@ -124,11 +124,10 @@ per 900 ms, as Herdr's own); done is a check
 right 1) counts the resources newer than you last saw. ⌘⇧R or the button opens or closes a frameless
 window 12 px from the right edge under the bar (y 60). The chat never moves for it: its reading column, input and
 cards keep their place and width. The window takes the room right of the reading column less 24 px (left) and
-12 px (right), 260 to 320 px wide; with less than 260 px there, it is 320 px wide over the chat. It is as tall as
-its list, up to the window's height − 72, and ends 12 px above the chat input at most (the input's measured height;
-before it is measured, 160 px). It is opened again (the new
-one first, then the old one closed) when its list, the agent or the window's size changes it by 8 px or more
-(smaller: not while the pointer is on it). It cannot be dragged. Under 720 px, a drawer down the right side,
+12 px (right), 260 to 320 px wide; with less than 260 px there, it is 320 px wide over the chat. It is one
+height for any list (empty, short, long, every group folded): from y 60 to 12 px above the chat input (the input's
+measured height; before it is measured, 160 px). It is opened again (the new one first, then the old one closed) when
+the window's size moves it or changes its height by 8 px or more (smaller: not while the pointer is on it). It cannot be dragged. Under 720 px, a drawer down the right side,
 from the top to 12 px above the chat input. A click beside it does not close it;
 Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
 **Markdown** (.md), **Web pages** (.html, .htm), **PDFs**, **Images** (.png, .svg), **Other docs** (any other file the

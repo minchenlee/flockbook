@@ -75,7 +75,9 @@ test("each group folds on its own; an old 'docs' in the folded list folds nothin
   assert.equal(byId(el, "res-h"), null, "Web pages folded");
 });
 
-test("the height counts each doc group's title", () => {
+test("more doc groups do not change the height (one height)", () => {
+  open([doc("m", "/p/a.md")]);
+  const one = R.placeNow().height;
   open([doc("m", "/p/a.md"), doc("h", "/p/b.html"), doc("p", "/p/c.pdf")]);
-  assert.equal(R.placeNow().height, R.placement(1400, 30000, 3, 3).height, "3 rows, 3 titles");
+  assert.equal(R.placeNow().height, one);
 });
