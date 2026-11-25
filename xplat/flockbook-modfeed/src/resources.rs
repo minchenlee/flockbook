@@ -863,7 +863,7 @@ fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (&'static st
     match kind {
         "doc" => {
             let p = match (target.strip_prefix("~/"), home) {
-                (Some(rest), Some(h)) => h.join(rest).to_string_lossy().to_string(),
+                (Some(rest), Some(h)) => home_join(h, rest),
                 _ => target.to_string(),
             };
             ("doc", format!("doc:{p}"), p)
@@ -1019,6 +1019,14 @@ fn host_port(scheme: &str, auth: &str) -> String {
     } else {
         format!("{auth}:{}", if scheme == "https" { 443 } else { 80 })
     }
+}
+
+/// `~/rest` with the home put in: the home, "/", the rest, as text. Not Path::join: on Windows it puts a "\\" in
+/// between, and the id and the shown path then differ from the same doc written out in full ("/home/me/a.md").
+fn home_join(home: &Path, rest: &str) -> String {
+    let h = home.to_string_lossy();
+    let h = h.strip_suffix('/').unwrap_or(&h);
+    format!("{h}/{rest}")
 }
 
 /// The home as "~" at the start of a path.
@@ -1652,6 +1660,14 @@ mod tests {
         assert!(!serde_json::to_value(&r).unwrap().to_string().contains("links"), "no field without links");
         let r = crate::rows::row(&item(ItemKind::UserText("see https://x.com".into())));
         assert_eq!(r.links, None, "user text is not searched");
+    }
+
+    #[test]
+    fn a_home_path_is_the_home_and_a_slash_on_every_platform() {
+        let home = Path::new("/home/me");
+        assert_eq!(normal("doc", "~/plans/plan.md", Some(home)).1, "doc:/home/me/plans/plan.md");
+        assert_eq!(normal("doc", "~/plans/plan.md", Some(Path::new("/home/me/"))).2, "/home/me/plans/plan.md");
+        assert_eq!(normal("doc", "~/a.md", None).2, "~/a.md");
     }
 
     #[test]
