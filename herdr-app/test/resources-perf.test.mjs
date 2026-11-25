@@ -250,12 +250,12 @@ test("a group folds: a click on its title, a chevron, the count stays, kept for 
 const count = (el) => (!el || typeof el !== "object" ? 0 : 1 + (el.kids ?? []).reduce((a, k) => a + count(k), 0));
 
 // Measured on an Apple M2 (16 GB), node 26.13, load about 5: before this change one render of the 761 items made
-// 6117 elements and took about 4.3 ms here (the stub's elements; Herdr's are dearer). Now: under 1500 elements.
-test("761 items: one render makes a bounded tree, and is quick", () => {
+// 6117 elements and took about 4.3 ms here (the stub's elements; Herdr's are dearer); now 1239 elements, about 0.7 ms.
+// The element count is the guard: a wall-clock limit fails under load (20.6 ms at load 11, lead 11-25).
+test("761 items: one render makes a bounded tree", (t) => {
   const v = open(long());
   assert.ok(count(v.render(fakeCx())) < 1500, `${count(v.render(fakeCx()))} elements`);
   const t0 = performance.now();
   for (let i = 0; i < 20; i++) v.render(fakeCx());
-  const ms = (performance.now() - t0) / 20;
-  assert.ok(ms < 15, `${ms.toFixed(2)} ms a render`);
+  t.diagnostic(`${((performance.now() - t0) / 20).toFixed(2)} ms a render (not checked)`);
 });
