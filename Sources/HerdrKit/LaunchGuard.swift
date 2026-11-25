@@ -7,7 +7,7 @@ import CoreGraphics
 public enum LaunchGuard {
     /// Checks that never show a window, a Dock icon, or take focus (HerdrDeskApp).
     public static let headless: Set<String> = [
-        "--headless", "--snapshot", "--snapshot-reading", "--snapshot-log", "--snapshot-queued", "--snapshot-statusline", "--snapshot-live", "--snapshot-demo", "--snapshot-settings",
+        "--headless", "--snapshot", "--snapshot-reading", "--snapshot-log", "--snapshot-queued", "--snapshot-statusline", "--snapshot-since", "--snapshot-live", "--snapshot-demo", "--snapshot-settings",
         "--snapshot-remote", "--stress", "--hittest", "--test-approve", "--test-notice", "--test-hub", "--test-remote", "--test-remote-live",
         "--serve-remote", "--test-terminal", "--test-scroll", "--test-bottom", "--test-table", "--test-closetab",
         "--test-menus", "--test-tabdrag", "--test-chrome", "--test-sheet", "--test-panemenu", "--test-wheel",

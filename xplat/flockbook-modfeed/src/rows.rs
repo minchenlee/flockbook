@@ -37,11 +37,14 @@ pub struct FeedRow {
     pub perm: Option<FeedPerm>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<FeedQuestion>,
+    /// An assistant row's targets (resources.rs): UTF-16 offsets into `text` and the kind. None when there are none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<crate::resources::FeedLink>>,
 }
 
 impl FeedRow {
     pub fn new(k: &str, id: &str, text: Option<String>, ts: Option<i64>) -> FeedRow {
-        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, images: None, pics: None, chips: None, perm: None, question: None }
+        FeedRow { kind_tag: "row", k: k.into(), id: id.into(), text, from: None, ts, images: None, pics: None, chips: None, perm: None, question: None, links: None }
     }
 }
 
@@ -234,6 +237,19 @@ pub fn question(q: &QuestionRequest) -> FeedQuestion {
     }
 }
 
+/// An assistant text's links, at their places in the text as sent (`cut` to TEXT_CAP). Where the text is cut, a
+/// target that goes on past the cut is not a link: found in the text as written (up to 4 KB past the cut), it ends
+/// after the cut's place.
+fn reply_links(s: &str) -> Vec<crate::resources::FeedLink> {
+    let Some((at, _)) = s.grapheme_indices(true).nth(TEXT_CAP) else { return crate::resources::links(s) };
+    let mut m = (at + 4096).min(s.len());
+    while !s.is_char_boundary(m) {
+        m += 1;
+    }
+    let end16 = s[..at].encode_utf16().count();
+    crate::resources::links(&s[..m]).into_iter().filter(|l| l.end <= end16).collect()
+}
+
 pub fn row(it: &ConversationItem) -> FeedRow {
     let mut r = FeedRow::new("status", &it.id, None, ms(it.timestamp));
     r.pics = pics(it);
@@ -253,7 +269,10 @@ pub fn row(it: &ConversationItem) -> FeedRow {
         }
         ItemKind::AssistantText(s) => {
             r.k = "assistant".into();
-            r.text = Some(cut(s, TEXT_CAP));
+            let text = cut(s, TEXT_CAP);
+            let links = crate::mdsplit::judge(&text, reply_links(s));
+            r.links = (!links.is_empty()).then_some(links);
+            r.text = Some(text);
         }
         ItemKind::Status(s) => r.text = Some(s.clone()),
         ItemKind::ToolChips(chips) => {

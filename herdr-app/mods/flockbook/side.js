@@ -2,7 +2,8 @@
 // Flockbook (its own settings) and Settings.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, spaces, run, openOverlay, closeOverlay, props } from "herdr";
+import { theme, spaces, run, openOverlay, closeOverlay, props, shared, setShared } from "herdr";
+import { KEY_SIDE_W } from "./resources.js";
 import { openMenu, spaceItems } from "./menu.js";
 import { needing, showNeeds, showOverview, showSettings, shownScreen, icon, showSpace, toggleSidebar, sidebarShown, peekClosed, PEEK_W, PEEK_GAP, SPRING } from "./state.js";
 import { statusMark, lightsRoom, BAR_H } from "./top.js";
@@ -110,6 +111,8 @@ export class SideView {
         .on_mouse_down("left", stop).on_click(() => toggleSidebar()).child(svg(icon("sidebar")).size(16)));
     const root = v_flex().id("side-root").size_full().px(8).pb(8).gap(2)
       .on_hover((h) => { if (!h) this.leave(); });
+    // Docked: its width, so the Resources window knows the whole window's (resources.js).
+    if (!this.floating) root.on_size_change((size) => { const w = Math.round(size?.width ?? 0); if (w > 0 && shared(KEY_SIDE_W) !== w) setShared(KEY_SIDE_W, w); });
     // Floating: the panel draws its own surface, as Herdr draws no frame around it.
     if (this.floating) root.on_mouse_down("left", stop).bg(t.chrome).rounded(14).border(1).border_color(t.border).shadow_lg()
       .relative().left(this.slid ? 0 : -PEEK_W).when(this.slid, (el) => el.spring("left", SPRING));

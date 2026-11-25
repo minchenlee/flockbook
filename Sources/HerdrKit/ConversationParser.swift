@@ -11,6 +11,7 @@ public struct ConversationParser: Sendable {
     var lineTS: Date?                        // time of the line being fed
     var lineOffset: UInt64?                  // byte offset of the line being fed (picture refs point at it)
     var callById: [String: ToolCall] = [:]   // call details; results patch these after the chip was emitted
+    var callSeq = 0                          // the calls counted in log order (`ToolCall.seq`)
     var runsByKey: [String: [(tool: String, label: ToolLabel, id: String)]] = [:]
     var questionAt: [String: Int] = [:]      // AskUserQuestion tool_use id -> index in `done`
     /// The session the last line fed says the conversation went on in (Claude Code's `continued-in`), else nil.
@@ -136,6 +137,7 @@ public struct ConversationParser: Sendable {
                 openOrder.append(id)
                 callById[id] = ToolCall(id: id, toolName: name, summary: Self.summary(name: name, input: input),
                                         input: Self.cut(Self.prettyJSON(input)))
+                callSeq += 1; callById[id]?.seq = callSeq
             case "tool_result":
                 if let id = b["tool_use_id"] as? String, let at = questionAt[id], case .question(var q) = done[at].kind {
                     q.state = QuestionAdapter.claudeState(q, isError: b["is_error"] as? Bool ?? false,
@@ -229,6 +231,7 @@ public struct ConversationParser: Sendable {
             openOrder.append(id)
             let raw = (payload["arguments"] as? String) ?? (payload["input"] as? String) ?? ""
             callById[id] = ToolCall(id: id, toolName: name, summary: Self.codexCommand(payload), input: Self.cut(raw))
+            callSeq += 1; callById[id]?.seq = callSeq
         case "custom_tool_call_output", "function_call_output", "local_shell_call_output":
             if let id = payload["call_id"] as? String, let at = questionAt[id], case .question(var q) = done[at].kind {
                 if let state = QuestionAdapter.codexState(q, output: Self.resultText(payload["output"])) {

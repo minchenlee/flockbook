@@ -1,0 +1,725 @@
+[
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 33,
+        "res": "pr",
+        "start": 4
+      }
+    ],
+    "name": "bare",
+    "text": "PR: https://github.com/o/r/pull/9 ok",
+    "wrapped": [
+      "https://github.com/o/r/pull/9"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 38,
+        "res": "pr",
+        "start": 9
+      }
+    ],
+    "name": "inline link address",
+    "text": "[the PR](https://github.com/o/r/pull/1)",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 23,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "angle address",
+    "text": "[a](<https://x.com/a(b)>)",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 18,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "autolink",
+    "text": "see <https://x.com>",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 19,
+        "res": "link",
+        "start": 6
+      }
+    ],
+    "name": "code span",
+    "text": "Open `https://x.com` now",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 20,
+        "res": "link",
+        "start": 7
+      }
+    ],
+    "name": "code span with spaces",
+    "text": "Open ` https://x.com ` now",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 17,
+        "res": "link",
+        "start": 4
+      }
+    ],
+    "name": "between code spans",
+    "text": "`a` https://x.com `b`",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 23,
+        "res": "link",
+        "start": 10
+      }
+    ],
+    "name": "after a double-backtick span",
+    "text": "``a ` b`` https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 20,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "address after a space",
+    "text": "[x]( https://x.com/a)",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 20,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "address after a line break",
+    "text": "[x](\nhttps://x.com/a)",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 29,
+        "res": "link",
+        "start": 10
+      }
+    ],
+    "name": "crlf: address after CRLF",
+    "text": "[Guide](\r\nhttps://x.com/guide)",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 32,
+        "res": "link",
+        "start": 13
+      }
+    ],
+    "name": "crlf: address in <> after spaces and CRLF",
+    "text": "[Guide]( \r\n <https://x.com/guide>)",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0,
+      40
+    ],
+    "links": [
+      {
+        "block": 40,
+        "end": 55,
+        "res": "link",
+        "start": 40
+      }
+    ],
+    "name": "crlf: bare after a CRLF fence",
+    "text": "Intro\r\n```\r\ncode https://x.com/in\r\n```\r\nhttps://x.com/b\r\n",
+    "wrapped": [
+      "https://x.com/b"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 19,
+        "res": "link",
+        "start": 4
+      }
+    ],
+    "name": "after !",
+    "text": "Wow!https://x.com/a",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "indented code",
+    "text": "    https://x.com",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "tab: indented code",
+    "text": "\thttps://x.com",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 16,
+        "res": "link",
+        "start": 3
+      }
+    ],
+    "name": "indented: 3 spaces is text, 4 is code",
+    "text": "   https://a.com\n\n    https://x.com",
+    "wrapped": [
+      "https://a.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 24,
+        "res": "link",
+        "start": 11
+      }
+    ],
+    "name": "indented: lazy continuation is text",
+    "text": "x\n     see https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 25,
+        "res": "link",
+        "start": 12
+      }
+    ],
+    "name": "indented: a list item's second paragraph is text",
+    "text": "- item\n\n    https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0,
+      20
+    ],
+    "links": [
+      {
+        "end": 42,
+        "res": "link",
+        "start": 29
+      }
+    ],
+    "name": "indented: 4 spaces after a fence in a list item (drawn alone: code)",
+    "text": "- a\n  ```\n  x\n  ```\n    more https://x.com",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0,
+      22
+    ],
+    "links": [
+      {
+        "end": 44,
+        "res": "link",
+        "start": 31
+      }
+    ],
+    "name": "indented: 4 spaces after a table in a list item (drawn alone: code)",
+    "text": "- a\n  | h |\n  | --- |\n    more https://x.com",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0,
+      22
+    ],
+    "links": [
+      {
+        "end": 52,
+        "res": "link",
+        "start": 33
+      }
+    ],
+    "name": "quote split: 4 spaces after a table",
+    "text": "> intro\n| h |\n| --- |\n>     curl https://x.com/guide",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0,
+      30
+    ],
+    "links": [
+      {
+        "end": 60,
+        "res": "link",
+        "start": 41
+      }
+    ],
+    "name": "quote split: 4 spaces after a fence",
+    "text": "> intro\n    ```\n    x\n    ```\n>     curl https://x.com/guide",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "quote: indented code inside",
+    "text": ">     https://x.com",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 15,
+        "res": "link",
+        "start": 2
+      }
+    ],
+    "name": "quote: text",
+    "text": "> https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 17,
+        "res": "link",
+        "start": 4
+      }
+    ],
+    "name": "quote: nested text",
+    "text": "> > https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 17,
+        "res": "link",
+        "start": 4
+      }
+    ],
+    "name": "escaped backtick: the real span after it",
+    "text": "\\` `https://x.com` now",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 18,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "escaped backtick: after a span",
+    "text": "`a\\` https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 16,
+        "res": "link",
+        "start": 3
+      }
+    ],
+    "name": "escaped backtick: two backslashes",
+    "text": "\\\\`https://x.com`",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "escaped backtick: both escaped",
+    "text": "\\`https://x.com\\` ok",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 19,
+        "res": "link",
+        "start": 6
+      }
+    ],
+    "name": "code span: a backslash escapes nothing",
+    "text": "`a\\` `https://x.com`",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 28,
+        "res": "link",
+        "start": 15
+      }
+    ],
+    "name": "across paragraphs: a span does not cross a blank line",
+    "text": "`a\\` means `\n\n`https://x.com`",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 24,
+        "res": "link",
+        "start": 11
+      }
+    ],
+    "name": "across paragraphs: a line of spaces is blank",
+    "text": "a `\n \t\nsee https://x.com `b`",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 24,
+        "res": "link",
+        "start": 11
+      }
+    ],
+    "name": "across paragraphs: CRLF blank line",
+    "text": "a `\r\n\r\nsee https://x.com `b`",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "nbsp: a line of no-break spaces is not blank",
+    "text": "`a\n \nsee https://x.com `",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "nbsp: an em-space line is not blank",
+    "text": "`a\n \nsee https://x.com `",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      26
+    ],
+    "links": [
+      {
+        "end": 21,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "nbsp before a fence: the chat draws a code box",
+    "text": " ```\nhttps://x.com/in\n```\nhttps://x.com/out",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0,
+      80
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 19,
+        "res": "link",
+        "start": 6
+      },
+      {
+        "end": 77,
+        "res": "link",
+        "start": 64
+      },
+      {
+        "block": 80,
+        "end": 98,
+        "res": "link",
+        "start": 85
+      }
+    ],
+    "name": "blocks: prose, code, table, prose",
+    "text": "Intro https://a.com\n\n```sh\ncurl https://b.com\n```\n| H |\n|---|\n| https://c.com |\n\nEnd https://d.com",
+    "wrapped": [
+      "https://a.com",
+      "https://d.com"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 20,
+        "res": "link",
+        "start": 5
+      }
+    ],
+    "name": "utf-16: emoji and Chinese",
+    "text": "🎉 見 https://x.com/a，好 👍",
+    "wrapped": [
+      "https://x.com/a"
+    ]
+  },
+  {
+    "blocks": [
+      0,
+      15
+    ],
+    "links": [
+      {
+        "block": 15,
+        "end": 33,
+        "res": "link",
+        "start": 18
+      }
+    ],
+    "name": "utf-16: astral before a later block",
+    "text": "😀 a\n```\nb\n```\n😀 https://x.com/e",
+    "wrapped": [
+      "https://x.com/e"
+    ]
+  },
+  {
+    "blocks": [
+      29
+    ],
+    "links": [
+      {
+        "block": 29,
+        "end": 46,
+        "res": "link",
+        "start": 29
+      }
+    ],
+    "name": "tilde fence with a backtick in its info",
+    "text": "~~~ a`b\nhttps://x.com/in\n~~~\nhttps://x.com/out",
+    "wrapped": [
+      "https://x.com/out"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 26,
+        "res": "link",
+        "start": 13
+      }
+    ],
+    "name": "backtick fence with a backtick after it is text",
+    "text": "```x``` then https://x.com",
+    "wrapped": [
+      "https://x.com"
+    ]
+  },
+  {
+    "blocks": [
+      44
+    ],
+    "links": [
+      {
+        "end": 37,
+        "res": "link",
+        "start": 22
+      },
+      {
+        "block": 44,
+        "end": 63,
+        "res": "link",
+        "start": 44
+      }
+    ],
+    "name": "table separator with colons and a trailing pipe",
+    "text": "| a | b |\n|:--|--:|\n| https://x.com/c | d |\nhttps://x.com/after",
+    "wrapped": [
+      "https://x.com/after"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "inline html",
+    "text": "<span>see</span> https://x.com",
+    "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "block": 0,
+        "end": 47,
+        "res": "link",
+        "start": 4
+      }
+    ],
+    "name": "markup in the address",
+    "text": "see https://en.wikipedia.org/wiki/Foo_(bar)_baz",
+    "wrapped": [
+      "https://en.wikipedia.org/wiki/Foo_(bar)_baz"
+    ]
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [],
+    "name": "entity in the address",
+    "text": "go https://x.com/?a=1&amp;b=2",
+    "wrapped": []
+  }
+]
