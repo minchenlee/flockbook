@@ -93,6 +93,13 @@ function main(args) {
     const r = spawnSync("cargo", ["clippy", "--workspace", "--all-targets", "--locked", "--message-format=json", "--", "--cap-lints", "warn"],
       { cwd: xplat, encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "inherit"] });
     if (r.status !== 0) {
+      // The errors are in the JSON on stdout: show them.
+      for (const line of (r.stdout ?? "").split("\n")) {
+        try {
+          const m = JSON.parse(line);
+          if (m.reason === "compiler-message" && m.message.level === "error") console.error(m.message.rendered);
+        } catch {}
+      }
       console.error(`clippy-baseline: cargo clippy exited ${r.status ?? r.signal}: fix the build first`);
       return 2;
     }
