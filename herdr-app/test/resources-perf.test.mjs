@@ -111,12 +111,50 @@ test("after a restart (the cache is empty) the first ask is a full read, also wi
   assert.equal(fake.shared[R.KEY_DATA].items, undefined, "the big value is replaced by the small one");
 });
 
-test("the cache keeps the last CACHE_MAX agents", async () => {
+test("the cache keeps the last CACHE_MAX agents asked about (one asked about again is kept)", async () => {
   helper(Object.fromEntries(Array.from({ length: R.CACHE_MAX + 1 }, (_, i) => [`t${i}`, long(`x${i}`).slice(0, 2)])));
-  for (let i = 0; i <= R.CACHE_MAX; i++) { showAgent(`t${i}`); await R.pollResources(fakeCx(), true); }
-  assert.equal(R.dataFor("t0"), null, "the oldest one went");
-  assert.equal(R.dataFor("t1").items.length, 2);
+  for (let i = 0; i < R.CACHE_MAX; i++) { showAgent(`t${i}`); await R.pollResources(fakeCx(), true); }
+  // t0 again: now the newest.
+  showAgent("t0"); await R.pollResources(fakeCx(), true);
+  showAgent(`t${R.CACHE_MAX}`); await R.pollResources(fakeCx(), true);
+  assert.equal(R.dataFor("t0")?.items.length, 2, "asked about again: kept");
+  assert.equal(R.dataFor("t1"), null, "the one asked about longest ago went");
+  assert.equal(R.dataFor("t2").items.length, 2);
   assert.equal(R.dataFor(`t${R.CACHE_MAX}`).items.length, 2);
+});
+
+test("the open window, back to an agent: its list at once, then a full read (a doc written meanwhile is there now) (Codex R1)", async () => {
+  const doc = { type: "res", id: "d", kind: "doc", target: "/home/u/p/plan.md", title: "plan.md", detail: "~/p", row: "r-d", first_ts: 5, last_ts: 5, mentions: 1, exists: false };
+  const lists = { t1: [doc], t2: long("b").slice(0, 2) };
+  const asked = helper(lists);   // a --since ask gets nothing: the log did not change
+  fake.props = { view: "resources", overlay: "o7" };
+  fake.shared[R.KEY_OPEN] = "o7"; fake.shared[R.KEY_RUN] = R.RUN;
+  const cx = fakeCx();
+  const v = new R.ResourcesView(cx);
+  await cx.settle();
+  assert.equal(R.dataFor("t1").items[0].exists, false);
+  showAgent("t2"); v.tick(cx); await cx.settle();
+  // The file is written now.
+  lists.t1 = [{ ...doc, exists: true }];
+  showAgent("t1"); v.tick(cx);
+  assert.equal(R.dataFor("t1")?.items.length, 1, "shown at once");
+  await cx.settle();
+  const last = asked.filter((a) => a.includes("t1")).at(-1);
+  assert.ok(!last.includes("--since"), "a full read");
+  assert.equal(R.dataFor("t1").items[0].exists, true);
+});
+
+test("a full read asked while a delta runs is done after it, not dropped (Codex R1)", async () => {
+  const lists = { t1: long().slice(0, 3) };
+  const asked = helper(lists);
+  await R.pollResources(fakeCx(), true);
+  lists.t1 = lists.t1.map((i) => ({ ...i, title: `${i.title} new` }));
+  const cx = fakeCx();
+  const delta = R.pollResources(cx, true);           // the bar's ask, running
+  const full = R.pollResources(cx, true, true);      // the window opens now
+  await Promise.all([delta, full]); await cx.settle();
+  assert.deepEqual(asked.map((a) => a.includes("--since")), [false, true, false], "the full one after the delta");
+  assert.match(R.dataFor("t1").items[0].title, / new$/);
 });
 
 const open = (items, extra = {}) => {
@@ -159,9 +197,14 @@ test("at most ROW_LIMIT rows a group, then a Show N more row; a click shows the 
 
 test("the height counts the rows drawn, not all of them", () => {
   open(long());
+  fake.shared["flockbook.window.height"] = 30000;   // tall enough that the height is not at its most
   const p = R.placeNow();
-  // 5 groups, each with ROW_LIMIT or fewer rows: 30 + 30 + 30 + 30 + 30 rows, 5 "Show more" rows.
-  assert.equal(p.height, R.placement(1400, 900, 150, 10).height);
+  // 5 groups, each with ROW_LIMIT rows drawn: 150 rows; 5 titles and 5 "Show more" rows.
+  assert.equal(p.height, R.placement(1400, 30000, 150, 10).height);
+  assert.notEqual(p.height, R.placement(1400, 30000, 151, 10).height, "one row more is another height");
+  assert.notEqual(p.height, R.placement(1400, 30000, 150, 9).height);
+  assert.equal(R.placeNow(["docs"]).height, R.placement(1400, 30000, 150 - 30 + 436, 9).height, "docs shown in full: no Show more there");
+  fake.shared["flockbook.window.height"] = 900;
   const few = long().filter((i) => i.kind === "pr").slice(0, 3);
   open(few);
   assert.equal(R.placeNow().height, R.placement(1400, 900, 3, 1).height, "a short list: as before");
