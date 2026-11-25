@@ -219,7 +219,7 @@ const view = (items, extra = {}) => {
   return new R.ResourcesView(fakeCx());
 };
 
-test("the window: groups in order with counts, a new dot, a missing file struck, the footer, an empty state", () => {
+test("the window: groups in order with counts, a new dot, a missing file struck, the count in the header, an empty state", () => {
   const now = Date.now();
   const v = view([res("l1", "link", now - 120_000), res("p1", "pr", now - 60_000, { title: "o/r#12" }), res("d1", "doc", now - 5_000, { title: "plan.md", detail: "~/notes", exists: true }),
     res("d2", "doc", now - 10_000, { title: "gone.md", detail: "~/x", exists: false }), res("a1", "artifact", now - 200_000), res("x", "link", now)], { seen: now - 7_000 });
@@ -233,12 +233,15 @@ test("the window: groups in order with counts, a new dot, a missing file struck,
   assert.equal(byId(el, "res-new-d2"), null);
   assert.match(textOf(byId(el, "res-d2")), /File not found/);
   assert.match(textOf(byId(el, "res-p1")), /o\/r#12.*1m/);
-  assert.equal(textOf(byId(el, "res-foot")), "5 items · 1 removed");
+  // The count is in the header (owner 11-25: no footer, more room for the list).
+  assert.equal(byId(el, "res-foot"), null, "no footer");
+  assert.equal(textOf(byId(byId(el, "res-head"), "res-count")), "5 items · 1 removed");
   assert.equal(byId(el, "res-x"), null, "removed: not listed");
   // Empty.
   const e = view([]).render(fakeCx());
   assert.match(textOf(e), /No resources yet.*Docs, artifacts and links the agent mentions in its replies show up here\./);
-  assert.equal(textOf(byId(e, "res-foot")), "0 items");
+  assert.equal(byId(e, "res-foot"), null);
+  assert.equal(textOf(byId(byId(e, "res-head"), "res-count")), "0 items");
 });
 
 test("shown is seen: the badge goes while the window is open", () => {
@@ -380,7 +383,7 @@ test("the window's bottom stays 12 px above the chat input", () => {
 });
 
 test("refit: only a real change reopens; it does not shrink under the pointer", () => {
-  const a = R.placement(1400, 900, 2, 1), more = R.placement(1400, 900, 8, 2), none = R.placement(1400, 900, 0, 0);
+  const a = R.placement(1400, 900, 3, 1), more = R.placement(1400, 900, 8, 2), none = R.placement(1400, 900, 0, 0);
   assert.equal(R.needsRefit(a, a, false), false);
   assert.equal(R.needsRefit(null, a, false), false, "nothing open");
   assert.equal(R.needsRefit(a, more, false), true, "grows");

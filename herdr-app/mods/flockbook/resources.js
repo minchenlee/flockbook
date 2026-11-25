@@ -237,7 +237,7 @@ export function placement(winW, winH, count = 0, groups = 0, paneW = winW, input
   const room = w - (w - pane + r.left + r.width) - READ_GAP - GAP;
   const width = room >= MIN_PANEL ? Math.min(PANEL_W, room) : PANEL_W;
   const most = Math.max(80, bottom - TOP);
-  const want = 46 + 34 + Math.max(1, count) * 50 + groups * 30 + 16;
+  const want = 46 + Math.max(1, count) * 50 + groups * 30 + 16;
   const height = Math.min(most, Math.max(180, Math.min(h - 72, count ? want : 200)));
   return { at: { x: Math.max(0, w - GAP - width), y: TOP }, width, height, drawer: false, right: width + GAP };
 }
@@ -374,6 +374,9 @@ export class ResourcesView {
       .child(div().text_size(13).font_weight(600).text_color(t.foreground).child("Resources"))
       .child(div().id("res-scope").h(22).px(8).flex().items_center().rounded(11).bg(t.selected).text_size(11.5).text_color(t.muted).child("This agent"))
       .child(div().flex_1())
+      // The count (owner 11-25: here, not in a footer, so the list has the room).
+      .child(div().id("res-count").flex_none().text_size(11.5).text_color(t.muted)
+        .child(`${items.length} item${items.length === 1 ? "" : "s"}${hidden ? ` · ${hidden} removed` : ""}`))
       .child(iconBtn("res-close", "close", "Close (Esc)", () => this.closeSelf()));
 
     const row = (it) => {
@@ -416,10 +419,6 @@ export class ResourcesView {
         .child(div().text_size(13).font_weight(600).text_color(t.foreground).child(emptyText(address, d?.error)[0]))
         .child(div().text_size(12).text_color(t.muted).text_center().child(emptyText(address, d?.error)[1]));
 
-    const foot = h_flex().id("res-foot").h(34).flex_none().px(14).items_center().border_t(1).border_color(t.border)
-      .text_size(11.5).text_color(t.muted)
-      .child(`${items.length} item${items.length === 1 ? "" : "s"}${hidden ? ` · ${hidden} removed` : ""}`);
-
     const root = v_flex().id("res-root").size_full().bg(t.background).border(1).border_color(t.border).shadow_lg()
       .when(props()?.drawer !== true, (el) => el.rounded(14))
       .on_hover((inside) => { this.inside = Boolean(inside); })
@@ -427,6 +426,6 @@ export class ResourcesView {
       .on_mouse_down("left", (_e, cx) => { cx?.stop_propagation?.(); this.h?.focus?.(); })
       .on_key_down((e, cx) => { if (e?.key === "escape") { cx?.stop_propagation?.(); this.closeSelf(); } });
     if (this.h) root.track_focus(this.h);
-    return root.child(header).child(body).child(foot);
+    return root.child(header).child(body);
   }
 }
