@@ -290,7 +290,8 @@ pub mod fake_core {
             let mut held = vec![];
             for mut s in clients {
                 let mut line = String::new();
-                if BufReader::new(s.try_clone().unwrap()).read_line(&mut line).is_err() {
+                // A client that hangs up before a request (a connect check) is skipped.
+                if BufReader::new(s.try_clone().unwrap()).read_line(&mut line).map_or(true, |n| n == 0) {
                     continue;
                 }
                 let o: Value = serde_json::from_str(&line).unwrap();
@@ -415,6 +416,15 @@ mod socket_tests {
         let c = HcClient::new(session, 2, 1);
         assert_eq!(c.call("server.status", json!({}), None), Err(HerdrError::Socket("HC_SESSION \"a/b\" can't be a folder name".into())));
         assert!(core.calls.lock().unwrap().is_empty());
+    }
+
+    /// A client that hangs up before its first line does not stop the fake core.
+    #[test]
+    fn a_silent_client_does_not_stop_the_core() {
+        let core = fake_core::start(|_, _| Some(json!({})));
+        drop(connector_for(&HcSession::new(&core.path)).connect(Some(Duration::from_secs(2))).unwrap());
+        let c = HcClient::new(HcSession::new(&core.path), 2, 1);
+        assert_eq!(c.call("server.status", json!({}), None).unwrap(), json!({}));
     }
 
     #[test]

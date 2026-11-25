@@ -3,7 +3,8 @@
 //! else `/run/user/<uid>/herdr-core/` when it exists (Linux only in practice); else the session's state directory,
 //! `${XDG_STATE_HOME:-~/.local/state}/herdr-core/<session>/<session>.sock`. The session name comes from
 //! `HC_SESSION`, default `default`. On Windows hc listens on the named pipe
-//! `\\.\pipe\herdr-core-<USERNAME>-<session>.sock` instead. Flockbook's overrides on top: `--hc-socket <path>` and
+//! `\\.\pipe\herdr-core-<user>-<session>.sock` instead (`<user>`: the ASCII letters and digits of `USERNAME`; see
+//! `windows_pipe`). Flockbook's overrides on top: `--hc-socket <path>` and
 //! `HERDR_DESK_HC_SOCKET`.
 
 use std::collections::HashMap;

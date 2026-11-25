@@ -394,7 +394,9 @@ mod windows {
             let pipe = open(&core.path, Some(Duration::from_secs(2))).unwrap();
             assert_eq!(check_server(pipe.as_raw_handle() as HANDLE), Ok(()));
             drop(pipe);
-            assert!(PipeConnector { path: core.path.clone() }.connect(Some(Duration::from_secs(2))).is_ok());
+            let mut s = LineSocket::connect(&PipeConnector { path: core.path.clone() }, Some(Duration::from_secs(2))).unwrap();
+            s.write_line(br#"{"jsonrpc":"2.0","id":1,"method":"server.status","params":{}}"#).unwrap();
+            assert!(!s.read_line().unwrap().is_empty());
         }
     }
 }

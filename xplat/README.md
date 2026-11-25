@@ -16,7 +16,7 @@ All spikes run headless (no window). Run `cargo test` in this directory.
 ## The mod's sidecar
 
 `flockbook-modfeed` prints the protocol's JSON Lines (protocol 1). Linux and macOS: Unix socket.
-Windows: herdr-core's named pipe, `\\.\pipe\herdr-core-<USERNAME>-<session>.sock` (`HC_SOCKET` still overrides it).
+Windows: herdr-core's named pipe, `\\.\pipe\herdr-core-<user>-<session>.sock`, with only the ASCII letters and digits of `USERNAME` as `<user>` (`HC_SOCKET` still overrides it). Flockbook connects only when the pipe's server runs as the same Windows user.
 The open-files scan is a TODO there: it finds no agent log by its open files, and fails closed.
 
 ```sh
