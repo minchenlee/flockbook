@@ -306,8 +306,20 @@ pub fn run(argv: &[String]) -> String {
                     // Read only. `~/` is this machine's home (the agent's: a terminal elsewhere runs this there).
                     let Some(path) = log else { return r.finish_with(json!({"cursor": null, "full": true})) };
                     let user_home = std::env::var_os("HOME").map(PathBuf::from);
-                    return match crate::resources::answer(path, opt("--since").as_deref(), user_home.as_deref()) {
-                        Ok(a) => {
+                    // What the last call kept (resources/<hash of the terminal>.json beside the cache): only the new lines are parsed.
+                    let kept_at = cache_url.and_then(|c| crate::resources::state_dir(c)).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&found.pane.terminal_id))));
+                    let kept: Option<crate::resources::Kept> = kept_at.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok());
+                    let linear = matches!(kind.as_str(), "claude" | "codex" | "cursor" | "grok");
+                    // The pane's folder: where a relative doc path in a reply opens (when the log names none that has it).
+                    let cwd = Some(found.pane.cwd.as_str()).filter(|c| !c.is_empty()).map(PathBuf::from);
+                    return match crate::resources::answer_in(path, opt("--since").as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), linear) {
+                        Ok((a, next, _)) => {
+                            if let Some(at) = kept_at.as_deref().filter(|_| next.as_ref().map(|k| (k.size, k.at)) != kept.as_ref().map(|k| (k.size, k.at))) {
+                                match &next {
+                                    Some(k) => crate::resources::keep(k, at),
+                                    None => _ = std::fs::remove_file(at),
+                                }
+                            }
                             for it in &a.items {
                                 r.out.emit(it);
                             }

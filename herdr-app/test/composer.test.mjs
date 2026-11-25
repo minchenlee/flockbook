@@ -103,6 +103,18 @@ test("each agent keeps its own draft", () => {
   assert.equal(c.box(fake.agents[0]).input.value(), "for api");
 });
 
+test("the chat keeps its input's height in shared(), for the Resources window's bottom", async () => {
+  fake.exec = (cmd, args) => args[0] === "feed"
+    ? jl(header("feed"), { type: "log", agent: "claude", path: "/l.jsonl", start: 0, size: 1, cursor: "c" }, { type: "splice", at: 0, count: 1 }, { type: "row", id: "u1", k: "user", text: "hi" }, end)
+    : jl(header(args[0]), end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  const find = (el) => (el?.kids ?? []).some((k) => k?._a?.id === "composer") ? el : (el?.kids ?? []).map(find).find(Boolean);
+  const wrap = find(v.render(cx));
+  assert.ok(wrap?._h.on_size_change, "the input's box is measured");
+  wrap._h.on_size_change({ width: 800, height: 151.6 });
+  assert.equal(fake.shared["flockbook.input.height"], 152);
+});
+
 test("the chat shows the composer, and a drop on it attaches files", async () => {
   fake.exec = (cmd, args) => args[0] === "feed"
     ? jl(header("feed"), { type: "log", agent: "claude", path: "/l.jsonl", start: 0, size: 1, cursor: "c" }, { type: "splice", at: 0, count: 1 }, { type: "row", id: "u1", k: "user", text: "hi" }, end)

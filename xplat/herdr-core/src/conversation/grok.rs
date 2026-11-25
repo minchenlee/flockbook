@@ -183,6 +183,8 @@ impl ConversationParser {
                 if let Some(c) = self.call_by_id.get_mut(id) {
                     c.output = Some(cut(&out));
                     c.is_error = status == Some("failed");
+                } else {
+                    self.late += 1;
                 }
                 self.close_call(id);
             }

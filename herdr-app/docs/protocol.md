@@ -232,7 +232,7 @@ into PNG). Pastes older than a day in that folder are removed; other files never
 ### `log` (`feed`)
 
 ```json
-{"agent":"claude","cursor":"1.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
+{"agent":"claude","cursor":"3.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
 ```
 
 | Field | Meaning |
@@ -282,11 +282,11 @@ With `--pictures` (what `serve` asks for, also with `--before`), the log is pars
 `user` and `tools` rows with pictures get `pics`: one entry per picture, the owner's for a user row, the calls'
 result pictures in call order for a tools row. `{"format":"png","width":3,"height":4,"offset":1290,"index":0,
 "digest":"<16 hex digits>"}`: the line's file offset, the picture's place in that line, and the first 8 bytes of
-the SHA-256 of its base64. Codex, Grok and Cursor row ids then come from line offsets, so they differ from the
-rows without `--pictures`. The mod never passes it.
+the SHA-256 of its base64. The mod never passes it.
 
-One per conversation row, in order. `id` is stable for the same log and `start`: the mod keys row
-heights by it.
+One per conversation row, in order. `id` names the same message whatever range was read: the tail, a page
+with `--before`, or Resources (which reads from the file's start). Claude ids come from the log; Codex, Grok and
+Cursor ids from the message's line offset (`cx@1290`). The mod keys row heights by it.
 
 | `k` | Fields | Shown as |
 |---|---|---|
@@ -331,13 +331,20 @@ only plain text is searched. Not found: user rows, tool output, code blocks, oth
 (`![a](src)`), HTML (and the rest of a paragraph after an inline tag), reference links and definitions (`[a][1]`, `[1]: https://…`), a target that runs into an escape or
 an entity (`\_`, `&amp;`), relative paths, paths with spaces. A target cut by the
 `…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
-The mod draws the web kinds as Markdown links in prose (not in code boxes or tables, nor on a line indented 4 or
-more in its block: drawn alone, that block may show it as code; TextView opens them); `doc` stays
-text for now. A mod that does not know `links` ignores it. After the helper is updated, a chat read before keeps its
-rows for its `--cursor` (`unchanged`): their links show once the log changes and the rows come again in a `splice`.
+`block` (left out when not set): the UTF-16 start of the chat block (the mod's `splitBlocks`: the text between code
+fences and tables) where the mod writes the link as a Markdown link. The helper sets it only when both the whole reply
+and that block read alone (as the mod draws it, with TextView) read the range as plain text: not code, a link's address,
+an autolink, a picture (`!` before it) or HTML. So a link in a code box, a table, a code span, or on a line that drawn
+alone is indented code has no `block`. The mod only writes: it writes the web kinds whose `block` is the block it draws
+(TextView opens them); `doc` stays text for now. A link without `block` (an older helper, a row read before) stays
+text. Both sides check the same cases: `Tests/Fixtures/resources/md-links.json` (`xplat/flockbook-modfeed/tests/md_links.rs`,
+`herdr-app/test/links.test.mjs`).
+
+A mod that does not know `links` ignores it. The helper that adds `block` gives `3.` cursors: an older `--cursor`
+gets every row again in a `splice` at 0, so a chat read before gets its links with `block`.
 
 ```json
-{"id":"a2","k":"assistant","links":[{"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
+{"id":"a2","k":"assistant","links":[{"block":0,"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
 ```
 
 `chips[]`: `symbol` (an SF Symbols name such as `terminal` or `doc.text`; the mod maps it to its own icon), `text` (the chip label), `calls[]`. Each call: `name` (the
@@ -531,24 +538,47 @@ one reply, the later target first). Read only.
 - Collected with the same rules as a row's `links` (assistant text only), and the claude.ai artifact URL in the result of
   a successful Artifact publish (its `title` from the call's input). Not collected: what the person typed, other
   tools' input and output, relative paths.
-- `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`.
+- Commands (`cmd`, assistant text only): a fenced code block whose language (the info's first word, any case) is
+  none, `sh`, `bash`, `zsh`, `shell` or `console`, holding one command: one line, or lines joined by a `\` at
+  their end; a leading `$ ` is dropped; at most 400 characters. Not commands: a block with more lines (a script, a
+  command and its output), other languages (`text`, `log`, `json`…), indented code, inline code, a comment.
+  `target`: the command as written (its lines kept), trimmed.
+- `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`, `cmd`. A mod ignores kinds it does not know.
 - `id`: FNV-1a (hex) of the normalized target; the same target is one item. A doc: its absolute path (`~/` is the
-  home of the machine the agent runs on). `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
-  GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`.
+  home of the machine the agent runs on).
+- Docs also come from relative paths in a reply (`docs/a.md`, `./a.md`, in text, a code span or a link; not a bare
+  file name, an address without its scheme, a pattern or a placeholder). Where it opens: the one file under the
+  folders the log names (`cwd`) or the pane's folder; else the one under a folder a command went to (`cd /…`) or the
+  one doc path a tool call named that ends in it. None, or more than one: not listed (once its file is there, a
+  later read lists it). Found, it is the item of that file: one `id` with the absolute mentions of it. Feed `row`
+  `links` do not carry relative paths. `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
+  GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`. A
+  command: the command trimmed (key `cmd:<command>`).
 - `title`: a doc's first `# ` heading (Markdown) or `<title>` (HTML) in its first 4 KB, else its file name; an
-  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path. `detail`: a doc's folder (`~` for the
-  home), a URL's host, or `o/r`.
+  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path; a command's: the last line of the paragraph or heading right
+  before its block (an ending `:` or `：` dropped, at most 80 characters), else the command's start (60). `detail`: a
+  doc's folder (`~` for the home), a URL's host, or `o/r`; a command on one line (each line's ending `\` dropped).
 - `row`: the `id` of the feed `row` with the last mention. `first_ts`, `last_ts`: ms, or null.
 - `exists`: docs only; the path's real file (links followed) is a file now, and the real file's extension is a doc kind
   (`md`, `html`, `htm`, `pdf`, `png`, `svg`). A `preview.md` link to `notes.txt` or to a folder: `false`. It can be old
   by the time the person clicks: the mod asks `open-check` before it opens a file.
-- Only the last 2 MB of the log are read (as `feed` shows first): older mentions are not counted.
+- The whole log is counted, at any length. `row` can be older than the rows the chat has loaded: then "Show in chat"
+  does nothing.
+- With `--cache`, the helper keeps what it parsed in `resources/<hash of the terminal>.json` beside it (one file per
+  terminal, written through a temp file and renamed; at most 64 files, the newest kept, and files not changed for 7
+  days are dropped; a file that does not parse counts as none). Next time it parses only the lines after a safe start and gives
+  the same answer as a whole read; a log that is shorter, changed at its start or another file is read whole. Without
+  `--cache` the whole log is read each time.
 - `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,
   unchanged, gives no `res`; the same log, grown, gives only the resources mentioned after the cursor's newest one
   (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).
+  The cursor (`r4.…`) holds a mark of the log file (device, inode, birth time) and of its bytes: another file at the same path
+  (a log written again, of the same size or bigger) is another log. A kept state of other rules also gives them all, and so does a relative doc path that now
+  opens another file (or opens one now): its item has another `id`. An older cursor (`r1.`, `r2.`, `r3.`) gives them all once. A result that comes for a tool call
+  before the kept start also gives them all.
 
 ```json
-{"type":"end","ok":true,"ms":4,"cursor":"r1.af63…ce1.48213.1793670020000","full":false}
+{"type":"end","ok":true,"ms":4,"cursor":"r4.af63…ce1.48213.1793670020000.9c1e…07.5d2a…e4","full":false}
 ```
 
 ### `openable` (`open-check`)

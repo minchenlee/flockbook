@@ -2,10 +2,10 @@
 //! Pure. `detect` finds the targets in an assistant text; feed rows carry them as `links`, and the `resources`
 //! command (P1) collects them with the same rules.
 
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use herdr_core::{ConversationItem, ItemKind};
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,9 @@ pub struct FeedLink {
     pub start: usize,
     pub end: usize,
     pub res: &'static str,
+    /// Set by mdsplit::judge: the UTF-16 start of the chat block where the mod writes it as a Markdown link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block: Option<usize>,
 }
 
 /// One target: `start`..`end` in UTF-16 units, its kind, and the target as it opens (a URL with a scheme, or the
@@ -44,6 +47,12 @@ const CJK_PUNCT: &str = "。，、；：！？「」『』（）《》【】…�
 /// `\[`, an entity `&amp;`) is not searched, and a target that runs into it is not found: to be safe.
 /// Punctuation at the end (`.` `,` `)` without its `(`, `。`…) is not part of a target.
 pub fn detect(text: &str) -> Vec<Found> {
+    scan(text, false)
+}
+
+/// `detect`, and with `rel` also relative doc paths (`docs/a.md`, `./a.md`): what Resources collects. Feed rows
+/// do not link them (the mod could not open them).
+fn scan(text: &str, rel: bool) -> Vec<Found> {
     // Only plain text is searched: everything starts taken, a text event as written is freed.
     let mut taken = vec![true; text.len()];
     let mut hits: Vec<(usize, usize, &'static str, String)> = vec![];
@@ -65,7 +74,7 @@ pub fn detect(text: &str) -> Vec<Found> {
                         _ => None,
                     };
                     if let Some((ds, de)) = dest {
-                        if let Some((kind, target)) = whole(&text[ds..de]) {
+                        if let Some((kind, target)) = whole_rel(&text[ds..de], rel) {
                             hits.push((ds, de, kind, target));
                         }
                     }
@@ -88,7 +97,7 @@ pub fn detect(text: &str) -> Vec<Found> {
                 let lead = inner.len() - inner.trim_start().len();
                 let tok = inner.trim();
                 if tok == c.trim() {
-                    if let Some((kind, target)) = whole(tok) {
+                    if let Some((kind, target)) = whole_rel(tok, rel) {
                         let s = r.start + n + lead;
                         hits.push((s, s + tok.len(), kind, target));
                     }
@@ -99,6 +108,9 @@ pub fn detect(text: &str) -> Vec<Found> {
     }
     bare_urls(text, &mut taken, &mut hits);
     bare_paths(text, &mut taken, &mut hits);
+    if rel {
+        bare_rel(text, &mut taken, &mut hits);
+    }
     hits.sort_by_key(|h| h.0);
     // Byte offsets to UTF-16, in one pass.
     let mut out = vec![];
@@ -157,6 +169,20 @@ fn whole(tok: &str) -> Option<(&'static str, String)> {
         return Some(("doc", tok.to_string()));
     }
     None
+}
+
+/// `whole`, and with `rel` a relative doc path too.
+fn whole_rel(tok: &str, rel: bool) -> Option<(&'static str, String)> {
+    whole(tok).or_else(|| (rel && is_rel_doc(tok)).then(|| ("doc", tok.to_string())))
+}
+
+/// A relative path to a doc: a folder and a file (`docs/a.md`, `./a.md`, `../a.md`, `.claude/a.md`), the file a doc
+/// kind. Not: a bare file name (`README.md`), an address without its scheme (`x.com/a.png`: a first part with a dot),
+/// a pattern or a placeholder (`coord/*.md`, `contracts/<id>.md`).
+fn is_rel_doc(tok: &str) -> bool {
+    let Some((first, _)) = tok.split_once('/') else { return false };
+    let first_ok = first == "." || first == ".." || first.starts_with('.') || (!first.is_empty() && !first.contains('.'));
+    first_ok && !tok.starts_with('~') && !tok.contains("//") && !tok.contains(['*', '?', '<', '>', '{', '}', '$', '[', ']', '|']) && !tok.contains(':') && !tok.contains(char::is_whitespace) && doc_end(tok, 0, tok.len()) == Some(tok.len())
 }
 
 /// A scheme-less address that is still one: `localhost:<port>`, `127.0.0.1:<port>`, a claude.ai artifact, a GitHub
@@ -358,8 +384,139 @@ fn bare_paths(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'st
     }
 }
 
+/// Relative doc paths in plain text (see `is_rel_doc`), after URLs and absolute paths.
+fn bare_rel(text: &str, taken: &mut [bool], hits: &mut Vec<(usize, usize, &'static str, String)>) {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if taken[i] || !(b[i].is_ascii_alphanumeric() || b[i] == b'.' || b[i] == b'_') || !starts_here(text, i) {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        for (k, c) in text[i..].char_indices() {
+            if !path_char(c) {
+                break;
+            }
+            j = i + k + c.len_utf8();
+        }
+        match doc_end(text, i, j) {
+            Some(e) if is_rel_doc(&text[i..e]) && !taken[i..e].iter().any(|&x| x) => {
+                hits.push((i, e, "doc", text[i..e].to_string()));
+                mark(taken, i, e, true);
+                i = e;
+            }
+            _ => i = j.max(i + 1),
+        }
+    }
+}
+
+/// A one-line shell command the reply gives the human to run (`cmd`): where its block starts (UTF-16), what the
+/// reply says right before it, and the command as written.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Command {
+    pub start: usize,
+    pub title: String,
+    pub cmd: String,
+}
+
+/// A fenced block's language that holds shell commands (the info's first word, any case).
+const CMD_LANGS: [&str; 6] = ["", "sh", "bash", "zsh", "shell", "console"];
+/// A longer command is not one to keep.
+const CMD_MAX: usize = 400;
+const TITLE_MAX: usize = 80;
+const HEAD_MAX: usize = 60;
+
+/// The commands in `text`, in order: fenced code blocks in a shell language (`CMD_LANGS`) that hold one command, one
+/// line or lines joined by a `\` at their end, at most `CMD_MAX` characters; a leading `$ ` is dropped. Not commands:
+/// a block with more than one (a script, or a command and its output), other languages (text, log, json…), indented
+/// code, inline code, a comment. Title: the last line of the paragraph or heading right before the block (its
+/// ending `:` or `：` dropped, cut at `TITLE_MAX`); with none there, the command's start.
+pub fn commands(text: &str) -> Vec<Command> {
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let mut out = vec![];
+    // The text of the block right before (a paragraph or a heading), and of the one being read.
+    let (mut before, mut cur): (Option<String>, Option<String>) = (None, None);
+    // The fenced block being read: its start (bytes), language, body.
+    let mut code: Option<(usize, String, String)> = None;
+    for (ev, r) in Parser::new_ext(text, opts).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::Paragraph | Tag::Heading { .. }) => cur = Some(String::new()),
+            Event::End(TagEnd::Paragraph | TagEnd::Heading(_)) => before = cur.take(),
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                code = Some((r.start, info.split_whitespace().next().unwrap_or("").to_ascii_lowercase(), String::new()));
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some((start, lang, body)) = code.take() {
+                    if let Some(cmd) = CMD_LANGS.contains(&lang.as_str()).then(|| one_command(&body)).flatten() {
+                        let title = before.as_deref().map(title_of).filter(|t| !t.is_empty()).unwrap_or_else(|| cut(&one_line(&cmd), HEAD_MAX));
+                        out.push(Command { start: text[..start].encode_utf16().count(), title, cmd });
+                    }
+                }
+                before = None;
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(c) = code.as_mut() {
+                    c.2.push_str(&t);
+                } else if let Some(c) = cur.as_mut() {
+                    c.push_str(&t);
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(c) = cur.as_mut() {
+                    c.push('\n');
+                }
+            }
+            // Inside a paragraph: part of its text.
+            Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. })
+            | Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image) => {}
+            // Another block between: the text before is not the command's.
+            Event::Start(_) | Event::End(_) | Event::Rule if cur.is_none() => before = None,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A block's body as one command, or None.
+fn one_command(body: &str) -> Option<String> {
+    let mut lines: Vec<&str> = body.lines().collect();
+    while lines.first().is_some_and(|l| l.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    let (last, rest) = lines.split_last()?;
+    if last.trim_end().ends_with('\\') || rest.iter().any(|l| !l.trim_end().ends_with('\\')) {
+        return None;
+    }
+    let all = lines.join("\n");
+    let all = all.trim();
+    let cmd = all.strip_prefix("$ ").map(str::trim_start).unwrap_or(all);
+    (!cmd.is_empty() && !cmd.starts_with('#') && cmd.chars().count() <= CMD_MAX).then(|| cmd.to_string())
+}
+
+/// A command on one line: each line's ending `\` dropped, the spaces made one.
+pub fn one_line(cmd: &str) -> String {
+    cmd.lines().map(|l| l.trim().trim_end_matches('\\')).collect::<Vec<_>>().join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn cut(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    format!("{}…", s.chars().take(max - 1).collect::<String>().trim_end())
+}
+
+/// The title a paragraph gives the command after it: its last line, without the ending colon.
+fn title_of(p: &str) -> String {
+    let line = p.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    cut(line.trim_end_matches([':', '：', ' ']).trim(), TITLE_MAX)
+}
+
 pub fn links(text: &str) -> Vec<FeedLink> {
-    detect(text).into_iter().map(|f| FeedLink { start: f.start, end: f.end, res: f.kind }).collect()
+    detect(text).into_iter().map(|f| FeedLink { start: f.start, end: f.end, res: f.kind, block: None }).collect()
 }
 
 
@@ -392,66 +549,268 @@ pub struct Resource {
 /// successful Artifact publish. Not collected: what the person typed, other tools' input and output.
 /// `home`: the home `~/` stands for.
 pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource> {
-    let mut acc: Vec<(Resource, usize)> = vec![];
-    let mut at: HashMap<String, usize> = HashMap::new();
-    let mut seq = 0usize;
-    for it in crate::rows::merged(items) {
-        let ts = crate::rows::ms(it.timestamp);
-        let mut found: Vec<(&'static str, String, Option<String>)> = vec![];
-        match &it.kind {
-            ItemKind::AssistantText(s) => found.extend(detect(s).into_iter().map(|f| (f.kind, f.target, None))),
-            ItemKind::ToolChips(chips) => {
-                for c in chips.iter().flat_map(|c| &c.calls) {
-                    let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
-                    let (action, title, file) = artifact_input(&c.input);
-                    // No title given: the published page's own <title>, when the file is here.
-                    let title = title.or_else(|| file.map(PathBuf::from).filter(|p| p.is_absolute()).and_then(|p| openable(&p).ok()).and_then(|p| file_title(&p)));
-                    if action.as_deref().is_some_and(|a| a != "publish") {
-                        continue;
-                    }
-                    found.extend(detect(out).into_iter().filter(|f| f.kind == "artifact").map(|f| (f.kind, f.target, title.clone())));
-                }
-            }
-            _ => {}
+    let mut acc = Acc::default();
+    acc.add(items, home);
+    acc.finish(home)
+}
+
+/// The kinds a resource can be (`normal` gives one of them).
+const KINDS: [&str; 8] = ["doc", "local", "cmd", "pr", "issue", "ci", "artifact", "link"];
+
+fn kind_of(k: &str) -> Option<&'static str> {
+    KINDS.iter().copied().find(|x| *x == k)
+}
+
+/// A title as given (a reply's text before a command, an Artifact call's `title`), or a published file whose own
+/// title is read when the list is made (as `collect` reads it).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+enum Title {
+    Given(String),
+    File(String),
+}
+
+/// One target while the log is read: what `Resource` gets from its mentions so far.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct Held {
+    key: String,
+    kind: String,
+    target: String,
+    row: String,
+    first_ts: Option<i64>,
+    last_ts: Option<i64>,
+    mentions: usize,
+    /// The order of the last mention, over the whole log.
+    seq: usize,
+    /// The titles the mentions gave, the newest last: the newest that reads is the title. A given title makes the
+    /// older ones no matter.
+    titles: Vec<Title>,
+}
+
+/// The resources of a log read so far; `add` the items of more lines, `finish` makes the list. Items added in parts
+/// give the same list as all at once when no run of tool calls is cut (`rows::merged` joins a run).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Acc {
+    held: Vec<Held>,
+    seq: usize,
+    /// For relative doc paths (resolved in `finish`): the folders the log says the agent worked in (`cwd`), the
+    /// folders its commands went to (`cd /…`), and the absolute doc paths its tool calls named.
+    #[serde(default)]
+    cwds: BTreeSet<String>,
+    #[serde(default)]
+    dirs: BTreeSet<String>,
+    #[serde(default)]
+    files: BTreeSet<String>,
+    /// Key -> index in `held`; made again from `held` after a read from disk.
+    #[serde(skip)]
+    at: HashMap<String, usize>,
+}
+
+impl Acc {
+    pub fn add(&mut self, items: &[ConversationItem], home: Option<&Path>) {
+        if self.at.len() != self.held.len() {
+            self.at = self.held.iter().enumerate().map(|(i, h)| (h.key.clone(), i)).collect();
         }
-        for (kind, target, title) in found {
-            let (kind, key, target) = normal(kind, &target, home);
-            seq += 1;
-            match at.get(&key) {
-                Some(&k) => {
-                    let (r, s) = &mut acc[k];
-                    r.mentions += 1;
-                    r.last_ts = ts.or(r.last_ts);
-                    r.first_ts = r.first_ts.or(ts);
-                    r.row = it.id.clone();
-                    r.target = target;
-                    if let Some(t) = title {
-                        r.title = t;
-                    }
-                    *s = seq;
+        for it in crate::rows::merged(items) {
+            let ts = crate::rows::ms(it.timestamp);
+            let mut found: Vec<(&'static str, String, Option<Title>)> = vec![];
+            match &it.kind {
+                ItemKind::AssistantText(s) => {
+                    // In the order they are written: a later one is newer.
+                    let mut f: Vec<(usize, &'static str, String, Option<Title>)> = scan(s, true).into_iter().map(|f| (f.start, f.kind, f.target, None)).collect();
+                    f.extend(commands(s).into_iter().map(|c| (c.start, "cmd", c.cmd, Some(Title::Given(c.title)))));
+                    f.sort_by_key(|x| x.0);
+                    found.extend(f.into_iter().map(|(_, k, t, title)| (k, t, title)));
                 }
-                None => {
-                    at.insert(key.clone(), acc.len());
-                    let r = Resource {
-                        t: "res",
-                        id: crate::protocol::fnv1a(&key),
-                        kind,
-                        target,
-                        title: title.unwrap_or_default(),
-                        detail: String::new(),
-                        row: it.id.clone(),
-                        first_ts: ts,
-                        last_ts: ts,
-                        mentions: 1,
-                        exists: None,
-                    };
-                    acc.push((r, seq));
+                ItemKind::ToolChips(chips) => {
+                    for c in chips.iter().flat_map(|c| &c.calls).filter(|c| !c.is_error && c.output.is_some()) {
+                        self.places(&c.input, home);
+                    }
+                    for c in chips.iter().flat_map(|c| &c.calls) {
+                        let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
+                        let (action, title, file) = artifact_input(&c.input);
+                        // No title given: the published page's own <title>, when the file is here.
+                        let title = title.map(Title::Given).or_else(|| file.filter(|f| Path::new(f).is_absolute()).map(Title::File));
+                        if action.as_deref().is_some_and(|a| a != "publish") {
+                            continue;
+                        }
+                        found.extend(detect(out).into_iter().filter(|f| f.kind == "artifact").map(|f| (f.kind, f.target, title.clone())));
+                    }
+                }
+                _ => {}
+            }
+            for (kind, target, title) in found {
+                let (kind, key, target) = match kind == "doc" && is_rel_doc(&target) {
+                    true => {
+                        let r = rel_clean(&target);
+                        ("doc", format!("rel:{r}"), r)
+                    }
+                    false => normal(kind, &target, home),
+                };
+                self.seq += 1;
+                let k = match self.at.get(&key) {
+                    Some(&k) => {
+                        let h = &mut self.held[k];
+                        h.mentions += 1;
+                        h.last_ts = ts.or(h.last_ts);
+                        h.first_ts = h.first_ts.or(ts);
+                        h.row = it.id.clone();
+                        h.target = target;
+                        h.seq = self.seq;
+                        k
+                    }
+                    None => {
+                        self.at.insert(key.clone(), self.held.len());
+                        let h = Held { key, kind: kind.into(), target, row: it.id.clone(), first_ts: ts, last_ts: ts, mentions: 1, seq: self.seq, titles: vec![] };
+                        self.held.push(h);
+                        self.held.len() - 1
+                    }
+                };
+                let titles = &mut self.held[k].titles;
+                match title {
+                    Some(Title::Given(t)) => *titles = vec![Title::Given(t)],
+                    Some(Title::File(p)) => {
+                        titles.retain(|t| *t != Title::File(p.clone()));
+                        titles.push(Title::File(p));
+                    }
+                    None => {}
                 }
             }
         }
     }
-    acc.sort_by_key(|(r, s)| std::cmp::Reverse((r.last_ts.unwrap_or(i64::MIN), *s)));
-    acc.into_iter().map(|(r, _)| described(r, home)).collect()
+
+    /// The folders and doc paths a tool call that worked names (see `cwds`): the doc path of a file tool
+    /// (`file_path`, `path`, `notebook_path`) and the folders of a command's `cd /…` (`command`, `cmd`). Not any other
+    /// string: a command's text or a description names paths it did not open.
+    fn places(&mut self, input: &str, home: Option<&Path>) {
+        let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(input) else { return };
+        for k in ["file_path", "path", "notebook_path"] {
+            if let Some(("doc", t)) = o.get(k).and_then(|v| v.as_str()).and_then(|s| whole(s.trim())) {
+                self.files.insert(normal("doc", &t, home).2);
+            }
+        }
+        for k in ["command", "cmd"] {
+            let cmds: Vec<&str> = match o.get(k) {
+                Some(serde_json::Value::String(s)) => vec![s],
+                Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.as_str()).collect(),
+                _ => vec![],
+            };
+            for d in cmds.into_iter().flat_map(cd_targets) {
+                self.dirs.insert(normal("doc", &d, home).2.trim_end_matches('/').to_string());
+            }
+        }
+    }
+
+    /// The working folders named by log lines (`cwd`), in order.
+    pub fn cwd(&mut self, cwd: &str) {
+        self.cwds.insert(cwd.to_string());
+    }
+
+    /// Where a relative doc path opens (its real path): under a working folder (`cwd`, `agent`: the pane's) when
+    /// exactly one such file is there (more than one: none, the other clues do not pick); with none there, under a
+    /// folder a command went to, or a doc path a file tool named that ends in it, when exactly one is. None: not listed.
+    /// It does not open, and it may be an example (`docs/a.md`); once its file is there, the next read finds it.
+    /// The path is looked up as written: the file system takes `..` after a link, as it opens it.
+    fn resolve(&self, rel: &str, agent: Option<&str>) -> Option<String> {
+        let one = |c: BTreeSet<String>| (c.len() == 1).then(|| c.into_iter().next()).flatten();
+        let found = |b: &str| -> Option<String> {
+            let p = format!("{}/{rel}", b.trim_end_matches('/'));
+            Path::new(&p).is_file().then(|| real_doc(&p))
+        };
+        let here: BTreeSet<String> = self.cwds.iter().map(String::as_str).chain(agent).filter_map(found).collect();
+        if !here.is_empty() {
+            return one(here);
+        }
+        if rel.split('/').any(|x| x == "..") {
+            return None;
+        }
+        let end = format!("/{rel}");
+        let there: BTreeSet<String> = self.dirs.iter().filter_map(|d| found(d)).chain(self.files.iter().filter(|f| f.ends_with(&end)).map(|f| real_doc(f))).collect();
+        one(there)
+    }
+
+    /// Each relative doc path and the key it has now (see `resolve`): when one changes, a list merged by id would
+    /// keep the old item.
+    fn resolved(&self, agent: Option<&str>) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = self.held.iter().filter_map(|h| h.key.strip_prefix("rel:")).map(|r| (r.to_string(), self.resolve(r, agent).map(|p| format!("doc:{p}")).unwrap_or_default())).collect();
+        out.sort();
+        out
+    }
+
+    /// The list, newest first (see `collect`).
+    pub fn finish(&self, home: Option<&Path>) -> Vec<Resource> {
+        self.finish_in(home, None)
+    }
+
+    /// `finish`, with the agent's folder for relative doc paths. A relative path found is the item of its file (one
+    /// item with the absolute mentions of it, its id the absolute path's: mentions added, the last mention's row); one
+    /// not found is not listed.
+    pub fn finish_in(&self, home: Option<&Path>, agent: Option<&str>) -> Vec<Resource> {
+        let keys: HashMap<String, String> = self.resolved(agent).into_iter().map(|(r, k)| (format!("rel:{r}"), k)).collect();
+        let mut merged: Vec<Held> = vec![];
+        let mut at: HashMap<String, usize> = HashMap::new();
+        for h in &self.held {
+            let mut h = h.clone();
+            if let Some(k) = keys.get(&h.key) {
+                // Not found: not listed.
+                if k.is_empty() {
+                    continue;
+                }
+                h.target = k.strip_prefix("doc:").unwrap_or(k).to_string();
+                h.key = k.clone();
+            } else if let Some(p) = h.key.strip_prefix("doc:") {
+                // One file written two ways (a linked folder, another case): one item, named by its real path.
+                let r = real_doc(p);
+                if r != p {
+                    (h.key, h.target) = (format!("doc:{r}"), r);
+                }
+            }
+            match at.get(&h.key) {
+                Some(&i) => {
+                    let m = &mut merged[i];
+                    m.mentions += h.mentions;
+                    m.first_ts = match (m.first_ts, h.first_ts) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, b) => a.or(b),
+                    };
+                    if h.seq > m.seq {
+                        (m.seq, m.row, m.target, m.last_ts) = (h.seq, h.row, h.target, h.last_ts.or(m.last_ts));
+                    }
+                }
+                None => {
+                    at.insert(h.key.clone(), merged.len());
+                    merged.push(h);
+                }
+            }
+        }
+        let mut held: Vec<&Held> = merged.iter().collect();
+        held.sort_by_key(|h| std::cmp::Reverse((h.last_ts.unwrap_or(i64::MIN), h.seq)));
+        held.into_iter()
+            .map(|h| {
+                let title = h.titles.iter().rev().find_map(|t| match t {
+                    Title::Given(t) => Some(t.clone()),
+                    Title::File(p) => openable(Path::new(p)).ok().and_then(|p| file_title(&p)),
+                });
+                let r = Resource {
+                    t: "res",
+                    id: crate::protocol::fnv1a(&h.key),
+                    kind: kind_of(&h.kind).unwrap_or("link"),
+                    target: h.target.clone(),
+                    title: title.unwrap_or_default(),
+                    detail: String::new(),
+                    row: h.row.clone(),
+                    first_ts: h.first_ts,
+                    last_ts: h.last_ts,
+                    mentions: h.mentions,
+                    exists: None,
+                };
+                described(r, home)
+            })
+            .collect()
+    }
+
+    fn known(&self) -> bool {
+        self.held.iter().all(|h| kind_of(&h.kind).is_some())
+    }
 }
 
 /// The `action`, `title` and `file_path` of an Artifact call's input (JSON, maybe cut at 4 KB: then read as text).
@@ -504,7 +863,7 @@ fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (&'static st
     match kind {
         "doc" => {
             let p = match (target.strip_prefix("~/"), home) {
-                (Some(rest), Some(h)) => h.join(rest).to_string_lossy().to_string(),
+                (Some(rest), Some(h)) => home_join(h, rest),
                 _ => target.to_string(),
             };
             ("doc", format!("doc:{p}"), p)
@@ -513,6 +872,7 @@ fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (&'static st
             let (scheme, auth, _, _) = parts(target);
             ("local", format!("local:{}", host_port(&scheme, &auth)), target.to_string())
         }
+        "cmd" => ("cmd", format!("cmd:{}", target.trim()), target.trim().to_string()),
         "pr" | "issue" | "ci" => {
             let (_, _, path, _) = parts(target);
             let seg: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -532,6 +892,122 @@ fn normal(kind: &'static str, target: &str, home: Option<&Path>) -> (&'static st
     }
 }
 
+/// A relative path as one item: without leading "./".
+fn rel_clean(p: &str) -> String {
+    let mut p = p;
+    while let Some(r) = p.strip_prefix("./") {
+        p = r;
+    }
+    p.to_string()
+}
+
+/// A doc path as the file system names it: its folder's real path (links followed, the case on disk) and the file's
+/// name, or the whole real path when the file itself is no link (a link to a file keeps its own name: `exists` and
+/// `open-check` look at what it opens). The path as written when there is no such folder.
+fn real_doc(p: &str) -> String {
+    let path = Path::new(p);
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return p.to_string() };
+    let Ok(rdir) = std::fs::canonicalize(dir) else { return p.to_string() };
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    match std::fs::canonicalize(path) {
+        Ok(r) if !is_link => r.to_string_lossy().into_owned(),
+        _ => rdir.join(name).to_string_lossy().into_owned(),
+    }
+}
+
+/// The absolute folders a shell command goes to: `cd /…` or `cd ~/…` as a command of its own (at the start, or after
+/// `&&`, `||`, `;`, `|`, `(`, `{` or a line break), the `cd` not quoted. The command is split as a shell splits it
+/// (quotes, `\\` escapes): a `cd` inside quotes or an argument (`echo cd /x`, `printf '…; cd /x'`) is none. A command
+/// it cannot split (a quote not closed) gives none.
+fn cd_targets(s: &str) -> Vec<String> {
+    // Words (with whether any part was quoted) and operators, in order.
+    enum Tok {
+        Word(String, bool),
+        Op,
+    }
+    let mut toks: Vec<Tok> = vec![];
+    let (mut w, mut quoted, mut in_word) = (String::new(), false, false);
+    let mut cs = s.chars().peekable();
+    let end_word = |toks: &mut Vec<Tok>, w: &mut String, quoted: &mut bool, in_word: &mut bool| {
+        if *in_word {
+            toks.push(Tok::Word(std::mem::take(w), *quoted));
+        }
+        (*quoted, *in_word) = (false, false);
+    };
+    while let Some(c) = cs.next() {
+        match c {
+            '\\' => match cs.next() {
+                Some('\n') => {}
+                Some(n) => {
+                    w.push(n);
+                    (quoted, in_word) = (true, true);
+                }
+                None => return vec![],
+            },
+            '\'' => {
+                (quoted, in_word) = (true, true);
+                loop {
+                    match cs.next() {
+                        Some('\'') => break,
+                        Some(x) => w.push(x),
+                        None => return vec![],
+                    }
+                }
+            }
+            '"' => {
+                (quoted, in_word) = (true, true);
+                loop {
+                    match cs.next() {
+                        Some('"') => break,
+                        Some('\\') => match cs.next() {
+                            Some(x @ ('"' | '\\' | '$' | '`')) => w.push(x),
+                            Some('\n') => {}
+                            Some(x) => {
+                                w.push('\\');
+                                w.push(x);
+                            }
+                            None => return vec![],
+                        },
+                        Some(x) => w.push(x),
+                        None => return vec![],
+                    }
+                }
+            }
+            ';' | '|' | '&' | '(' | ')' | '{' | '}' | '\n' => {
+                end_word(&mut toks, &mut w, &mut quoted, &mut in_word);
+                toks.push(Tok::Op);
+            }
+            c if c.is_whitespace() => end_word(&mut toks, &mut w, &mut quoted, &mut in_word),
+            c => {
+                w.push(c);
+                in_word = true;
+            }
+        }
+    }
+    end_word(&mut toks, &mut w, &mut quoted, &mut in_word);
+    let mut out = vec![];
+    let mut at_start = true;
+    let mut i = 0;
+    while i < toks.len() {
+        match &toks[i] {
+            Tok::Op => at_start = true,
+            Tok::Word(word, q) => {
+                if at_start && !q && word == "cd" {
+                    if let Some(Tok::Word(d, _)) = toks.get(i + 1) {
+                        if (d.starts_with('/') || d.starts_with("~/")) && !d.contains(['$', '`', '*', '?']) {
+                            out.push(d.clone());
+                        }
+                        i += 1;
+                    }
+                }
+                at_start = false;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 /// "host:port", the port the scheme's when none is written.
 fn host_port(scheme: &str, auth: &str) -> String {
     let has_port = match auth.rfind(':') {
@@ -543,6 +1019,14 @@ fn host_port(scheme: &str, auth: &str) -> String {
     } else {
         format!("{auth}:{}", if scheme == "https" { 443 } else { 80 })
     }
+}
+
+/// `~/rest` with the home put in: the home, "/", the rest, as text. Not Path::join: on Windows it puts a "\\" in
+/// between, and the id and the shown path then differ from the same doc written out in full ("/home/me/a.md").
+fn home_join(home: &Path, rest: &str) -> String {
+    let h = home.to_string_lossy();
+    let h = h.strip_suffix('/').unwrap_or(&h);
+    format!("{h}/{rest}")
 }
 
 /// The home as "~" at the start of a path.
@@ -589,6 +1073,7 @@ fn described(mut r: Resource, home: Option<&Path>) -> Resource {
             let n = seg.last().copied().unwrap_or("");
             r.title = if r.kind == "ci" { format!("CI run {n}") } else { format!("{}#{n}", r.detail) };
         }
+        "cmd" => r.detail = one_line(&r.target),
         "local" => {
             let (scheme, auth, _, _) = parts(&r.target);
             r.title = if auth.contains(':') { auth.clone() } else { host_port(&scheme, &auth) };
@@ -625,6 +1110,167 @@ fn file_title(p: &Path) -> Option<String> {
     t.filter(|t| !t.is_empty())
 }
 
+/// Bump when what is collected changes (`detect`, `commands`, `normal`, `Acc`): a state kept with another number is
+/// not used.
+pub const RULES: u32 = 3;
+
+/// What one log's last `resources` call keeps, so the next reads only from `at`: the resources of the lines before
+/// it. `at` is a line start where no tool call waits for its result and no run of tool calls goes on (see
+/// `answer_kept`). Used only for the same log, home and rules, when the log is not shorter and its bytes before `at`
+/// look the same (a hash of its first 4 KB and of the 4 KB before `at`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Kept {
+    pub rules: u32,
+    pub home: Option<String>,
+    pub path: String,
+    /// The log's size when read.
+    pub size: u64,
+    pub at: u64,
+    head: String,
+    near: String,
+    /// The file's `identity` when kept (a state of another file at the path is not used).
+    #[serde(default)]
+    file: String,
+    acc: Acc,
+}
+
+/// Writes `k` to `at` (one file per terminal), and removes the folder's state files untouched for 7 days (terminals
+/// gone) and all but the newest `KEPT`. Only files named as `state_name` names them are removed; in a folder that is a
+/// link nothing is written.
+pub fn keep(k: &Kept, at: &Path) {
+    if at.parent().is_some_and(|d| std::fs::symlink_metadata(d).is_ok_and(|m| !m.is_dir())) {
+        return;
+    }
+    crate::locate::write_json(k, Some(at));
+    let week = std::time::Duration::from_secs(7 * 24 * 3600);
+    let hour = std::time::Duration::from_secs(3600);
+    let mut states = vec![];
+    for e in at.parent().and_then(|d| std::fs::read_dir(d).ok()).into_iter().flatten().flatten() {
+        let p = e.path();
+        let age = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).unwrap_or_default();
+        let name = e.file_name().to_string_lossy().into_owned();
+        if state_name(&name, true) {
+            // A temp file a stopped write left (another call may be writing one now: only old ones go).
+            if age > hour {
+                let _ = std::fs::remove_file(&p);
+            }
+        } else if state_name(&name, false) && e.file_type().is_ok_and(|t| t.is_file()) {
+            if age > week {
+                let _ = std::fs::remove_file(&p);
+            } else if p != at {
+                states.push((age, p));
+            }
+        }
+    }
+    // At most KEPT files: the one just written and the newest others.
+    states.sort();
+    for (_, p) in states.into_iter().skip(KEPT - 1) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// How many terminals keep a state (one file each, a few KB to a few hundred KB).
+const KEPT: usize = 64;
+
+/// What the bytes before `at` look like: a hash of the first 4 KB, and a hash of 16 pieces of 1 KB spread over them
+/// and the 4 KB before `at`. An agent only adds lines to its log; this finds another file at the path, not every
+/// change inside an old line.
+fn print(log: &Path, at: u64) -> std::io::Result<(String, String)> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(log)?;
+    let mut span = |from: u64, to: u64| -> std::io::Result<String> {
+        f.seek(SeekFrom::Start(from))?;
+        let mut d = vec![];
+        (&mut f).take(to.saturating_sub(from)).read_to_end(&mut d)?;
+        Ok(String::from_utf8_lossy(&d).into_owned())
+    };
+    let head = span(0, at.min(4096))?;
+    let mut rest = String::new();
+    for i in 0..16 {
+        let s = at / 16 * i;
+        rest.push_str(&span(s, (s + 1024).min(at))?);
+    }
+    rest.push_str(&span(at.saturating_sub(4096), at)?);
+    Ok((crate::protocol::fnv1a(&head), crate::protocol::fnv1a(&rest)))
+}
+
+/// The tool calls of a run join one item: a next read starts only at a line whose first item is text (the person's or
+/// the agent's), never a call or a call that waits (`PermissionRequest`).
+fn starts_clean(i: Option<&ConversationItem>) -> bool {
+    i.is_some_and(|i| matches!(i.kind, ItemKind::UserText(_) | ItemKind::AssistantText(_)))
+}
+
+/// The items of the lines in `from..to`, parsed on their own, and how many results there are for calls before `from`.
+fn items_in(log: &Path, from: u64, to: u64) -> std::io::Result<(Vec<ConversationItem>, usize)> {
+    let mut p = herdr_core::ConversationParser::new();
+    crate::tail::each_line(log, from, to, |l, at| p.feed_at(l, Some(at)))?;
+    Ok((crate::tail::without_pictures(p.items()), p.late_results()))
+}
+
+/// The working folder a log line names: Claude Code's `"cwd":"…"`, Codex's in `session_meta` and `turn_context`
+/// (the first one in the line; a value with an escape is skipped).
+fn line_cwd(l: &str) -> Option<String> {
+    let i = l.find("\"cwd\":\"")? + 7;
+    let rest = &l[i..];
+    let e = rest.find('"')?;
+    let c = &rest[..e];
+    (c.starts_with('/') && !c.contains('\\')).then(|| c.trim_end_matches('/').to_string()).filter(|c| !c.is_empty())
+}
+
+/// The cursor's mark of the log's bytes before `size` (see `print`): another file at the path does not pass.
+fn mark_of(log: &Path, size: u64) -> Option<String> {
+    mark_for_rules(log, size, RULES)
+}
+
+/// `mark_of` with other rules (a test makes the cursor of the rules before).
+#[doc(hidden)]
+pub fn mark_for_rules(log: &Path, size: u64, rules: u32) -> Option<String> {
+    let id = identity(log)?;
+    print(log, size).ok().map(|(h, n)| crate::protocol::fnv1a(&format!("{rules}.{id}.{h}{n}")))
+}
+
+/// The file itself: its device, inode and birth time (where the file system has one). A log written again through a
+/// new file (renamed over the old one, or made again) is another file, whatever its bytes. Not the change time: an
+/// append changes it, and every read would then be whole.
+fn identity(log: &Path) -> Option<String> {
+    let m = std::fs::metadata(log).ok()?;
+    let born = m.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(format!("{}.{}.{}", m.dev(), m.ino(), born.unwrap_or(0)))
+    }
+    #[cfg(not(unix))]
+    {
+        Some(format!("{}", born.unwrap_or(0)))
+    }
+}
+
+/// The state folder beside `cache`, or None when it is a link or not a folder: nothing is read, written or removed
+/// through a link.
+pub fn state_dir(cache: &Path) -> Option<PathBuf> {
+    let d = cache.with_file_name("resources");
+    match std::fs::symlink_metadata(&d) {
+        Ok(m) if !m.is_dir() => None,
+        _ => Some(d),
+    }
+}
+
+/// A name this command gives a state file: `<hex>.json` (FNV-1a of the terminal); with `temp`, the temp file a
+/// write makes first (`.<hex>.json.<pid>`).
+fn state_name(n: &str, temp: bool) -> bool {
+    let hex = |s: &str| (1..=16).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c));
+    match temp {
+        false => n.strip_suffix(".json").is_some_and(hex),
+        true => n.strip_prefix('.').and_then(|r| r.split_once(".json.")).is_some_and(|(h, pid)| hex(h) && !pid.is_empty() && pid.bytes().all(|c| c.is_ascii_digit())),
+    }
+}
+
+/// How many line starts before the end `answer_kept` looks at for the next `at`, and how many of them it checks
+/// by parsing to the end.
+const LOOK: usize = 2000;
+const CHECKS: usize = 4;
+
 /// The answer to `resources`: the items to send, the next cursor, and whether they are all of them (`full`) or only
 /// the ones newer than `since`.
 pub struct Answer {
@@ -633,37 +1279,134 @@ pub struct Answer {
     pub full: bool,
 }
 
-/// The resources in the last 2 MB of the log (`tail::BYTES`, as the chat). The cursor is
-/// "r1.<hash of the path>.<size>.<newest last_ts>". With a cursor of this log: the same size, no items; a bigger
-/// size, only the items mentioned at or after its newest one (a run of tool calls has its first call's time, so a
-/// later call in it can have that same time; sent again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
+/// `answer_kept` with the agent's folder (the pane's), for relative doc paths.
+pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: Option<&Kept>, linear: bool) -> std::io::Result<(Answer, Option<Kept>, u64)> {
+    answer_in(log, since, home, None, kept, linear)
+}
+
+/// The resources in the whole log (`answer_kept` with nothing kept).
 pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::Result<Answer> {
+    answer_kept(log, since, home, None, false).map(|x| x.0)
+}
+
+/// The resources in the whole log; with `kept` from the call before (and a log that still fits it), only the lines
+/// from its `at` are parsed. `linear`: the agent's log is read line after line with nothing later changing what an
+/// earlier line gave (Claude Code, Codex, Cursor, Grok; not pi or agy, whose entries are a tree or slots): only then is a
+/// state returned. Returns the answer, the state to keep, and the offset parsing started at.
+///
+/// The next `at` is a line start before which no tool call waits for its result, and whose lines parsed on their
+/// own give the same items as the end of this read, the first not tool calls: the items before it are then final.
+///
+/// The cursor is "r4.<hash of the path>.<size>.<newest last_ts>.<mark>.<where relative docs open>" (`mark_of`: the
+/// file and its bytes before `size`; the last part: a hash of `Acc::resolved`). An r1, r2 or r3 cursor (old Codex
+/// ids; a log cut at 64 MB; no relative docs) gets all of it again. With a cursor of this log whose mark still
+/// passes: the same size, no items; a bigger size, only the items mentioned at or after its newest one (a run of tool
+/// calls has its first call's time, so a later call in it can have that same time; sent again, the mod merges by id).
+/// Else (another file at the path, a shorter one, a bad cursor) all of them. All of them too when the kept state does
+/// not fit the log, or a result comes for a call before the kept start: the log is then read whole.
+pub fn answer_in(log: &Path, since: Option<&str>, home: Option<&Path>, cwd: Option<&Path>, kept: Option<&Kept>, linear: bool) -> std::io::Result<(Answer, Option<Kept>, u64)> {
+    let agent = cwd.map(|c| normal("doc", &c.to_string_lossy(), home).2);
+    let agent = agent.as_deref();
     let hash = crate::protocol::fnv1a(&log.to_string_lossy());
-    // Unchanged: nothing is read or parsed.
-    if let Some(c) = since {
-        let p: Vec<&str> = c.split('.').collect();
-        if let ["r1", h, size, _] = p.as_slice() {
-            if *h == hash && size.parse::<u64>().ok() == Some(std::fs::metadata(log)?.len()) {
-                return Ok(Answer { items: vec![], cursor: c.to_string(), full: false });
-            }
-        }
-    }
-    let range = crate::tail::read(log, None, crate::tail::BYTES)?;
-    let all = collect(&crate::tail::items(&range.lines), home);
-    let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
-    let cursor = format!("r1.{hash}.{}.{newest}", range.size);
+    let size = std::fs::metadata(log)?.len();
+    // The cursor's size and newest time, when it is one of this file.
     let was = since.and_then(|c| {
         let p: Vec<&str> = c.split('.').collect();
         match p.as_slice() {
-            ["r1", h, size, ts] if *h == hash => Some((size.parse::<u64>().ok()?, ts.parse::<i64>().ok()?)),
+            ["r4", h, n, ts, m, r] if *h == hash => {
+                let n = n.parse::<u64>().ok().filter(|&n| n <= size)?;
+                (mark_of(log, n).as_deref() == Some(*m)).then_some((n, ts.parse::<i64>().ok()?, r.to_string()))
+            }
             _ => None,
         }
     });
-    Ok(match was {
-        Some((size, _)) if size == range.size => Answer { items: vec![], cursor, full: false },
-        Some((size, ts)) if size < range.size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
+    let path = log.to_string_lossy().to_string();
+    let home_s = home.map(|h| h.to_string_lossy().to_string());
+    let file = identity(log).unwrap_or_default();
+    let base = match kept {
+        Some(k) if linear && k.rules == RULES && k.home == home_s && k.path == path && k.file == file && k.at <= k.size && k.size <= size && k.acc.known() => {
+            Some(k).filter(|_| print(log, k.at).ok() == Some((k.head.clone(), k.near.clone())))
+        }
+        _ => None,
+    };
+    // A kept state that does not fit: the log changed under it (or the rules did), so the old list may not hold.
+    let mut whole = linear && kept.is_some() && base.is_none();
+    // Unchanged (and a kept state, if any, that fits): nothing is read or parsed.
+    if let (Some(c), Some((n, _, _)), false) = (since, &was, whole) {
+        if *n == size {
+            return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
+        }
+    }
+    let (mut from, mut acc) = match base {
+        Some(k) => (k.at, k.acc.clone()),
+        None => (0, Acc::default()),
+    };
+    // Line starts with no tool call waiting before them: where the next read may start.
+    let (items, starts, end) = loop {
+        let mut p = herdr_core::ConversationParser::new();
+        let mut starts: Vec<(u64, usize)> = vec![];
+        let mut cwds: Vec<String> = vec![];
+        let end = crate::tail::each_line(log, from, size, |l, at| {
+            if !p.has_open_tool_use() {
+                starts.push((at, l.len()));
+            }
+            if let Some(c) = line_cwd(l) {
+                if cwds.last() != Some(&c) {
+                    cwds.push(c);
+                }
+            }
+            p.feed_at(l, Some(at));
+        })?;
+        // A result for a call before the kept start: what it changes is in the kept part. Read it all again.
+        if from > 0 && p.late_results() > 0 {
+            (from, acc, whole) = (0, Acc::default(), true);
+            continue;
+        }
+        // The folders are kept with the state as they are read: a set, and the last one (lines after the next start
+        // are read again next time, and give the same).
+        cwds.iter().for_each(|c| acc.cwd(c));
+        break (crate::tail::without_pictures(p.items()), starts, end);
+    };
+    // The next start: the latest line start that passes, else this one (`items[..k]` are then the final ones).
+    let (mut at, mut k) = (from, 0usize);
+    if linear {
+        let mut checks = 0;
+        for &(s, len) in starts.iter().rev().take(LOOK).filter(|x| x.0 > from) {
+            // Cheap first: the line alone must start with text.
+            if !starts_clean(items_in(log, s, s + len as u64 + 1)?.0.first()) {
+                continue;
+            }
+            // No result after it for a call before it: that call's item could still change.
+            let (b, late) = items_in(log, s, end)?;
+            if late == 0 && starts_clean(b.first()) && b.len() <= items.len() && items[items.len() - b.len()..] == b[..] {
+                (at, k) = (s, items.len() - b.len());
+                break;
+            }
+            checks += 1;
+            if checks == CHECKS {
+                break;
+            }
+        }
+    }
+    acc.add(&items[..k], home);
+    let next = match linear {
+        true => {
+            let (head, near) = print(log, at)?;
+            Some(Kept { rules: RULES, home: home_s, path, size, at, head, near, file, acc: acc.clone() })
+        }
+        false => None,
+    };
+    acc.add(&items[k..], home);
+    let all = acc.finish_in(home, agent);
+    let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
+    // Where the relative doc paths open now: when one moved (its item has another id), all of it again.
+    let res = crate::protocol::fnv1a(&format!("{:?}", acc.resolved(agent)));
+    let cursor = format!("r4.{hash}.{size}.{newest}.{}.{res}", mark_of(log, size).unwrap_or_default());
+    let answer = match was {
+        Some((n, ts, r)) if n < size && !whole && r == res => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
         _ => Answer { items: all, cursor, full: true },
-    })
+    };
+    Ok((answer, next, from))
 }
 
 #[cfg(test)]
@@ -901,7 +1644,7 @@ mod tests {
         assert_eq!(r.links, None, "same length after the cut");
         // A URL that ends before the cut is kept.
         let r = row(format!("https://x.com/ok {}", "a".repeat(cap)));
-        assert_eq!(r.links, Some(vec![FeedLink { start: 0, end: 16, res: "link" }]));
+        assert_eq!(r.links, Some(vec![FeedLink { start: 0, end: 16, res: "link", block: Some(0) }]));
     }
 
     #[test]
@@ -909,9 +1652,9 @@ mod tests {
         use herdr_core::*;
         let item = |kind| ConversationItem { id: "a1".into(), kind, ..Default::default() };
         let r = crate::rows::row(&item(ItemKind::AssistantText("PR: https://github.com/o/r/pull/9 ok".into())));
-        assert_eq!(r.links, Some(vec![FeedLink { start: 4, end: 33, res: "pr" }]));
+        assert_eq!(r.links, Some(vec![FeedLink { start: 4, end: 33, res: "pr", block: Some(0) }]));
         let json = serde_json::to_value(&r).unwrap().to_string();
-        assert!(json.contains(r#""links":[{"end":33,"res":"pr","start":4}]"#), "{json}");
+        assert!(json.contains(r#""links":[{"block":0,"end":33,"res":"pr","start":4}]"#), "{json}");
         let r = crate::rows::row(&item(ItemKind::AssistantText("nothing here".into())));
         assert_eq!(r.links, None);
         assert!(!serde_json::to_value(&r).unwrap().to_string().contains("links"), "no field without links");
@@ -920,8 +1663,16 @@ mod tests {
     }
 
     #[test]
+    fn a_home_path_is_the_home_and_a_slash_on_every_platform() {
+        let home = Path::new("/home/me");
+        assert_eq!(normal("doc", "~/plans/plan.md", Some(home)).1, "doc:/home/me/plans/plan.md");
+        assert_eq!(normal("doc", "~/plans/plan.md", Some(Path::new("/home/me/"))).2, "/home/me/plans/plan.md");
+        assert_eq!(normal("doc", "~/a.md", None).2, "~/a.md");
+    }
+
+    #[test]
     fn links_for_a_row() {
         assert_eq!(links("no links here"), vec![]);
-        assert_eq!(links("x https://x.com"), vec![FeedLink { start: 2, end: 15, res: "link" }]);
+        assert_eq!(links("x https://x.com"), vec![FeedLink { start: 2, end: 15, res: "link", block: None }], "links() leaves block to mdsplit::judge");
     }
 }
