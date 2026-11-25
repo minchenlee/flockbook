@@ -912,28 +912,95 @@ fn real_doc(p: &str) -> String {
     }
 }
 
-/// The absolute folders a shell command goes to: `cd /…` or `cd ~/…` at its start or after `&&`, `;`, `||`,
-/// `|`, `(` or a line break; quotes taken off.
+/// The absolute folders a shell command goes to: `cd /…` or `cd ~/…` as a command of its own (at the start, or after
+/// `&&`, `||`, `;`, `|`, `(`, `{` or a line break), the `cd` not quoted. The command is split as a shell splits it
+/// (quotes, `\\` escapes): a `cd` inside quotes or an argument (`echo cd /x`, `printf '…; cd /x'`) is none. A command
+/// it cannot split (a quote not closed) gives none.
 fn cd_targets(s: &str) -> Vec<String> {
+    // Words (with whether any part was quoted) and operators, in order.
+    enum Tok {
+        Word(String, bool),
+        Op,
+    }
+    let mut toks: Vec<Tok> = vec![];
+    let (mut w, mut quoted, mut in_word) = (String::new(), false, false);
+    let mut cs = s.chars().peekable();
+    let end_word = |toks: &mut Vec<Tok>, w: &mut String, quoted: &mut bool, in_word: &mut bool| {
+        if *in_word {
+            toks.push(Tok::Word(std::mem::take(w), *quoted));
+        }
+        (*quoted, *in_word) = (false, false);
+    };
+    while let Some(c) = cs.next() {
+        match c {
+            '\\' => match cs.next() {
+                Some('\n') => {}
+                Some(n) => {
+                    w.push(n);
+                    (quoted, in_word) = (true, true);
+                }
+                None => return vec![],
+            },
+            '\'' => {
+                (quoted, in_word) = (true, true);
+                loop {
+                    match cs.next() {
+                        Some('\'') => break,
+                        Some(x) => w.push(x),
+                        None => return vec![],
+                    }
+                }
+            }
+            '"' => {
+                (quoted, in_word) = (true, true);
+                loop {
+                    match cs.next() {
+                        Some('"') => break,
+                        Some('\\') => match cs.next() {
+                            Some(x @ ('"' | '\\' | '$' | '`')) => w.push(x),
+                            Some('\n') => {}
+                            Some(x) => {
+                                w.push('\\');
+                                w.push(x);
+                            }
+                            None => return vec![],
+                        },
+                        Some(x) => w.push(x),
+                        None => return vec![],
+                    }
+                }
+            }
+            ';' | '|' | '&' | '(' | ')' | '{' | '}' | '\n' => {
+                end_word(&mut toks, &mut w, &mut quoted, &mut in_word);
+                toks.push(Tok::Op);
+            }
+            c if c.is_whitespace() => end_word(&mut toks, &mut w, &mut quoted, &mut in_word),
+            c => {
+                w.push(c);
+                in_word = true;
+            }
+        }
+    }
+    end_word(&mut toks, &mut w, &mut quoted, &mut in_word);
     let mut out = vec![];
-    for (i, _) in s.match_indices("cd ") {
-        let before = s[..i].trim_end_matches([' ', '\t']);
-        if !(before.is_empty() || before.ends_with("&&") || before.ends_with(';') || before.ends_with('|') || before.ends_with('(') || before.ends_with('\n')) {
-            continue;
+    let mut at_start = true;
+    let mut i = 0;
+    while i < toks.len() {
+        match &toks[i] {
+            Tok::Op => at_start = true,
+            Tok::Word(word, q) => {
+                if at_start && !q && word == "cd" {
+                    if let Some(Tok::Word(d, _)) = toks.get(i + 1) {
+                        if (d.starts_with('/') || d.starts_with("~/")) && !d.contains(['$', '`', '*', '?']) {
+                            out.push(d.clone());
+                        }
+                        i += 1;
+                    }
+                }
+                at_start = false;
+            }
         }
-        let rest = s[i + 3..].trim_start();
-        let (q, rest) = match rest.as_bytes().first() {
-            Some(&c @ (b'"' | b'\'')) => (Some(c as char), &rest[1..]),
-            _ => (None, rest),
-        };
-        let end = match q {
-            Some(q) => rest.find(q).unwrap_or(rest.len()),
-            None => rest.find(|c: char| c.is_whitespace() || ";&|)".contains(c)).unwrap_or(rest.len()),
-        };
-        let d = &rest[..end];
-        if (d.starts_with('/') || d.starts_with("~/")) && !d.contains('$') {
-            out.push(d.to_string());
-        }
+        i += 1;
     }
     out
 }
@@ -1034,7 +1101,7 @@ fn file_title(p: &Path) -> Option<String> {
 
 /// Bump when what is collected changes (`detect`, `commands`, `normal`, `Acc`): a state kept with another number is
 /// not used.
-pub const RULES: u32 = 2;
+pub const RULES: u32 = 3;
 
 /// What one log's last `resources` call keeps, so the next reads only from `at`: the resources of the lines before
 /// it. `at` is a line start where no tool call waits for its result and no run of tool calls goes on (see
@@ -1141,8 +1208,14 @@ fn line_cwd(l: &str) -> Option<String> {
 
 /// The cursor's mark of the log's bytes before `size` (see `print`): another file at the path does not pass.
 fn mark_of(log: &Path, size: u64) -> Option<String> {
+    mark_for_rules(log, size, RULES)
+}
+
+/// `mark_of` with other rules (a test makes the cursor of the rules before).
+#[doc(hidden)]
+pub fn mark_for_rules(log: &Path, size: u64, rules: u32) -> Option<String> {
     let id = identity(log)?;
-    print(log, size).ok().map(|(h, n)| crate::protocol::fnv1a(&format!("{RULES}.{id}.{h}{n}")))
+    print(log, size).ok().map(|(h, n)| crate::protocol::fnv1a(&format!("{rules}.{id}.{h}{n}")))
 }
 
 /// The file itself: its device, inode and birth time (where the file system has one). A log written again through a

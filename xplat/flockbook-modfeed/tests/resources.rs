@@ -1177,3 +1177,59 @@ fn one_file_written_two_ways_is_one_item() {
     assert_eq!(docs.len(), 1, "{docs:?}");
     assert_eq!((docs[0].target.as_str(), docs[0].mentions), (d.join("real/a.md").to_str().unwrap(), if ci { 3 } else { 2 }));
 }
+
+
+// ---- relative-doc Codex R2 ----
+
+#[test]
+fn only_a_real_cd_is_a_folder_the_agent_went_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    for p in ["arch/reports/a.md", "echo/reports/b.md", "real/reports/c.md", "esc/reports/e.md", "semi/reports/s.md"] {
+        std::fs::create_dir_all(d.join(p).parent().unwrap()).unwrap();
+        std::fs::write(d.join(p), "# X").unwrap();
+    }
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    let cwd = d.join("repos");
+    let q = |n: &str| d.join(n).to_string_lossy().to_string();
+    let cmds = [
+        format!("printf 'x ; cd {} && y'", q("arch")),
+        format!("echo \"cd {}\"", q("echo")),
+        format!("echo cd {} \\; cd {}x", q("esc"), q("esc")),
+        format!("ls && cd \"{}\" && ls", q("real")),
+        format!("true;cd {}", q("semi")),
+    ];
+    let mut lines = vec![in_cwd(user("u0", 0, "go"), &cwd)];
+    for (i, c) in cmds.iter().enumerate() {
+        lines.push(in_cwd(tool(&format!("t{i}"), 1, &format!("c{i}"), "Bash", json!({"command": c})), &cwd));
+        lines.push(in_cwd(result(&format!("r{i}"), 2, &format!("c{i}"), "ok", false), &cwd));
+    }
+    lines.push(in_cwd(say("a1", 3, "See reports/a.md, reports/b.md, reports/c.md, reports/e.md and reports/s.md."), &cwd));
+    let log = d.join("s.jsonl");
+    write(&log, &lines, false);
+    let mut t: Vec<String> = docs_of(&log, None).into_iter().map(|r| r.target).collect();
+    t.sort();
+    assert_eq!(t, vec![q("real/reports/c.md"), q("semi/reports/s.md")], "a cd in quotes, an echoed one, an escaped ';': not folders");
+}
+
+#[test]
+fn a_state_or_a_cursor_of_the_rules_before_is_all_again() {
+    let home = Some(Path::new(HOME));
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &[user("u0", 0, "go"), say("a1", 1, "see https://a.example.com"), user("u1", 2, "ok")], false);
+    assert!(resources::RULES >= 3, "rules 3: states of 101da5e took paths from failed tools");
+    let (a, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
+    let mut k = k.unwrap();
+    k.rules = 2;
+    let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, Some(&k), true).unwrap();
+    assert!(b.full, "a state of rules 2 is not used");
+    // An r4 cursor made with the rules before (its mark has them): all of it again, with no state too.
+    let p: Vec<&str> = a.cursor.split('.').collect();
+    let size: u64 = p[2].parse().unwrap();
+    let old = format!("r4.{}.{}.{}.{}.{}", p[1], p[2], p[3], resources::mark_for_rules(&log, size, resources::RULES - 1).unwrap(), p[5]);
+    let c = resources::answer_kept(&log, Some(&old), home, None, true).unwrap().0;
+    assert!(c.full && !c.items.is_empty(), "{:?}", c.items);
+    let same = resources::answer_kept(&log, Some(&a.cursor), home, None, true).unwrap().0;
+    assert!(!same.full && same.items.is_empty(), "this rules' cursor: nothing new");
+}
