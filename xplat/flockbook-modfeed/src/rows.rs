@@ -269,9 +269,10 @@ pub fn row(it: &ConversationItem) -> FeedRow {
         }
         ItemKind::AssistantText(s) => {
             r.k = "assistant".into();
-            let links = reply_links(s);
+            let text = cut(s, TEXT_CAP);
+            let links = crate::mdsplit::judge(&text, reply_links(s));
             r.links = (!links.is_empty()).then_some(links);
-            r.text = Some(cut(s, TEXT_CAP));
+            r.text = Some(text);
         }
         ItemKind::Status(s) => r.text = Some(s.clone()),
         ItemKind::ToolChips(chips) => {

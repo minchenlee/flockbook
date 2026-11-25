@@ -436,7 +436,7 @@ test("Copy message copies the row's markdown as written, for user, assistant and
 
 test("links in a reply: drawn as Markdown links; the row's height, Copy message and user rows stay as they were", async () => {
   const text = "PR: https://github.com/o/r/pull/9 and /home/me/plan.md";
-  const links = [{ start: 4, end: 33, res: "pr" }, { start: 38, end: 54, res: "doc" }];
+  const links = [{ start: 4, end: 33, res: "pr", block: 0 }, { start: 38, end: 54, res: "doc", block: 0 }];
   fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 2 }, user("u1", "see https://x.com"),
     { ...asst("a1", text), links }, end);
   const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;

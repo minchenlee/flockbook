@@ -36,9 +36,10 @@ struct Cursor {
     rows_hash: String,
 }
 
-/// The cursor's first field. 2: Codex, Grok and Cursor row ids from line offsets (`cx@N`); a "1." cursor names rows
-/// with the old ids, so it gets everything again (the mod then drops the older rows it read with them).
-pub const CURSOR_V: &str = "2";
+/// The cursor's first field. 2: Codex, Grok and Cursor row ids from line offsets (`cx@N`). 3: links carry `block`
+/// (mdsplit.rs). An older cursor names rows sent before, so it gets everything again (the mod then drops the older
+/// rows it read with it).
+pub const CURSOR_V: &str = "3";
 
 fn parse(c: Option<&str>) -> Option<Cursor> {
     let p: Vec<&str> = c?.split('.').collect();

@@ -15,6 +15,9 @@ pub struct FeedLink {
     pub start: usize,
     pub end: usize,
     pub res: &'static str,
+    /// Set by mdsplit::judge: the UTF-16 start of the chat block where the mod writes it as a Markdown link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block: Option<usize>,
 }
 
 /// One target: `start`..`end` in UTF-16 units, its kind, and the target as it opens (a URL with a scheme, or the
@@ -463,7 +466,7 @@ fn title_of(p: &str) -> String {
 }
 
 pub fn links(text: &str) -> Vec<FeedLink> {
-    detect(text).into_iter().map(|f| FeedLink { start: f.start, end: f.end, res: f.kind }).collect()
+    detect(text).into_iter().map(|f| FeedLink { start: f.start, end: f.end, res: f.kind, block: None }).collect()
 }
 
 
@@ -1018,7 +1021,7 @@ mod tests {
         assert_eq!(r.links, None, "same length after the cut");
         // A URL that ends before the cut is kept.
         let r = row(format!("https://x.com/ok {}", "a".repeat(cap)));
-        assert_eq!(r.links, Some(vec![FeedLink { start: 0, end: 16, res: "link" }]));
+        assert_eq!(r.links, Some(vec![FeedLink { start: 0, end: 16, res: "link", block: Some(0) }]));
     }
 
     #[test]
@@ -1026,9 +1029,9 @@ mod tests {
         use herdr_core::*;
         let item = |kind| ConversationItem { id: "a1".into(), kind, ..Default::default() };
         let r = crate::rows::row(&item(ItemKind::AssistantText("PR: https://github.com/o/r/pull/9 ok".into())));
-        assert_eq!(r.links, Some(vec![FeedLink { start: 4, end: 33, res: "pr" }]));
+        assert_eq!(r.links, Some(vec![FeedLink { start: 4, end: 33, res: "pr", block: Some(0) }]));
         let json = serde_json::to_value(&r).unwrap().to_string();
-        assert!(json.contains(r#""links":[{"end":33,"res":"pr","start":4}]"#), "{json}");
+        assert!(json.contains(r#""links":[{"block":0,"end":33,"res":"pr","start":4}]"#), "{json}");
         let r = crate::rows::row(&item(ItemKind::AssistantText("nothing here".into())));
         assert_eq!(r.links, None);
         assert!(!serde_json::to_value(&r).unwrap().to_string().contains("links"), "no field without links");
@@ -1039,6 +1042,6 @@ mod tests {
     #[test]
     fn links_for_a_row() {
         assert_eq!(links("no links here"), vec![]);
-        assert_eq!(links("x https://x.com"), vec![FeedLink { start: 2, end: 15, res: "link" }]);
+        assert_eq!(links("x https://x.com"), vec![FeedLink { start: 2, end: 15, res: "link", block: None }], "links() leaves block to mdsplit::judge");
     }
 }
