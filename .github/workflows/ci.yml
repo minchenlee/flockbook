@@ -394,3 +394,19 @@ jobs:
           path: |
             build/ui-checks-macos15
             build/snapshots-*
+
+  # The one check a ruleset requires (the name stays when jobs are added): every job above passed or was skipped.
+  # A job left out of needs is not checked: add each new job here.
+  result:
+    name: CI result
+    needs: [gate, build, mod, ui, build-macos15, bundle-macos15, kit-macos15, test-macos15]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s\n' "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(printf '%s\n' "$RESULTS" | jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")')
+          if [ -n "$bad" ]; then echo "::error title=CI result::failed or cancelled: $bad"; exit 1; fi

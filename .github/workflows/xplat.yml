@@ -1,25 +1,15 @@
 name: xplat
 
 # The cross-platform port (Rust + iced) in xplat/, and the mod's Node tests on the Rust sidecar. The one place the
-# Rust tests run. Runs only when xplat/, herdr-app/, the clippy gate or this file changes; on main and on the ci/
-# branches (the merge flow pushes ci/<topic> and waits for green, so the Rust tests and clippy run before main).
+# Rust tests run. On main, on the ci/ branches and on PRs. No paths filter: GitHub compares a push only with the push
+# before it (and a new branch whose commits are all pushed already with nothing), so a Rust change could go
+# unchecked. The changes job compares with main instead, and the jobs skip when no Rust file changed.
+# "xplat result" is the check a ruleset requires.
 on:
   push:
     branches: [main, "ci/**"]
-    paths:
-      - "xplat/**"
-      - "herdr-app/**"
-      - "Tests/HerdrKitTests/Fixtures/slash-tables.json"
-      - "scripts/clippy-baseline.*"
-      - ".github/workflows/xplat.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "xplat/**"
-      - "herdr-app/**"
-      - "Tests/HerdrKitTests/Fixtures/slash-tables.json"
-      - "scripts/clippy-baseline.*"
-      - ".github/workflows/xplat.yml"
   workflow_dispatch:
 
 permissions:
@@ -39,11 +29,47 @@ defaults:
     working-directory: xplat
 
 jobs:
+  # Whether a Rust file changed: a PR and a ci/ branch against main (their fork point), main against its last push.
+  # A manual run, an API error or 300 files or more (the compare's limit): every job runs.
+  changes:
+    name: Rust changed?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          rust=1
+          if [ "$EVENT" != workflow_dispatch ]; then
+            BASE=main
+            if [ "$EVENT" = push ] && [ "$GITHUB_REF" = refs/heads/main ] && [ -n "$BEFORE" ] \
+              && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then BASE=$BEFORE; fi
+            if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[].filename'); then
+              n=$(printf '%s\n' "$files" | grep -c . || true)
+              hit=$(printf '%s\n' "$files" | grep -E '^(xplat/|herdr-app/|Tests/HerdrKitTests/Fixtures/slash-tables\.json$|scripts/clippy-baseline\.|\.github/workflows/xplat\.yml$)' || true)
+              if [ "$n" -lt 300 ] && [ -z "$hit" ]; then
+                rust=0
+                echo "::notice title=xplat jobs skipped::no Rust file changed against $BASE ($n files)"
+              fi
+            else
+              echo "::warning title=xplat::could not compare with $BASE: every job runs"
+            fi
+          fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+
   # The lint gate: no (lint, file) count of clippy's warnings may pass xplat/clippy-baseline.json
   # (scripts/clippy-baseline.mjs; its head says how to update the baseline). On macOS with a pinned Rust: the counts
   # depend on the platform (cfg) and on clippy's version, and the baseline is made the same way on a Mac.
   clippy:
     name: Clippy (no new warnings)
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == '1' }}
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -79,6 +105,8 @@ jobs:
 
   linux:
     name: Linux build + test
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == '1' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -145,6 +173,8 @@ jobs:
 
   windows:
     name: Windows compile check
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == '1' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -175,6 +205,8 @@ jobs:
 
   macos:
     name: macOS build
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == '1' }}
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -199,3 +231,19 @@ jobs:
       # here too. Headless; the live terminal tests are #[ignore].
       - name: Test
         run: cargo test --workspace --locked
+
+  # The one check a ruleset requires (the name stays when jobs are added): every job above passed or was skipped.
+  # A job left out of needs is not checked: add each new job here.
+  result:
+    name: xplat result
+    needs: [changes, clippy, linux, windows, macos]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s\n' "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(printf '%s\n' "$RESULTS" | jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")')
+          if [ -n "$bad" ]; then echo "::error title=xplat result::failed or cancelled: $bad"; exit 1; fi
