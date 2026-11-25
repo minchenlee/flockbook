@@ -221,13 +221,13 @@ const view = (items, extra = {}) => {
 
 test("the window: groups in order with counts, a new dot, a missing file struck, the count in the header, an empty state", () => {
   const now = Date.now();
-  const v = view([res("l1", "link", now - 120_000), res("p1", "pr", now - 60_000, { title: "o/r#12" }), res("d1", "doc", now - 5_000, { title: "plan.md", detail: "~/notes", exists: true }),
-    res("d2", "doc", now - 10_000, { title: "gone.md", detail: "~/x", exists: false }), res("a1", "artifact", now - 200_000), res("x", "link", now)], { seen: now - 7_000 });
+  const v = view([res("l1", "link", now - 120_000), res("p1", "pr", now - 60_000, { title: "o/r#12" }), res("d1", "doc", now - 5_000, { title: "plan.md", target: "/home/u/notes/plan.md", detail: "~/notes", exists: true }),
+    res("d2", "doc", now - 10_000, { title: "gone.md", target: "/home/u/x/gone.md", detail: "~/x", exists: false }), res("a1", "artifact", now - 200_000), res("x", "link", now)], { seen: now - 7_000 });
   fake.shared[R.removedKey("t1")] = [{ id: "x", last_ts: now }];
   const el = v.render(fakeCx());
-  const groups = ["docs", "artifacts", "github", "links"].map((g) => byId(el, `res-group-${g}`));
+  const groups = ["markdown", "artifacts", "github", "links"].map((g) => byId(el, `res-group-${g}`));
   assert.ok(groups.every(Boolean));
-  assert.match(textOf(groups[0]), /^Docs 2 plan\.md now ~\/notes gone\.md/, "newest first in a group");
+  assert.match(textOf(groups[0]), /^Markdown 2 plan\.md now ~\/notes gone\.md/, "newest first in a group");
   assert.match(textOf(byId(el, "res-head")), /Resources.*This agent/);
   assert.ok(byId(el, "res-new-d1"), "newer than seen at open: a dot");
   assert.equal(byId(el, "res-new-d2"), null);

@@ -131,7 +131,9 @@ one first, then the old one closed) when its list, the agent or the window's siz
 (smaller: not while the pointer is on it). It cannot be dragged. Under 720 px, a drawer down the right side,
 from the top to 12 px above the chat input. A click beside it does not close it;
 Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
-**Docs**, **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each with its count. A click on a
+**Markdown** (.md), **Web pages** (.html, .htm), **PDFs**, **Images** (.png, .svg), **Other docs** (any other file the
+agent named; by the extension, any case), **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each
+with its count; a group with nothing in it is not shown. A doc's icon is its group's (doc, globe, file-text, image). A click on a
 group's title (a chevron on its left: down open, right folded) folds it, for every agent and over a restart; a folded
 group keeps its count and draws no rows. A group draws 30 rows, then "Show N more" (12 px muted; a click shows the
 rest until the agent changes); the window's height counts only the rows drawn. One row per
@@ -273,7 +275,7 @@ artifacts and links the agent mentions in its replies show up here."
 - **Art** `mods/flockbook/icons/`: arrow-down, bell, branch, check, close, doc, folder, gear, grid,
   plus, search, send, sidebar, sliders, spinner, split, terminal, tool (16 × 16 SVG, 1.8 px round strokes, `currentColor`).
   From Lucide (lucide-static 1.79.0): copy, eye-off, message (`message-square-text`), the Resources row actions, and
-  chevron-right, chevron-down (a Resources group's title). They keep
+  chevron-right, chevron-down (a Resources group's title), globe, file-text, image (the Resources doc groups' rows). They keep
   Lucide's 24 × 24 grid with 2.2 px strokes (as thin as 1.5 px on 16) and a license line at the top of each file.
   Lucide is under the ISC License: Copyright (c) 2026 Lucide Icons and Contributors. Permission to use, copy, modify,
   and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above

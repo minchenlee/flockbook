@@ -58,8 +58,14 @@ export const KEY_FRAME = "flockbook.res.frame";
 // window opened in this run carries it; after a restart the id left in shared has another one.
 export const RUN = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
+// A doc's group comes from its file's extension (any case; the helper says kind "doc" for all of them); a doc of
+// another kind of file is in Other docs. `icon`: its rows' icon.
 export const GROUPS = [
-  { id: "docs", label: "Docs", kinds: ["doc"] },
+  { id: "markdown", label: "Markdown", kinds: ["doc"], exts: ["md"], icon: "doc" },
+  { id: "web", label: "Web pages", kinds: ["doc"], exts: ["html", "htm"], icon: "globe" },
+  { id: "pdfs", label: "PDFs", kinds: ["doc"], exts: ["pdf"], icon: "file-text" },
+  { id: "images", label: "Images", kinds: ["doc"], exts: ["png", "svg"], icon: "image" },
+  { id: "otherdocs", label: "Other docs", kinds: ["doc"], icon: "doc" },
   { id: "artifacts", label: "Artifacts", kinds: ["artifact"] },
   { id: "github", label: "PRs & CI", kinds: ["pr", "issue", "ci"] },
   { id: "commands", label: "Commands", kinds: ["cmd"] },
@@ -69,6 +75,22 @@ export const GROUPS = [
 export const ACT_ICONS = { jump: "message", copy: "copy", remove: "eye-off" };
 const ICON = { doc: "doc", artifact: "grid", pr: "branch", issue: "branch", ci: "refresh", local: "terminal", link: "link", cmd: "terminal" };
 export const OPENS = ["md", "html", "htm", "pdf", "png", "svg"];
+
+// "md" for "/p/Plan.MD"; "" without one (a dot in a folder or at the start of the name is not one).
+export function extOf(target) {
+  const name = String(target ?? "").split(/[\\/]/).pop();
+  const i = name.lastIndexOf(".");
+  return i > 0 ? name.slice(i + 1).toLowerCase() : "";
+}
+const BY_EXT = new Map(GROUPS.flatMap((g) => (g.exts ?? []).map((x) => [x, g.id])));
+const BY_KIND = new Map(GROUPS.filter((g) => !g.exts && g.id !== "otherdocs").flatMap((g) => g.kinds.map((k) => [k, g.id])));
+// The id of the group an item is in (null: none).
+export function groupOf(item) {
+  if (item?.kind === "doc") return BY_EXT.get(extOf(item.target)) ?? "otherdocs";
+  return BY_KIND.get(item?.kind) ?? null;
+}
+const GROUP_ICON = new Map(GROUPS.map((g) => [g.id, g.icon]));
+const iconOf = (item) => (item.kind === "doc" ? GROUP_ICON.get(groupOf(item)) : ICON[item.kind]) ?? "link";
 
 const byNewest = (a, b) => (b.last_ts ?? -Infinity) - (a.last_ts ?? -Infinity);
 
@@ -145,8 +167,7 @@ export function badgeCount(items, seen, removed) {
 
 export function grouped(items) {
   const by = new Map(GROUPS.map((g) => [g.id, []]));
-  const of = new Map(GROUPS.flatMap((g) => g.kinds.map((k) => [k, g.id])));
-  for (const i of items) by.get(of.get(i.kind))?.push(i);
+  for (const i of items) by.get(groupOf(i))?.push(i);
   return GROUPS.map((g) => ({ ...g, items: by.get(g.id) })).filter((g) => g.items.length);
 }
 
@@ -481,7 +502,7 @@ export class ResourcesView {
         })
         .when(fresh, (el) => el.child(div().id(`res-new-${it.id}`).absolute().left(1).top(16).size(6).rounded(3).bg(t.accent)))
         .child(div().size(22).flex_none().mt(1).rounded(6).bg(t.raised).flex().items_center().justify_center()
-          .when(gone, (el) => el.opacity(0.5)).child(svg(icon(ICON[it.kind] ?? "link")).size(12).text_color(t.muted)))
+          .when(gone, (el) => el.opacity(0.5)).child(svg(icon(iconOf(it))).size(12).text_color(t.muted)))
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(h_flex().gap(6).items_center()
             .child(div().flex_1().min_w(0).truncate().text_size(13).font_weight(550).text_color(gone ? t.dim : t.foreground)

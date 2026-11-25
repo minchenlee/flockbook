@@ -180,27 +180,27 @@ test("at most ROW_LIMIT rows a group, then a Show N more row; a click shows the 
   const v = open(long());
   fake.shared[R.KEY_FRAME] = R.placeNow();
   let el = v.render(fakeCx());
-  const docs = byId(el, "res-group-docs");
+  const docs = byId(el, "res-group-markdown");
   assert.equal(rowsIn(docs).length, 30);
-  assert.match(textOf(byId(el, "res-group-head-docs")), /Docs\s*436/, "the count is all of them");
-  assert.match(textOf(byId(el, "res-more-docs")), /Show 406 more/);
+  assert.match(textOf(byId(el, "res-group-head-markdown")), /Markdown\s*436/, "the count is all of them");
+  assert.match(textOf(byId(el, "res-more-markdown")), /Show 406 more/);
   assert.equal(byId(el, "res-more-artifacts")?._a?.id, "res-more-artifacts");
   assert.match(textOf(byId(el, "res-more-artifacts")), /Show 10 more/);
-  byId(el, "res-more-docs")._h.on_click(null, fakeCx());
+  byId(el, "res-more-markdown")._h.on_click(null, fakeCx());
   el = v.render(fakeCx());
-  assert.equal(rowsIn(byId(el, "res-group-docs")).length, 436);
-  assert.equal(byId(el, "res-more-docs"), null);
+  assert.equal(rowsIn(byId(el, "res-group-markdown")).length, 436);
+  assert.equal(byId(el, "res-more-markdown"), null);
   // Taller now (a very tall window, so the height is not at its most): opened again, the new one keeps the group shown.
   fake.shared["flockbook.window.height"] = 30000;
   fake.shared[R.KEY_FRAME] = R.placeNow();
-  v.expanded = new Set(); assert.ok(R.placeNow(["docs"]).height > R.placeNow().height);
-  v.expanded = new Set(["docs"]);
+  v.expanded = new Set(); assert.ok(R.placeNow(["markdown"]).height > R.placeNow().height);
+  v.expanded = new Set(["markdown"]);
   v.refit();
   const spec = log.overlays.at(-1);
-  assert.deepEqual(spec.props.expanded, ["docs"]);
+  assert.deepEqual(spec.props.expanded, ["markdown"]);
   fake.props = { ...spec.props, overlay: "o8" };
   const again = new R.ResourcesView(fakeCx()).render(fakeCx());
-  assert.equal(rowsIn(byId(again, "res-group-docs")).length, 436);
+  assert.equal(rowsIn(byId(again, "res-group-markdown")).length, 436);
 });
 
 test("the height counts the rows drawn, not all of them", () => {
@@ -211,7 +211,7 @@ test("the height counts the rows drawn, not all of them", () => {
   assert.equal(p.height, R.placement(1400, 30000, 150, 10).height);
   assert.notEqual(p.height, R.placement(1400, 30000, 151, 10).height, "one row more is another height");
   assert.notEqual(p.height, R.placement(1400, 30000, 150, 9).height);
-  assert.equal(R.placeNow(["docs"]).height, R.placement(1400, 30000, 150 - 30 + 436, 9).height, "docs shown in full: no Show more there");
+  assert.equal(R.placeNow(["markdown"]).height, R.placement(1400, 30000, 150 - 30 + 436, 9).height, "docs shown in full: no Show more there");
   fake.shared["flockbook.window.height"] = 900;
   const few = long().filter((i) => i.kind === "pr").slice(0, 3);
   open(few);
@@ -221,15 +221,15 @@ test("the height counts the rows drawn, not all of them", () => {
 test("a group folds: a click on its title, a chevron, the count stays, kept for every agent and a restart, the window shorter", () => {
   const v = open(long());
   let el = v.render(fakeCx());
-  assert.match(byId(el, "res-chev-docs")._a.path, /chevron-down\.svg$/);
+  assert.match(byId(el, "res-chev-markdown")._a.path, /chevron-down\.svg$/);
   const tall = R.placeNow().height;
-  byId(el, "res-group-head-docs")._h.on_click(null, fakeCx());
-  assert.deepEqual(fake.shared[R.KEY_COLLAPSED], ["docs"]);
+  byId(el, "res-group-head-markdown")._h.on_click(null, fakeCx());
+  assert.deepEqual(fake.shared[R.KEY_COLLAPSED], ["markdown"]);
   el = v.render(fakeCx());
-  assert.equal(rowsIn(byId(el, "res-group-docs")).length, 0, "no rows");
-  assert.equal(byId(el, "res-more-docs"), null);
-  assert.match(textOf(byId(el, "res-group-head-docs")), /Docs\s*436/, "the count is still there");
-  assert.match(byId(el, "res-chev-docs")._a.path, /chevron-right\.svg$/);
+  assert.equal(rowsIn(byId(el, "res-group-markdown")).length, 0, "no rows");
+  assert.equal(byId(el, "res-more-markdown"), null);
+  assert.match(textOf(byId(el, "res-group-head-markdown")), /Markdown\s*436/, "the count is still there");
+  assert.match(byId(el, "res-chev-markdown")._a.path, /chevron-right\.svg$/);
   assert.ok(R.placeNow().height < tall || R.placeNow().height === tall && tall === 900 - R.INPUT_GUESS - 12 - 60, "not taller");
   // Few rows: the fold makes it shorter for sure.
   const w = open(long().filter((i) => i.kind === "pr").slice(0, 5).concat(long().filter((i) => i.kind === "link").slice(0, 5)));
