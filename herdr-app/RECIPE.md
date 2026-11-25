@@ -131,7 +131,10 @@ one first, then the old one closed) when its list, the agent or the window's siz
 (smaller: not while the pointer is on it). It cannot be dragged. Under 720 px, a drawer down the right side,
 from the top to 12 px above the chat input. A click beside it does not close it;
 Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
-**Docs**, **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each with its count; one row per
+**Docs**, **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each with its count. A click on a
+group's title (a chevron on its left: down open, right folded) folds it, for every agent and over a restart; a folded
+group keeps its count and draws no rows. A group draws 30 rows, then "Show N more" (12 px muted; a click shows the
+rest until the agent changes); the window's height counts only the rows drawn. One row per
 resource: a 22 px icon square, the title (13 px 550), the time since its last mention ("4m"), and a
 second line (11.5 px muted; a doc's folder and a command in mono). New since you last opened it: a 6 px `accent` dot
 on the left. A doc that is not there: dim and struck through, its icon half clear, "· File not found";
@@ -140,7 +143,7 @@ reply that mentioned it, when loaded; a speech-bubble icon), **Copy** (a copy ic
 **Remove from list** (an eye-off icon). A click on a command copies it (never runs it) and says "Copied.";
 a one-line shell command in a fenced block of a reply is one (docs/protocol.md `res`). A click opens a web address in
 the browser, or a doc (md, html, htm, pdf, png, svg; there now; an agent on this computer) with
-`open` (`xdg-open` off macOS). Footer: "N items · M removed". Empty: "No resources yet" and "Docs,
+`open` (`xdg-open` off macOS). The header's count: "N items · M removed". Empty: "No resources yet" and "Docs,
 artifacts and links the agent mentions in its replies show up here."
 
 ## How it behaves
@@ -226,8 +229,10 @@ artifacts and links the agent mentions in its replies show up here."
   open settings dialog), `flockbook.sidebar`, `flockbook.sidebar.peek`,
   `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
   `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
-  last update line, and when the mod asked). Resources: `flockbook.res.data` ({terminal, cursor, items, at, error}: the
-  last `resources` answer, for the shown agent; `error` "old"/"missing": the helper on its machine cannot list them), `flockbook.res.on` (the helper has the command), `flockbook.res.open`
+  last update line, and when the mod asked). Resources: `flockbook.res.data` ({terminal, cursor, count, at, error, v}: small, what
+  changed last; `v` goes up at each change so every copy draws again; `error` "old"/"missing": the helper on its machine
+  cannot list them; the lists themselves are in memory, the last 8 agents, not persisted, so after a restart the first ask
+  is a full read), `flockbook.res.collapsed` (the ids of the folded groups), `flockbook.res.on` (the helper has the command), `flockbook.res.open`
   and `flockbook.res.run` (the open window and the app run it was opened in: an id left from before a restart is not open),
   `flockbook.res.scope` ("agent"), `flockbook.res.seen.<t>` (the newest `last_ts` seen in the window; the first
   look at an agent sets it to its newest, so an old conversation has no badge), `flockbook.res.removed.<t>`
@@ -267,7 +272,8 @@ artifacts and links the agent mentions in its replies show up here."
 - **Keys** `keys.json`: one `layout:flockbook` section.
 - **Art** `mods/flockbook/icons/`: arrow-down, bell, branch, check, close, doc, folder, gear, grid,
   plus, search, send, sidebar, sliders, spinner, split, terminal, tool (16 × 16 SVG, 1.8 px round strokes, `currentColor`).
-  From Lucide (lucide-static 1.79.0): copy, eye-off, message (`message-square-text`), the Resources row actions. They keep
+  From Lucide (lucide-static 1.79.0): copy, eye-off, message (`message-square-text`), the Resources row actions, and
+  chevron-right, chevron-down (a Resources group's title). They keep
   Lucide's 24 × 24 grid with 2.2 px strokes (as thin as 1.5 px on 16) and a license line at the top of each file.
   Lucide is under the ISC License: Copyright (c) 2026 Lucide Icons and Contributors. Permission to use, copy, modify,
   and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above
