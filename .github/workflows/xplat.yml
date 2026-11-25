@@ -1,14 +1,16 @@
 name: xplat
 
 # The cross-platform port (Rust + iced) in xplat/, and the mod's Node tests on the Rust sidecar. The one place the
-# Rust tests run. Runs only when xplat/, herdr-app/ or this file changes.
+# Rust tests run. Runs only when xplat/, herdr-app/, the clippy gate or this file changes; on main and on the ci/
+# branches (the merge flow pushes ci/<topic> and waits for green, so the Rust tests and clippy run before main).
 on:
   push:
-    branches: [main]
+    branches: [main, "ci/**"]
     paths:
       - "xplat/**"
       - "herdr-app/**"
       - "Tests/HerdrKitTests/Fixtures/slash-tables.json"
+      - "scripts/clippy-baseline.*"
       - ".github/workflows/xplat.yml"
   pull_request:
     branches: [main]
@@ -16,6 +18,7 @@ on:
       - "xplat/**"
       - "herdr-app/**"
       - "Tests/HerdrKitTests/Fixtures/slash-tables.json"
+      - "scripts/clippy-baseline.*"
       - ".github/workflows/xplat.yml"
   workflow_dispatch:
 
@@ -24,7 +27,8 @@ permissions:
 
 concurrency:
   group: xplat-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer push to a ci/ branch or a PR cancels the older run; main runs to the end.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/ci/') }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,6 +39,44 @@ defaults:
     working-directory: xplat
 
 jobs:
+  # The lint gate: no (lint, file) count of clippy's warnings may pass xplat/clippy-baseline.json
+  # (scripts/clippy-baseline.mjs; its head says how to update the baseline). On macOS with a pinned Rust: the counts
+  # depend on the platform (cfg) and on clippy's version, and the baseline is made the same way on a Mac.
+  clippy:
+    name: Clippy (no new warnings)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The helper's build script (known-files table) reads the release tags and main's history.
+          fetch-depth: 0
+
+      # The baseline's clippy (xplat/clippy-baseline.json "clippy"): change both together.
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xplat -> target
+          key: clippy
+
+      # The script, and the helper's build script.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Script tests
+        working-directory: .
+        run: node --test scripts/clippy-baseline.test.mjs
+
+      - name: Clippy against the baseline
+        run: node ../scripts/clippy-baseline.mjs
+
   linux:
     name: Linux build + test
     runs-on: ubuntu-24.04
