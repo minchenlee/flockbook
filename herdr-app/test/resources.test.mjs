@@ -31,7 +31,7 @@ function helper(next, commands = ["version", "feed", "resources"]) {
 }
 
 beforeEach(() => {
-  reset(); forgetCommands(); R.forgetResources();
+  reset(); forgetCommands(); R.forgetResources(); R.forgetCache();
   fake.spaces = [space("sp1", { tabs: [{ id: "tb-t1", index: 1, name: "1", active: true, status: "idle", panes: 1, settled: false }] })];
   fake.agents = [agent("t1", "idle")];
 });
@@ -108,7 +108,7 @@ test("asked at most every few seconds over all copies, and not at all by an olde
   await R.pollResources(fakeCx(), true);
   await R.pollResources(fakeCx());
   assert.equal(asked.length, 1);
-  reset(); forgetCommands(); R.forgetResources();
+  reset(); forgetCommands(); R.forgetResources(); R.forgetCache();
   fake.agents = [agent("t1", "idle")];
   const none = helper(() => [[], "c", true], ["version", "feed"]);
   await R.pollResources(fakeCx(), true);
@@ -212,7 +212,7 @@ test("⌘⇧R toggles the window; one left from before a restart does not count 
 });
 
 const view = (items, extra = {}) => {
-  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c1", items: items.map(({ type: _t, ...r }) => r), at: 1 };
+  R.putData({ terminal: "t1", cursor: "c1", items: items.map(({ type: _t, ...r }) => r), at: 1 });
   fake.shared[R.seenKey("t1")] = extra.seen ?? 0;
   fake.props = { view: "resources", overlay: "o7" };
   fake.shared[R.KEY_OPEN] = "o7";
@@ -315,7 +315,7 @@ test("the bar: a Resources button with a badge, only with a helper that has the 
   let el = new TopView(fakeCx()).render(fakeCx());
   assert.equal(byId(el, "resources"), null, "an older helper: no button");
   fake.shared[R.KEY_ON] = true;
-  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c", items: [{ ...res("a", "link", 50) }, { ...res("b", "link", 40) }], at: 1 };
+  R.putData({ terminal: "t1", cursor: "c", items: [{ ...res("a", "link", 50) }, { ...res("b", "link", 40) }], at: 1 });
   fake.shared[R.seenKey("t1")] = 45;
   el = new TopView(fakeCx()).render(fakeCx());
   assert.ok(byId(el, "resources"));
@@ -368,7 +368,7 @@ test("the window's width: the room right of the column less 24 and 12, 260 to 32
 
 test("the window placed now ends above the chat input's height (chat.js keeps it)", () => {
   fake.shared[R.KEY_INPUT_H] = 150; fake.shared[R.KEY_WIN_W] = 1470; fake.shared["flockbook.window.height"] = 900;
-  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c", items: Array.from({ length: 30 }, (_, i) => res(`i${i}`, "link", 50 - i)), at: 1 };
+  R.putData({ terminal: "t1", cursor: "c", items: Array.from({ length: 30 }, (_, i) => res(`i${i}`, "link", 50 - i)), at: 1 });
   const p = R.placeNow();
   assert.ok(p.at.y + p.height <= 900 - 150 - 12, `bottom ${p.at.y + p.height}`);
 });
@@ -404,7 +404,7 @@ test("the open window follows the item count and the shown agent: reopened in pl
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n, "nothing changed: not reopened");
   // Six more mentioned.
-  fake.shared[R.KEY_DATA] = { ...fake.shared[R.KEY_DATA], items: ["b", "c", "d", "e", "f", "g", "a"].map((id, i) => res(id, "link", 60 - i)) };
+  R.putData({ ...R.dataFor("t1"), items: ["b", "c", "d", "e", "f", "g", "a"].map((id, i) => res(id, "link", 60 - i)) });
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n + 1);
   const spec = log.overlays.at(-1);
@@ -424,7 +424,7 @@ test("the open window follows the item count and the shown agent: reopened in pl
 
 test("the window moves where the chat made room: a wider window, a second refit (Codex round 1 High)", () => {
   fake.shared[R.KEY_WIN_W] = 1100; fake.shared["flockbook.window.height"] = 900; fake.shared[R.KEY_ON] = true;
-  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c1", items: [res("a", "link", 50)], at: 1 };
+  R.putData({ terminal: "t1", cursor: "c1", items: [res("a", "link", 50)], at: 1 });
   command("resources");
   assert.deepEqual(log.shown.at(-1).at, { x: 1100 - 332, y: 60 });
   // Wider: the chat makes room at the new right edge, and the window must be there too.
@@ -454,7 +454,7 @@ test("the window cannot be dragged off its place: every press is stopped; close(
 });
 
 test("a refit window: no full read again, no focus unless it had it, the dots as they were", () => {
-  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c1", items: [res("a", "link", 50)], at: 1 };
+  R.putData({ terminal: "t1", cursor: "c1", items: [res("a", "link", 50)], at: 1 });
   fake.shared[R.seenKey("t1")] = 50;
   fake.props = { view: "resources", overlay: "o8", refit: true, focus: false, seenAtOpen: 10 };
   const cx = fakeCx();
@@ -545,7 +545,7 @@ test("the input's height measured on the rendered chat moves the window's bottom
   const wrap = byId(root, "composer-size");
   assert.ok(wrap?._h.on_size_change, "the measured element has the stable id Herdr needs for on_size_change");
   assert.ok(byId(wrap, "composer"), "it holds the chat input");
-  fake.shared[R.KEY_DATA] = { terminal: "t1", cursor: "c", items: Array.from({ length: 40 }, (_, i) => res(`i${i}`, "link", 50 - i)), at: 1 };
+  R.putData({ terminal: "t1", cursor: "c", items: Array.from({ length: 40 }, (_, i) => res(`i${i}`, "link", 50 - i)), at: 1 });
   fake.shared["flockbook.window.height"] = 900;
   for (const [winW, inputH] of [[700, 150], [700, 270], [800, 150], [1470, 270]]) {
     fake.shared[R.KEY_WIN_W] = winW;

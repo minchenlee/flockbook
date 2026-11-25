@@ -39,10 +39,10 @@ function helper(lists, delta = {}) {
   };
   return asked;
 }
-const showAgent = (t) => { fake.agents = [agent(t, "idle")]; };
+const showAgent = (t) => { fake.agents = [agent(t, "idle", { tab: "tb-t1" })]; };
 
 beforeEach(() => {
-  reset(); forgetCommands(); R.forgetResources();
+  reset(); forgetCommands(); R.forgetResources(); R.forgetCache();
   fake.spaces = [space("sp1", { tabs: [{ id: "tb-t1", index: 1, name: "1", active: true, status: "idle", panes: 1, settled: false }] })];
   showAgent("t1");
 });
@@ -132,6 +132,7 @@ const rowsIn = (el) => (el?.kids ?? []).filter((k) => typeof k?._a?.id === "stri
 test("at most ROW_LIMIT rows a group, then a Show N more row; a click shows the rest, also after a refit", () => {
   assert.equal(R.ROW_LIMIT, 30);
   const v = open(long());
+  fake.shared[R.KEY_FRAME] = R.placeNow();
   let el = v.render(fakeCx());
   const docs = byId(el, "res-group-docs");
   assert.equal(rowsIn(docs).length, 30);
@@ -143,7 +144,11 @@ test("at most ROW_LIMIT rows a group, then a Show N more row; a click shows the 
   el = v.render(fakeCx());
   assert.equal(rowsIn(byId(el, "res-group-docs")).length, 436);
   assert.equal(byId(el, "res-more-docs"), null);
-  // Taller now: the window is opened again, and the new one keeps the group shown.
+  // Taller now (a very tall window, so the height is not at its most): opened again, the new one keeps the group shown.
+  fake.shared["flockbook.window.height"] = 30000;
+  fake.shared[R.KEY_FRAME] = R.placeNow();
+  v.expanded = new Set(); assert.ok(R.placeNow(["docs"]).height > R.placeNow().height);
+  v.expanded = new Set(["docs"]);
   v.refit();
   const spec = log.overlays.at(-1);
   assert.deepEqual(spec.props.expanded, ["docs"]);

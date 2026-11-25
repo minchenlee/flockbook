@@ -2,9 +2,15 @@
 // helper's `resources` command, docs/protocol.md "res"). A window under the bar's right edge (⌘⇧R or
 // the bar's button); the button's badge counts the ones newer than you last saw.
 //
+// The lists themselves are in memory (`cache`, module code is shared by every copy): the last CACHE_MAX agents,
+// { terminal, cursor, items, at, error? } each, so going back to an agent shows its list at once and asks only
+// --since its cursor. Not persisted: after a restart the first ask is a full read (owner 11-25: 761 items made a
+// 179 KB value written each change).
 // Kept in shared() (persisted), so every copy of the mod and a restart see the same:
-//   flockbook.res.data        { terminal, cursor, items, at, error? }: the last answer, for the shown agent only.
-//                             `error`: "old" or "missing", the helper on the agent's machine cannot list them
+//   flockbook.res.data        { terminal, cursor, count, at, error?, v }: what changed last, small; `v` goes up at
+//                             each change, so the other copies draw again. `error`: "old" or "missing", the helper on
+//                             the agent's machine cannot list them
+//   flockbook.res.collapsed   the ids of the folded groups (GROUPS), for every agent
 //   flockbook.res.on          the helper has the command (older helpers: no button)
 //   flockbook.res.open        the open window's overlay id; flockbook.res.run: the app run it was opened in (RUN).
 //                             An id from another run (before a restart) is not open: no heartbeat, nothing written while open
@@ -28,6 +34,7 @@ export const KEY_OPEN = "flockbook.res.open";
 export const KEY_RUN = "flockbook.res.run";
 export const KEY_SCOPE = "flockbook.res.scope";
 export const KEY_JUMP = "flockbook.res.jump";
+export const KEY_COLLAPSED = "flockbook.res.collapsed";
 export const KEY_WIN_W = "flockbook.window.width";
 export const KEY_SIDE_W = "flockbook.sidebar.width";
 export const seenKey = (t) => `flockbook.res.seen.${t}`;
@@ -35,6 +42,8 @@ export const removedKey = (t) => `flockbook.res.removed.${t}`;
 export const term = (address) => String(address ?? "").replace(/^hc:/, "");
 
 export const RES_MS = 5000;           // one ask at most this often, over every copy
+export const CACHE_MAX = 8;           // agents whose list is kept in memory
+export const ROW_LIMIT = 30;          // rows drawn a group before "Show N more"
 export const PANEL_W = 320;
 export const READ_GAP = 24;           // at least this between the window and the chat's column and input
 export const NARROW_W = 720;          // below it: a drawer down the right side
@@ -77,6 +86,11 @@ export function applyAnswer(prev, terminal, answer, at = Date.now()) {
   if (answer?.error || !answer?.end) return prev ?? null;
   const lines = (answer.lines ?? []).filter((l) => l.type === "res" && l.id);
   const full = answer.end.full !== false || !prev || prev.terminal !== terminal;
+  // Nothing new: the same list (the same array, so a compare is one ===).
+  if (!full && !lines.length) {
+    const cursor = answer.end.cursor ?? null;
+    return cursor === prev.cursor && !prev.error ? prev : { terminal, cursor, items: prev.items, at };
+  }
   let items;
   if (full) items = lines;
   else {
@@ -86,6 +100,23 @@ export function applyAnswer(prev, terminal, answer, at = Date.now()) {
   }
   items = items.map(({ type: _t, ...rest }) => rest).sort(byNewest);
   return { terminal, cursor: answer.end.cursor ?? null, items, at };
+}
+
+// Whether two lists draw the same: the same items, in the same order, with the same fields.
+export function sameItems(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (x === y) continue;
+    const kx = Object.keys(x);
+    if (kx.length !== Object.keys(y).length) return false;
+    for (const k of kx) {
+      if (x[k] === y[k]) continue;
+      if (typeof x[k] !== "object" || JSON.stringify(x[k]) !== JSON.stringify(y[k])) return false;
+    }
+  }
+  return true;
 }
 
 export const newest = (items) => (items ?? []).reduce((m, i) => Math.max(m, i.last_ts ?? 0), 0);
@@ -113,7 +144,28 @@ export function badgeCount(items, seen, removed) {
 }
 
 export function grouped(items) {
-  return GROUPS.map((g) => ({ ...g, items: items.filter((i) => g.kinds.includes(i.kind)) })).filter((g) => g.items.length);
+  const by = new Map(GROUPS.map((g) => [g.id, []]));
+  const of = new Map(GROUPS.flatMap((g) => g.kinds.map((k) => [k, g.id])));
+  for (const i of items) by.get(of.get(i.kind))?.push(i);
+  return GROUPS.map((g) => ({ ...g, items: by.get(g.id) })).filter((g) => g.items.length);
+}
+
+// The groups as the window draws them: `shown` the rows drawn (none when folded; ROW_LIMIT unless the group is in
+// `expanded`), `rest` the ones under "Show N more". `collapsed`, `expanded`: group ids. Both the window and its
+// height use it; a filter (by time, later) goes before it.
+export function layoutGroups(items, collapsed = [], expanded = [], limit = ROW_LIMIT) {
+  const folded = new Set(Array.isArray(collapsed) ? collapsed : []), open = new Set(expanded ?? []);
+  return grouped(items).map((g) => {
+    if (folded.has(g.id)) return { ...g, collapsed: true, shown: [], rest: 0 };
+    const shown = open.has(g.id) ? g.items : g.items.slice(0, limit);
+    return { ...g, collapsed: false, shown, rest: g.items.length - shown.length };
+  });
+}
+
+// Folds the group, or unfolds it (for every agent; kept over a restart).
+export function toggleGroup(id) {
+  const now = Array.isArray(shared(KEY_COLLAPSED)) ? shared(KEY_COLLAPSED) : [];
+  setShared(KEY_COLLAPSED, now.includes(id) ? now.filter((x) => x !== id) : [...now, id]);
 }
 
 // "now", "4m", "3h", "2d".
@@ -175,10 +227,23 @@ export function jumpTo(item, terminal) {
   showScreen("chat");
 }
 
-// The data for this agent, when it is the one asked about last.
+// The lists in memory, by terminal, oldest first (a Map keeps the order things were put in).
+const cache = new Map();
+function remember(d) {
+  cache.delete(d.terminal); cache.set(d.terminal, d);
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+}
+// Keeps `d` for its agent and says so in shared (small: no items), so every copy draws again.
+export function putData(d) {
+  remember(d);
+  const s = { terminal: d.terminal, cursor: d.cursor ?? null, count: d.items?.length ?? 0, at: d.at, v: (shared(KEY_DATA)?.v ?? 0) + 1 };
+  if (d.error) s.error = d.error;
+  setShared(KEY_DATA, s);
+}
+
+// The list of this agent, when it is in memory.
 export function dataFor(address) {
-  const d = shared(KEY_DATA);
-  return d && address && d.terminal === term(address) ? d : null;
+  return address ? cache.get(term(address)) ?? null : null;
 }
 
 // The bar's badge for the shown agent.
@@ -195,17 +260,20 @@ export function badgeFor(address) {
 // window that spawned it closed to fit), and then its `finally` never runs: an ask older than BUSY_MS no longer counts.
 // An ask that comes back after a newer one started drops its answer: it would write older data over the newer.
 export const BUSY_MS = 15000;
-let busy = 0, last = 0;
-export const forgetResources = () => { busy = 0; last = 0; };
+let busy = 0, last = 0, lastT = null;
+export const forgetResources = () => { busy = 0; last = 0; lastT = null; };
+// The lists in memory gone, as after a restart (tests).
+export const forgetCache = () => cache.clear();
 // `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title).
 export async function pollResources(cx, force = false, full = false) {
   const address = currentAgent()?.address ?? null;
   if (!address || (busy && Date.now() - busy < BUSY_MS)) return;
   const t = term(address);
-  const was = shared(KEY_DATA);
-  const same = was?.terminal === t;
-  if (!force && same && Date.now() - last < RES_MS) return;
-  const mine = Date.now(); busy = mine; last = mine;
+  // The cursor only with the list it belongs to: after a restart, a full read.
+  const was = cache.get(t) ?? null;
+  const same = Boolean(was);
+  if (!force && same && lastT === t && Date.now() - last < RES_MS) return;
+  const mine = Date.now(); busy = mine; last = mine; lastT = t;
   try {
     const on = await sidecar.hasCommand("resources");
     if (busy !== mine) return;
@@ -216,9 +284,11 @@ export async function pollResources(cx, force = false, full = false) {
     const next = applyAnswer(same && !full ? was : null, t, r);
     if (!next) return;
     if (!next.error && (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null)) setShared(seenKey(t), newest(next.items));
-    if (!same || JSON.stringify(was.items) !== JSON.stringify(next.items) || was.cursor !== next.cursor || (was.error ?? null) !== (next.error ?? null)) {
-      setShared(KEY_DATA, next); cx?.notify?.();
-    }
+    // Drawn again only when the list or the hint changed: a new cursor alone is kept quietly.
+    if (!same || (was.error ?? null) !== (next.error ?? null) || !sameItems(was.items, next.items)) {
+      putData(next); cx?.notify?.();
+    } else if (next !== was) remember(next);
+    else remember(was);
   } finally { if (busy === mine) busy = 0; }
 }
 
@@ -264,14 +334,17 @@ export function needsRefit(prev, next, inside = false) {
   return d > 0 || !inside;
 }
 
-// Where the window goes now: the shown agent's items, the window's size.
-export function placeNow() {
+// Where the window goes now: the shown agent's rows as drawn (layoutGroups: a "Show N more" row counts as a
+// group title), the window's size. `expanded`: the open window's groups shown in full.
+export function placeNow(expanded = []) {
   const address = currentAgent()?.address ?? null;
   const d = dataFor(address);
   const items = d ? visible(d.items, shared(removedKey(term(address)))) : [];
+  const gs = layoutGroups(items, shared(KEY_COLLAPSED), expanded);
+  const rows = gs.reduce((n, g) => n + g.shown.length, 0), titles = gs.length + gs.filter((g) => g.rest).length;
   const paneW = shared(KEY_WIN_W) ?? 0;
   const winW = paneW + (sidebarShown() ? shared(KEY_SIDE_W) ?? 0 : 0);
-  return placement(winW, shared("flockbook.window.height") ?? 0, items.length, grouped(items).length, paneW, shared(KEY_INPUT_H) ?? 0);
+  return placement(winW, shared("flockbook.window.height") ?? 0, rows, titles, paneW, shared(KEY_INPUT_H) ?? 0);
 }
 
 // Opens the window at `p`, then closes `old` (a refit): the new one is open before the old one goes, and the old
@@ -317,6 +390,7 @@ export class ResourcesView {
     this.inside = false; // the pointer is on the window
     this.note = null;   // why the last click did not open
     this.hover = null;  // the row the pointer is on: its actions show
+    this.expanded = new Set(p.refit && Array.isArray(p.expanded) ? p.expanded : []); // groups shown past ROW_LIMIT
     cx?.spawn?.((cx) => (p.refit ? pollResources(cx) : pollResources(cx, true, true)));
     cx?.timer?.every?.(1000, (cx) => this.tick(cx));
     // A window does not take the keyboard when it opens: focus it, after the first frame, so Esc reaches it.
@@ -325,7 +399,7 @@ export class ResourcesView {
 
   tick(cx) {
     const a = currentAgent()?.address ?? null;
-    if (a !== this.address) { this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; cx?.notify?.(); }
+    if (a !== this.address) { this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; this.expanded = new Set(); cx?.notify?.(); }
     cx?.spawn?.((cx) => pollResources(cx));
     this.markSeen();
     this.refit();
@@ -335,9 +409,9 @@ export class ResourcesView {
   // resize an open window). At most once a tick.
   refit() {
     if (!panelOpen()) return;
-    const p = placeNow();
+    const p = placeNow([...this.expanded]);
     if (!needsRefit(shared(KEY_FRAME), p, this.inside || this.hover !== null)) return;
-    openPanel(p, { refit: true, focus: Boolean(this.h?.is_focused?.()), seenAtOpen: this.seenAtOpen }, props()?.overlay ?? shared(KEY_OPEN));
+    openPanel(p, { refit: true, focus: Boolean(this.h?.is_focused?.()), seenAtOpen: this.seenAtOpen, expanded: [...this.expanded] }, props()?.overlay ?? shared(KEY_OPEN));
   }
 
   // Shown is seen: the badge goes.
@@ -409,12 +483,24 @@ export class ResourcesView {
           .child(iconBtn(`res-remove-${it.id}`, ACT_ICONS.remove, "Remove from list", (_e, cx) => { removeItem(it, tk); cx?.notify?.(); }))));
     };
 
+    // A group's title folds it (a click anywhere on it); a long one draws ROW_LIMIT rows, then "Show N more".
+    const title = (g) => h_flex().id(`res-group-head-${g.id}`).px(10).mx(4).pt(8).pb(3).gap(4).items_center().rounded(6)
+      .hover((s) => s.text_color(t.foreground)).text_color(t.muted)
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx?.stop_propagation?.(); toggleGroup(g.id); cx?.notify?.(); })
+      .child(svg(icon(g.collapsed ? "chevron-right" : "chevron-down")).id(`res-chev-${g.id}`).size(12).flex_none())
+      .child(div().flex_1().text_size(11).font_weight(600).child(g.label))
+      .child(div().text_size(11).font_weight(600).child(String(g.items.length)));
+    const more = (g) => div().id(`res-more-${g.id}`).px(10).mx(4).py(6).rounded(8).text_size(12).text_color(t.muted)
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx?.stop_propagation?.(); this.expanded.add(g.id); cx?.notify?.(); })
+      .child(`Show ${g.rest} more`);
     const body = items.length
-      ? v_flex().id("res-list").flex_1().min_h(0).py(4).overflow_y_scrollbar().children(grouped(items).map((g) => v_flex().id(`res-group-${g.id}`)
-        .child(h_flex().px(14).pt(8).pb(3).items_center()
-          .child(div().flex_1().text_size(11).font_weight(600).text_color(t.muted).child(g.label))
-          .child(div().text_size(11).font_weight(600).text_color(t.muted).child(String(g.items.length))))
-        .children(g.items.map(row))))
+      ? v_flex().id("res-list").flex_1().min_h(0).py(4).overflow_y_scrollbar().children(layoutGroups(items, shared(KEY_COLLAPSED), [...this.expanded]).map((g) => v_flex().id(`res-group-${g.id}`)
+        .child(title(g))
+        .children(g.shown.map(row))
+        .when(g.rest > 0, (el) => el.child(more(g)))))
       : v_flex().id("res-empty").flex_1().px(24).py(28).gap(6).items_center().justify_center()
         .child(div().text_size(13).font_weight(600).text_color(t.foreground).child(emptyText(address, d?.error)[0]))
         .child(div().text_size(12).text_color(t.muted).text_center().child(emptyText(address, d?.error)[1]));

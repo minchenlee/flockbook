@@ -28,7 +28,7 @@ function helper(answer) {
 const realNow = Date.now;
 let clock = 0;
 beforeEach(() => {
-  reset(); forgetCommands(); R.forgetResources(); calls.length = 0;
+  reset(); forgetCommands(); R.forgetResources(); R.forgetCache(); calls.length = 0;
   fake.spaces = [space("sp1", { tabs: [{ id: "tb-t1", index: 1, name: "1", active: true, status: "idle", panes: 1, settled: false }] })];
   fake.agents = [agent("t1", "idle")];
   clock = realNow(); Date.now = () => clock;
