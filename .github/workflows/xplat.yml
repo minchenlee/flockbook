@@ -35,6 +35,10 @@ jobs:
     name: Rust changed?
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # No checkout: not the workflow's xplat folder.
+    defaults:
+      run:
+        working-directory: .
     outputs:
       rust: ${{ steps.diff.outputs.rust }}
     steps:
@@ -240,6 +244,9 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
     steps:
       - env:
           RESULTS: ${{ toJSON(needs) }}
