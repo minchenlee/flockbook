@@ -832,6 +832,9 @@ pub struct Kept {
     pub at: u64,
     head: String,
     near: String,
+    /// The file's `identity` when kept (a state of another file at the path is not used).
+    #[serde(default)]
+    file: String,
     acc: Acc,
 }
 
@@ -910,7 +913,25 @@ fn items_in(log: &Path, from: u64, to: u64) -> std::io::Result<(Vec<Conversation
 
 /// The cursor's mark of the log's bytes before `size` (see `print`): another file at the path does not pass.
 fn mark_of(log: &Path, size: u64) -> Option<String> {
-    print(log, size).ok().map(|(h, n)| crate::protocol::fnv1a(&format!("{h}{n}")))
+    let id = identity(log)?;
+    print(log, size).ok().map(|(h, n)| crate::protocol::fnv1a(&format!("{RULES}.{id}.{h}{n}")))
+}
+
+/// The file itself: its device, inode and birth time (where the file system has one). A log written again through a
+/// new file (renamed over the old one, or made again) is another file, whatever its bytes. Not the change time: an
+/// append changes it, and every read would then be whole.
+fn identity(log: &Path) -> Option<String> {
+    let m = std::fs::metadata(log).ok()?;
+    let born = m.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(format!("{}.{}.{}", m.dev(), m.ino(), born.unwrap_or(0)))
+    }
+    #[cfg(not(unix))]
+    {
+        Some(format!("{}", born.unwrap_or(0)))
+    }
 }
 
 /// The state folder beside `cache`, or None when it is a link or not a folder: nothing is read, written or removed
@@ -979,22 +1000,23 @@ pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: O
             _ => None,
         }
     });
-    // Unchanged: nothing is read or parsed.
-    if let (Some(c), Some((n, _))) = (since, was) {
-        if n == size {
-            return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
-        }
-    }
     let path = log.to_string_lossy().to_string();
     let home_s = home.map(|h| h.to_string_lossy().to_string());
+    let file = identity(log).unwrap_or_default();
     let base = match kept {
-        Some(k) if linear && k.rules == RULES && k.home == home_s && k.path == path && k.at <= k.size && k.size <= size && k.acc.known() => {
+        Some(k) if linear && k.rules == RULES && k.home == home_s && k.path == path && k.file == file && k.at <= k.size && k.size <= size && k.acc.known() => {
             Some(k).filter(|_| print(log, k.at).ok() == Some((k.head.clone(), k.near.clone())))
         }
         _ => None,
     };
-    // A kept state that does not fit: the log changed under it, so the old list may not hold.
+    // A kept state that does not fit: the log changed under it (or the rules did), so the old list may not hold.
     let mut whole = linear && kept.is_some() && base.is_none();
+    // Unchanged (and a kept state, if any, that fits): nothing is read or parsed.
+    if let (Some(c), Some((n, _)), false) = (since, was, whole) {
+        if n == size {
+            return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
+        }
+    }
     let (mut from, mut acc) = match base {
         Some(k) => (k.at, k.acc.clone()),
         None => (0, Acc::default()),
@@ -1041,7 +1063,7 @@ pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: O
     let next = match linear {
         true => {
             let (head, near) = print(log, at)?;
-            Some(Kept { rules: RULES, home: home_s, path, size, at, head, near, acc: acc.clone() })
+            Some(Kept { rules: RULES, home: home_s, path, size, at, head, near, file, acc: acc.clone() })
         }
         false => None,
     };

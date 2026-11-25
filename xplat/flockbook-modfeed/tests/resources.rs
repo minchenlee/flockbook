@@ -749,32 +749,86 @@ fn kept_states_have_a_cap() {
 
 // ---- Codex R1 (hg-res-incremental) ----
 
+/// The bytes the mark samples (resources.rs `print`): the first 4 KB, 16 pieces of 1 KB, the last 4 KB.
+fn sampled(n: u64, at: u64) -> bool {
+    at < 4096 || at + 4096 >= n || (0..16).any(|i| (n / 16 * i..n / 16 * i + 1024).contains(&at))
+}
+
+/// A log of filler with one reply whose words sit where the mark does not look (so only the file's own identity tells
+/// two files apart), and that reply's offset.
+fn unsampled_log(word: &str) -> (Vec<String>, u64) {
+    let filler = |i: usize| say(&format!("f{i}"), 1, &format!("Filler {i:04} {}", "x".repeat(300)));
+    for at in 20..180usize {
+        let mut lines: Vec<String> = vec![user("u0", 0, "go")];
+        lines.extend((0..200).map(filler));
+        lines.insert(at, say("v1", 1, &format!("{word} https://{word}.example.com")));
+        let n: u64 = lines.iter().map(|l| l.len() as u64 + 1).sum();
+        let off: u64 = lines[..at].iter().map(|l| l.len() as u64 + 1).sum();
+        let len = lines[at].len() as u64;
+        if (off..off + len).all(|b| !sampled(n, b)) {
+            return (lines, off);
+        }
+    }
+    panic!("no unsampled place");
+}
+
 /// Another file at the same path (a log written again), the same size or bigger: all of it again (`full`), with
-/// or without a kept state, never merged into the old list.
+/// or without a kept state, never merged into the old list. Also when the new file differs only where the mark does
+/// not sample: the file itself is another one.
 #[test]
 fn another_file_at_the_path_is_all_again() {
     let home = Some(Path::new(HOME));
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("s.jsonl");
-    write(&log, &[user("u0", 0, "go"), say("a1", 50, "old https://old.example.com")], false);
+    let swap = |lines: &[String]| {
+        let tmp = dir.path().join("new.jsonl");
+        write(&tmp, lines, false);
+        std::fs::rename(&tmp, &log).unwrap();
+    };
+    let (old, _) = unsampled_log("old");
+    write(&log, &old, false);
     let (a, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
-    // The same size, other words.
     let size = std::fs::metadata(&log).unwrap().len();
-    write(&log, &[user("u0", 0, "go"), say("a1", 50, "new https://new.example.com")], false);
+    // The same size, other words where the mark does not look.
+    let (new, _) = unsampled_log("new");
+    swap(&new);
     assert_eq!(std::fs::metadata(&log).unwrap().len(), size);
     for kept in [k.as_ref(), None] {
         let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, kept, true).unwrap();
         assert!(b.full, "same size, kept {}: {:?}", kept.is_some(), b.items);
         assert_eq!(values(&b.items), whole_log(&log));
     }
-    // Bigger, its mentions older than the cursor's newest.
-    write(&log, &[user("u0", 0, "go"), say("a1", 5, "first https://first.example.com"), say("a2", 6, "second https://second.example.com and more words")], false);
+    // Bigger: the same, and one more line.
+    let mut bigger = new.clone();
+    bigger.push(say("v2", 0, "and https://more.example.com"));
+    swap(&bigger);
     assert!(std::fs::metadata(&log).unwrap().len() > size);
     for kept in [k.as_ref(), None] {
         let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, kept, true).unwrap();
         assert!(b.full, "bigger, kept {}: {:?}", kept.is_some(), b.items);
         assert_eq!(values(&b.items), whole_log(&log));
+        assert!(!b.items.iter().any(|r| r.target.contains("old.example")), "nothing of the old file");
     }
+    // Other words at the start too (a smaller log, its mentions older than the cursor's newest).
+    swap(&[user("u0", 0, "go"), say("a1", 0, "first https://first.example.com and words"), say("a2", 0, "second https://second.example.com"), say("a3", 0, "x".repeat(size as usize).as_str())]);
+    let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, k.as_ref(), true).unwrap();
+    assert!(b.full);
+    assert_eq!(values(&b.items), whole_log(&log));
+}
+
+/// A kept state made with other rules: the log unchanged, still all of it again (the rules may find other things).
+#[test]
+fn a_state_of_other_rules_is_all_again_also_unchanged() {
+    let home = Some(Path::new(HOME));
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &[user("u0", 0, "go"), say("a1", 1, "see https://a.example.com"), user("u1", 2, "ok")], false);
+    let (a, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
+    let mut k = k.unwrap();
+    k.rules += 100;
+    let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, Some(&k), true).unwrap();
+    assert!(b.full, "{:?}", b.items);
+    assert_eq!(values(&b.items), whole_log(&log));
 }
 
 /// A result that comes again for a call before the kept start (an Artifact call whose failed result is followed by a
@@ -797,11 +851,17 @@ fn a_later_result_for_a_call_before_the_kept_start_reads_all_again() {
     write(&log, &[result("r2", 9, "c1", "Published: https://claude.ai/code/artifact/late-1", false)], true);
     let want = whole_log(&log);
     assert!(want.iter().any(|r| r["kind"] == "artifact"), "the whole log has the artifact: {want:?}");
-    let (b, k2, _) = resources::answer_kept(&log, Some(&a.cursor), home, k.as_ref(), true).unwrap();
+    let late_at = k.as_ref().unwrap().size;
+    assert!(k.as_ref().unwrap().at <= late_at);
+    let (b, k2, from) = resources::answer_kept(&log, Some(&a.cursor), home, k.as_ref(), true).unwrap();
     assert_eq!(values(&b.items), want);
     assert!(b.full, "the artifact's time is older than the cursor's: only a full answer brings it");
-    // The next call, the log unchanged but for one more line: the same as the whole log again.
-    write(&log, &[say("a4", 10, "Done https://b.example.com")], true);
-    let (c, _, _) = resources::answer_kept(&log, None, home, k2.as_ref(), true).unwrap();
+    assert_eq!(from, 0, "read from the log's start");
+    let k2 = k2.unwrap();
+    assert!(k2.at == 0 || k2.at > late_at, "the next start is not before the late result: at {} late line {late_at}", k2.at);
+    // The next call, one more line: the same as the whole log again, and the start now after the late result.
+    write(&log, &[user("u2", 10, "next"), say("a4", 11, "Done https://b.example.com")], true);
+    let (c, k3, _) = resources::answer_kept(&log, None, home, Some(&k2), true).unwrap();
     assert_eq!(values(&c.items), whole_log(&log));
+    assert!(k3.unwrap().at > late_at, "the start moved past the late result");
 }

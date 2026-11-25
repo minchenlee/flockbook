@@ -559,8 +559,8 @@ one reply, the later target first). Read only.
 - `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,
   unchanged, gives no `res`; the same log, grown, gives only the resources mentioned after the cursor's newest one
   (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).
-  The cursor holds a mark of the log's bytes: another file at the same path (a log written again, of the same size or
-  bigger) is another log. An older cursor (`r1.`, `r2.`) gives them all once. A result that comes for a tool call
+  The cursor holds a mark of the log file (device, inode, birth time) and of its bytes: another file at the same path
+  (a log written again, of the same size or bigger) is another log. A kept state of other rules also gives them all. An older cursor (`r1.`, `r2.`) gives them all once. A result that comes for a tool call
   before the kept start also gives them all.
 
 ```json
