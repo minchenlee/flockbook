@@ -73,7 +73,9 @@ jobs:
             # were cancelled must not hide its Mac changes. A new branch's first push has no "before": main too.
             if [ "$EVENT" = push ] && [ "$GITHUB_REF" != refs/heads/main ]; then BASE=main; fi
             if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then BASE=main; fi
-            if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[].filename'); then
+            # A moved file counts by its old path too.
+            if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" \
+                --jq '.files[] | .filename, (.previous_filename // empty)'); then
               n=$(printf '%s\n' "$files" | grep -c . || true)
               app_files=$(printf '%s\n' "$files" | grep -E '^(Sources/|Tests/|web/|Package\.(swift|resolved)$|scripts/|\.github/workflows/ci\.yml$)' \
                 | grep -Ev '^scripts/(helper-release\.mjs|known-files\.mjs|package-mod\.sh|install-from-release\.sh)$' || true)

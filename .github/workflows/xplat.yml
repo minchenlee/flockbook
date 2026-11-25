@@ -29,8 +29,9 @@ defaults:
     working-directory: xplat
 
 jobs:
-  # Whether a Rust file changed: a PR and a ci/ branch against main (their fork point), main against its last push.
-  # A manual run, an API error or 300 files or more (the compare's limit): every job runs.
+  # Whether a Rust file changed: a PR against its base commit at the event, a ci/ branch against main (their fork
+  # point), main against its last push. A moved file counts by its old path too. A manual run, an API error, 300 files
+  # or more (the compare's limit), a main push with no last push, or one that is not ahead of it: every job runs.
   changes:
     name: Rust changed?
     runs-on: ubuntu-latest
@@ -47,23 +48,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           rust=1
-          if [ "$EVENT" != workflow_dispatch ]; then
-            BASE=main
-            if [ "$EVENT" = push ] && [ "$GITHUB_REF" = refs/heads/main ] && [ -n "$BEFORE" ] \
-              && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then BASE=$BEFORE; fi
-            if files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[].filename'); then
+          BASE=main
+          ONMAIN=0
+          if [ "$EVENT" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            ONMAIN=1
+            BASE=$BEFORE
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then BASE=; fi
+          elif [ -n "$PR_BASE" ]; then
+            BASE=$PR_BASE
+          fi
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "$BASE" ]; then
+            echo "::notice title=xplat::no base to compare with: every job runs"
+          elif out=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" \
+              --jq '.status, (.files[] | .filename, (.previous_filename // empty))'); then
+            status=$(printf '%s\n' "$out" | head -n 1)
+            files=$(printf '%s\n' "$out" | tail -n +2)
+            if [ "$ONMAIN" = 1 ] && [ "$status" != ahead ]; then
+              echo "::notice title=xplat::main is $status against its last push: every job runs"
+            else
               n=$(printf '%s\n' "$files" | grep -c . || true)
               hit=$(printf '%s\n' "$files" | grep -E '^(xplat/|herdr-app/|Tests/HerdrKitTests/Fixtures/slash-tables\.json$|scripts/clippy-baseline\.|\.github/workflows/xplat\.yml$)' || true)
               if [ "$n" -lt 300 ] && [ -z "$hit" ]; then
                 rust=0
                 echo "::notice title=xplat jobs skipped::no Rust file changed against $BASE ($n files)"
               fi
-            else
-              echo "::warning title=xplat::could not compare with $BASE: every job runs"
             fi
+          else
+            echo "::warning title=xplat::could not compare with $BASE: every job runs"
           fi
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
 
