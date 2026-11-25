@@ -155,6 +155,14 @@ test("a full read asked while a delta runs is done after it, not dropped (Codex 
   await Promise.all([delta, full]); await cx.settle();
   assert.deepEqual(asked.map((a) => a.includes("--since")), [false, true, false], "the full one after the delta");
   assert.match(R.dataFor("t1").items[0].title, / new$/);
+  // Also when the delta ends early (the helper failed): the full one still runs after it.
+  const was = fake.exec; let n = 0;
+  fake.exec = (c, args) => (args[0] === "resources" && n++ === 0 ? jl(header("resources"), { type: "error", code: "read", message: "x" }, { type: "end", ok: false, ms: 1 }) : was(c, args));
+  lists.t1 = lists.t1.map((i) => ({ ...i, title: "again" }));
+  R.forgetCache();   // nothing to keep: the failed ask returns early
+  const d2 = R.pollResources(cx, true), f2 = R.pollResources(cx, true, true);
+  await Promise.all([d2, f2]);
+  assert.equal(R.dataFor("t1").items[0].title, "again");
 });
 
 const open = (items, extra = {}) => {

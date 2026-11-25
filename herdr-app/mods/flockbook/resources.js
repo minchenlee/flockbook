@@ -260,14 +260,18 @@ export function badgeFor(address) {
 // window that spawned it closed to fit), and then its `finally` never runs: an ask older than BUSY_MS no longer counts.
 // An ask that comes back after a newer one started drops its answer: it would write older data over the newer.
 export const BUSY_MS = 15000;
-let busy = 0, last = 0, lastT = null;
-export const forgetResources = () => { busy = 0; last = 0; lastT = null; };
+// `wantFull`: a full read was asked while another ask ran; it runs when that one ends (the window opened during
+// the bar's delta: docs are looked at again all the same).
+let busy = 0, last = 0, lastT = null, wantFull = false;
+export const forgetResources = () => { busy = 0; last = 0; lastT = null; wantFull = false; };
 // The lists in memory gone, as after a restart (tests).
 export const forgetCache = () => cache.clear();
 // `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title).
 export async function pollResources(cx, force = false, full = false) {
   const address = currentAgent()?.address ?? null;
-  if (!address || (busy && Date.now() - busy < BUSY_MS)) return;
+  if (!address) return;
+  if (busy && Date.now() - busy < BUSY_MS) { if (full) wantFull = true; return; }
+  if (full) wantFull = false;
   const t = term(address);
   // The cursor only with the list it belongs to: after a restart, a full read.
   const was = cache.get(t) ?? null;
@@ -289,7 +293,11 @@ export async function pollResources(cx, force = false, full = false) {
       putData(next); cx?.notify?.();
     } else if (next !== was) remember(next);
     else remember(was);
-  } finally { if (busy === mine) busy = 0; }
+  } finally {
+    if (busy === mine) busy = 0;
+    // Also after an early return above. An ask a newer one replaced leaves it to that one.
+    if (wantFull && !busy) { wantFull = false; await pollResources(cx, true, true); }
+  }
 }
 
 // Where the window goes: right of the chat's reading column, or a drawer down the right side of a narrow window.
@@ -399,7 +407,12 @@ export class ResourcesView {
 
   tick(cx) {
     const a = currentAgent()?.address ?? null;
-    if (a !== this.address) { this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; this.expanded = new Set(); cx?.notify?.(); }
+    // Another agent: its list from memory at once, then a full read (a doc it named may be there now; a delta from
+    // its cursor would not say so when its log did not change).
+    if (a !== this.address) {
+      this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; this.expanded = new Set(); cx?.notify?.();
+      if (a) cx?.spawn?.((cx) => pollResources(cx, true, true));
+    }
     cx?.spawn?.((cx) => pollResources(cx));
     this.markSeen();
     this.refit();
