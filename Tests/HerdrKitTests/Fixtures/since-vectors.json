@@ -1,0 +1,761 @@
+{
+ "_about": "Shared by the Mac app (Sources/HerdrKitChecks/ChecksSince.swift), the Herdr app mod (herdr-app/test/since-vectors.test.mjs) and the helper (xplat/flockbook-modfeed/tests/since_vectors.rs). Taken from herdr-app/test/since.test.mjs, herdr-app/test/summary.test.mjs, xplat/flockbook-modfeed/tests/glance.rs and xplat/flockbook-modfeed/src/summary.rs. Change a text or rule on one side: change it here, and every side's tests fail until it matches.",
+ "away_ms": 300000,
+ "span": [
+  [
+   2820000,
+   "47 minutes"
+  ],
+  [
+   60000,
+   "1 minute"
+  ],
+  [
+   10800000,
+   "3 hours"
+  ],
+  [
+   180000000,
+   "2 days"
+  ],
+  [
+   10000,
+   "1 minute"
+  ],
+  [
+   5400000,
+   "2 hours"
+  ]
+ ],
+ "words": [
+  [
+   "Two words. And `three` more — yes",
+   6
+  ],
+  [
+   "測試通過 ok",
+   5
+  ],
+  [
+   "",
+   0
+  ],
+  [
+   "— · …",
+   0
+  ]
+ ],
+ "about": [
+  [
+   7,
+   "10"
+  ],
+  [
+   3,
+   "3"
+  ],
+  [
+   64,
+   "60"
+  ],
+  [
+   1912,
+   "1,900"
+  ],
+  [
+   23456,
+   "23,000"
+  ],
+  [
+   995,
+   "1,000"
+  ]
+ ],
+ "facts": [
+  [
+   {
+    "edited": 5,
+    "commands": 2,
+    "tests": "passed",
+    "test": "pytest"
+   },
+   "Edited 5 files · pytest passed after the last edit"
+  ],
+  [
+   {
+    "edited": 1,
+    "commands": 1,
+    "tests": "failed",
+    "test": "cargo test",
+    "failed": "cargo test"
+   },
+   "Edited 1 file · cargo test failed after the last edit"
+  ],
+  [
+   {
+    "edited": 0,
+    "commands": 3,
+    "tests": "passed",
+    "test": "npm test"
+   },
+   "Npm test passed"
+  ],
+  [
+   {
+    "edited": 0,
+    "commands": 1,
+    "tests": "ran"
+   },
+   "A test command ran, result not known"
+  ],
+  [
+   {
+    "edited": 2,
+    "commands": 0,
+    "tests": "none"
+   },
+   "Edited 2 files · no test run after the last edit"
+  ],
+  [
+   {
+    "edited": 0,
+    "commands": 4,
+    "failed": "make"
+   },
+   "The last command failed: make"
+  ],
+  [
+   {
+    "edited": 0,
+    "commands": 1
+   },
+   "Ran 1 command"
+  ],
+  [
+   {
+    "edited": 0,
+    "commands": 0
+   },
+   ""
+  ],
+  [
+   null,
+   ""
+  ]
+ ],
+ "arrive": [
+  {
+   "seen": null,
+   "id": "a3",
+   "now": 6000000,
+   "want": null,
+   "why": "a chat never opened before"
+  },
+  {
+   "seen": {
+    "id": "a3",
+    "at": 0
+   },
+   "id": "a3",
+   "now": 6000000,
+   "want": null,
+   "why": "nothing new"
+  },
+  {
+   "seen": {
+    "id": "a1",
+    "at": 5700001
+   },
+   "id": "a3",
+   "now": 6000000,
+   "want": null,
+   "why": "away too short"
+  },
+  {
+   "seen": {
+    "id": "a1",
+    "at": 3180000
+   },
+   "id": null,
+   "now": 6000000,
+   "want": null,
+   "why": "no turn id yet"
+  },
+  {
+   "seen": {
+    "id": "a1",
+    "at": 3180000
+   },
+   "id": "a3",
+   "now": 6000000,
+   "want": {
+    "from": 3180000,
+    "back": 6000000
+   },
+   "why": "back after 47 minutes"
+  }
+ ],
+ "count_line": [
+  [
+   {
+    "away": "47 minutes",
+    "messages": 2,
+    "words": 5
+   },
+   "You were away 47 minutes · 2 new messages · about 10 words"
+  ],
+  [
+   {
+    "away": "47 minutes",
+    "messages": 2,
+    "words": 64
+   },
+   "You were away 47 minutes · 2 new messages · about 60 words"
+  ],
+  [
+   {
+    "away": "1 hour",
+    "messages": 1,
+    "words": 1912
+   },
+   "You were away 1 hour · 1 new message · about 1,900 words"
+  ],
+  [
+   {
+    "away": "6 minutes",
+    "messages": 0,
+    "words": 0
+   },
+   "You were away 6 minutes · no new message in the rows loaded"
+  ]
+ ],
+ "test_names": [
+  [
+   "pytest tests/",
+   "pytest"
+  ],
+  [
+   "cd herdr-app && npm test",
+   "npm test"
+  ],
+  [
+   "npm run test:unit",
+   "npm test"
+  ],
+  [
+   "go test ./...",
+   "go test"
+  ],
+  [
+   "cargo nextest run",
+   "cargo nextest"
+  ],
+  [
+   "swift test --filter A",
+   "swift test"
+  ],
+  [
+   "node --test test/",
+   "node --test"
+  ],
+  [
+   "npx vitest run",
+   "vitest"
+  ],
+  [
+   "make test",
+   "make test"
+  ],
+  [
+   "bundle exec rspec",
+   "rspec"
+  ],
+  [
+   "queue run --pool build -- cargo test -p core",
+   "cargo test"
+  ],
+  [
+   "A=1 timeout 600 go test ./...",
+   "go test"
+  ],
+  [
+   "cargo test -- --nocapture",
+   "cargo test"
+  ],
+  [
+   "git checkout -- test",
+   null
+  ],
+  [
+   "cat pytest.ini",
+   null
+  ],
+  [
+   "echo latest",
+   null
+  ],
+  [
+   "git log --grep test",
+   null
+  ],
+  [
+   "ls tests",
+   null
+  ],
+  [
+   "echo 'a | pytest'",
+   null
+  ],
+  [
+   "cat <<EOF\npytest\nEOF",
+   null
+  ]
+ ],
+ "first_sentence": [
+  [
+   "- **Done.** More here",
+   "Done."
+  ],
+  [
+   "改好了。接下來要測試",
+   "改好了。"
+  ],
+  [
+   "Updated v1.2 of a.rs and more",
+   "Updated v1.2 of a.rs and more"
+  ],
+  [
+   "```\ncode\n```\n\nAfter the code.",
+   "After the code."
+  ],
+  [
+   "See [the notes](file:///w/notes.md) and a[0]. Then more",
+   "See the notes and a[0]."
+  ],
+  [
+   "  \n",
+   null
+  ],
+  [
+   "Done with `loader` (`/w/atlas/src/loader.rs`) and https://example.com/a/b.",
+   "Done with loader (loader.rs) and https://example.com/a/b."
+  ],
+  [
+   "The and/or case in src/a.rs, 1/2/3 and /tmp stay.",
+   "The and/or case in src/a.rs, 1/2/3 and /tmp stay."
+  ],
+  [
+   "12. Step one. Step two",
+   "Step one."
+  ],
+  [
+   "## Plan\n\nI will measure it first.",
+   "Plan"
+  ]
+ ],
+ "logs": [
+  {
+   "name": "edits then a test that passes",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u0\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Old turn\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"x1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c0\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/old.rs\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"x2\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c0\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"x3\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Old reply.\"}]}}",
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:10.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Fix the parser\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:11.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/src/a.rs\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:12.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:13.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/src/a.rs\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:14.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:15.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Write\",\"input\":{\"file_path\":\"/w/src/b.rs\",\"content\":\"x\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:16.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a4\",\"timestamp\":\"2026-11-03T01:40:17.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c4\",\"name\":\"Bash\",\"input\":{\"command\":\"cd /w && cargo test -p parser 2>&1 | tail -5\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r4\",\"timestamp\":\"2026-11-03T01:40:30.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c4\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a5\",\"timestamp\":\"2026-11-03T01:40:31.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Fixed the parser. It now reads empty lines.\\n\\nAll 12 tests pass.\"}]}}"
+   ],
+   "want": {
+    "edited": 2,
+    "commands": 1,
+    "failed": null,
+    "tests": "ran",
+    "test": "cargo test",
+    "said": "Fixed the parser."
+   },
+   "line": "Edited 2 files · cargo test ran after the last edit, result not known"
+  },
+  {
+   "name": "an edit after the test means no test run",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Bash\",\"input\":{\"command\":\"npm test\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/a.js\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Bash\",\"input\":{\"command\":\"git status\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a4\",\"timestamp\":\"2026-11-03T01:40:07.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done\"}]}}"
+   ],
+   "want": {
+    "edited": 1,
+    "commands": 2,
+    "failed": null,
+    "tests": "none",
+    "test": null,
+    "said": "Done"
+   },
+   "line": "Edited 1 file · no test run after the last edit"
+  },
+  {
+   "name": "edit and test in one run keep their order",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/a.js\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"npm test\"}}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/b.js\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"out\",\"is_error\":false}]}}"
+   ],
+   "want": {
+    "edited": 2,
+    "commands": 1,
+    "failed": null,
+    "tests": "none",
+    "test": null,
+    "said": null
+   },
+   "line": "Edited 2 files · no test run after the last edit"
+  },
+  {
+   "name": "the last command failed",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Build\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/a.js\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"pytest -q\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Bash\",\"input\":{\"command\":\"npm run build\\n# the release build\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"out\",\"is_error\":true}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a4\",\"timestamp\":\"2026-11-03T01:40:07.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The build fails. I stopped here.\"}]}}"
+   ],
+   "want": {
+    "edited": 1,
+    "commands": 2,
+    "failed": "npm run build",
+    "tests": "passed",
+    "test": "pytest",
+    "said": "The build fails."
+   },
+   "line": "Edited 1 file · pytest passed after the last edit · the last command failed: npm run build"
+  },
+  {
+   "name": "a failed test run is both",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/a.py\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"python -m pytest\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":true}]}}"
+   ],
+   "want": {
+    "edited": 1,
+    "commands": 1,
+    "failed": "python -m pytest",
+    "tests": "failed",
+    "test": "pytest",
+    "said": null
+   },
+   "line": "Edited 1 file · pytest failed after the last edit"
+  },
+  {
+   "name": "a later command that passes clears the failure",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"ls nope\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":true}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"out\",\"is_error\":false}]}}"
+   ],
+   "want": {
+    "edited": 0,
+    "commands": 2,
+    "failed": null,
+    "tests": null,
+    "test": null,
+    "said": null
+   },
+   "line": "Ran 2 commands"
+  },
+  {
+   "name": "a command with no result yet",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/a.py\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"pytest\"}}]}}"
+   ],
+   "want": {
+    "edited": 1,
+    "commands": 0,
+    "failed": null,
+    "tests": "none",
+    "test": null,
+    "said": null
+   },
+   "line": "Edited 1 file · no test run after the last edit"
+  },
+  {
+   "name": "no turn yet",
+   "agent": "claude",
+   "lines": [],
+   "want": {
+    "edited": 0,
+    "commands": 0,
+    "failed": null,
+    "tests": null,
+    "test": null,
+    "said": null
+   },
+   "line": ""
+  },
+  {
+   "name": "words only: no test expected",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Write it up\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/notes/REPORT.md\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Written.\"}]}}"
+   ],
+   "want": {
+    "edited": 1,
+    "commands": 0,
+    "failed": null,
+    "tests": null,
+    "test": null,
+    "said": "Written."
+   },
+   "line": "Edited 1 file"
+  },
+  {
+   "name": "a code file beside words",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/README.md\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/Makefile\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":false}]}}"
+   ],
+   "want": {
+    "edited": 2,
+    "commands": 0,
+    "failed": null,
+    "tests": "none",
+    "test": null,
+    "said": null
+   },
+   "line": "Edited 2 files · no test run after the last edit"
+  },
+  {
+   "name": "codex edits and exit codes",
+   "agent": "codex",
+   "lines": [
+    "{\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Fix it\"}]}}",
+    "{\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"call_id\":\"c1\",\"name\":\"apply_patch\",\"input\":\"*** Begin Patch\\n*** Update File: src/a.rs\\n@@\\n-a\\n+b\\n*** Add File: src/b.rs\\n+x\\n*** End Patch\"}}",
+    "{\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"c1\",\"output\":\"Success\"}}",
+    "{\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"c2\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"cargo test\\\"}\"}}",
+    "{\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"c2\",\"output\":\"Chunk ID: 1\\nProcess exited with code 101\\nOutput:\\nfailed\"}}",
+    "{\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"One test still fails.\"}]}}"
+   ],
+   "want": {
+    "edited": 2,
+    "commands": 1,
+    "failed": "cargo test",
+    "tests": "failed",
+    "test": "cargo test",
+    "said": "One test still fails."
+   },
+   "line": "Edited 2 files · cargo test failed after the last edit"
+  },
+  {
+   "name": "markdown marks are left out",
+   "agent": "claude",
+   "lines": [
+    "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:10.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Make the importer faster.\"}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:11.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"## Plan\\n\\nI will measure it first. Then cut.\\n\\nShould I go on?\"}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:12.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/src/importer.py\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+    "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:13.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+    "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:14.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"pytest -q\"}}]}}"
+   ],
+   "want": {
+    "edited": 1,
+    "commands": 0,
+    "failed": null,
+    "tests": "none",
+    "test": null,
+    "said": "Plan"
+   },
+   "line": "Edited 1 file · no test run after the last edit"
+  }
+ ],
+ "summary_parse": [
+  [
+   "STATE: Tests pass.\nNEEDS: Pick a release day.",
+   [
+    "Tests pass.",
+    "Pick a release day."
+   ]
+  ],
+  [
+   "TASK: Ship the importer.\nSTATE: Tests pass.\nNEEDS: nothing\nWAITS: answer",
+   [
+    "Tests pass.",
+    null
+   ]
+  ],
+  [
+   "a plugin said hello\n\n state: Done. \nNeeds: Nothing.\n",
+   [
+    "Done.",
+    null
+   ]
+  ],
+  [
+   "STATE: Done.",
+   [
+    "Done.",
+    null
+   ]
+  ],
+  [
+   "NEEDS: x",
+   null
+  ],
+  [
+   "STATE:\nNEEDS: x",
+   null
+  ],
+  [
+   "I think the state is fine.",
+   null
+  ]
+ ],
+ "model_name": [
+  [
+   " claude-haiku-5-5 ",
+   "claude-haiku-5-5"
+  ],
+  [
+   "opencode-go/glm-5.3-flash:low",
+   "opencode-go/glm-5.3-flash:low"
+  ],
+  [
+   "",
+   null
+  ],
+  [
+   "  ",
+   null
+  ],
+  [
+   "--help",
+   null
+  ],
+  [
+   "a b",
+   null
+  ],
+  [
+   "x;rm",
+   null
+  ],
+  [
+   "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+   null
+  ]
+ ],
+ "summary_input": {
+  "agent": "claude",
+  "lines": [
+   "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Fix the parser\"}}",
+   "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/w/src/a.rs\",\"old_string\":\"a\",\"new_string\":\"b\"}}]}}",
+   "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"out\",\"is_error\":false}]}}",
+   "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Bash\",\"input\":{\"command\":\"pytest -q\"}}]}}",
+   "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"out\",\"is_error\":false}]}}",
+   "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Fixed it. Tests pass.\"}]}}"
+  ],
+  "text": "OWNER ASKED:\nFix the parser\n\nAGENT WROTE:\nFixed it. Tests pass.\n\nFROM THE LOG: edited 1 files; ran 1 commands; tests passed (pytest)\n"
+ },
+ "texts": {
+  "card_title": "Since you left",
+  "summary_mark": "Summary · written by a model, may be wrong",
+  "needs_prefix": "Needs you: ",
+  "from_log": "From the log",
+  "from_log_with_summary": "From the log, not from the summary",
+  "jump": "Jump to that message",
+  "summaries_about": "A model writes two lines about an agent's last turn, for the chat's Since you left card. Off: nothing is sent to a model.",
+  "summaries_sent": "When an agent stops, the end of its last turn and your message that started it go to the model. A model can be wrong; the line from the log stays on the card.",
+  "by_about": "The program that writes the summaries, on its own account.",
+  "by_notes": {
+   "own": "Claude Code, Codex and pi agents each use their own program. A turn goes only where that conversation already goes. Other agents get no summary.",
+   "claude": "Claude Code writes for every agent. The turns of other agents go to Claude Code's provider too.",
+   "codex": "Codex writes for every agent. The turns of other agents go to Codex's provider too.",
+   "pi": "pi writes for every agent. The turns of other agents go to pi's provider too."
+  },
+  "model_about": "Pick one from the list, or type a name.",
+  "model_empty": {
+   "claude": "claude-haiku-5-5",
+   "codex": "the model Codex uses by default",
+   "pi": "the model pi uses by default"
+  },
+  "model_source": {
+   "built-in": "Claude Code has no command that lists its models. This is a short list kept in Flockbook; you can type another name.",
+   "file": "From Codex's own list on this computer.",
+   "program": "From pi --list-models."
+  }
+ },
+ "usage_text": [
+  [
+   {
+    "today": {
+     "runs": 0,
+     "failed": 0,
+     "sent": 0,
+     "got": 0
+    },
+    "week": {
+     "runs": 0,
+     "failed": 0,
+     "sent": 0,
+     "got": 0
+    }
+   },
+   "No model ran for a summary in the last 7 days."
+  ],
+  [
+   {
+    "today": {
+     "runs": 42,
+     "failed": 1,
+     "sent": 96321,
+     "got": 5149
+    },
+    "week": {
+     "runs": 210,
+     "failed": 0,
+     "sent": 512000,
+     "got": 1
+    }
+   },
+   "Today: 42 runs of a model (1 failed), about 96,000 characters sent and 5,100 back.\nLast 7 days: 210 runs of a model, about 512,000 characters sent and 1 back."
+  ]
+ ],
+ "summary_batch": 3
+}

@@ -86,6 +86,8 @@ struct PaneView: View {
     @State private var answeredQuestions: Set<String> = []
     /// The pane's frame: the question card may take the height left after the conversation's minimum.
     @State private var paneFrame = CGRect.zero
+    /// The Since you left card's last Jump.
+    @State private var jump: SinceJump?
 
     /// The label shows on split tabs, and on any pane while it is being renamed.
     private var labelShown: Bool { showLabel || model.renamingPane?.id == pane.id }
@@ -106,6 +108,7 @@ struct PaneView: View {
                                  team: agent.team,
                                  hostSetup: SessionResolver.hostSetup(kind: agent.kind, sessionId: agent.sessionId, remote: pane.composerRemote(model.store.session.remote)),
                                  scrollToken: model.sendTokens[pane.id] ?? 0,
+                                 jump: jump,
                                  session: agent.sessionId,
                                  onLoadEarlier: { await model.store.loadEarlier(paneId: pane.id) })
                     .environment(\.logURL, model.store.logURL(for: agent.sessionId))
@@ -119,12 +122,17 @@ struct PaneView: View {
                     }
                     .paneBar(.bottom) {
                         VStack(spacing: 0) {
+                            sinceCard(agent)
                             if agent.status == .working, let q = model.queued[pane.id] {
                                 QueuedStrip(queue: q, canPull: model.writesEnabled, pulling: model.pulling.contains(pane.id),
                                             onPull: { model.pullQueued(pane) })
                             }
-                            if let line = model.statusLines[pane.id] { StatusLineBar(record: line) }
+                            if let line = model.statusLines[pane.id] {
+                                StatusLineBar(record: line)
+                                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.status = $0 } }
+                            }
                             composer(agent)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.composer = $0 } }
                         }
                     }
                     .softScrollEdges([.top, .bottom])
@@ -146,6 +154,8 @@ struct PaneView: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { paneFrame = $0; QuestionProbe.paneFrame = $0 }
         .task(id: pane.cwd) { branch = await GitInfo.branch(cwd: pane.cwd, host: pane.composerRemote(model.store.session.remote)) }
         .task(id: pane.agent?.status) { await readScreenQuestion() }
+        // Since you left: on the way in, the time away; then a mark of what this conversation shows, while it shows.
+        .task(id: "\(pane.id)|\(pane.agent?.sessionId ?? "")|\(sinceOnScreen)") { await model.since.watch(pane, onScreen: sinceOnScreen, model: model) }
         .task(id: "\(pane.agent?.status.rawValue ?? "")-\(focused)") {
             // While blocked or a tool call is pending, re-read the screen every 2 s.
             repeat {
@@ -204,6 +214,37 @@ extension PaneView {
                 .inputColumn()
         } else {
             composerField(agent)
+        }
+    }
+
+    /// The conversation is on screen: a tab shows (not Inbox, Overview, Search or Settings) and the app is not hidden,
+    /// minimized or covered.
+    var sinceOnScreen: Bool { model.screen == .tab && model.since.appVisible }
+
+    /// A question, stop or approval card holds the reply box's place, or an approval card stands in the conversation:
+    /// the Since you left card waits (`SinceLeft.waits`).
+    private func composerHoldsCard(_ agent: Agent) -> Bool {
+        SinceLeft.waits(question: question(agent) != nil,
+                        stopCard: (stoppedScreenCard != nil || ApprovalProbe.injected != nil) && agent.status == .blocked,
+                        composerCard: model.cardInComposer(pane) != nil,
+                        conversationCard: model.liveCardInConversation(pane) != nil)
+    }
+
+    /// The Since you left card, while the owner has not hidden it (×) and the conversation has rows.
+    @ViewBuilder func sinceCard(_ agent: Agent) -> some View {
+        let key = model.since.key(pane, session: model.store.session)
+        if let away = model.since.away[key], !composerHoldsCard(agent) {
+            let items = model.store.conversation(for: agent.sessionId)
+            if !items.isEmpty {
+                let facts = Glance.facts(items, agent: agent.kind)
+                SinceCard(card: SinceLeft.card(items, away: away, facts: facts), summary: model.since.summary(key, id: facts.id),
+                          onJump: { jump = SinceJump(id: $0, token: (jump?.token ?? 0) + 1) },
+                          onHide: { model.since.away[key] = nil })
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.card = $0 } }
+                    .onAppear { if SinceProbe.on { SinceProbe.appeared += 1 } }
+                    .inputColumn()
+                    .padding(.bottom, 8)
+            }
         }
     }
 

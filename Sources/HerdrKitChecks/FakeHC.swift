@@ -88,6 +88,18 @@ final class FakeHC: @unchecked Sendable {
     private var _execReplies: [(String, String)] = []
     /// `machine.exec`: the stdout of the first reply whose key occurs in the line (or argv joined); else empty, code 1.
     var execReplies: [(String, String)] { get { lock.withLock { _execReplies } } set { lock.withLock { _execReplies = newValue } } }
+    /// Seconds `machine.exec` holds its answer (a model that thinks), or until the caller goes away: `execGone` counts
+    /// those, as the core ends the program then.
+    var execHold: Double = 0
+    private var _execGone = 0
+    var execGone: Int { lock.withLock { _execGone } }
+    /// Connections open now.
+    var openCount: Int { lock.withLock { open.count } }
+    /// Each connection is closed as soon as it is accepted (herdr-core going down right after connect): `closedOnAccept`
+    /// counts them.
+    var closeOnAccept = false
+    private var _closedOnAccept = 0
+    var closedOnAccept: Int { lock.withLock { _closedOnAccept } }
     private var _files: [String: String] = [:]
     /// `file.read`: contents by `<on>:<path>` (`:<path>` here).
     var files: [String: String] { get { lock.withLock { _files } } set { lock.withLock { _files = newValue } } }
@@ -140,6 +152,7 @@ final class FakeHC: @unchecked Sendable {
                 let c = accept(fd, nil, nil)
                 if lock.withLock({ activeGeneration != gen }) { if c >= 0 { close(c) }; close(fd); return }
                 if c < 0 { if errno == EINTR || errno == ECONNABORTED { continue }; close(fd); return }
+                if closeOnAccept { close(c); lock.withLock { _closedOnAccept += 1 }; continue }
                 var one: Int32 = 1
                 setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
                 lock.withLock { open.append(c) }
@@ -221,6 +234,16 @@ final class FakeHC: @unchecked Sendable {
         case "machine.exec":
             let cmd = (params["line"] as? String) ?? ((params["argv"] as? [String]) ?? []).joined(separator: " ")
             let hit = lock.withLock { _execReplies.first { cmd.contains($0.0) }?.1 }
+            if execHold > 0 {
+                let end = Date().addingTimeInterval(execHold)
+                while Date() < end {
+                    var p = pollfd(fd: c, events: Int16(POLLIN), revents: 0)
+                    if Darwin.poll(&p, 1, 50) > 0 {
+                        var b: UInt8 = 0
+                        if recv(c, &b, 1, MSG_PEEK) <= 0 { lock.withLock { _execGone += 1 }; break }
+                    }
+                }
+            }
             return (reply(id: id, result: ["stdout": Data((hit ?? "").utf8).base64EncodedString(), "stderr": "", "code": hit == nil ? 1 : 0,
                                            "truncated": false, "timed_out": false, "ms": 1]), nil)
         case "file.read":

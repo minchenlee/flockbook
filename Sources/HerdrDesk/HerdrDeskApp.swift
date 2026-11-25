@@ -91,6 +91,10 @@ struct HerdrDeskApp: App {
             let dir = args[i + 1]
             DispatchQueue.main.async { SnapshotRunner.runStatusLine(dir: dir) }
         }
+        if let i = args.firstIndex(of: "--snapshot-since"), args.indices.contains(i + 1) {
+            let dir = args[i + 1]
+            DispatchQueue.main.async { SnapshotRunner.runSince(dir: dir) }
+        }
         if let i = args.firstIndex(of: "--snapshot-queued"), args.indices.contains(i + 1) {
             let dir = args[i + 1]
             DispatchQueue.main.async { SnapshotRunner.runQueued(dir: dir) }
@@ -241,6 +245,9 @@ struct HerdrDeskApp: App {
             let hub = RemoteHub.live(model: m)
             m.remote = hub
             if hub.enabled { Task { @MainActor in await hub.start() } }
+            // Summaries (off by default) run only in a real launch.
+            m.since.runner = SinceModel.liveRunner(store)
+            m.since.start(m)
         }
         _model = State(initialValue: m)
     }
