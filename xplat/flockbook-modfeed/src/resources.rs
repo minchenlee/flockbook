@@ -839,13 +839,34 @@ pub struct Kept {
 pub fn keep(k: &Kept, at: &Path) {
     crate::locate::write_json(k, Some(at));
     let week = std::time::Duration::from_secs(7 * 24 * 3600);
+    let hour = std::time::Duration::from_secs(3600);
+    let mut states = vec![];
     for e in at.parent().and_then(|d| std::fs::read_dir(d).ok()).into_iter().flatten().flatten() {
-        let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|a| a > week);
-        if old && e.path().extension().is_some_and(|x| x == "json") {
-            let _ = std::fs::remove_file(e.path());
+        let p = e.path();
+        let age = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).unwrap_or_default();
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') && name.contains(".json.") {
+            // A temp file a stopped write left (another call may be writing one now: only old ones go).
+            if age > hour {
+                let _ = std::fs::remove_file(&p);
+            }
+        } else if p.extension().is_some_and(|x| x == "json") {
+            if age > week {
+                let _ = std::fs::remove_file(&p);
+            } else if p != at {
+                states.push((age, p));
+            }
         }
     }
+    // At most KEPT files: the one just written and the newest others.
+    states.sort();
+    for (_, p) in states.into_iter().skip(KEPT - 1) {
+        let _ = std::fs::remove_file(p);
+    }
 }
+
+/// How many terminals keep a state (one file each, a few KB to a few hundred KB).
+const KEPT: usize = 64;
 
 /// What the bytes before `at` look like: a hash of the first 4 KB, and a hash of 16 pieces of 1 KB spread over them
 /// and the 4 KB before `at`. An agent only adds lines to its log; this finds another file at the path, not every

@@ -673,7 +673,7 @@ fn timing_100_mb_then_100_kb() {
     let (got, _, from) = kept(&log, s.as_ref());
     let inc = t.elapsed();
     assert_eq!(got, whole);
-    println!("timing: log {} bytes; first read with a state {:?}; whole log {:?}; only the new {} bytes {:?}", before, full_first, full, std::fs::metadata(&log).unwrap().len() - from, inc);
+    println!("timing: log {} bytes; first read with a state {:?}; whole log {:?}; only the new {} bytes {:?}; state {} bytes", before, full_first, full, std::fs::metadata(&log).unwrap().len() - from, inc, serde_json::to_vec(&s).unwrap().len());
 }
 
 
@@ -702,5 +702,35 @@ fn real_log_in_steps() {
         s = Some(next);
     }
     behind.sort();
-    println!("real: {} bytes, {checked} checks equal; bytes from the kept start to the end: median {}, p90 {}, max {}", data.len(), behind[100], behind[180], behind[199]);
+    println!("real: {} bytes, {checked} checks equal; bytes from the kept start to the end: median {}, p90 {}, max {}; state {} bytes", data.len(), behind[100], behind[180], behind[199], serde_json::to_vec(&s).unwrap().len());
+}
+
+/// The state folder stays small: at most 64 files (the newest kept), none older than 7 days, no temp files left over.
+#[test]
+fn kept_states_have_a_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = std::time::SystemTime::now();
+    let put = |name: &str, age_s: u64| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, b"{}").unwrap();
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(now - std::time::Duration::from_secs(age_s)).unwrap();
+    };
+    for i in 0..80u64 {
+        put(&format!("{i:02}.json"), 60 + i * 60);
+    }
+    put("old.json", 8 * 24 * 3600);
+    put(".x.json.123", 2 * 3600);
+    put("notes.txt", 9 * 24 * 3600);
+    let log = dir.path().join("s.jsonl");
+    std::fs::write(&log, format!("{}\n", serde_json::json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-03T01:40:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"https://a.example.com"}]}}))).unwrap();
+    let (_, kept, _) = modfeedkit::resources::answer_kept(&log, None, None, None, true).unwrap();
+    let at = dir.path().join("me.json");
+    modfeedkit::resources::keep(&kept.expect("a state"), &at);
+    let mut names: Vec<String> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".json") || n.starts_with('.')).collect();
+    names.sort();
+    assert_eq!(names.len(), 64, "{names:?}");
+    assert!(names.contains(&"me.json".to_string()), "the file just written stays");
+    assert!(names.contains(&"00.json".to_string()) && !names.contains(&"79.json".to_string()), "the newest are kept: {names:?}");
+    assert!(!names.contains(&"old.json".to_string()) && !names.contains(&".x.json.123".to_string()));
+    assert!(dir.path().join("notes.txt").exists(), "only state files are dropped");
 }

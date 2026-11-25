@@ -552,7 +552,8 @@ one reply, the later target first). Read only.
 - The whole log is counted, at any length. `row` can be older than the rows the chat has loaded: then "Show in chat"
   does nothing.
 - With `--cache`, the helper keeps what it parsed in `resources/<hash of the terminal>.json` beside it (one file per
-  terminal; files not changed for 7 days are dropped). Next time it parses only the lines after a safe start and gives
+  terminal, written through a temp file and renamed; at most 64 files, the newest kept, and files not changed for 7
+  days are dropped; a file that does not parse counts as none). Next time it parses only the lines after a safe start and gives
   the same answer as a whole read; a log that is shorter, changed at its start or another file is read whole. Without
   `--cache` the whole log is read each time.
 - `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,

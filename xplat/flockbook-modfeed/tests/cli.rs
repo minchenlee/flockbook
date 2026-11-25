@@ -227,4 +227,10 @@ fn resources_keeps_a_state_beside_the_cache() {
     assert_eq!(more.last().unwrap()["cursor"], serde_json::json!(whole.cursor));
     let state: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
     assert!(state["at"].as_u64().unwrap() > at, "the start moved on: {state}");
+    // A broken state file is no state: the whole log is read, the answer is the same, and a good file is written again.
+    std::fs::write(&files[0], b"{\"rules\":1,\"at\":").unwrap();
+    let broken = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s]);
+    assert_eq!(res(&broken), want);
+    let again: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).expect("written whole again");
+    assert!(again["at"].as_u64().unwrap() > 0, "{again}");
 }
