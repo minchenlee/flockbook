@@ -757,10 +757,17 @@ fn parse_lstart(words: &[&str]) -> Option<NaiveDateTime> {
 }
 
 /// A pid file's `procStart`: `ps lstart` text on macOS; on Linux Claude Code writes `/proc/<pid>/stat` starttime
-/// (clock ticks after boot) instead.
+/// (clock ticks after boot) instead, and on Windows the creation time as a FILETIME (100 ns after 1601-01-01 UTC).
+/// The two numbers are told apart by size: a FILETIME after 1632 is at least 10^16; ticks after boot reach that only
+/// after some 3 million years at 100 Hz.
 fn proc_start(ps: &str) -> Option<Date> {
     if !ps.is_empty() && ps.bytes().all(|b| b.is_ascii_digit()) {
-        return linux::ticks_to_date(ps.parse().ok()?);
+        let n: u64 = ps.parse().ok()?;
+        if n >= 10_000_000_000_000_000 {
+            const UNIX_EPOCH_S: i64 = 11_644_473_600; // 1601-01-01 to 1970-01-01
+            return DateTime::<Utc>::from_timestamp((n / 10_000_000) as i64 - UNIX_EPOCH_S, (n % 10_000_000) as u32 * 100);
+        }
+        return linux::ticks_to_date(n);
     }
     let words: Vec<&str> = ps.split(' ').filter(|w| !w.is_empty()).collect();
     parse_lstart(&words).and_then(|n| local_to_utc(&Utc, &n))
@@ -845,11 +852,26 @@ fn is_interpreter(w: &str) -> bool {
 /// (`node /opt/x/bin/codex` runs `codex`). Interpreter flags are not skipped: `node --inspect …/codex` gives
 /// `--inspect` (fail closed). A program that only names another (`script claude`) runs itself.
 pub(crate) fn program<'a>(words: &[&'a str]) -> Option<&'a str> {
-    let first = last_path_component(words.first()?);
+    let first = program_name(words.first()?);
     if is_interpreter(first) {
-        words.get(1).map(|w| last_path_component(w))
+        words.get(1).map(|w| program_name(w))
     } else {
         Some(first)
+    }
+}
+
+/// A program word's name: its last path component. On Windows `\` separates too, and `.exe` is dropped
+/// (`C:\x\claude.exe` is `claude`).
+fn program_name(w: &str) -> &str {
+    let name = last_path_component(w);
+    if !cfg!(windows) {
+        return name;
+    }
+    let t = name.trim_end_matches('\\');
+    let name = t.rsplit('\\').next().unwrap_or(t);
+    match name.len().checked_sub(4) {
+        Some(i) if name.is_char_boundary(i) && name[i..].eq_ignore_ascii_case(".exe") => &name[..i],
+        _ => name,
     }
 }
 
