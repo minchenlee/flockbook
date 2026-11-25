@@ -121,7 +121,9 @@ fn the_line_is_a_res_line() {
     assert!(v.get("exists").is_none(), "no exists for a URL");
 }
 
+// Unix only: a doc is a path from "/" or "~/" (detect), and a temp folder on Windows is "C:\…".
 #[test]
+#[cfg(unix)]
 fn titles_from_the_files() {
     let dir = tempfile::tempdir().unwrap();
     // The folder's real path: a doc is named by it (/var is /private/var on macOS).
@@ -885,7 +887,9 @@ fn real(p: &Path) -> std::path::PathBuf {
     p.canonicalize().unwrap()
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn a_relative_doc_opens_from_the_agents_folder() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -909,7 +913,9 @@ fn a_relative_doc_opens_from_the_agents_folder() {
     assert_eq!((docs.len(), docs[0].exists), (1, Some(true)), "{docs:?}");
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn a_relative_doc_not_under_the_folder_is_found_by_a_folder_the_agent_went_to() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -930,7 +936,9 @@ fn a_relative_doc_not_under_the_folder_is_found_by_a_folder_the_agent_went_to() 
     assert_eq!((docs[0].target.as_str(), docs[0].exists), (d.join("status/reports/map.md").to_str().unwrap(), Some(true)));
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn a_relative_doc_matches_a_path_the_log_wrote_and_joins_its_item() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -951,7 +959,9 @@ fn a_relative_doc_matches_a_path_the_log_wrote_and_joins_its_item() {
     assert_eq!(docs[0].first_ts, Some(ms(1)));
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn a_relative_doc_with_two_matches_or_none_is_not_listed() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -975,7 +985,9 @@ fn a_relative_doc_with_two_matches_or_none_is_not_listed() {
     assert!(docs.is_empty(), "two matches (not picked) and none (it does not open, maybe an example): not listed: {docs:?}");
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn what_is_not_a_relative_doc() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("s.jsonl");
@@ -1004,7 +1016,9 @@ fn relative_mix(d: &Path) -> Vec<String> {
     ]
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn relative_docs_cut_at_every_line_the_same_as_the_whole_log() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -1019,7 +1033,9 @@ fn relative_docs_cut_at_every_line_the_same_as_the_whole_log() {
     every_cut(&lines, "relative");
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn a_relative_doc_that_resolves_later_is_all_again() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -1089,7 +1105,9 @@ fn real_log_relative_docs() {
 
 // ---- relative-doc Codex R1 ----
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn two_files_under_the_working_folders_are_not_listed_whatever_else_the_log_says() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -1109,7 +1127,9 @@ fn two_files_under_the_working_folders_are_not_listed_whatever_else_the_log_says
     assert!(docs_of(&log, None).is_empty(), "two under the folders: not listed, the Read does not pick one: {:?}", docs_of(&log, None));
 }
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn only_paths_of_tool_calls_that_worked_are_candidates() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
@@ -1181,7 +1201,9 @@ fn one_file_written_two_ways_is_one_item() {
 
 // ---- relative-doc Codex R2 ----
 
+// Unix only: a relative doc opens only from a working folder that starts with "/" (a Windows temp folder is "C:\…").
 #[test]
+#[cfg(unix)]
 fn only_a_real_cd_is_a_folder_the_agent_went_to() {
     let dir = tempfile::tempdir().unwrap();
     let d = real(dir.path());
