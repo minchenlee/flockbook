@@ -132,8 +132,12 @@ mod windows {
     use windows_sys::Win32::Storage::FileSystem::{
         GetFileType, ReadFile, WriteFile, FILE_FLAG_OVERLAPPED, FILE_TYPE_PIPE, SECURITY_IDENTIFICATION,
     };
-    use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
-    use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::Security::{EqualSid, GetTokenInformation, IsValidSid, TokenUser, PSID, TOKEN_QUERY, TOKEN_USER};
+    use windows_sys::Win32::System::Pipes::{GetNamedPipeServerProcessId, WaitNamedPipeW};
+    use windows_sys::Win32::System::Threading::{
+        CreateEventW, GetCurrentProcess, OpenProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
     /// How long a connect waits at most while every instance of the pipe is busy.
@@ -185,6 +189,76 @@ mod windows {
                 }
                 Err(e) => return Err(e),
             }
+        }
+    }
+
+    /// A process's user: its token's `TOKEN_USER`, in a pointer-aligned buffer (as hc 0.1.22 reads its own,
+    /// crates/herdr-core/src/platform/windows.rs:205-211).
+    struct ProcessUser(Vec<usize>);
+
+    impl ProcessUser {
+        /// The user of `process`, a handle open for `PROCESS_QUERY_LIMITED_INFORMATION` (or the current-process
+        /// pseudo handle).
+        fn of(process: HANDLE) -> io::Result<ProcessUser> {
+            let mut token: HANDLE = std::ptr::null_mut();
+            // SAFETY: `token` receives a new handle on success; it is owned below.
+            if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: the token handle just opened, owned by nothing else.
+            let token = unsafe { OwnedHandle::from_raw_handle(token) };
+            let t = token.as_raw_handle() as HANDLE;
+            let mut n = 0u32;
+            // SAFETY: a size query (no buffer); it fails with the size needed in `n`.
+            unsafe { GetTokenInformation(t, TokenUser, std::ptr::null_mut(), 0, &mut n) };
+            if n == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let mut buf = vec![0usize; (n as usize).div_ceil(std::mem::size_of::<usize>())];
+            // SAFETY: `buf` holds at least `n` bytes, aligned for TOKEN_USER.
+            if unsafe { GetTokenInformation(t, TokenUser, buf.as_mut_ptr().cast(), n, &mut n) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(ProcessUser(buf))
+        }
+
+        /// The user's SID; it points into this value.
+        fn sid(&self) -> PSID {
+            // SAFETY: GetTokenInformation(TokenUser) filled the buffer with a TOKEN_USER first.
+            unsafe { (*self.0.as_ptr().cast::<TOKEN_USER>()).User.Sid }
+        }
+    }
+
+    /// True when `a` and `b` are valid SIDs of the same account.
+    fn same_user(a: PSID, b: PSID) -> bool {
+        // SAFETY: each pointer is checked by IsValidSid before EqualSid reads it.
+        unsafe { IsValidSid(a) != 0 && IsValidSid(b) != 0 && EqualSid(a, b) != 0 }
+    }
+
+    /// Ok when the process that serves `pipe` runs as this process's user. Anyone may create a pipe of hc's name
+    /// before hc does (hc's DACL guards only the pipes hc made), so a connect checks who serves it before it writes
+    /// anything. Err: why not, or why it could not tell.
+    fn check_server(pipe: HANDLE) -> Result<(), String> {
+        let mut pid = 0u32;
+        // SAFETY: `pipe` is a client end of a named pipe this caller owns.
+        if unsafe { GetNamedPipeServerProcessId(pipe, &mut pid) } == 0 {
+            return Err(format!("cannot tell which process serves it: {}", io::Error::last_os_error()));
+        }
+        // SAFETY: plain call; a null return is checked.
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process.is_null() {
+            return Err(format!("cannot open the process {pid} that serves it: {}", io::Error::last_os_error()));
+        }
+        // SAFETY: the process handle just opened, owned by nothing else.
+        let process = unsafe { OwnedHandle::from_raw_handle(process) };
+        let theirs = ProcessUser::of(process.as_raw_handle() as HANDLE)
+            .map_err(|e| format!("cannot read the user of the process {pid} that serves it: {e}"))?;
+        // SAFETY: GetCurrentProcess returns a pseudo handle that needs no closing.
+        let ours = ProcessUser::of(unsafe { GetCurrentProcess() }).map_err(|e| format!("cannot read this process's user: {e}"))?;
+        if same_user(theirs.sid(), ours.sid()) {
+            Ok(())
+        } else {
+            Err(format!("the process {pid} that serves it runs as another Windows user"))
         }
     }
 
@@ -272,6 +346,10 @@ mod windows {
             if unsafe { GetFileType(pipe.as_raw_handle() as HANDLE) } != FILE_TYPE_PIPE {
                 return Err(fail(io::Error::new(io::ErrorKind::InvalidInput, "not a named pipe")));
             }
+            // Before the first byte goes out: a pipe of another user's process is not this user's herdr-core.
+            if let Err(why) = check_server(pipe.as_raw_handle() as HANDLE) {
+                return Err(HerdrError::Socket(format!("refused {}: {why}; only this user's herdr-core is trusted", self.path)));
+            }
             // SAFETY: no security attributes and no name; a null return is checked.
             let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
             if event.is_null() {
@@ -280,6 +358,43 @@ mod windows {
             // SAFETY: a valid event handle that nothing else owns.
             let event = unsafe { OwnedHandle::from_raw_handle(event) };
             Ok(Box::new(PipeTransport { pipe: Some(pipe), event, timeout }))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use windows_sys::Win32::Security::{CreateWellKnownSid, WinWorldSid, SECURITY_MAX_SID_SIZE};
+
+        /// The "Everyone" SID, which no process runs as.
+        fn everyone() -> Vec<u32> {
+            let mut buf = vec![0u32; (SECURITY_MAX_SID_SIZE as usize).div_ceil(4)];
+            let mut n = SECURITY_MAX_SID_SIZE;
+            // SAFETY: `buf` holds `n` bytes.
+            let ok = unsafe { CreateWellKnownSid(WinWorldSid, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut n) };
+            assert!(ok != 0, "CreateWellKnownSid: {}", io::Error::last_os_error());
+            buf
+        }
+
+        #[test]
+        fn same_user_compares_sids() {
+            let (mut a, mut b) = (everyone(), everyone());
+            let me = ProcessUser::of(unsafe { GetCurrentProcess() }).unwrap();
+            let me_again = ProcessUser::of(unsafe { GetCurrentProcess() }).unwrap();
+            assert!(same_user(a.as_mut_ptr().cast(), b.as_mut_ptr().cast()));
+            assert!(same_user(me.sid(), me_again.sid()));
+            assert!(!same_user(me.sid(), a.as_mut_ptr().cast()), "another account's SID");
+            let mut zero = vec![0u32; 17];
+            assert!(!same_user(me.sid(), zero.as_mut_ptr().cast()), "not a SID");
+        }
+
+        #[test]
+        fn a_pipe_this_user_serves_passes_the_server_check() {
+            let core = crate::hc::client::fake_core::start(|_, _| Some(serde_json::json!({})));
+            let pipe = open(&core.path, Some(Duration::from_secs(2))).unwrap();
+            assert_eq!(check_server(pipe.as_raw_handle() as HANDLE), Ok(()));
+            drop(pipe);
+            assert!(PipeConnector { path: core.path.clone() }.connect(Some(Duration::from_secs(2))).is_ok());
         }
     }
 }
