@@ -9,6 +9,7 @@ pub mod feed;
 pub mod glance;
 pub mod install;
 pub mod locate;
+pub mod mdsplit;
 pub mod models;
 pub mod paste;
 pub mod protocol;

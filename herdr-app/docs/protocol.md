@@ -232,7 +232,7 @@ into PNG). Pastes older than a day in that folder are removed; other files never
 ### `log` (`feed`)
 
 ```json
-{"agent":"claude","cursor":"2.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
+{"agent":"claude","cursor":"3.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
 ```
 
 | Field | Meaning |
@@ -331,13 +331,20 @@ only plain text is searched. Not found: user rows, tool output, code blocks, oth
 (`![a](src)`), HTML (and the rest of a paragraph after an inline tag), reference links and definitions (`[a][1]`, `[1]: https://…`), a target that runs into an escape or
 an entity (`\_`, `&amp;`), relative paths, paths with spaces. A target cut by the
 `…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
-The mod draws the web kinds as Markdown links in prose (not in code boxes or tables, nor on a line indented 4 or
-more in its block: drawn alone, that block may show it as code; TextView opens them); `doc` stays
-text for now. A mod that does not know `links` ignores it. After the helper is updated, a chat read before keeps its
-rows for its `--cursor` (`unchanged`): their links show once the log changes and the rows come again in a `splice`.
+`block` (left out when not set): the UTF-16 start of the chat block (the mod's `splitBlocks`: the text between code
+fences and tables) where the mod writes the link as a Markdown link. The helper sets it only when both the whole reply
+and that block read alone (as the mod draws it, with TextView) read the range as plain text: not code, a link's address,
+an autolink, a picture (`!` before it) or HTML. So a link in a code box, a table, a code span, or on a line that drawn
+alone is indented code has no `block`. The mod only writes: it writes the web kinds whose `block` is the block it draws
+(TextView opens them); `doc` stays text for now. A link without `block` (an older helper, a row read before) stays
+text. Both sides check the same cases: `Tests/Fixtures/resources/md-links.json` (`xplat/flockbook-modfeed/tests/md_links.rs`,
+`herdr-app/test/links.test.mjs`).
+
+A mod that does not know `links` ignores it. The helper that adds `block` gives `3.` cursors: an older `--cursor`
+gets every row again in a `splice` at 0, so a chat read before gets its links with `block`.
 
 ```json
-{"id":"a2","k":"assistant","links":[{"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
+{"id":"a2","k":"assistant","links":[{"block":0,"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
 ```
 
 `chips[]`: `symbol` (an SF Symbols name such as `terminal` or `doc.text`; the mod maps it to its own icon), `text` (the chip label), `calls[]`. Each call: `name` (the
