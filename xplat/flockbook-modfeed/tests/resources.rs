@@ -180,7 +180,7 @@ fn since_a_cursor_only_what_is_newer() {
     let first = resources::answer(&log, None, None).unwrap();
     assert!(first.full);
     assert_eq!(first.items.len(), 2);
-    assert!(first.cursor.starts_with("r3."), "{}", first.cursor);
+    assert!(first.cursor.starts_with("r4."), "{}", first.cursor);
 
     let same = resources::answer(&log, Some(&first.cursor), None).unwrap();
     assert_eq!((same.full, same.items.len()), (false, 0), "nothing new");
@@ -206,7 +206,7 @@ fn since_a_cursor_only_what_is_newer() {
     // An "r1." or "r2." cursor of this very log (old Codex ids; a log cut at 64 MB): all of it again, not "nothing new".
     let now = resources::answer(&log, None, None).unwrap().cursor;
     let p: Vec<&str> = now.split('.').collect();
-    for v in ["r1", "r2"] {
+    for v in ["r1", "r2", "r3"] {
         let c = format!("{v}.{}.{}.{}", p[1], p[2], p[3]);
         let old = resources::answer(&log, Some(&c), None).unwrap();
         assert!(old.full && !old.items.is_empty(), "an {v} cursor gets everything again");
@@ -864,4 +864,216 @@ fn a_later_result_for_a_call_before_the_kept_start_reads_all_again() {
     let (c, k3, _) = resources::answer_kept(&log, None, home, Some(&k2), true).unwrap();
     assert_eq!(values(&c.items), whole_log(&log));
     assert!(k3.unwrap().at > late_at, "the start moved past the late result");
+}
+
+
+// ---- Relative doc paths (hg-res-relative-doc) ----
+
+/// A Claude line with the agent's working folder (`cwd`, as Claude Code writes it on each line).
+fn in_cwd(l: String, cwd: &Path) -> String {
+    let mut v: Value = serde_json::from_str(&l).unwrap();
+    v["cwd"] = json!(cwd);
+    v.to_string()
+}
+
+fn docs_of(log: &Path, cwd: Option<&Path>) -> Vec<resources::Resource> {
+    resources::answer_in(log, None, Some(Path::new(HOME)), cwd, None, true).unwrap().0.items.into_iter().filter(|r| r.kind == "doc").collect()
+}
+
+fn real(p: &Path) -> std::path::PathBuf {
+    p.canonicalize().unwrap()
+}
+
+#[test]
+fn a_relative_doc_opens_from_the_agents_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("proj/docs")).unwrap();
+    std::fs::write(d.join("proj/docs/a.md"), "# Plan A").unwrap();
+    let log = d.join("s.jsonl");
+    let cwd = d.join("proj");
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(say("a1", 1, "Saved in `docs/a.md`."), &cwd),
+        in_cwd(say("a2", 2, "Also ./docs/a.md and [the plan](docs/a.md)."), &cwd),
+    ], false);
+    let docs = docs_of(&log, None);
+    assert_eq!(docs.len(), 1, "{docs:?}");
+    let a = &docs[0];
+    assert_eq!(a.target, d.join("proj/docs/a.md").to_string_lossy());
+    assert_eq!((a.mentions, a.exists, a.title.as_str()), (3, Some(true), "Plan A"));
+    // The pane's folder when the log names none.
+    write(&log, &[user("u0", 0, "go"), say("a1", 1, "Saved in `docs/a.md`.")], false);
+    let docs = docs_of(&log, Some(&cwd));
+    assert_eq!((docs.len(), docs[0].exists), (1, Some(true)), "{docs:?}");
+}
+
+#[test]
+fn a_relative_doc_not_under_the_folder_is_found_by_a_folder_the_agent_went_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("status/reports")).unwrap();
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    std::fs::write(d.join("status/reports/map.md"), "# Map").unwrap();
+    let log = d.join("s.jsonl");
+    let cwd = d.join("repos");
+    let st = d.join("status").to_string_lossy().to_string();
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(tool("a1", 1, "c1", "Bash", json!({"command": format!("cd {st} && ls reports")})), &cwd),
+        in_cwd(result("r1", 2, "c1", "map.md", false), &cwd),
+        in_cwd(say("a2", 3, "The map is in `reports/map.md`."), &cwd),
+    ], false);
+    let docs = docs_of(&log, None);
+    assert_eq!(docs.len(), 1, "{docs:?}");
+    assert_eq!((docs[0].target.as_str(), docs[0].exists), (d.join("status/reports/map.md").to_str().unwrap(), Some(true)));
+}
+
+#[test]
+fn a_relative_doc_matches_a_path_the_log_wrote_and_joins_its_item() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    let log = d.join("s.jsonl");
+    let cwd = d.join("repos");
+    let file = d.join("notes/reports/y.md");
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(say("a0", 1, "I will write reports/y.md now."), &cwd),
+        in_cwd(tool("a1", 2, "c1", "Write", json!({"file_path": file, "content": "# Y"})), &cwd),
+        in_cwd(result("r1", 3, "c1", "ok", false), &cwd),
+        in_cwd(say("a2", 4, &format!("Done: {}", file.display())), &cwd),
+    ], false);
+    let docs = docs_of(&log, None);
+    assert_eq!(docs.len(), 1, "the relative mention and the absolute one are one item: {docs:?}");
+    assert_eq!((docs[0].target.as_str(), docs[0].mentions, docs[0].exists), (file.to_str().unwrap(), 2, Some(false)));
+    assert_eq!(docs[0].first_ts, Some(ms(1)));
+}
+
+#[test]
+fn a_relative_doc_with_two_matches_or_none_is_not_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    for f in ["one/reports/z.md", "two/reports/z.md"] {
+        std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap();
+        std::fs::write(d.join(f), "# Z").unwrap();
+    }
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    let log = d.join("s.jsonl");
+    let cwd = d.join("repos");
+    let cd = |n: &str| json!({"command": format!("cd {} && ls", d.join(n).display())});
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(tool("a1", 1, "c1", "Bash", cd("one")), &cwd),
+        in_cwd(result("r1", 2, "c1", "", false), &cwd),
+        in_cwd(tool("a2", 3, "c2", "Bash", cd("two")), &cwd),
+        in_cwd(result("r2", 4, "c2", "", false), &cwd),
+        in_cwd(say("a3", 5, "See reports/z.md and docs/gone.md."), &cwd),
+    ], false);
+    let docs = docs_of(&log, None);
+    assert!(docs.is_empty(), "two matches (not picked) and none (it does not open, maybe an example): not listed: {docs:?}");
+}
+
+#[test]
+fn what_is_not_a_relative_doc() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    for t in ["github.com/o/r/blob/main/a.md", "x.com/a.png", "README.md", "see a.md", "docs/a.mdx", "docs/a.md/b", "https://x.com/docs/a.md", "`coord/*.bak.md`", "`contracts/<id>.md`", "`a/{b}.md`", "```\ndocs/a.md\n```"] {
+        write(&log, &[say("a1", 1, t)], false);
+        assert!(docs_of(&log, Some(dir.path())).is_empty(), "{t}: {:?}", docs_of(&log, Some(dir.path())));
+    }
+    // The feed's links are as before: a relative path is not a link in a row.
+    assert!(resources::detect("docs/a.md and `reports/b.md`").is_empty());
+}
+
+fn relative_mix(d: &Path) -> Vec<String> {
+    let cwd = d.join("repos");
+    let st = d.join("status").to_string_lossy().to_string();
+    vec![
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(say("a1", 1, "First `reports/late.md` and docs/a.md."), &cwd),
+        in_cwd(user("u1", 2, "and?"), &cwd),
+        in_cwd(tool("a2", 3, "c1", "Bash", json!({"command": format!("cd {st}")})), &cwd),
+        in_cwd(result("r2", 4, "c1", "", false), &cwd),
+        in_cwd(say("a3", 5, "Then reports/map.md."), &cwd),
+        in_cwd(user("u2", 6, "ok"), &cwd),
+        in_cwd(tool("a4", 7, "c2", "Write", json!({"file_path": format!("{st}/w/reports/late.md"), "content": "x"})), &cwd),
+        in_cwd(result("r4", 8, "c2", "ok", false), &cwd),
+        in_cwd(say("a5", 9, "Wrote it; also https://x.example.com"), &cwd),
+    ]
+}
+
+#[test]
+fn relative_docs_cut_at_every_line_the_same_as_the_whole_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("status/reports")).unwrap();
+    std::fs::create_dir_all(d.join("repos/docs")).unwrap();
+    std::fs::write(d.join("status/reports/map.md"), "# Map").unwrap();
+    std::fs::write(d.join("repos/docs/a.md"), "# A").unwrap();
+    let lines = relative_mix(&d);
+    let all = { let l = d.join("all.jsonl"); write(&l, &lines, false); whole_log(&l) };
+    let t: Vec<&str> = all.iter().filter(|r| r["kind"] == "doc").map(|r| r["target"].as_str().unwrap()).collect();
+    assert!(t.contains(&d.join("status/w/reports/late.md").to_str().unwrap()), "the Write after the mention resolves it: {t:?}");
+    every_cut(&lines, "relative");
+}
+
+#[test]
+fn a_relative_doc_that_resolves_later_is_all_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    std::fs::create_dir_all(d.join("status")).unwrap();
+    let cwd = d.join("repos");
+    let log = d.join("s.jsonl");
+    let home = Some(Path::new(HOME));
+    let st = d.join("status").to_string_lossy().to_string();
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(tool("a1", 1, "c1", "Bash", json!({"command": format!("cd {st}")})), &cwd),
+        in_cwd(result("r1", 2, "c1", "", false), &cwd),
+        in_cwd(say("a2", 3, "Will be reports/new.md."), &cwd),
+        in_cwd(user("u1", 4, "ok"), &cwd),
+    ], false);
+    let (a, k, _) = resources::answer_in(&log, None, home, None, None, true).unwrap();
+    assert!(!a.items.iter().any(|r| r.kind == "doc"), "not found yet: not listed: {:?}", a.items);
+    // The file is made where the agent went, the log grows: the mention is now that file. Its time is older than the
+    // cursor's newest: only a full answer brings it.
+    std::fs::create_dir_all(d.join("status/reports")).unwrap();
+    std::fs::write(d.join("status/reports/new.md"), "# New").unwrap();
+    write(&log, &[in_cwd(say("a3", 5, "More https://y.example.com"), &cwd)], true);
+    let (b, _, _) = resources::answer_in(&log, Some(&a.cursor), home, None, k.as_ref(), true).unwrap();
+    assert_eq!(values(&b.items), whole_log(&log));
+    assert_eq!(b.items.iter().find(|r| r.kind == "doc").map(|r| r.target.clone()), Some(d.join("status/reports/new.md").to_string_lossy().into()));
+    assert!(b.full, "a relative path found now: all of it");
+}
+
+/// A real log (`RES_REAL_LOG`, cwd `RES_REAL_CWD`): the docs that only relative paths give, to read by eye (--ignored --nocapture).
+#[test]
+#[ignore]
+fn real_log_relative_docs() {
+    let Some(src) = std::env::var_os("RES_REAL_LOG") else { return };
+    let cwd = std::env::var_os("RES_REAL_CWD").map(std::path::PathBuf::from);
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let log = Path::new(&src);
+    let t = std::time::Instant::now();
+    let all = resources::answer_in(log, None, home.as_deref(), cwd.as_deref(), None, true).unwrap().0.items;
+    println!("read in {:?}", t.elapsed());
+    let mut abs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for l in std::fs::read_to_string(log).unwrap_or_default().lines() {
+        let Ok(v) = serde_json::from_str::<Value>(l) else { continue };
+        if v["type"] != "assistant" { continue }
+        for b in v["message"]["content"].as_array().into_iter().flatten() {
+            if let Some(s) = b["text"].as_str() {
+                for f in resources::detect(s) { if f.kind == "doc" { *abs.entry(f.target.replace("~/", &format!("{}/", home.as_ref().unwrap().display()))).or_default() += 1; } }
+            }
+        }
+    }
+    let new: Vec<_> = all.iter().filter(|r| r.kind == "doc" && !abs.contains_key(&r.target)).collect();
+    let there = new.iter().filter(|r| r.exists == Some(true)).count();
+    let joined = all.iter().filter(|r| r.kind == "doc" && abs.get(&r.target).is_some_and(|&n| r.mentions > n)).count();
+    println!("docs {} (absolute only {}), new rows from relative paths {} ({} there), absolute rows that relative mentions joined {}", all.iter().filter(|r| r.kind == "doc").count(), abs.len(), new.len(), there, joined);
+    for r in new.iter().take(60) {
+        println!("  {:?} {} x{}", r.exists, r.target, r.mentions);
+    }
 }

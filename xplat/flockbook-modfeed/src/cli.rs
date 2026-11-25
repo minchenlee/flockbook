@@ -310,7 +310,9 @@ pub fn run(argv: &[String]) -> String {
                     let kept_at = cache_url.and_then(|c| crate::resources::state_dir(c)).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&found.pane.terminal_id))));
                     let kept: Option<crate::resources::Kept> = kept_at.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok());
                     let linear = matches!(kind.as_str(), "claude" | "codex" | "cursor" | "grok");
-                    return match crate::resources::answer_kept(path, opt("--since").as_deref(), user_home.as_deref(), kept.as_ref(), linear) {
+                    // The pane's folder: where a relative doc path in a reply opens (when the log names none that has it).
+                    let cwd = Some(found.pane.cwd.as_str()).filter(|c| !c.is_empty()).map(PathBuf::from);
+                    return match crate::resources::answer_in(path, opt("--since").as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), linear) {
                         Ok((a, next, _)) => {
                             if let Some(at) = kept_at.as_deref().filter(|_| next.as_ref().map(|k| (k.size, k.at)) != kept.as_ref().map(|k| (k.size, k.at))) {
                                 match &next {

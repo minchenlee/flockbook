@@ -538,7 +538,13 @@ one reply, the later target first). Read only.
   `target`: the command as written (its lines kept), trimmed.
 - `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`, `cmd`. A mod ignores kinds it does not know.
 - `id`: FNV-1a (hex) of the normalized target; the same target is one item. A doc: its absolute path (`~/` is the
-  home of the machine the agent runs on). `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
+  home of the machine the agent runs on).
+- Docs also come from relative paths in a reply (`docs/a.md`, `./a.md`, in text, a code span or a link; not a bare
+  file name, an address without its scheme, a pattern or a placeholder). Where it opens: the one file under the
+  folders the log names (`cwd`) or the pane's folder; else the one under a folder a command went to (`cd /…`) or the
+  one doc path a tool call named that ends in it. None, or more than one: not listed (once its file is there, a
+  later read lists it). Found, it is the item of that file: one `id` with the absolute mentions of it. Feed `row`
+  `links` do not carry relative paths. `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
   GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`. A
   command: the command trimmed (key `cmd:<command>`).
 - `title`: a doc's first `# ` heading (Markdown) or `<title>` (HTML) in its first 4 KB, else its file name; an
@@ -559,12 +565,13 @@ one reply, the later target first). Read only.
 - `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,
   unchanged, gives no `res`; the same log, grown, gives only the resources mentioned after the cursor's newest one
   (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).
-  The cursor holds a mark of the log file (device, inode, birth time) and of its bytes: another file at the same path
-  (a log written again, of the same size or bigger) is another log. A kept state of other rules also gives them all. An older cursor (`r1.`, `r2.`) gives them all once. A result that comes for a tool call
+  The cursor (`r4.…`) holds a mark of the log file (device, inode, birth time) and of its bytes: another file at the same path
+  (a log written again, of the same size or bigger) is another log. A kept state of other rules also gives them all, and so does a relative doc path that now
+  opens another file (or opens one now): its item has another `id`. An older cursor (`r1.`, `r2.`, `r3.`) gives them all once. A result that comes for a tool call
   before the kept start also gives them all.
 
 ```json
-{"type":"end","ok":true,"ms":4,"cursor":"r3.af63…ce1.48213.1793670020000.9c1e…07","full":false}
+{"type":"end","ok":true,"ms":4,"cursor":"r4.af63…ce1.48213.1793670020000.9c1e…07.5d2a…e4","full":false}
 ```
 
 ### `openable` (`open-check`)
