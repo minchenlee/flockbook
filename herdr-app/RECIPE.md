@@ -226,14 +226,14 @@ artifacts and links the agent mentions in its replies show up here."
   open settings dialog), `flockbook.sidebar`, `flockbook.sidebar.peek`,
   `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
   `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
-  last update line, and when the mod asked). Resources: `flockbook.res.data` ({terminal, cursor, items, at}: the
-  last `resources` answer, for the shown agent), `flockbook.res.on` (the helper has the command), `flockbook.res.open`
-  and `flockbook.res.alive` (the open window and when it last drew: an id left from before a restart is not open),
+  last update line, and when the mod asked). Resources: `flockbook.res.data` ({terminal, cursor, items, at, error}: the
+  last `resources` answer, for the shown agent; `error` "old"/"missing": the helper on its machine cannot list them), `flockbook.res.on` (the helper has the command), `flockbook.res.open`
+  and `flockbook.res.run` (the open window and the app run it was opened in: an id left from before a restart is not open),
   `flockbook.res.scope` ("agent"), `flockbook.res.seen.<t>` (the newest `last_ts` seen in the window; the first
   look at an agent sets it to its newest, so an old conversation has no badge), `flockbook.res.removed.<t>`
   ([{id, last_ts}] taken off the list; one mentioned again later, with a newer `last_ts`, comes back; a bare id
   stays removed), `flockbook.res.jump` ({terminal, row, at}: the chat scrolls to that row once),
-  `flockbook.res.polled`, `flockbook.window.width`, `flockbook.sidebar.width`.
+  `flockbook.window.width`, `flockbook.sidebar.width`.
 - **herdr functions**: `spaces`, `agents`, `panes`, `focused`, `theme`, `layout`, `window`,
   `settings`, `props`, `run`, `nextCommand`, `setAgentOrder`, `openOverlay`, `closeOverlay`,
   `exec`, `appHome`, `home`, `readTextFile`, `writeTextFile` (config.json only).
