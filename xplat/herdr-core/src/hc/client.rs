@@ -6,7 +6,6 @@ use crate::error::HerdrError;
 use crate::model::*;
 use crate::screen::{DeliveryOutcome, PaneScreen};
 use crate::transport::{Connector, LineSocket};
-#[cfg(not(any(unix, windows)))]
 use crate::transport::Transport;
 use serde_json::{json, Value};
 use std::cell::Cell;
@@ -67,19 +66,26 @@ fn connector_for(session: &HcSession) -> Box<dyn Connector> {
 /// No endpoint kind is known on other systems: every call fails closed with a socket error.
 #[cfg(not(any(unix, windows)))]
 fn connector_for(_session: &HcSession) -> Box<dyn Connector> {
-    struct NoEndpoint(String);
-    impl Connector for NoEndpoint {
-        fn connect(&self, _timeout: Option<Duration>) -> Result<Box<dyn Transport>, HerdrError> {
-            Err(HerdrError::Socket(format!("connect {} failed: herdr-core sockets are not supported on this OS yet", self.0)))
-        }
+    Box::new(NoEndpoint("connect herdr-core failed: herdr-core sockets are not supported on this OS yet".into()))
+}
+
+/// Every connect fails with this message, as a socket error.
+struct NoEndpoint(String);
+
+impl Connector for NoEndpoint {
+    fn connect(&self, _timeout: Option<Duration>) -> Result<Box<dyn Transport>, HerdrError> {
+        Err(HerdrError::Socket(self.0.clone()))
     }
-    Box::new(NoEndpoint("herdr-core".into()))
 }
 
 impl HcClient {
     pub fn new(session: HcSession, call_timeout_s: u64, send_timeout_s: u64) -> HcClient {
         HcClient {
-            connector: connector_for(&session),
+            // A session hc refuses never reaches a socket.
+            connector: match &session.refused {
+                Some(why) => Box::new(NoEndpoint(why.clone())),
+                None => connector_for(&session),
+            },
             session,
             seq: Cell::new(0),
             call_timeout: Duration::from_secs(call_timeout_s),
@@ -263,7 +269,7 @@ mod tests {
 
 /// A fake herdr-core for checks: answers each call from `reply(method, params)`. On a Unix socket, or on Windows on a
 /// named pipe, as hc listens there.
-#[cfg(test)]
+#[cfg(all(test, any(unix, windows)))]
 pub mod fake_core {
     use serde_json::Value;
     use std::io::{BufRead, BufReader, Write};
@@ -361,7 +367,7 @@ pub mod fake_core {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(unix, windows)))]
 mod socket_tests {
     use super::*;
 
@@ -398,6 +404,17 @@ mod socket_tests {
         let c = HcClient::new(HcSession::new(r"\\.\pipe\flockbook-check-nobody-listens.sock"), 1, 1);
         assert!(!c.session.is_available());
         assert!(matches!(c.snapshot(), Err(HerdrError::Socket(_))));
+    }
+
+    /// A session hc would refuse never reaches the socket, even when something listens there.
+    #[test]
+    fn a_refused_session_never_connects() {
+        let core = fake_core::start(|_, _| Some(json!({})));
+        let session = HcSession { socket_path: core.path.clone(), refused: Some("HC_SESSION \"a/b\" can't be a folder name".into()) };
+        assert!(!session.is_available());
+        let c = HcClient::new(session, 2, 1);
+        assert_eq!(c.call("server.status", json!({}), None), Err(HerdrError::Socket("HC_SESSION \"a/b\" can't be a folder name".into())));
+        assert!(core.calls.lock().unwrap().is_empty());
     }
 
     #[test]

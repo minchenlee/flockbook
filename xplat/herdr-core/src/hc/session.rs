@@ -99,11 +99,28 @@ impl HcSession {
 }
 
 /// The named pipe hc on Windows listens on for this `USERNAME` and `HC_SESSION` (upstream docs/security.md names
-/// the Unix sockets only; hc writes the same name to the session's `core.lock`). Err: hc refuses the session name.
+/// the Unix sockets only; hc writes the same name to the session's `core.lock`). Err: hc refuses the session name,
+/// so no core can listen for it. Follows herdr-core v0.1.22, crates/herdr-core/src:
+/// - `platform/windows.rs:375-379` (`endpoints`): the prefix `herdr-core-<user>-`, where `<user>` keeps only the
+///   ASCII letters and digits of `USERNAME` (empty when unset).
+/// - `paths.rs:83-93` (`session`): the name is trimmed, blank means `default`; `.`, `..`, control characters and
+///   any of `/\:*?"<>|` are refused.
+/// - `paths.rs:34-47`, `paths.rs:78`, `platform/windows.rs:373`: the longest pipe, the holder's
+///   `<prefix><session>.holder.sock` plus `.` and 8 hex digits, may not pass 256 bytes.
 pub fn windows_pipe(user: Option<&str>, session: Option<&str>) -> Result<String, String> {
-    let user = user.unwrap_or_default();
-    let session = session.filter(|s| !s.is_empty()).unwrap_or("default");
-    Ok(format!(r"\\.\pipe\herdr-core-{user}-{session}.sock"))
+    const MAX_PIPE: usize = 256;
+    const HOLDER_ID: usize = 8;
+    let user: String = user.unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let session = session.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("default");
+    if session == "." || session == ".." || session.chars().any(|c| c.is_control() || r#"/\:*?"<>|"#.contains(c)) {
+        return Err(format!("HC_SESSION {session:?} can't be a folder name, so herdr-core does not start with it"));
+    }
+    let prefix = format!(r"\\.\pipe\herdr-core-{user}-{session}");
+    let longest = format!("{prefix}.holder.sock").len() + 1 + HOLDER_ID;
+    if longest > MAX_PIPE {
+        return Err(format!("HC_SESSION {session:?} is too long: its pipe names would pass {MAX_PIPE} bytes"));
+    }
+    Ok(format!("{prefix}.sock"))
 }
 
 /// `/run/user/<uid>` when it exists.
