@@ -573,3 +573,22 @@ test("the window open or closed: the rendered chat is the same, and the input ke
     "composer-size/composer/box/h/send/svg size=14",
   ]);
 });
+
+test("an ask that never comes back (its window closed while it waited) does not stop the next asks", async () => {
+  // The first ask hangs forever: the task that ran it is dropped, so its finally never runs.
+  fake.exec = (_cmd, args) => {
+    if (args[0] === "version") return jl(header("version"), { type: "version", commands: ["version", "feed", "resources"] }, end());
+    return new Promise(() => {});
+  };
+  R.pollResources(fakeCx(), true);
+  await new Promise((r) => setImmediate(r));
+  // Later (past the wait limit): it is asked again, and the items show.
+  const realNow = Date.now;
+  Date.now = () => realNow() + R.BUSY_MS + 1;
+  try {
+    const asked = helper(() => [[res("a", "doc", 10)], "c1", true]);
+    await R.pollResources(fakeCx());
+    assert.equal(asked.length, 1, "the stuck ask does not block for good");
+    assert.equal(R.dataFor("t1")?.items.length, 1);
+  } finally { Date.now = realNow; }
+});

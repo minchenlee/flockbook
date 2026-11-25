@@ -181,17 +181,20 @@ export function badgeFor(address) {
 
 // One `resources` for the shown agent, at most each RES_MS over every copy (`force`: now). Redraws
 // only when something changed.
-let busy = false, last = 0;
-export const forgetResources = () => { busy = false; last = 0; };
+// `busy`: when the ask now running started (0: none). The task that asks can be dropped while it waits (the
+// window that spawned it closed to fit), and then its `finally` never runs: an ask older than BUSY_MS no longer counts.
+export const BUSY_MS = 15000;
+let busy = 0, last = 0;
+export const forgetResources = () => { busy = 0; last = 0; };
 // `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title).
 export async function pollResources(cx, force = false, full = false) {
   const address = currentAgent()?.address ?? null;
-  if (!address || busy) return;
+  if (!address || (busy && Date.now() - busy < BUSY_MS)) return;
   const t = term(address);
   const was = shared(KEY_DATA);
   const same = was?.terminal === t;
   if (!force && same && Date.now() - Math.max(last, shared(KEY_POLL_AT) ?? 0) < RES_MS) return;
-  busy = true; last = Date.now(); setShared(KEY_POLL_AT, last);
+  const mine = Date.now(); busy = mine; last = mine; setShared(KEY_POLL_AT, last);
   try {
     const on = await sidecar.hasCommand("resources");
     if (shared(KEY_ON) !== on) { setShared(KEY_ON, on); cx?.notify?.(); }
@@ -203,7 +206,7 @@ export async function pollResources(cx, force = false, full = false) {
     if (!same || JSON.stringify(was.items) !== JSON.stringify(next.items) || was.cursor !== next.cursor) {
       setShared(KEY_DATA, next); cx?.notify?.();
     }
-  } finally { busy = false; }
+  } finally { if (busy === mine) busy = 0; }
 }
 
 // Where the window goes: right of the chat's reading column, or a drawer down the right side of a narrow window.
