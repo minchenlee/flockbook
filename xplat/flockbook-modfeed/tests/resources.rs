@@ -124,7 +124,8 @@ fn the_line_is_a_res_line() {
 #[test]
 fn titles_from_the_files() {
     let dir = tempfile::tempdir().unwrap();
-    let d = dir.path();
+    // The folder's real path: a doc is named by it (/var is /private/var on macOS).
+    let d = &dir.path().canonicalize().unwrap();
     std::fs::write(d.join("plan.md"), "intro\n\n# The plan\n\nbody").unwrap();
     std::fs::write(d.join("r.html"), "<html><head><title> Weekly report </title></head></html>").unwrap();
     std::fs::write(d.join("plain.md"), "no heading").unwrap();
@@ -1065,7 +1066,14 @@ fn real_log_relative_docs() {
         if v["type"] != "assistant" { continue }
         for b in v["message"]["content"].as_array().into_iter().flatten() {
             if let Some(s) = b["text"].as_str() {
-                for f in resources::detect(s) { if f.kind == "doc" { *abs.entry(f.target.replace("~/", &format!("{}/", home.as_ref().unwrap().display()))).or_default() += 1; } }
+                for f in resources::detect(s) {
+                    if f.kind == "doc" {
+                        // Named as the list names it: the folder's real path.
+                        let p = std::path::PathBuf::from(f.target.replace("~/", &format!("{}/", home.as_ref().unwrap().display())));
+                        let p = match (p.parent().and_then(|d| d.canonicalize().ok()), p.file_name()) { (Some(d), Some(n)) if !p.is_symlink() => p.canonicalize().unwrap_or(d.join(n)), (Some(d), Some(n)) => d.join(n), _ => p };
+                        *abs.entry(p.to_string_lossy().into_owned()).or_default() += 1;
+                    }
+                }
             }
         }
     }
@@ -1076,4 +1084,96 @@ fn real_log_relative_docs() {
     for r in new.iter().take(60) {
         println!("  {:?} {} x{}", r.exists, r.target, r.mentions);
     }
+}
+
+
+// ---- relative-doc Codex R1 ----
+
+#[test]
+fn two_files_under_the_working_folders_are_not_listed_whatever_else_the_log_says() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    for p in ["a/docs/plan.md", "b/docs/plan.md"] {
+        std::fs::create_dir_all(d.join(p).parent().unwrap()).unwrap();
+        std::fs::write(d.join(p), "# Plan").unwrap();
+    }
+    let log = d.join("s.jsonl");
+    let (a, b) = (d.join("a"), d.join("b"));
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &a),
+        in_cwd(tool("t1", 1, "c1", "Read", json!({"file_path": a.join("docs/plan.md")})), &a),
+        in_cwd(result("r1", 2, "c1", "# Plan", false), &a),
+        in_cwd(user("u1", 3, "now there"), &b),
+        in_cwd(say("a2", 4, "See `docs/plan.md`."), &b),
+    ], false);
+    assert!(docs_of(&log, None).is_empty(), "two under the folders: not listed, the Read does not pick one: {:?}", docs_of(&log, None));
+}
+
+#[test]
+fn only_paths_of_tool_calls_that_worked_are_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    for p in ["x/reports/f.md", "y/reports/g.md", "z/reports/h.md"] {
+        std::fs::create_dir_all(d.join(p).parent().unwrap()).unwrap();
+        std::fs::write(d.join(p), "# F").unwrap();
+    }
+    let cwd = d.join("repos");
+    let log = d.join("s.jsonl");
+    write(&log, &[
+        in_cwd(user("u0", 0, "go"), &cwd),
+        in_cwd(tool("t1", 1, "c1", "Write", json!({"file_path": d.join("x/reports/f.md"), "content": "x"})), &cwd),
+        in_cwd(result("r1", 2, "c1", "denied", true), &cwd),
+        in_cwd(tool("t2", 3, "c2", "Bash", json!({"command": format!("cat {}", d.join("z/reports/h.md").display()), "description": d.join("z/reports/h.md")})), &cwd),
+        in_cwd(result("r2", 4, "c2", "# F", false), &cwd),
+        in_cwd(tool("t3", 5, "c3", "Bash", json!({"command": format!("cd {} && ls", d.join("x").display())})), &cwd),
+        in_cwd(result("r3", 6, "c3", "no", true), &cwd),
+        in_cwd(say("a1", 7, &format!("Earlier: {}", d.join("y/reports/g.md").display())), &cwd),
+        in_cwd(user("u1", 8, "and?"), &cwd),
+        in_cwd(say("a2", 9, "See reports/f.md, reports/g.md and reports/h.md."), &cwd),
+    ], false);
+    let docs = docs_of(&log, None);
+    let t: Vec<(&str, usize)> = docs.iter().map(|r| (r.target.as_str(), r.mentions)).collect();
+    assert_eq!(t, vec![(d.join("y/reports/g.md").to_str().unwrap(), 1)], "a failed Write or cd, a command's text, another reply's path: no candidates");
+}
+
+#[test]
+#[cfg(unix)]
+fn a_relative_path_with_dot_dot_goes_through_links_as_the_file_system_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    let cwd = d.join("proj");
+    std::fs::create_dir_all(cwd.join("deep/inner")).unwrap();
+    std::fs::create_dir_all(cwd.join("deep/docs")).unwrap();
+    std::fs::create_dir_all(cwd.join("docs")).unwrap();
+    std::fs::write(cwd.join("deep/docs/plan.md"), "# Deep").unwrap();
+    std::fs::write(cwd.join("docs/plan.md"), "# Top").unwrap();
+    std::os::unix::fs::symlink(cwd.join("deep/inner"), cwd.join("alias")).unwrap();
+    let log = d.join("s.jsonl");
+    write(&log, &[in_cwd(user("u0", 0, "go"), &cwd), in_cwd(say("a1", 1, "See `alias/../docs/plan.md`."), &cwd)], false);
+    let docs = docs_of(&log, None);
+    assert_eq!(docs.len(), 1, "{docs:?}");
+    assert_eq!((docs[0].target.as_str(), docs[0].title.as_str()), (cwd.join("deep/docs/plan.md").to_str().unwrap(), "Deep"), "alias/.. is deep, not proj");
+}
+
+#[test]
+#[cfg(unix)]
+fn one_file_written_two_ways_is_one_item() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("real")).unwrap();
+    std::fs::write(d.join("real/a.md"), "# A").unwrap();
+    std::os::unix::fs::symlink(d.join("real"), d.join("link")).unwrap();
+    let log = d.join("s.jsonl");
+    let mut text = format!("{} and {}", d.join("link/a.md").display(), d.join("real/a.md").display());
+    // A volume that does not tell case apart (macOS): the other case is the same file too.
+    let upper = d.join("REAL/A.md");
+    let ci = upper.is_file();
+    if ci {
+        text.push_str(&format!(" and {}", upper.display()));
+    }
+    write(&log, &[say("a1", 1, &text)], false);
+    let docs = docs_of(&log, None);
+    assert_eq!(docs.len(), 1, "{docs:?}");
+    assert_eq!((docs[0].target.as_str(), docs[0].mentions), (d.join("real/a.md").to_str().unwrap(), if ci { 3 } else { 2 }));
 }

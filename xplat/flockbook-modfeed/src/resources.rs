@@ -5,7 +5,7 @@
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use herdr_core::{ConversationItem, ItemKind};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -619,7 +619,7 @@ impl Acc {
                     found.extend(f.into_iter().map(|(_, k, t, title)| (k, t, title)));
                 }
                 ItemKind::ToolChips(chips) => {
-                    for c in chips.iter().flat_map(|c| &c.calls) {
+                    for c in chips.iter().flat_map(|c| &c.calls).filter(|c| !c.is_error && c.output.is_some()) {
                         self.places(&c.input, home);
                     }
                     for c in chips.iter().flat_map(|c| &c.calls) {
@@ -675,27 +675,23 @@ impl Acc {
         }
     }
 
-    /// The folders and doc paths a tool call's input names (see `cwds`): every string in it, a JSON input or not.
+    /// The folders and doc paths a tool call that worked names (see `cwds`): the doc path of a file tool
+    /// (`file_path`, `path`, `notebook_path`) and the folders of a command's `cd /…` (`command`, `cmd`). Not any other
+    /// string: a command's text or a description names paths it did not open.
     fn places(&mut self, input: &str, home: Option<&Path>) {
-        fn strings<'a>(v: &'a serde_json::Value, out: &mut Vec<&'a str>) {
-            match v {
-                serde_json::Value::String(s) => out.push(s),
-                serde_json::Value::Array(a) => a.iter().for_each(|x| strings(x, out)),
-                serde_json::Value::Object(o) => o.values().for_each(|x| strings(x, out)),
-                _ => {}
-            }
-        }
-        let v: Option<serde_json::Value> = serde_json::from_str(input).ok();
-        let mut all = vec![];
-        match &v {
-            Some(v) => strings(v, &mut all),
-            None => all.push(input),
-        }
-        for s in all {
-            if let Some(("doc", t)) = whole(s.trim()) {
+        let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(input) else { return };
+        for k in ["file_path", "path", "notebook_path"] {
+            if let Some(("doc", t)) = o.get(k).and_then(|v| v.as_str()).and_then(|s| whole(s.trim())) {
                 self.files.insert(normal("doc", &t, home).2);
             }
-            for d in cd_targets(s) {
+        }
+        for k in ["command", "cmd"] {
+            let cmds: Vec<&str> = match o.get(k) {
+                Some(serde_json::Value::String(s)) => vec![s],
+                Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.as_str()).collect(),
+                _ => vec![],
+            };
+            for d in cmds.into_iter().flat_map(cd_targets) {
                 self.dirs.insert(normal("doc", &d, home).2.trim_end_matches('/').to_string());
             }
         }
@@ -706,47 +702,33 @@ impl Acc {
         self.cwds.insert(cwd.to_string());
     }
 
-    /// Where a relative doc path opens: under a working folder (`cwd`, `agent`: the pane's) when exactly one
-    /// such file is there; else under a folder a command went to, or a doc path the tool calls named that ends in it,
-    /// when exactly one is. None (not found, or more than one): not listed. It does not open, and it may be an example
-    /// (`docs/a.md`); once its file is there, the next read finds it.
-    fn resolve(&self, rel: &str, agent: Option<&str>, abs: &BTreeSet<String>) -> Option<String> {
-        let one = |c: BTreeMap<String, String>| (c.len() == 1).then(|| c.into_values().next()).flatten();
-        let real = |p: &str| std::fs::canonicalize(p).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string());
-        let mut here = BTreeMap::new();
-        for b in self.cwds.iter().map(String::as_str).chain(agent) {
-            let p = join(b, rel);
-            if Path::new(&p).is_file() {
-                here.insert(real(&p), p);
-            }
+    /// Where a relative doc path opens (its real path): under a working folder (`cwd`, `agent`: the pane's) when
+    /// exactly one such file is there (more than one: none, the other clues do not pick); with none there, under a
+    /// folder a command went to, or a doc path a file tool named that ends in it, when exactly one is. None: not listed.
+    /// It does not open, and it may be an example (`docs/a.md`); once its file is there, the next read finds it.
+    /// The path is looked up as written: the file system takes `..` after a link, as it opens it.
+    fn resolve(&self, rel: &str, agent: Option<&str>) -> Option<String> {
+        let one = |c: BTreeSet<String>| (c.len() == 1).then(|| c.into_iter().next()).flatten();
+        let found = |b: &str| -> Option<String> {
+            let p = format!("{}/{rel}", b.trim_end_matches('/'));
+            Path::new(&p).is_file().then(|| real_doc(&p))
+        };
+        let here: BTreeSet<String> = self.cwds.iter().map(String::as_str).chain(agent).filter_map(found).collect();
+        if !here.is_empty() {
+            return one(here);
         }
-        if let Some(p) = one(here) {
-            return Some(p);
+        if rel.split('/').any(|x| x == "..") {
+            return None;
         }
-        if !rel.split('/').any(|x| x == "..") {
-            let mut there = BTreeMap::new();
-            for d in &self.dirs {
-                let p = join(d, rel);
-                if Path::new(&p).is_file() {
-                    there.insert(real(&p), p);
-                }
-            }
-            let end = format!("/{rel}");
-            for f in self.files.iter().chain(abs).filter(|f| f.ends_with(&end)) {
-                there.insert(real(f), f.clone());
-            }
-            if let Some(p) = one(there) {
-                return Some(p);
-            }
-        }
-        None
+        let end = format!("/{rel}");
+        let there: BTreeSet<String> = self.dirs.iter().filter_map(|d| found(d)).chain(self.files.iter().filter(|f| f.ends_with(&end)).map(|f| real_doc(f))).collect();
+        one(there)
     }
 
     /// Each relative doc path and the key it has now (see `resolve`): when one changes, a list merged by id would
     /// keep the old item.
     fn resolved(&self, agent: Option<&str>) -> Vec<(String, String)> {
-        let abs: BTreeSet<String> = self.held.iter().filter(|h| h.key.starts_with("doc:")).map(|h| h.target.clone()).collect();
-        let mut out: Vec<(String, String)> = self.held.iter().filter_map(|h| h.key.strip_prefix("rel:")).map(|r| (r.to_string(), self.resolve(r, agent, &abs).map(|p| format!("doc:{p}")).unwrap_or_default())).collect();
+        let mut out: Vec<(String, String)> = self.held.iter().filter_map(|h| h.key.strip_prefix("rel:")).map(|r| (r.to_string(), self.resolve(r, agent).map(|p| format!("doc:{p}")).unwrap_or_default())).collect();
         out.sort();
         out
     }
@@ -772,6 +754,12 @@ impl Acc {
                 }
                 h.target = k.strip_prefix("doc:").unwrap_or(k).to_string();
                 h.key = k.clone();
+            } else if let Some(p) = h.key.strip_prefix("doc:") {
+                // One file written two ways (a linked folder, another case): one item, named by its real path.
+                let r = real_doc(p);
+                if r != p {
+                    (h.key, h.target) = (format!("doc:{r}"), r);
+                }
             }
             match at.get(&h.key) {
                 Some(&i) => {
@@ -910,19 +898,18 @@ fn rel_clean(p: &str) -> String {
     p.to_string()
 }
 
-/// `base` and `rel` joined, "." and ".." taken out.
-fn join(base: &str, rel: &str) -> String {
-    let mut parts: Vec<&str> = base.split('/').filter(|x| !x.is_empty()).collect();
-    for x in rel.split('/') {
-        match x {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            x => parts.push(x),
-        }
+/// A doc path as the file system names it: its folder's real path (links followed, the case on disk) and the file's
+/// name, or the whole real path when the file itself is no link (a link to a file keeps its own name: `exists` and
+/// `open-check` look at what it opens). The path as written when there is no such folder.
+fn real_doc(p: &str) -> String {
+    let path = Path::new(p);
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return p.to_string() };
+    let Ok(rdir) = std::fs::canonicalize(dir) else { return p.to_string() };
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    match std::fs::canonicalize(path) {
+        Ok(r) if !is_link => r.to_string_lossy().into_owned(),
+        _ => rdir.join(name).to_string_lossy().into_owned(),
     }
-    format!("/{}", parts.join("/"))
 }
 
 /// The absolute folders a shell command goes to: `cd /…` or `cd ~/…` at its start or after `&&`, `;`, `||`,
