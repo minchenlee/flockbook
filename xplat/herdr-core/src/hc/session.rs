@@ -11,6 +11,9 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HcSession {
     pub socket_path: String,
+    /// Why no herdr-core can listen for this session (hc refuses its name): never available, and every call fails
+    /// with this reason. `None` for a usable session.
+    pub refused: Option<String>,
 }
 
 /// The user's home directory: `HOME` on Unix, `USERPROFILE` on Windows. Empty when unset.
@@ -29,7 +32,12 @@ fn non_empty<'a>(env: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
 
 impl HcSession {
     pub fn new(socket_path: &str) -> HcSession {
-        HcSession { socket_path: socket_path.into() }
+        HcSession { socket_path: socket_path.into(), refused: None }
+    }
+
+    /// A session hc would refuse to start, with the reason.
+    fn refused(why: String) -> HcSession {
+        HcSession { socket_path: String::new(), refused: Some(why) }
     }
 
     /// The session from this process's environment.
@@ -52,10 +60,11 @@ impl HcSession {
         }
         let session = non_empty(env, "HC_SESSION").unwrap_or("default");
         if cfg!(windows) {
-            // hc on Windows listens on a named pipe of the user's and the session's name (hc 0.1.22; upstream
-            // docs/security.md names the Unix sockets only). hc writes the same name to the session's `core.lock`.
-            let user = non_empty(env, "USERNAME").unwrap_or_default();
-            return HcSession::new(&format!(r"\\.\pipe\herdr-core-{user}-{session}.sock"));
+            let raw = |k: &str| env.get(k).map(String::as_str);
+            return match windows_pipe(raw("USERNAME"), raw("HC_SESSION")) {
+                Ok(p) => HcSession::new(&p),
+                Err(why) => HcSession::refused(why),
+            };
         }
         if let Some(r) = non_empty(env, "XDG_RUNTIME_DIR") {
             return HcSession::new(&format!("{r}/herdr-core/{session}.sock"));
@@ -70,6 +79,9 @@ impl HcSession {
     /// True when a socket file is there (on Windows: a server has the named pipe open). Missing is normal (hc not
     /// installed or not running), not an error.
     pub fn is_available(&self) -> bool {
+        if self.refused.is_some() {
+            return false;
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::FileTypeExt;
@@ -84,6 +96,14 @@ impl HcSession {
             false
         }
     }
+}
+
+/// The named pipe hc on Windows listens on for this `USERNAME` and `HC_SESSION` (upstream docs/security.md names
+/// the Unix sockets only; hc writes the same name to the session's `core.lock`). Err: hc refuses the session name.
+pub fn windows_pipe(user: Option<&str>, session: Option<&str>) -> Result<String, String> {
+    let user = user.unwrap_or_default();
+    let session = session.filter(|s| !s.is_empty()).unwrap_or("default");
+    Ok(format!(r"\\.\pipe\herdr-core-{user}-{session}.sock"))
 }
 
 /// `/run/user/<uid>` when it exists.
@@ -135,6 +155,53 @@ mod tests {
         assert_eq!(HcSession::resolve(&env(&[user]), &["--hc-socket".into(), r"\\.\pipe\a.sock".into()], None).socket_path, r"\\.\pipe\a.sock");
         // Empty values count as unset.
         assert_eq!(HcSession::resolve(&env(&[user, ("HC_SOCKET", ""), ("HC_SESSION", "")]), &[], None).socket_path, r"\\.\pipe\herdr-core-someone-default.sock");
+    }
+
+    /// hc 0.1.22 keeps only the ASCII letters and digits of `USERNAME`.
+    #[test]
+    fn pipe_user_is_ascii_alphanumeric() {
+        let pipe = |u: &str| windows_pipe(Some(u), None).unwrap();
+        assert_eq!(pipe("dev-user"), r"\\.\pipe\herdr-core-devuser-default.sock");
+        assert_eq!(pipe("Some One"), r"\\.\pipe\herdr-core-SomeOne-default.sock");
+        assert_eq!(pipe("José.Ng_2"), r"\\.\pipe\herdr-core-JosNg2-default.sock");
+        assert_eq!(pipe("用戶"), r"\\.\pipe\herdr-core--default.sock");
+        assert_eq!(windows_pipe(None, None).unwrap(), r"\\.\pipe\herdr-core--default.sock");
+    }
+
+    /// hc 0.1.22 trims the session name; blank means `default`.
+    #[test]
+    fn pipe_session_is_trimmed() {
+        let pipe = |s: &str| windows_pipe(Some("someone"), Some(s)).unwrap();
+        assert_eq!(pipe("work "), r"\\.\pipe\herdr-core-someone-work.sock");
+        assert_eq!(pipe("  work"), r"\\.\pipe\herdr-core-someone-work.sock");
+        assert_eq!(pipe("   "), r"\\.\pipe\herdr-core-someone-default.sock");
+        assert_eq!(pipe("My Test"), r"\\.\pipe\herdr-core-someone-My Test.sock");
+        assert_eq!(pipe("工作"), r"\\.\pipe\herdr-core-someone-工作.sock");
+    }
+
+    /// The session names hc 0.1.22 refuses to start with: no pipe is probed for them.
+    #[test]
+    fn pipe_session_hc_refuses() {
+        for bad in ["a/b", r"a\b", "a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b", ".", "..", " .. ", "a\tb", "a\u{7f}b"] {
+            let e = windows_pipe(Some("someone"), Some(bad)).unwrap_err();
+            assert!(e.contains("HC_SESSION"), "{bad:?}: {e}");
+        }
+        // The holder's pipe, `<pipe minus .sock>.holder.<8 hex>.sock`, must fit in 256 bytes.
+        let fixed = r"\\.\pipe\herdr-core-someone-".len() + ".holder.sock".len() + 1 + 8;
+        let fits = "s".repeat(256 - fixed);
+        assert!(windows_pipe(Some("someone"), Some(&fits)).is_ok());
+        let e = windows_pipe(Some("someone"), Some(&format!("{fits}s"))).unwrap_err();
+        assert!(e.contains("too long"), "{e}");
+        // Bytes, not characters.
+        assert!(windows_pipe(Some("someone"), Some(&"é".repeat((256 - fixed) / 2 + 1))).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refused_session_is_never_available() {
+        let s = HcSession::resolve(&env(&[("USERNAME", "someone"), ("HC_SESSION", "a/b")]), &[], None);
+        assert!(s.refused.is_some());
+        assert!(!s.is_available());
     }
 
     #[test]
