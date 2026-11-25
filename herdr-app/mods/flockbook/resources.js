@@ -66,10 +66,13 @@ const byNewest = (a, b) => (b.last_ts ?? -Infinity) - (a.last_ts ?? -Infinity);
 // The next data from an answer: all of it when `full` (or another agent), else the new lines merged in by id.
 // An answer with an error keeps what was there.
 // The helper on the agent's machine cannot list them: an older one (no `resources` there) or none. Shown as a hint
-// in place of "No resources yet". Another error keeps what was there.
+// in place of "No resources yet". Another error keeps what was there. A helper there from before `resources` has
+// the same protocol and version, so the helper here forwards its answer as it is: `usage` (an unknown command). Here
+// `usage` is not that: the version line said this helper has the command.
 const HELPER_HINT = { remote_helper_outdated: "old", remote_helper_missing: "missing" };
 export function applyAnswer(prev, terminal, answer, at = Date.now()) {
-  const hint = HELPER_HINT[answer?.error?.code];
+  const code = answer?.error?.code;
+  const hint = HELPER_HINT[code] ?? (code === "usage" && machineOf(terminal) ? "old" : undefined);
   if (hint) return prev?.terminal === terminal && prev.error === hint ? prev : { terminal, cursor: null, items: [], at, error: hint };
   if (answer?.error || !answer?.end) return prev ?? null;
   const lines = (answer.lines ?? []).filter((l) => l.type === "res" && l.id);
@@ -190,6 +193,7 @@ export function badgeFor(address) {
 // only when something changed.
 // `busy`: when the ask now running started (0: none). The task that asks can be dropped while it waits (the
 // window that spawned it closed to fit), and then its `finally` never runs: an ask older than BUSY_MS no longer counts.
+// An ask that comes back after a newer one started drops its answer: it would write older data over the newer.
 export const BUSY_MS = 15000;
 let busy = 0, last = 0;
 export const forgetResources = () => { busy = 0; last = 0; };
@@ -204,9 +208,11 @@ export async function pollResources(cx, force = false, full = false) {
   const mine = Date.now(); busy = mine; last = mine;
   try {
     const on = await sidecar.hasCommand("resources");
+    if (busy !== mine) return;
     if (shared(KEY_ON) !== on) { setShared(KEY_ON, on); cx?.notify?.(); }
     if (!on) return;
     const r = await sidecar.resources(address, same && !full ? was.cursor : null);
+    if (busy !== mine) return;
     const next = applyAnswer(same && !full ? was : null, t, r);
     if (!next) return;
     if (!next.error && (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null)) setShared(seenKey(t), newest(next.items));

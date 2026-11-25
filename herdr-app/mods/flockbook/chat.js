@@ -32,6 +32,7 @@ const CHECK_MS = 400;
 // Older rows load by themselves while all rows fit on screen (with FILL_PX to spare), at most AUTO_OLDER
 // times a chat is opened: a log whose last 2 MB is only tool output can hold no rows for a long way back.
 const AUTO_OLDER = 5, FILL_PX = 400;
+const JUMP_WAIT_MS = 15000;   // Show in chat: a click this recent is for a chat made after it; the chat waits this long for its log
 const JUMP_PAGES = 32;   // Show in chat reads back at most this many 2 MB pages (Resources reads 64 MB)
 
 // A chat chip: a tool chip, a note from another agent, a running call. The caller adds what it shows.
@@ -98,7 +99,9 @@ export class ChatView {
     this.composer.onNewConversation = (_address, cx) => this.refresh(cx);
     this.cards.canFocus = () => this.composer?.empty !== false;
     this.switchTo(currentAgent()?.address ?? null);
-    this.jumped = shared(KEY_JUMP)?.at ?? null;   // a jump from before this copy started is done
+    // A jump from before this copy started is done, unless it is recent: Show in chat from another screen makes the chat after the click.
+    const j = shared(KEY_JUMP);
+    this.jumped = j?.at && Date.now() - j.at < JUMP_WAIT_MS ? null : j?.at ?? null;
     cx.spawn((cx) => this.poll(cx));
     cx.timer.every(CHECK_MS, (cx) => this.tick(cx));
     cx.spawn(async () => { if (await loadTiming()) cx.timer.every(1000, () => flush()); });
@@ -148,7 +151,7 @@ export class ChatView {
     // "Show in chat" in the Resources window: once, for this agent, when its row is loaded (after the
     // way-in above, which opens at the newest).
     const j = shared(KEY_JUMP);
-    if (j?.at && j.at !== this.jumped) { this.jumped = j.at; if (term(j.terminal) === term(this.address)) this.pendingJump = { row: j.row, pages: 0, path: null }; }
+    if (j?.at && j.at !== this.jumped) { this.jumped = j.at; if (term(j.terminal) === term(this.address)) this.pendingJump = { row: j.row, pages: 0, path: null, since: Date.now() }; }
     this.showJump(cx);
     // On the way in, the glance is asked now, not after the usual wait.
     if (screen === "chat") { const force = Boolean(this.arriving) && this.forced !== this.arriving; if (force) this.forced = this.arriving; cx.spawn((cx) => pollGlance(cx, force)); this.see(cx); }
@@ -165,8 +168,14 @@ export class ChatView {
   showJump(cx) {
     const p = this.pendingJump, f = this.feed();
     if (!p || !f) return;
-    // Not read yet (or only an error so far): wait.
-    if (!f.loaded || f.path === null || this.olderBusy) return;
+    // Not read yet (or only an error so far, or no log): wait, JUMP_WAIT_MS at most.
+    if (!f.loaded || f.path === null) {
+      if (Date.now() - p.since < JUMP_WAIT_MS) return;
+      this.pendingJump = null;
+      notify({ title: "Could not show the message", body: "The chat could not read this agent's conversation.", level: "info", timeout: 4000 });
+      return;
+    }
+    if (this.olderBusy) return;
     if (p.path === null) p.path = f.path;
     else if (p.path !== f.path) { this.pendingJump = null; return; }
     if (f.rows.some((r) => r.id === p.row)) { this.pendingJump = null; this.jumpTo(p.row, cx); return; }

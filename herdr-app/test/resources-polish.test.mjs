@@ -173,3 +173,82 @@ test("Show in chat waits for the chat's first read before it looks", async () =>
   assert.deepEqual(calls.filter((c) => c[0] === "scroll_to_item").at(-1), ["scroll_to_item", 0, "top"]);
   assert.deepEqual(log.notify, []);
 });
+
+// Codex R1 (631e057...90a3de0), the 3 Mediums.
+test("an ask that comes back after BUSY_MS does not write over the newer answer", async () => {
+  let releaseA = null, n = 0;
+  fake.exec = (_c, args) => {
+    if (args[0] === "version") return jl(header("version"), { type: "version", commands: ["version", "feed", "resources"] }, end());
+    if (args[0] !== "resources") return jl(header(args[0]), { type: "end", ok: true, ms: 1 });
+    n++;
+    if (n === 1) return new Promise((done) => { releaseA = () => done(jl(header("resources"), res("a", 10), end("c1", true))); });
+    return jl(header("resources"), res("b", 20), end("c2", true));
+  };
+  const cx = fakeCx();
+  const a = R.pollResources(cx, true);
+  for (let i = 0; i < 5 && !releaseA; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(releaseA, "A is waiting on the helper");
+  clock += R.BUSY_MS + 1;
+  await R.pollResources(cx, true);
+  assert.equal(R.dataFor("t1")?.cursor, "c2");
+  releaseA(); await a;   // A comes back late
+  assert.equal(R.dataFor("t1")?.cursor, "c2", "A's older answer is dropped");
+  assert.deepEqual(R.dataFor("t1").items.map((i) => i.id), ["b"]);
+});
+
+test("Show in chat from Overview: a chat made after the click still shows the row", async () => {
+  const asked = chatLog((before) => (before === 9000 ? [6000, [feedRow("r-old"), feedRow("a6")]] : [0, []]));
+  fake.shared["flockbook.screen"] = "chat";
+  fake.shared[R.KEY_JUMP] = { terminal: "t1", row: "r-old", at: Date.now() };   // written just before the chat was made
+  const cx = fakeCx(); const v = new ChatView(cx); v.autoOlder = 5; await cx.settle();
+  calls.length = 0;
+  await ticks(v, cx);
+  assert.deepEqual(asked, [9000], "read back for the row");
+  const i = v.feed().rows.findIndex((r) => r.id === "r-old");
+  assert.deepEqual(calls.filter((c) => c[0] === "scroll_to_item").at(-1), ["scroll_to_item", i, "top"]);
+});
+
+test("a jump from long before the chat was made is not done again", async () => {
+  chatLog(() => [0, []]);
+  fake.shared["flockbook.screen"] = "chat";
+  fake.shared[R.KEY_JUMP] = { terminal: "t1", row: "a9", at: Date.now() - 600000 };
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  v.screen = "chat";
+  calls.length = 0; v.follow = false;
+  await ticks(v, cx, 3);
+  assert.equal(v.pendingJump, null);
+  assert.deepEqual(log.notify, []);
+});
+
+test("Show in chat when the chat gets no log: a hint after a while, not waiting for ever", async () => {
+  fake.exec = (_c, args) => jl(header(args[0]), { type: "log", agent: "claude", path: null, start: null, size: 0, cursor: null }, { type: "end", ok: true });
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  v.screen = "chat"; fake.shared["flockbook.screen"] = "chat";
+  fake.shared[R.KEY_JUMP] = { terminal: "t1", row: "a9", at: Date.now() };
+  await ticks(v, cx, 3);
+  assert.deepEqual(log.notify, [], "not yet");
+  clock += 60000;
+  await ticks(v, cx, 2);
+  assert.equal(log.notify.length, 1);
+  assert.match(log.notify[0].title + " " + log.notify[0].body, /could not|not .*open|not found/i);
+  assert.equal(v.pendingJump, null);
+  await ticks(v, cx, 2);
+  assert.equal(log.notify.length, 1, "once");
+});
+
+test("an older helper there (before resources) answers usage: the window says it is too old", async () => {
+  remoteAgent();
+  // What such a helper prints for "resources" (the same protocol and sidecar version, a shorter command list);
+  // the helper here forwards it as it is (remote.rs forward).
+  fake.exec = (_c, args) => {
+    if (args[0] === "version") return jl(header("version"), { type: "version", commands: ["version", "feed", "resources"] }, end());
+    if (args[0] === "resources") return jl(header("resources"), err("usage", "commands: version, feed, status, card, approve, answer, send"), { type: "end", ok: false, ms: 6 });
+    return jl(header(args[0]), { type: "end", ok: true, ms: 1 });
+  };
+  await R.pollResources(fakeCx(), true);
+  assert.equal(R.dataFor("box/t1")?.error, "old");
+  fake.props = { view: "resources", overlay: "o7" };
+  assert.match(textOf(byId(new R.ResourcesView(fakeCx()).render(fakeCx()), "res-empty")), /helper on box is too old/i);
+  // On this machine the helper has the command (version says so): usage is not "too old".
+  assert.equal(R.applyAnswer(null, "t1", { error: { code: "usage" }, lines: [] }), null);
+});
