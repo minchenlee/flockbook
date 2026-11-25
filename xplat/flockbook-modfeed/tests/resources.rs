@@ -227,7 +227,6 @@ fn the_whole_log_is_read_not_only_its_last_2_mb() {
     lines.push(say("a3", 20, "Again https://early.example.com/report"));
     write(&log, &lines, false);
     assert!(std::fs::metadata(&log).unwrap().len() > tail::BYTES + 512 * 1024);
-    assert!(std::fs::metadata(&log).unwrap().len() < resources::BYTES);
     let first = resources::answer(&log, None, None).unwrap();
     let get = |rs: &[resources::Resource], t: &str| rs.iter().find(|r| r.target == t).map(|r| r.mentions);
     assert_eq!(get(&first.items, "https://early.example.com/report"), Some(2), "{:?}", first.items);
@@ -411,4 +410,297 @@ fn commands_are_collected_from_replies_once_per_command() {
     // A command on several lines: the detail is one line.
     let rs = resources::collect(&tail::items(&[say("a1", 1, "```sh\nmake \\\n  all\n```")]), None);
     assert_eq!(rs[0].detail, "make all");
+}
+
+
+// ---- Only the new lines are parsed (hg-res-incremental) ----
+
+const HOME: &str = "/home/me";
+
+/// An assistant line of message `mid` (Claude Code writes each block of one message as its own line).
+fn block(id: &str, t: u32, mid: &str, content: Value) -> String {
+    line(json!({"type":"assistant","uuid":id,"timestamp":ts(t),"message":{"id":mid,"role":"assistant","content":[content]}}))
+}
+
+/// A Claude log with what a restart point must not cut: a run of tools, an Artifact call and its result apart,
+/// thinking before a tool call of the same message, a message in several lines, and a long stretch of work
+/// with no line from the person.
+fn claude_mix() -> Vec<String> {
+    let mut l = vec![
+        user("u1", 0, "Start"),
+        say("a1", 1, "Plan in ~/plans/p.md and https://a.example.com/x"),
+        block("a2", 2, "m2", json!({"type":"thinking","thinking":"I will look first","signature":"s"})),
+        block("a3", 2, "m2", json!({"type":"tool_use","id":"c1","name":"Bash","input":{"command":"ls"}})),
+        result("r1", 3, "c1", "https://tool.example.com", false),
+        tool("a4", 4, "c2", "Bash", json!({"command": "pwd"})),
+        result("r2", 5, "c2", "/w", false),
+        tool("a5", 6, "c3", "Artifact", json!({"action": "publish", "file_path": "/tmp/none.html", "title": "First page"})),
+        say("a6", 7, "Waiting for the publish; see https://b.example.com"),
+        result("r3", 8, "c3", "Published https://claude.ai/code/artifact/one-1", false),
+        block("a7", 9, "m7", json!({"type":"text","text":"Two parts: https://c.example.com"})),
+        block("a8", 9, "m7", json!({"type":"text","text":"and PR https://github.com/o/r/pull/3"})),
+        user("u2", 10, "go on alone"),
+    ];
+    // Long autonomous work: no user line, tool calls, results and replies.
+    for i in 0..30u32 {
+        let t = 11 + i * 3;
+        l.push(tool(&format!("w{i}"), t, &format!("k{i}"), "Bash", json!({"command": format!("step {i}")})));
+        l.push(result(&format!("x{i}"), t + 1, &format!("k{i}"), "ok", false));
+        if i % 3 == 0 {
+            l.push(say(&format!("s{i}"), t + 2, &format!("Step {i}: https://step{}.example.com and again https://a.example.com/x", i % 4)));
+        }
+        if i % 7 == 0 {
+            l.push(tool(&format!("p{i}"), t + 2, &format!("q{i}"), "Artifact", json!({"action": "publish", "title": format!("Page {i}")})));
+            l.push(result(&format!("y{i}"), t + 2, &format!("q{i}"), &format!("Published https://claude.ai/code/artifact/p-{i}"), false));
+        }
+    }
+    l.push(say("z1", 200, "Done: ~/plans/p.md, https://claude.ai/code/artifact/one-1"));
+    l
+}
+
+fn codex_mix() -> Vec<String> {
+    let line = |t: u32, payload: Value| json!({"timestamp": ts(t), "type": "response_item", "payload": payload}).to_string();
+    let msg = |t: u32, role: &str, text: &str| {
+        let kind = if role == "user" { "input_text" } else { "output_text" };
+        line(t, json!({"type": "message", "role": role, "content": [{"type": kind, "text": text}]}))
+    };
+    let mut l = vec![msg(0, "user", "Fix it"), msg(1, "assistant", "See https://a.example.com/x and ~/plans/c.md")];
+    for i in 0..20u32 {
+        let t = 2 + i * 3;
+        l.push(line(t, json!({"type": "function_call", "call_id": format!("c{i}"), "name": "exec_command", "arguments": "{\"cmd\":\"cargo test\"}"})));
+        l.push(line(t + 1, json!({"type": "function_call_output", "call_id": format!("c{i}"), "output": "Process exited with code 0"})));
+        if i % 2 == 0 {
+            l.push(msg(t + 2, "assistant", &format!("Step {i}: https://step{}.example.com", i % 3)));
+        }
+    }
+    l.push(msg(90, "user", "thanks"));
+    l.push(msg(91, "assistant", "Again https://a.example.com/x"));
+    l
+}
+
+fn values(rs: &[resources::Resource]) -> Vec<Value> {
+    rs.iter().map(|r| serde_json::to_value(r).unwrap()).collect()
+}
+
+/// What reading the whole log again gives.
+fn whole_log(log: &Path) -> Vec<Value> {
+    values(&resources::answer(log, None, Some(Path::new(HOME))).unwrap().items)
+}
+
+/// One `resources` call with a kept state: the items, the state to keep, and where parsing started.
+fn kept(log: &Path, k: Option<&resources::Kept>) -> (Vec<Value>, Option<resources::Kept>, u64) {
+    let (a, next, from) = resources::answer_kept(log, None, Some(Path::new(HOME)), k, true).unwrap();
+    (values(&a.items), next, from)
+}
+
+fn every_cut(lines: &[String], what: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    let mut later = 0;
+    for k in 1..lines.len() {
+        write(&log, &lines[..k], false);
+        let (first, s, _) = kept(&log, None);
+        assert_eq!(first, whole_log(&log), "{what}: the first {k} lines");
+        write(&log, &lines[k..], true);
+        let (got, _, from) = kept(&log, s.as_ref());
+        assert_eq!(got, whole_log(&log), "{what}: cut after line {k}");
+        if from > 0 {
+            later += 1;
+        }
+    }
+    assert!(later * 2 > lines.len(), "{what}: parsing started after the log's start for only {later} of {} cuts", lines.len());
+}
+
+#[test]
+fn cut_at_every_line_the_same_as_the_whole_log() {
+    every_cut(&claude_mix(), "claude");
+    every_cut(&codex_mix(), "codex");
+}
+
+fn line_by_line(lines: &[String], what: &str) -> Vec<u64> {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &[], false);
+    let (mut s, mut froms) = (None, vec![]);
+    for (i, l) in lines.iter().enumerate() {
+        write(&log, std::slice::from_ref(l), true);
+        let (got, next, from) = kept(&log, s.as_ref());
+        assert_eq!(got, whole_log(&log), "{what}: after line {i}");
+        froms.push(from);
+        s = next;
+    }
+    assert!(froms.windows(2).all(|w| w[0] <= w[1]), "{what}: the start only moves on: {froms:?}");
+    froms
+}
+
+#[test]
+fn a_line_at_a_time_the_start_moves_on_also_with_no_user_line() {
+    let lines = claude_mix();
+    let froms = line_by_line(&lines, "claude");
+    // The last user line ("u2") is long before the end: the start moved past it, in the stretch with no user line.
+    let u2: u64 = lines.iter().take_while(|l| !l.contains("\"u2\"")).map(|l| l.len() as u64 + 1).sum();
+    assert!(*froms.last().unwrap() > u2 + 2000, "start {} not past the last user line at {u2}", froms.last().unwrap());
+    let froms = line_by_line(&codex_mix(), "codex");
+    assert!(*froms.last().unwrap() > 0);
+}
+
+#[test]
+fn a_line_still_being_written_is_read_once_it_is_whole() {
+    let lines = claude_mix();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    for k in [5usize, 9, 20, 40] {
+        let half = &lines[k][..lines[k].len() / 2];
+        write(&log, &lines[..k], false);
+        std::fs::OpenOptions::new().append(true).open(&log).unwrap().write_all(half.as_bytes()).unwrap();
+        let (got, s, _) = kept(&log, None);
+        assert_eq!(got, whole_log(&log), "half of line {k}");
+        std::fs::OpenOptions::new().append(true).open(&log).unwrap().write_all(format!("{}\n", &lines[k][lines[k].len() / 2..]).as_bytes()).unwrap();
+        write(&log, &lines[k + 1..], true);
+        let (got, _, _) = kept(&log, s.as_ref());
+        assert_eq!(got, whole_log(&log), "line {k} finished");
+    }
+}
+
+#[test]
+fn a_changed_shorter_or_other_log_is_read_whole() {
+    let lines = claude_mix();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &lines, false);
+    let (_, s, _) = kept(&log, None);
+    let s = s.expect("a state");
+    assert!(s.at > 0);
+    // Rewritten before the start (same length; at its start, just before the start, and in the middle): read from 0,
+    // and the new text counts.
+    let text = std::fs::read_to_string(&log).unwrap();
+    let cut = s.at as usize;
+    for (at, what) in [(text.find("https://a.example.com/x").unwrap(), "head"), (text[..cut].rfind("https://").unwrap(), "near"), (text[..cut / 2].rfind("https://").unwrap(), "middle")] {
+        let mut changed = text.clone();
+        changed.replace_range(at + 8..at + 9, "Z");
+        std::fs::write(&log, &changed).unwrap();
+        write(&log, &[say("n1", 300, "more")], true);
+        let (got, _, from) = kept(&log, Some(&s));
+        assert_eq!(from, 0, "rewritten ({what}): from the start");
+        assert_eq!(got, whole_log(&log));
+        if what == "head" {
+            assert!(got.iter().any(|r| r["target"] == "https://Z.example.com/x"), "{what}: {got:?}");
+        }
+    }
+    // Shorter.
+    write(&log, &lines[..3], false);
+    let (got, _, from) = kept(&log, Some(&s));
+    assert_eq!((from, got), (0, whole_log(&log)));
+    // Another log with the same lines.
+    let other = dir.path().join("o.jsonl");
+    write(&other, &lines, false);
+    let (_, _, from) = resources::answer_kept(&other, None, Some(Path::new(HOME)), Some(&s), true).unwrap();
+    assert_eq!(from, 0, "another path");
+    // Another home, or a log that is not read line after line (pi, agy): from the start, nothing kept.
+    write(&log, &lines, false);
+    let (_, _, from) = resources::answer_kept(&log, None, Some(Path::new("/home/other")), Some(&s), true).unwrap();
+    assert_eq!(from, 0, "another home");
+    let (_, next, from) = resources::answer_kept(&log, None, Some(Path::new(HOME)), Some(&s), false).unwrap();
+    assert_eq!((from, next.is_none()), (0, true), "not linear");
+    // The state as kept on disk (JSON) works the same.
+    let back: resources::Kept = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    write(&log, &[say("n2", 301, "https://after.example.com")], true);
+    let (got, _, from) = kept(&log, Some(&back));
+    assert_eq!(from, s.at);
+    assert_eq!(got, whole_log(&log));
+}
+
+#[test]
+fn a_log_over_64_mb_is_read_whole_and_then_only_its_new_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    {
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&log).unwrap());
+        writeln!(f, "{}", say("a1", 0, "Report: https://early.example.com/report")).unwrap();
+        let filler = user("u", 10, &"x".repeat(64 * 1024));
+        for _ in 0..1200 {
+            writeln!(f, "{filler}").unwrap();
+        }
+        writeln!(f, "{}", say("a2", 20, "Again https://early.example.com/report")).unwrap();
+    }
+    let size = std::fs::metadata(&log).unwrap().len();
+    assert!(size > 70 * 1024 * 1024, "{size}");
+    let get = |rs: &[Value]| rs.iter().find(|r| r["target"] == "https://early.example.com/report").map(|r| r["mentions"].clone());
+    let (first, s, _) = kept(&log, None);
+    assert_eq!(get(&first), Some(json!(2)), "the early link, over the old 64 MB limit");
+    write(&log, &[say("a3", 30, "Once more https://early.example.com/report")], true);
+    let (more, _, from) = kept(&log, s.as_ref());
+    assert!(from > 64 * 1024 * 1024, "only the new lines: from {from}");
+    assert_eq!(get(&more), Some(json!(3)));
+}
+
+/// 100 MB of work with no user line, then 100 KB more: the whole log vs only the new lines. Release:
+/// `cargo test -p flockbook-modfeed --release --test resources -- --ignored --nocapture timing`.
+#[test]
+#[ignore]
+fn timing_100_mb_then_100_kb() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    let docs = dir.path().to_string_lossy().to_string();
+    let chunk = |n: u32| -> Vec<String> {
+        let mut l = vec![];
+        for i in 0..20u32 {
+            let k = n * 100 + i;
+            l.push(tool(&format!("w{k}"), 10, &format!("k{k}"), "Bash", json!({"command": format!("step {k}")})));
+            l.push(result(&format!("x{k}"), 11, &format!("k{k}"), &"o".repeat(4000), false));
+            l.push(say(&format!("s{k}"), 12, &format!("Step {k}: https://step{}.example.com and {docs}/r/{}.md", k % 50, k % 30)));
+        }
+        l
+    };
+    write(&log, &[user("u0", 0, "go")], false);
+    let mut n = 0;
+    while std::fs::metadata(&log).unwrap().len() < 100 * 1024 * 1024 {
+        write(&log, &chunk(n), true);
+        n += 1;
+    }
+    let t = std::time::Instant::now();
+    let (_, s, _) = kept(&log, None);
+    let full_first = t.elapsed();
+    let before = std::fs::metadata(&log).unwrap().len();
+    while std::fs::metadata(&log).unwrap().len() < before + 100 * 1024 {
+        write(&log, &chunk(n), true);
+        n += 1;
+    }
+    let t = std::time::Instant::now();
+    let whole = whole_log(&log);
+    let full = t.elapsed();
+    let t = std::time::Instant::now();
+    let (got, _, from) = kept(&log, s.as_ref());
+    let inc = t.elapsed();
+    assert_eq!(got, whole);
+    println!("timing: log {} bytes; first read with a state {:?}; whole log {:?}; only the new {} bytes {:?}", before, full_first, full, std::fs::metadata(&log).unwrap().len() - from, inc);
+}
+
+
+/// A real log (`RES_REAL_LOG=<path>`), copied in 200 steps with the state kept between them: the same answer as the
+/// whole copy at 10 of them and at the end, and how far behind the end the kept start falls (release, --ignored --nocapture).
+#[test]
+#[ignore]
+fn real_log_in_steps() {
+    let Some(src) = std::env::var_os("RES_REAL_LOG") else { return };
+    let data = std::fs::read(&src).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    std::fs::write(&log, b"").unwrap();
+    let (mut s, mut behind, mut at, mut checked) = (None, vec![], 0usize, 0);
+    for i in 1..=200usize {
+        let to = data.len() * i / 200;
+        std::fs::OpenOptions::new().append(true).open(&log).unwrap().write_all(&data[at..to]).unwrap();
+        at = to;
+        let (got, next, _) = kept(&log, s.as_ref());
+        let next = next.unwrap();
+        behind.push(to as u64 - next.at);
+        if i % 20 == 0 {
+            assert_eq!(got, whole_log(&log), "step {i}");
+            checked += 1;
+        }
+        s = Some(next);
+    }
+    behind.sort();
+    println!("real: {} bytes, {checked} checks equal; bytes from the kept start to the end: median {}, p90 {}, max {}", data.len(), behind[100], behind[180], behind[199]);
 }

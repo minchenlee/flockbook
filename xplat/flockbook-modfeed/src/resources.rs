@@ -4,7 +4,7 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use herdr_core::{ConversationItem, ItemKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -496,72 +496,149 @@ pub struct Resource {
 /// successful Artifact publish. Not collected: what the person typed, other tools' input and output.
 /// `home`: the home `~/` stands for.
 pub fn collect(items: &[ConversationItem], home: Option<&Path>) -> Vec<Resource> {
-    let mut acc: Vec<(Resource, usize)> = vec![];
-    let mut at: HashMap<String, usize> = HashMap::new();
-    let mut seq = 0usize;
-    for it in crate::rows::merged(items) {
-        let ts = crate::rows::ms(it.timestamp);
-        let mut found: Vec<(&'static str, String, Option<String>)> = vec![];
-        match &it.kind {
-            ItemKind::AssistantText(s) => {
-                // In the order they are written: a later one is newer.
-                let mut f: Vec<(usize, &'static str, String, Option<String>)> = detect(s).into_iter().map(|f| (f.start, f.kind, f.target, None)).collect();
-                f.extend(commands(s).into_iter().map(|c| (c.start, "cmd", c.cmd, Some(c.title))));
-                f.sort_by_key(|x| x.0);
-                found.extend(f.into_iter().map(|(_, k, t, title)| (k, t, title)));
-            }
-            ItemKind::ToolChips(chips) => {
-                for c in chips.iter().flat_map(|c| &c.calls) {
-                    let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
-                    let (action, title, file) = artifact_input(&c.input);
-                    // No title given: the published page's own <title>, when the file is here.
-                    let title = title.or_else(|| file.map(PathBuf::from).filter(|p| p.is_absolute()).and_then(|p| openable(&p).ok()).and_then(|p| file_title(&p)));
-                    if action.as_deref().is_some_and(|a| a != "publish") {
-                        continue;
-                    }
-                    found.extend(detect(out).into_iter().filter(|f| f.kind == "artifact").map(|f| (f.kind, f.target, title.clone())));
-                }
-            }
-            _ => {}
+    let mut acc = Acc::default();
+    acc.add(items, home);
+    acc.finish(home)
+}
+
+/// The kinds a resource can be (`normal` gives one of them).
+const KINDS: [&str; 8] = ["doc", "local", "cmd", "pr", "issue", "ci", "artifact", "link"];
+
+fn kind_of(k: &str) -> Option<&'static str> {
+    KINDS.iter().copied().find(|x| *x == k)
+}
+
+/// A title as given (a reply's text before a command, an Artifact call's `title`), or a published file whose own
+/// title is read when the list is made (as `collect` reads it).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+enum Title {
+    Given(String),
+    File(String),
+}
+
+/// One target while the log is read: what `Resource` gets from its mentions so far.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct Held {
+    key: String,
+    kind: String,
+    target: String,
+    row: String,
+    first_ts: Option<i64>,
+    last_ts: Option<i64>,
+    mentions: usize,
+    /// The order of the last mention, over the whole log.
+    seq: usize,
+    /// The titles the mentions gave, the newest last: the newest that reads is the title. A given title makes the
+    /// older ones no matter.
+    titles: Vec<Title>,
+}
+
+/// The resources of a log read so far; `add` the items of more lines, `finish` makes the list. Items added in parts
+/// give the same list as all at once when no run of tool calls is cut (`rows::merged` joins a run).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Acc {
+    held: Vec<Held>,
+    seq: usize,
+    /// Key -> index in `held`; made again from `held` after a read from disk.
+    #[serde(skip)]
+    at: HashMap<String, usize>,
+}
+
+impl Acc {
+    pub fn add(&mut self, items: &[ConversationItem], home: Option<&Path>) {
+        if self.at.len() != self.held.len() {
+            self.at = self.held.iter().enumerate().map(|(i, h)| (h.key.clone(), i)).collect();
         }
-        for (kind, target, title) in found {
-            let (kind, key, target) = normal(kind, &target, home);
-            seq += 1;
-            match at.get(&key) {
-                Some(&k) => {
-                    let (r, s) = &mut acc[k];
-                    r.mentions += 1;
-                    r.last_ts = ts.or(r.last_ts);
-                    r.first_ts = r.first_ts.or(ts);
-                    r.row = it.id.clone();
-                    r.target = target;
-                    if let Some(t) = title {
-                        r.title = t;
-                    }
-                    *s = seq;
+        for it in crate::rows::merged(items) {
+            let ts = crate::rows::ms(it.timestamp);
+            let mut found: Vec<(&'static str, String, Option<Title>)> = vec![];
+            match &it.kind {
+                ItemKind::AssistantText(s) => {
+                    // In the order they are written: a later one is newer.
+                    let mut f: Vec<(usize, &'static str, String, Option<Title>)> = detect(s).into_iter().map(|f| (f.start, f.kind, f.target, None)).collect();
+                    f.extend(commands(s).into_iter().map(|c| (c.start, "cmd", c.cmd, Some(Title::Given(c.title)))));
+                    f.sort_by_key(|x| x.0);
+                    found.extend(f.into_iter().map(|(_, k, t, title)| (k, t, title)));
                 }
-                None => {
-                    at.insert(key.clone(), acc.len());
-                    let r = Resource {
-                        t: "res",
-                        id: crate::protocol::fnv1a(&key),
-                        kind,
-                        target,
-                        title: title.unwrap_or_default(),
-                        detail: String::new(),
-                        row: it.id.clone(),
-                        first_ts: ts,
-                        last_ts: ts,
-                        mentions: 1,
-                        exists: None,
-                    };
-                    acc.push((r, seq));
+                ItemKind::ToolChips(chips) => {
+                    for c in chips.iter().flat_map(|c| &c.calls) {
+                        let (true, false, Some(out)) = (c.tool_name == "Artifact", c.is_error, c.output.as_deref()) else { continue };
+                        let (action, title, file) = artifact_input(&c.input);
+                        // No title given: the published page's own <title>, when the file is here.
+                        let title = title.map(Title::Given).or_else(|| file.filter(|f| Path::new(f).is_absolute()).map(Title::File));
+                        if action.as_deref().is_some_and(|a| a != "publish") {
+                            continue;
+                        }
+                        found.extend(detect(out).into_iter().filter(|f| f.kind == "artifact").map(|f| (f.kind, f.target, title.clone())));
+                    }
+                }
+                _ => {}
+            }
+            for (kind, target, title) in found {
+                let (kind, key, target) = normal(kind, &target, home);
+                self.seq += 1;
+                let k = match self.at.get(&key) {
+                    Some(&k) => {
+                        let h = &mut self.held[k];
+                        h.mentions += 1;
+                        h.last_ts = ts.or(h.last_ts);
+                        h.first_ts = h.first_ts.or(ts);
+                        h.row = it.id.clone();
+                        h.target = target;
+                        h.seq = self.seq;
+                        k
+                    }
+                    None => {
+                        self.at.insert(key.clone(), self.held.len());
+                        let h = Held { key, kind: kind.into(), target, row: it.id.clone(), first_ts: ts, last_ts: ts, mentions: 1, seq: self.seq, titles: vec![] };
+                        self.held.push(h);
+                        self.held.len() - 1
+                    }
+                };
+                let titles = &mut self.held[k].titles;
+                match title {
+                    Some(Title::Given(t)) => *titles = vec![Title::Given(t)],
+                    Some(Title::File(p)) => {
+                        titles.retain(|t| *t != Title::File(p.clone()));
+                        titles.push(Title::File(p));
+                    }
+                    None => {}
                 }
             }
         }
     }
-    acc.sort_by_key(|(r, s)| std::cmp::Reverse((r.last_ts.unwrap_or(i64::MIN), *s)));
-    acc.into_iter().map(|(r, _)| described(r, home)).collect()
+
+    /// The list, newest first (see `collect`).
+    pub fn finish(&self, home: Option<&Path>) -> Vec<Resource> {
+        let mut held: Vec<&Held> = self.held.iter().collect();
+        held.sort_by_key(|h| std::cmp::Reverse((h.last_ts.unwrap_or(i64::MIN), h.seq)));
+        held.into_iter()
+            .map(|h| {
+                let title = h.titles.iter().rev().find_map(|t| match t {
+                    Title::Given(t) => Some(t.clone()),
+                    Title::File(p) => openable(Path::new(p)).ok().and_then(|p| file_title(&p)),
+                });
+                let r = Resource {
+                    t: "res",
+                    id: crate::protocol::fnv1a(&h.key),
+                    kind: kind_of(&h.kind).unwrap_or("link"),
+                    target: h.target.clone(),
+                    title: title.unwrap_or_default(),
+                    detail: String::new(),
+                    row: h.row.clone(),
+                    first_ts: h.first_ts,
+                    last_ts: h.last_ts,
+                    mentions: h.mentions,
+                    exists: None,
+                };
+                described(r, home)
+            })
+            .collect()
+    }
+
+    fn known(&self) -> bool {
+        self.held.iter().all(|h| kind_of(&h.kind).is_some())
+    }
 }
 
 /// The `action`, `title` and `file_path` of an Artifact call's input (JSON, maybe cut at 4 KB: then read as text).
@@ -737,6 +814,79 @@ fn file_title(p: &Path) -> Option<String> {
     t.filter(|t| !t.is_empty())
 }
 
+/// Bump when what is collected changes (`detect`, `commands`, `normal`, `Acc`): a state kept with another number is
+/// not used.
+pub const RULES: u32 = 1;
+
+/// What one log's last `resources` call keeps, so the next reads only from `at`: the resources of the lines before
+/// it. `at` is a line start where no tool call waits for its result and no run of tool calls goes on (see
+/// `answer_kept`). Used only for the same log, home and rules, when the log is not shorter and its bytes before `at`
+/// look the same (a hash of its first 4 KB and of the 4 KB before `at`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Kept {
+    pub rules: u32,
+    pub home: Option<String>,
+    pub path: String,
+    /// The log's size when read.
+    pub size: u64,
+    pub at: u64,
+    head: String,
+    near: String,
+    acc: Acc,
+}
+
+/// Writes `k` to `at` (one file per terminal), and removes the folder's files untouched for 7 days (terminals gone).
+pub fn keep(k: &Kept, at: &Path) {
+    crate::locate::write_json(k, Some(at));
+    let week = std::time::Duration::from_secs(7 * 24 * 3600);
+    for e in at.parent().and_then(|d| std::fs::read_dir(d).ok()).into_iter().flatten().flatten() {
+        let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|a| a > week);
+        if old && e.path().extension().is_some_and(|x| x == "json") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// What the bytes before `at` look like: a hash of the first 4 KB, and a hash of 16 pieces of 1 KB spread over them
+/// and the 4 KB before `at`. An agent only adds lines to its log; this finds another file at the path, not every
+/// change inside an old line.
+fn print(log: &Path, at: u64) -> std::io::Result<(String, String)> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(log)?;
+    let mut span = |from: u64, to: u64| -> std::io::Result<String> {
+        f.seek(SeekFrom::Start(from))?;
+        let mut d = vec![];
+        (&mut f).take(to.saturating_sub(from)).read_to_end(&mut d)?;
+        Ok(String::from_utf8_lossy(&d).into_owned())
+    };
+    let head = span(0, at.min(4096))?;
+    let mut rest = String::new();
+    for i in 0..16 {
+        let s = at / 16 * i;
+        rest.push_str(&span(s, (s + 1024).min(at))?);
+    }
+    rest.push_str(&span(at.saturating_sub(4096), at)?);
+    Ok((crate::protocol::fnv1a(&head), crate::protocol::fnv1a(&rest)))
+}
+
+/// The tool calls of a run join one item: a next read starts only at a line whose first item is text (the person's or
+/// the agent's), never a call or a call that waits (`PermissionRequest`).
+fn starts_clean(i: Option<&ConversationItem>) -> bool {
+    i.is_some_and(|i| matches!(i.kind, ItemKind::UserText(_) | ItemKind::AssistantText(_)))
+}
+
+/// The items of the lines in `from..to`, parsed on their own.
+fn items_in(log: &Path, from: u64, to: u64) -> std::io::Result<Vec<ConversationItem>> {
+    let mut p = herdr_core::ConversationParser::new();
+    crate::tail::each_line(log, from, to, |l, at| p.feed_at(l, Some(at)))?;
+    Ok(crate::tail::without_pictures(p.items()))
+}
+
+/// How many line starts before the end `answer_kept` looks at for the next `at`, and how many of them it checks
+/// by parsing to the end.
+const LOOK: usize = 2000;
+const CHECKS: usize = 4;
+
 /// The answer to `resources`: the items to send, the next cursor, and whether they are all of them (`full`) or only
 /// the ones newer than `since`.
 pub struct Answer {
@@ -745,30 +895,91 @@ pub struct Answer {
     pub full: bool,
 }
 
-/// The most of a log `resources` reads: a grown log is read and parsed again each time (about 3 ms a MB), so a
-/// longer one is read from its last 64 MB.
-pub const BYTES: u64 = 64 * 1024 * 1024;
-
-/// The resources in the whole log up to `BYTES`, else in its last `BYTES` (an early report path is still listed in a
-/// long session; the chat shows only the last 2 MB first). The cursor is
-/// "r2.<hash of the path>.<size>.<newest last_ts>" (r1: rows with the old Codex ids, so all of it again). With a cursor of this log: the same size, no items; a bigger
-/// size, only the items mentioned at or after its newest one (a run of tool calls has its first call's time, so a
-/// later call in it can have that same time; sent again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
+/// The resources in the whole log (`answer_kept` with nothing kept).
 pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::Result<Answer> {
+    answer_kept(log, since, home, None, false).map(|x| x.0)
+}
+
+/// The resources in the whole log; with `kept` from the call before (and a log that still fits it), only the lines
+/// from its `at` are parsed. `linear`: the agent's log is read line after line with nothing later changing what an
+/// earlier line gave (Claude Code, Codex, Cursor, Grok; not pi or agy, whose entries are a tree or slots): only then is a
+/// state returned. Returns the answer, the state to keep, and the offset parsing started at.
+///
+/// The next `at` is a line start before which no tool call waits for its result, and whose lines parsed on their
+/// own give the same items as the end of this read, the first not tool calls: the items before it are then final.
+///
+/// The cursor is "r2.<hash of the path>.<size>.<newest last_ts>" (r1: rows with the old Codex ids, so all of it
+/// again). With a cursor of this log: the same size, no items; a bigger size, only the items mentioned at or after
+/// its newest one (a run of tool calls has its first call's time, so a later call in it can have that same time; sent
+/// again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
+pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: Option<&Kept>, linear: bool) -> std::io::Result<(Answer, Option<Kept>, u64)> {
     let hash = crate::protocol::fnv1a(&log.to_string_lossy());
+    let size = std::fs::metadata(log)?.len();
     // Unchanged: nothing is read or parsed.
     if let Some(c) = since {
         let p: Vec<&str> = c.split('.').collect();
-        if let ["r2", h, size, _] = p.as_slice() {
-            if *h == hash && size.parse::<u64>().ok() == Some(std::fs::metadata(log)?.len()) {
-                return Ok(Answer { items: vec![], cursor: c.to_string(), full: false });
+        if let ["r2", h, n, _] = p.as_slice() {
+            if *h == hash && n.parse::<u64>().ok() == Some(size) {
+                return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
             }
         }
     }
-    let range = crate::tail::read(log, None, BYTES)?;
-    let all = collect(&crate::tail::items_ids(&range), home);
+    let path = log.to_string_lossy().to_string();
+    let home_s = home.map(|h| h.to_string_lossy().to_string());
+    let base = match kept {
+        Some(k) if linear && k.rules == RULES && k.home == home_s && k.path == path && k.at <= k.size && k.size <= size && k.acc.known() => {
+            Some(k).filter(|_| print(log, k.at).ok() == Some((k.head.clone(), k.near.clone())))
+        }
+        _ => None,
+    };
+    let (from, acc) = match base {
+        Some(k) => (k.at, k.acc.clone()),
+        None => (0, Acc::default()),
+    };
+    // Line starts with no tool call waiting before them: where the next read may start.
+    let mut p = herdr_core::ConversationParser::new();
+    let mut starts: Vec<(u64, usize)> = vec![];
+    let end = crate::tail::each_line(log, from, size, |l, at| {
+        if !p.has_open_tool_use() {
+            starts.push((at, l.len()));
+        }
+        p.feed_at(l, Some(at));
+    })?;
+    let items = crate::tail::without_pictures(p.items());
+    drop(p);
+    // The next start: the latest line start that passes, else this one (`items[..k]` are then the final ones).
+    let (mut at, mut k) = (from, 0usize);
+    if linear {
+        let mut checks = 0;
+        for &(s, len) in starts.iter().rev().take(LOOK).filter(|x| x.0 > from) {
+            // Cheap first: the line alone must start with text.
+            if !starts_clean(items_in(log, s, s + len as u64 + 1)?.first()) {
+                continue;
+            }
+            let b = items_in(log, s, end)?;
+            if starts_clean(b.first()) && b.len() <= items.len() && items[items.len() - b.len()..] == b[..] {
+                (at, k) = (s, items.len() - b.len());
+                break;
+            }
+            checks += 1;
+            if checks == CHECKS {
+                break;
+            }
+        }
+    }
+    let mut acc = acc;
+    acc.add(&items[..k], home);
+    let next = match linear {
+        true => {
+            let (head, near) = print(log, at)?;
+            Some(Kept { rules: RULES, home: home_s, path, size, at, head, near, acc: acc.clone() })
+        }
+        false => None,
+    };
+    acc.add(&items[k..], home);
+    let all = acc.finish(home);
     let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
-    let cursor = format!("r2.{hash}.{}.{newest}", range.size);
+    let cursor = format!("r2.{hash}.{size}.{newest}");
     let was = since.and_then(|c| {
         let p: Vec<&str> = c.split('.').collect();
         match p.as_slice() {
@@ -776,11 +987,12 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
             _ => None,
         }
     });
-    Ok(match was {
-        Some((size, _)) if size == range.size => Answer { items: vec![], cursor, full: false },
-        Some((size, ts)) if size < range.size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
+    let answer = match was {
+        Some((n, _)) if n == size => Answer { items: vec![], cursor, full: false },
+        Some((n, ts)) if n < size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
         _ => Answer { items: all, cursor, full: true },
-    })
+    };
+    Ok((answer, next, from))
 }
 
 #[cfg(test)]
