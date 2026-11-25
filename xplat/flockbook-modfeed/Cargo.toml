@@ -38,3 +38,6 @@ qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

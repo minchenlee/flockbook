@@ -10,3 +10,6 @@ description = "Spike: windowed (virtual) chat list for iced, rmdv style"
 iced.workspace = true
 iced_test.workspace = true
 libc = "0.2"
+
+[lints]
+workspace = true
