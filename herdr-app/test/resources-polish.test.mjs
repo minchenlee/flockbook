@@ -44,6 +44,7 @@ test("an open window stays open with no heartbeat: ticking for a minute writes n
   const cx = fakeCx();
   const v = new R.ResourcesView(cx);
   await cx.settle();
+  v.tick(cx); await cx.settle();   // one refit to the item count it read
   log.shared.length = 0;
   for (let i = 0; i < 30; i++) { clock += 2000; v.tick(cx); await cx.settle(); }
   assert.equal(R.panelOpen(), true, "still open after a minute");

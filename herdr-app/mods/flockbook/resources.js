@@ -3,9 +3,11 @@
 // the bar's button); the button's badge counts the ones newer than you last saw.
 //
 // Kept in shared() (persisted), so every copy of the mod and a restart see the same:
-//   flockbook.res.data        { terminal, cursor, items, at }: the last answer, for the shown agent only
+//   flockbook.res.data        { terminal, cursor, items, at, error? }: the last answer, for the shown agent only.
+//                             `error`: "old" or "missing", the helper on the agent's machine cannot list them
 //   flockbook.res.on          the helper has the command (older helpers: no button)
-//   flockbook.res.open        the open window's overlay id; flockbook.res.alive: when it last drew (ms)
+//   flockbook.res.open        the open window's overlay id; flockbook.res.run: the app run it was opened in (RUN).
+//                             An id from another run (before a restart) is not open: no heartbeat, nothing written while open
 //   flockbook.res.frame       where it was opened (placement()); the chat does not move for it
 //   flockbook.res.scope       "agent" (P1 has only "This agent")
 //   flockbook.res.seen.<t>    the newest last_ts seen in the open window; set to the newest one the first
@@ -23,10 +25,9 @@ import { GUTTER, columnWidth } from "./estimate.js";
 export const KEY_DATA = "flockbook.res.data";
 export const KEY_ON = "flockbook.res.on";
 export const KEY_OPEN = "flockbook.res.open";
-export const KEY_ALIVE = "flockbook.res.alive";
+export const KEY_RUN = "flockbook.res.run";
 export const KEY_SCOPE = "flockbook.res.scope";
 export const KEY_JUMP = "flockbook.res.jump";
-const KEY_POLL_AT = "flockbook.res.polled";
 export const KEY_WIN_W = "flockbook.window.width";
 export const KEY_SIDE_W = "flockbook.sidebar.width";
 export const seenKey = (t) => `flockbook.res.seen.${t}`;
@@ -44,8 +45,9 @@ export const KEY_INPUT_H = "flockbook.input.height"; // the chat input's height 
 const INPUT_W = 800, INPUT_SIDE = 16; // the chat input: max_w(800) inside px(16) (composer.js)
 const REFIT_PX = 8;                   // a smaller change in height does not reopen the window
 export const KEY_FRAME = "flockbook.res.frame";
-const ALIVE_EVERY = 2000;             // the open window says it is there this often
-const ALIVE_MS = 6000;                // a window that has not said so for this long is gone (a restart)
+// This run of the app: module code runs once per app start and is shared by every copy (herdr AGENTS.md), so a
+// window opened in this run carries it; after a restart the id left in shared has another one.
+export const RUN = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export const GROUPS = [
   { id: "docs", label: "Docs", kinds: ["doc"] },
@@ -63,7 +65,12 @@ const byNewest = (a, b) => (b.last_ts ?? -Infinity) - (a.last_ts ?? -Infinity);
 
 // The next data from an answer: all of it when `full` (or another agent), else the new lines merged in by id.
 // An answer with an error keeps what was there.
+// The helper on the agent's machine cannot list them: an older one (no `resources` there) or none. Shown as a hint
+// in place of "No resources yet". Another error keeps what was there.
+const HELPER_HINT = { remote_helper_outdated: "old", remote_helper_missing: "missing" };
 export function applyAnswer(prev, terminal, answer, at = Date.now()) {
+  const hint = HELPER_HINT[answer?.error?.code];
+  if (hint) return prev?.terminal === terminal && prev.error === hint ? prev : { terminal, cursor: null, items: [], at, error: hint };
   if (answer?.error || !answer?.end) return prev ?? null;
   const lines = (answer.lines ?? []).filter((l) => l.type === "res" && l.id);
   const full = answer.end.full !== false || !prev || prev.terminal !== terminal;
@@ -193,8 +200,8 @@ export async function pollResources(cx, force = false, full = false) {
   const t = term(address);
   const was = shared(KEY_DATA);
   const same = was?.terminal === t;
-  if (!force && same && Date.now() - Math.max(last, shared(KEY_POLL_AT) ?? 0) < RES_MS) return;
-  const mine = Date.now(); busy = mine; last = mine; setShared(KEY_POLL_AT, last);
+  if (!force && same && Date.now() - last < RES_MS) return;
+  const mine = Date.now(); busy = mine; last = mine;
   try {
     const on = await sidecar.hasCommand("resources");
     if (shared(KEY_ON) !== on) { setShared(KEY_ON, on); cx?.notify?.(); }
@@ -202,8 +209,8 @@ export async function pollResources(cx, force = false, full = false) {
     const r = await sidecar.resources(address, same && !full ? was.cursor : null);
     const next = applyAnswer(same && !full ? was : null, t, r);
     if (!next) return;
-    if (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null) setShared(seenKey(t), newest(next.items));
-    if (!same || JSON.stringify(was.items) !== JSON.stringify(next.items) || was.cursor !== next.cursor) {
+    if (!next.error && (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null)) setShared(seenKey(t), newest(next.items));
+    if (!same || JSON.stringify(was.items) !== JSON.stringify(next.items) || was.cursor !== next.cursor || (was.error ?? null) !== (next.error ?? null)) {
       setShared(KEY_DATA, next); cx?.notify?.();
     }
   } finally { if (busy === mine) busy = 0; }
@@ -265,7 +272,7 @@ export function placeNow() {
 // one's close() sees that it is no longer the open one. No `key`: Herdr opens a keyed window where that key's
 // window was (dropped there, or the one it replaces), not at `p.at`.
 function openPanel(p, extra = {}, old = null) {
-  setShared(KEY_ALIVE, Date.now());
+  if (shared(KEY_RUN) !== RUN) setShared(KEY_RUN, RUN);
   setShared(KEY_FRAME, p);
   const id = openOverlay({ mod: "flockbook", props: { view: "resources", drawer: p.drawer, ...extra }, kind: "window", frame: "none",
     at: p.at, width: p.width, height: p.height });
@@ -273,7 +280,7 @@ function openPanel(p, extra = {}, old = null) {
   if (old && old !== id) closeOverlay(old);
 }
 
-export const panelOpen = () => Boolean(shared(KEY_OPEN)) && Date.now() - (shared(KEY_ALIVE) ?? 0) < ALIVE_MS;
+export const panelOpen = () => Boolean(shared(KEY_OPEN)) && shared(KEY_RUN) === RUN;
 
 // ⌘⇧R and the bar's button: open the window, or close it when it is open.
 export function toggleResources() {
@@ -282,6 +289,15 @@ export function toggleResources() {
   if (open) closeOverlay(open);   // left from before a restart
   setShared(KEY_SCOPE, shared(KEY_SCOPE) ?? "agent");
   openPanel(placeNow());
+}
+
+// The empty window's title and line: no agent, the helper there cannot list them (`error`), or nothing yet.
+export function emptyText(address, error = null) {
+  const m = machineOf(address) ?? "this machine";
+  if (!address) return ["No agent here", "Open an agent's tab to see what it pointed you to."];
+  if (error === "old") return ["Helper too old", `The Flockbook helper on ${m} is too old to list resources. Update it to see them here.`];
+  if (error === "missing") return ["No helper there", `${m} has no Flockbook helper yet. Install it from the chat to see resources here.`];
+  return ["No resources yet", "Docs, artifacts and links the agent mentions in its replies show up here."];
 }
 
 export class ResourcesView {
@@ -302,8 +318,6 @@ export class ResourcesView {
   }
 
   tick(cx) {
-    // Not every second: each set redraws every copy.
-    if (Date.now() - (shared(KEY_ALIVE) ?? 0) >= ALIVE_EVERY) setShared(KEY_ALIVE, Date.now());
     const a = currentAgent()?.address ?? null;
     if (a !== this.address) { this.address = a; this.seenAtOpen = a ? shared(seenKey(term(a))) ?? null : null; this.note = null; cx?.notify?.(); }
     cx?.spawn?.((cx) => pollResources(cx));
@@ -393,9 +407,8 @@ export class ResourcesView {
           .child(div().text_size(11).font_weight(600).text_color(t.muted).child(String(g.items.length))))
         .children(g.items.map(row))))
       : v_flex().id("res-empty").flex_1().px(24).py(28).gap(6).items_center().justify_center()
-        .child(div().text_size(13).font_weight(600).text_color(t.foreground).child(address ? "No resources yet" : "No agent here"))
-        .child(div().text_size(12).text_color(t.muted).text_center()
-          .child(address ? "Docs, artifacts and links the agent mentions in its replies show up here." : "Open an agent's tab to see what it pointed you to."));
+        .child(div().text_size(13).font_weight(600).text_color(t.foreground).child(emptyText(address, d?.error)[0]))
+        .child(div().text_size(12).text_color(t.muted).text_center().child(emptyText(address, d?.error)[1]));
 
     const foot = h_flex().id("res-foot").h(34).flex_none().px(14).items_center().border_t(1).border_color(t.border)
       .text_size(11.5).text_color(t.muted)

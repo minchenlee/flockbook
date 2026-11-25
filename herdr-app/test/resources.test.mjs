@@ -197,7 +197,7 @@ test("⌘⇧R toggles the window; one left from before a restart does not count 
   assert.equal(fake.shared[R.KEY_OPEN], null);
   assert.deepEqual(log.closed, ["o1"]);
   // A restart: the id is still in shared, but no window drew for a while.
-  fake.shared[R.KEY_OPEN] = "old"; fake.shared[R.KEY_ALIVE] = Date.now() - 60_000;
+  fake.shared[R.KEY_OPEN] = "old"; fake.shared[R.KEY_RUN] = "an earlier run";
   command("resources");
   assert.equal(fake.shared[R.KEY_OPEN], "o1", "opened, not closed");
   // The sidebar's width counts: the window is the bar plus the sidebar.
@@ -294,6 +294,7 @@ test("the chat scrolls to the row once, for its own agent", () => {
   const chat = new ChatView(fakeCx());
   const f = chat.feed();
   f.rows = [{ id: "r1", k: "user" }, { id: "r2", k: "assistant" }];
+  f.loaded = true; f.path = "/logs/s.jsonl"; f.start = 0; f.first = true;   // read: the jump waits for the first read
   calls.length = 0;
   fake.shared[R.KEY_JUMP] = { terminal: "t1", row: "r2", at: 5 };
   chat.screen = "chat"; fake.shared["flockbook.screen"] = "chat";
@@ -338,7 +339,7 @@ test("the window open or closed: the reading column and the chat input do not mo
   chat.width = 850;
   const before = [chat.colWidth(), R.readingLayout(850).left];
   fake.shared[R.KEY_FRAME] = R.placement(1100, 900, 5, 2, 850);
-  fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_ALIVE] = Date.now();
+  fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_RUN] = R.RUN;
   assert.deepEqual([chat.colWidth(), R.readingLayout(850).left], before);
 });
 
@@ -395,7 +396,7 @@ test("the open window follows the item count and the shown agent: reopened in pl
   fake.shared[R.KEY_WIN_W] = 1400; fake.shared["flockbook.window.height"] = 900;
   const v = view([res("a", "link", 50)], { seen: 10 });
   fake.shared[R.KEY_FRAME] = R.placement(1400, 900, 1, 1);
-  fake.shared[R.KEY_ALIVE] = Date.now();
+  fake.shared[R.KEY_RUN] = R.RUN;
   const n = log.overlays.length;
   v.tick(fakeCx());
   assert.equal(log.overlays.length, n, "nothing changed: not reopened");
@@ -555,7 +556,7 @@ test("the window open or closed: the rendered chat is the same, and the input ke
   const closed = geo((await chatTree()).root);
   fake.shared[R.KEY_WIN_W] = 1100; fake.shared["flockbook.window.height"] = 900; fake.shared[R.KEY_INPUT_H] = 150;
   fake.shared[R.KEY_FRAME] = R.placement(1100, 900, 5, 2, 1100, 150);
-  fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_ALIVE] = Date.now();
+  fake.shared[R.KEY_OPEN] = "o1"; fake.shared[R.KEY_RUN] = R.RUN;
   assert.equal(R.openFrame() !== null, true, "the window counts as open");
   assert.deepEqual(geo((await chatTree()).root), closed, "nothing in the chat moves or grows for the window");
   // The input's own sizes: INPUT_GUESS is about this input. A change here (more padding, a taller row) must
