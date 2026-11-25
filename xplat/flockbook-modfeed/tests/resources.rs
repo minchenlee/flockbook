@@ -180,7 +180,7 @@ fn since_a_cursor_only_what_is_newer() {
     let first = resources::answer(&log, None, None).unwrap();
     assert!(first.full);
     assert_eq!(first.items.len(), 2);
-    assert!(first.cursor.starts_with("r2."), "{}", first.cursor);
+    assert!(first.cursor.starts_with("r3."), "{}", first.cursor);
 
     let same = resources::answer(&log, Some(&first.cursor), None).unwrap();
     assert_eq!((same.full, same.items.len()), (false, 0), "nothing new");
@@ -203,11 +203,14 @@ fn since_a_cursor_only_what_is_newer() {
     let o = resources::answer(&other, Some(&c), None).unwrap();
     assert!(o.full);
     assert_eq!(o.items.len(), 1);
-    // An "r1." cursor of this very log (rows named with the old Codex ids): all of it again, not "nothing new".
+    // An "r1." or "r2." cursor of this very log (old Codex ids; a log cut at 64 MB): all of it again, not "nothing new".
     let now = resources::answer(&log, None, None).unwrap().cursor;
-    let r1 = now.replacen("r2.", "r1.", 1);
-    let old = resources::answer(&log, Some(&r1), None).unwrap();
-    assert!(old.full && !old.items.is_empty(), "an r1 cursor gets everything again");
+    let p: Vec<&str> = now.split('.').collect();
+    for v in ["r1", "r2"] {
+        let c = format!("{v}.{}.{}.{}", p[1], p[2], p[3]);
+        let old = resources::answer(&log, Some(&c), None).unwrap();
+        assert!(old.full && !old.items.is_empty(), "an {v} cursor gets everything again");
+    }
 }
 
 #[test]
@@ -705,7 +708,8 @@ fn real_log_in_steps() {
     println!("real: {} bytes, {checked} checks equal; bytes from the kept start to the end: median {}, p90 {}, max {}; state {} bytes", data.len(), behind[100], behind[180], behind[199], serde_json::to_vec(&s).unwrap().len());
 }
 
-/// The state folder stays small: at most 64 files (the newest kept), none older than 7 days, no temp files left over.
+/// The state folder stays small: at most 64 state files (the newest kept), none older than 7 days, no old temp files.
+/// Only files named as this command names them (`<hex>.json`, `.<hex>.json.<pid>`) are dropped.
 #[test]
 fn kept_states_have_a_cap() {
     let dir = tempfile::tempdir().unwrap();
@@ -715,22 +719,89 @@ fn kept_states_have_a_cap() {
         std::fs::write(&p, b"{}").unwrap();
         std::fs::File::options().write(true).open(&p).unwrap().set_modified(now - std::time::Duration::from_secs(age_s)).unwrap();
     };
+    let hex = |i: u64| format!("{:x}.json", 0xa000 + i);
     for i in 0..80u64 {
-        put(&format!("{i:02}.json"), 60 + i * 60);
+        put(&hex(i), 60 + i * 60);
     }
-    put("old.json", 8 * 24 * 3600);
-    put(".x.json.123", 2 * 3600);
-    put("notes.txt", 9 * 24 * 3600);
+    put("ffff1.json", 8 * 24 * 3600);
+    put(".ffff2.json.123", 2 * 3600);
+    put(".ffff3.json.124", 60);
+    for other in ["notes.txt", "keep.json", "glance.json", ".other.json.1", "Ab12.json"] {
+        put(other, 9 * 24 * 3600);
+    }
     let log = dir.path().join("s.jsonl");
-    std::fs::write(&log, format!("{}\n", serde_json::json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-03T01:40:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"https://a.example.com"}]}}))).unwrap();
-    let (_, kept, _) = modfeedkit::resources::answer_kept(&log, None, None, None, true).unwrap();
-    let at = dir.path().join("me.json");
-    modfeedkit::resources::keep(&kept.expect("a state"), &at);
-    let mut names: Vec<String> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".json") || n.starts_with('.')).collect();
-    names.sort();
-    assert_eq!(names.len(), 64, "{names:?}");
-    assert!(names.contains(&"me.json".to_string()), "the file just written stays");
-    assert!(names.contains(&"00.json".to_string()) && !names.contains(&"79.json".to_string()), "the newest are kept: {names:?}");
-    assert!(!names.contains(&"old.json".to_string()) && !names.contains(&".x.json.123".to_string()));
-    assert!(dir.path().join("notes.txt").exists(), "only state files are dropped");
+    std::fs::write(&log, format!("{}\n", say("a1", 0, "https://a.example.com"))).unwrap();
+    let (_, kept, _) = resources::answer_kept(&log, None, None, None, true).unwrap();
+    let at = dir.path().join("beef.json");
+    resources::keep(&kept.expect("a state"), &at);
+    let names: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    let states = names.iter().filter(|n| n.len() <= 21 && n.ends_with(".json") && n[..n.len() - 5].bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())).count();
+    assert_eq!(states, 64, "{names:?}");
+    assert!(names.contains("beef.json"), "the file just written stays");
+    assert!(names.contains(&hex(0)) && names.contains(&hex(62)) && !names.contains(&hex(63)), "the newest are kept: {names:?}");
+    assert!(!names.contains("ffff1.json") && !names.contains(".ffff2.json.123"), "old ones go");
+    assert!(names.contains(".ffff3.json.124"), "a temp file being written now stays");
+    for other in ["notes.txt", "keep.json", "glance.json", ".other.json.1", "Ab12.json", "s.jsonl"] {
+        assert!(names.contains(other), "{other} is not a state file: it stays");
+    }
+}
+
+
+// ---- Codex R1 (hg-res-incremental) ----
+
+/// Another file at the same path (a log written again), the same size or bigger: all of it again (`full`), with
+/// or without a kept state, never merged into the old list.
+#[test]
+fn another_file_at_the_path_is_all_again() {
+    let home = Some(Path::new(HOME));
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &[user("u0", 0, "go"), say("a1", 50, "old https://old.example.com")], false);
+    let (a, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
+    // The same size, other words.
+    let size = std::fs::metadata(&log).unwrap().len();
+    write(&log, &[user("u0", 0, "go"), say("a1", 50, "new https://new.example.com")], false);
+    assert_eq!(std::fs::metadata(&log).unwrap().len(), size);
+    for kept in [k.as_ref(), None] {
+        let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, kept, true).unwrap();
+        assert!(b.full, "same size, kept {}: {:?}", kept.is_some(), b.items);
+        assert_eq!(values(&b.items), whole_log(&log));
+    }
+    // Bigger, its mentions older than the cursor's newest.
+    write(&log, &[user("u0", 0, "go"), say("a1", 5, "first https://first.example.com"), say("a2", 6, "second https://second.example.com and more words")], false);
+    assert!(std::fs::metadata(&log).unwrap().len() > size);
+    for kept in [k.as_ref(), None] {
+        let (b, _, _) = resources::answer_kept(&log, Some(&a.cursor), home, kept, true).unwrap();
+        assert!(b.full, "bigger, kept {}: {:?}", kept.is_some(), b.items);
+        assert_eq!(values(&b.items), whole_log(&log));
+    }
+}
+
+/// A result that comes again for a call before the kept start (an Artifact call whose failed result is followed by a
+/// good one) changes an item already kept: the log is read whole, and the answer is all of it.
+#[test]
+fn a_later_result_for_a_call_before_the_kept_start_reads_all_again() {
+    let home = Some(Path::new(HOME));
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &[
+        user("u0", 0, "publish it"),
+        tool("a1", 1, "c1", "Artifact", json!({"action": "publish", "file_path": "/tmp/p.html", "title": "Plan"})),
+        result("r1", 2, "c1", "Failed: https://claude.ai/code/artifact/late-1", true),
+        say("a2", 3, "It failed; see https://a.example.com"),
+        user("u1", 4, "ok"),
+        say("a3", 5, "Waiting."),
+    ], false);
+    let (a, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
+    assert!(k.as_ref().unwrap().at > 0, "a kept start after the call");
+    write(&log, &[result("r2", 9, "c1", "Published: https://claude.ai/code/artifact/late-1", false)], true);
+    let want = whole_log(&log);
+    assert!(want.iter().any(|r| r["kind"] == "artifact"), "the whole log has the artifact: {want:?}");
+    let (b, k2, _) = resources::answer_kept(&log, Some(&a.cursor), home, k.as_ref(), true).unwrap();
+    assert_eq!(values(&b.items), want);
+    assert!(b.full, "the artifact's time is older than the cursor's: only a full answer brings it");
+    // The next call, the log unchanged but for one more line: the same as the whole log again.
+    write(&log, &[say("a4", 10, "Done https://b.example.com")], true);
+    let (c, _, _) = resources::answer_kept(&log, None, home, k2.as_ref(), true).unwrap();
+    assert_eq!(values(&c.items), whole_log(&log));
 }

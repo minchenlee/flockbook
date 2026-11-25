@@ -194,6 +194,34 @@ fn send_refuses_when_the_agents_box_has_text() {
 /// `resources --cache`: the state kept beside the cache (one file per terminal) makes the next call parse only the new
 /// lines, with the same answer as the whole log.
 #[test]
+#[cfg(unix)]
+fn resources_does_not_follow_a_linked_state_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache.json");
+    let cache_s = cache.to_string_lossy().to_string();
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    run(&fake.path, &["glance", "--cache", &cache_s]);
+    let log = dir.path().join("s.jsonl");
+    let say = serde_json::json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-03T01:40:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"See https://a.example.com"}]}}).to_string();
+    std::fs::write(&log, say + "\n").unwrap();
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+    c["entries"]["t1"]["path"] = serde_json::json!(log);
+    std::fs::write(&cache, c.to_string()).unwrap();
+    // resources/ is a link to another folder with JSON files of its own, one of them old.
+    let other = dir.path().join("elsewhere");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("abc.json"), b"{}").unwrap();
+    std::fs::File::options().write(true).open(other.join("abc.json")).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(9 * 24 * 3600)).unwrap();
+    std::os::unix::fs::symlink(&other, dir.path().join("resources")).unwrap();
+    let out = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s]);
+    assert_eq!(out.last().unwrap()["ok"], true, "{out:?}");
+    assert_eq!(out.iter().filter(|l| l["type"] == "res").count(), 1);
+    let names: Vec<String> = std::fs::read_dir(&other).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, vec!["abc.json".to_string()], "nothing written or removed through the link");
+}
+
+#[test]
 fn resources_keeps_a_state_beside_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("cache.json");

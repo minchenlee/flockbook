@@ -835,8 +835,13 @@ pub struct Kept {
     acc: Acc,
 }
 
-/// Writes `k` to `at` (one file per terminal), and removes the folder's files untouched for 7 days (terminals gone).
+/// Writes `k` to `at` (one file per terminal), and removes the folder's state files untouched for 7 days (terminals
+/// gone) and all but the newest `KEPT`. Only files named as `state_name` names them are removed; in a folder that is a
+/// link nothing is written.
 pub fn keep(k: &Kept, at: &Path) {
+    if at.parent().is_some_and(|d| std::fs::symlink_metadata(d).is_ok_and(|m| !m.is_dir())) {
+        return;
+    }
     crate::locate::write_json(k, Some(at));
     let week = std::time::Duration::from_secs(7 * 24 * 3600);
     let hour = std::time::Duration::from_secs(3600);
@@ -845,12 +850,12 @@ pub fn keep(k: &Kept, at: &Path) {
         let p = e.path();
         let age = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).unwrap_or_default();
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') && name.contains(".json.") {
+        if state_name(&name, true) {
             // A temp file a stopped write left (another call may be writing one now: only old ones go).
             if age > hour {
                 let _ = std::fs::remove_file(&p);
             }
-        } else if p.extension().is_some_and(|x| x == "json") {
+        } else if state_name(&name, false) && e.file_type().is_ok_and(|t| t.is_file()) {
             if age > week {
                 let _ = std::fs::remove_file(&p);
             } else if p != at {
@@ -896,11 +901,36 @@ fn starts_clean(i: Option<&ConversationItem>) -> bool {
     i.is_some_and(|i| matches!(i.kind, ItemKind::UserText(_) | ItemKind::AssistantText(_)))
 }
 
-/// The items of the lines in `from..to`, parsed on their own.
-fn items_in(log: &Path, from: u64, to: u64) -> std::io::Result<Vec<ConversationItem>> {
+/// The items of the lines in `from..to`, parsed on their own, and how many results there are for calls before `from`.
+fn items_in(log: &Path, from: u64, to: u64) -> std::io::Result<(Vec<ConversationItem>, usize)> {
     let mut p = herdr_core::ConversationParser::new();
     crate::tail::each_line(log, from, to, |l, at| p.feed_at(l, Some(at)))?;
-    Ok(crate::tail::without_pictures(p.items()))
+    Ok((crate::tail::without_pictures(p.items()), p.late_results()))
+}
+
+/// The cursor's mark of the log's bytes before `size` (see `print`): another file at the path does not pass.
+fn mark_of(log: &Path, size: u64) -> Option<String> {
+    print(log, size).ok().map(|(h, n)| crate::protocol::fnv1a(&format!("{h}{n}")))
+}
+
+/// The state folder beside `cache`, or None when it is a link or not a folder: nothing is read, written or removed
+/// through a link.
+pub fn state_dir(cache: &Path) -> Option<PathBuf> {
+    let d = cache.with_file_name("resources");
+    match std::fs::symlink_metadata(&d) {
+        Ok(m) if !m.is_dir() => None,
+        _ => Some(d),
+    }
+}
+
+/// A name this command gives a state file: `<hex>.json` (FNV-1a of the terminal); with `temp`, the temp file a
+/// write makes first (`.<hex>.json.<pid>`).
+fn state_name(n: &str, temp: bool) -> bool {
+    let hex = |s: &str| (1..=16).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c));
+    match temp {
+        false => n.strip_suffix(".json").is_some_and(hex),
+        true => n.strip_prefix('.').and_then(|r| r.split_once(".json.")).is_some_and(|(h, pid)| hex(h) && !pid.is_empty() && pid.bytes().all(|c| c.is_ascii_digit())),
+    }
 }
 
 /// How many line starts before the end `answer_kept` looks at for the next `at`, and how many of them it checks
@@ -929,20 +959,30 @@ pub fn answer(log: &Path, since: Option<&str>, home: Option<&Path>) -> std::io::
 /// The next `at` is a line start before which no tool call waits for its result, and whose lines parsed on their
 /// own give the same items as the end of this read, the first not tool calls: the items before it are then final.
 ///
-/// The cursor is "r2.<hash of the path>.<size>.<newest last_ts>" (r1: rows with the old Codex ids, so all of it
-/// again). With a cursor of this log: the same size, no items; a bigger size, only the items mentioned at or after
-/// its newest one (a run of tool calls has its first call's time, so a later call in it can have that same time; sent
-/// again, the mod merges by id); else (another log, a shorter one, a bad cursor) all of them.
+/// The cursor is "r3.<hash of the path>.<size>.<newest last_ts>.<mark>" (`mark_of`: the bytes before `size`). An
+/// r1 or r2 cursor (old Codex ids; a log cut at 64 MB) gets all of it again. With a cursor of this log whose mark still
+/// passes: the same size, no items; a bigger size, only the items mentioned at or after its newest one (a run of tool
+/// calls has its first call's time, so a later call in it can have that same time; sent again, the mod merges by id).
+/// Else (another file at the path, a shorter one, a bad cursor) all of them. All of them too when the kept state does
+/// not fit the log, or a result comes for a call before the kept start: the log is then read whole.
 pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: Option<&Kept>, linear: bool) -> std::io::Result<(Answer, Option<Kept>, u64)> {
     let hash = crate::protocol::fnv1a(&log.to_string_lossy());
     let size = std::fs::metadata(log)?.len();
-    // Unchanged: nothing is read or parsed.
-    if let Some(c) = since {
+    // The cursor's size and newest time, when it is one of this file.
+    let was = since.and_then(|c| {
         let p: Vec<&str> = c.split('.').collect();
-        if let ["r2", h, n, _] = p.as_slice() {
-            if *h == hash && n.parse::<u64>().ok() == Some(size) {
-                return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
+        match p.as_slice() {
+            ["r3", h, n, ts, m] if *h == hash => {
+                let n = n.parse::<u64>().ok().filter(|&n| n <= size)?;
+                (mark_of(log, n).as_deref() == Some(*m)).then_some((n, ts.parse::<i64>().ok()?))
             }
+            _ => None,
+        }
+    });
+    // Unchanged: nothing is read or parsed.
+    if let (Some(c), Some((n, _))) = (since, was) {
+        if n == size {
+            return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
         }
     }
     let path = log.to_string_lossy().to_string();
@@ -953,32 +993,41 @@ pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: O
         }
         _ => None,
     };
-    let (from, acc) = match base {
+    // A kept state that does not fit: the log changed under it, so the old list may not hold.
+    let mut whole = linear && kept.is_some() && base.is_none();
+    let (mut from, mut acc) = match base {
         Some(k) => (k.at, k.acc.clone()),
         None => (0, Acc::default()),
     };
     // Line starts with no tool call waiting before them: where the next read may start.
-    let mut p = herdr_core::ConversationParser::new();
-    let mut starts: Vec<(u64, usize)> = vec![];
-    let end = crate::tail::each_line(log, from, size, |l, at| {
-        if !p.has_open_tool_use() {
-            starts.push((at, l.len()));
+    let (items, starts, end) = loop {
+        let mut p = herdr_core::ConversationParser::new();
+        let mut starts: Vec<(u64, usize)> = vec![];
+        let end = crate::tail::each_line(log, from, size, |l, at| {
+            if !p.has_open_tool_use() {
+                starts.push((at, l.len()));
+            }
+            p.feed_at(l, Some(at));
+        })?;
+        // A result for a call before the kept start: what it changes is in the kept part. Read it all again.
+        if from > 0 && p.late_results() > 0 {
+            (from, acc, whole) = (0, Acc::default(), true);
+            continue;
         }
-        p.feed_at(l, Some(at));
-    })?;
-    let items = crate::tail::without_pictures(p.items());
-    drop(p);
+        break (crate::tail::without_pictures(p.items()), starts, end);
+    };
     // The next start: the latest line start that passes, else this one (`items[..k]` are then the final ones).
     let (mut at, mut k) = (from, 0usize);
     if linear {
         let mut checks = 0;
         for &(s, len) in starts.iter().rev().take(LOOK).filter(|x| x.0 > from) {
             // Cheap first: the line alone must start with text.
-            if !starts_clean(items_in(log, s, s + len as u64 + 1)?.first()) {
+            if !starts_clean(items_in(log, s, s + len as u64 + 1)?.0.first()) {
                 continue;
             }
-            let b = items_in(log, s, end)?;
-            if starts_clean(b.first()) && b.len() <= items.len() && items[items.len() - b.len()..] == b[..] {
+            // No result after it for a call before it: that call's item could still change.
+            let (b, late) = items_in(log, s, end)?;
+            if late == 0 && starts_clean(b.first()) && b.len() <= items.len() && items[items.len() - b.len()..] == b[..] {
                 (at, k) = (s, items.len() - b.len());
                 break;
             }
@@ -988,7 +1037,6 @@ pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: O
             }
         }
     }
-    let mut acc = acc;
     acc.add(&items[..k], home);
     let next = match linear {
         true => {
@@ -1000,17 +1048,9 @@ pub fn answer_kept(log: &Path, since: Option<&str>, home: Option<&Path>, kept: O
     acc.add(&items[k..], home);
     let all = acc.finish(home);
     let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
-    let cursor = format!("r2.{hash}.{size}.{newest}");
-    let was = since.and_then(|c| {
-        let p: Vec<&str> = c.split('.').collect();
-        match p.as_slice() {
-            ["r2", h, size, ts] if *h == hash => Some((size.parse::<u64>().ok()?, ts.parse::<i64>().ok()?)),
-            _ => None,
-        }
-    });
+    let cursor = format!("r3.{hash}.{size}.{newest}.{}", mark_of(log, size).unwrap_or_default());
     let answer = match was {
-        Some((n, _)) if n == size => Answer { items: vec![], cursor, full: false },
-        Some((n, ts)) if n < size => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
+        Some((n, ts)) if n < size && !whole => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
         _ => Answer { items: all, cursor, full: true },
     };
     Ok((answer, next, from))

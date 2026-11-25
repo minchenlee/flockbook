@@ -307,7 +307,7 @@ pub fn run(argv: &[String]) -> String {
                     let Some(path) = log else { return r.finish_with(json!({"cursor": null, "full": true})) };
                     let user_home = std::env::var_os("HOME").map(PathBuf::from);
                     // What the last call kept (resources/<hash of the terminal>.json beside the cache): only the new lines are parsed.
-                    let kept_at = cache_url.map(|c| c.with_file_name("resources").join(format!("{}.json", crate::protocol::fnv1a(&found.pane.terminal_id))));
+                    let kept_at = cache_url.and_then(|c| crate::resources::state_dir(c)).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&found.pane.terminal_id))));
                     let kept: Option<crate::resources::Kept> = kept_at.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok());
                     let linear = matches!(kind.as_str(), "claude" | "codex" | "cursor" | "grok");
                     return match crate::resources::answer_kept(path, opt("--since").as_deref(), user_home.as_deref(), kept.as_ref(), linear) {
