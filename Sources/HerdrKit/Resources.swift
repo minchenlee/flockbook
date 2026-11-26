@@ -239,14 +239,29 @@ extension Resources {
     }
 
     /// The working folder a log line names (the first \`"cwd":"…"\`; absolute, no escape in it).
+    /// The first `"cwd":"…"` of a log line: an absolute path with no escape in it, without its trailing slashes. On the
+    /// UTF-8 bytes: every log line goes through it, and Foundation's `range(of:)` took most of a large log's read.
     static func lineCwd(_ l: String) -> String? {
-        guard let r = l.range(of: "\"cwd\":\"") else { return nil }
-        let rest = l[r.upperBound...]
-        guard let e = rest.firstIndex(of: "\"") else { return nil }
-        var c = String(rest[..<e])
-        guard c.hasPrefix("/"), !c.contains("\\") else { return nil }
-        while c.hasSuffix("/") { c.removeLast() }
-        return c.isEmpty ? nil : c
+        var l = l
+        return l.withUTF8 { b -> String? in
+            let pat: [UInt8] = Array("\"cwd\":\"".utf8), n = b.count, m = pat.count
+            var i = 0
+            while i + m <= n {
+                if b[i] == 0x22, b[i + 1] == 0x63 {
+                    var j = 2
+                    while j < m, b[i + j] == pat[j] { j += 1 }
+                    if j == m { break }
+                }
+                i += 1
+            }
+            guard i + m <= n else { return nil }
+            let s = i + m
+            var e = s
+            while e < n, b[e] != 0x22 { if b[e] == 0x5C { return nil }; e += 1 }
+            guard e < n, e > s, b[s] == 0x2F else { return nil }
+            while e > s, b[e - 1] == 0x2F { e -= 1 }
+            return e > s ? String(decoding: UnsafeBufferPointer(rebasing: b[s..<e]), as: UTF8.self) : nil
+        }
     }
 
     /// The \`action\`, \`title\` and \`file_path\` of an Artifact call's input (JSON, maybe cut: then read as text).

@@ -87,6 +87,11 @@ func checksResources() throws {
     check(Resources.ago(.min, now: 1_000_000) == "\(Int(Double(1_000_000 - Double(Int64.min)) / 1000 / 86400))d" && Resources.ago(.max, now: 1_000_000) == "now",
           "resources: ago of a saturated timestamp does not overflow")
     check(Resources.collect(file: resFixtures.appendingPathComponent("no-such.jsonl"), home: nil) == nil, "resources: a file that cannot be read gives nil")
+    let cwds: [(String, String?)] = [
+        (#"{"type":"user","cwd":"/a/b//","x":1}"#, "/a/b"), (#"{"cwd":"/"}"#, nil), (#"{"cwd":"rel/x"}"#, nil),
+        (#"{"cwd":"/a\b"}"#, nil), (#"{"cwd":""}"#, nil), (#"{"cwd":"/a"#, nil), (#"{"c":1,"cwd":"/é/ü","cwd":"/z"}"#, "/é/ü"),
+        (#"{"ccwd":"/x"}"#, nil), (#"{"type":"x"}"#, nil), (#""cwd":"/x""#, "/x"), ("", nil)]
+    for (l, want) in cwds { check(Resources.lineCwd(l) == want, "resources: lineCwd of \(l) is \(want ?? "nil")") }
     checksResourcesList()
 }
 
