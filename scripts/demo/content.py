@@ -1129,3 +1129,6 @@ WORKSPACES = [
         ]},
     ]},
 ]
+
+# Resources for the other main agents (each gets a few, on its own project).
+resdemo.extend(WORKSPACES)

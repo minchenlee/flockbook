@@ -197,7 +197,7 @@ def main():
     scripts(plan, state_dir)
     skills(home)
     # The files the Resources demo agent names (Resources lists a doc only when its file is there).
-    print(f"wrote {resdemo.write_files()} files for the Resources demo under {resdemo.CWD}")
+    print(f"wrote {resdemo.write_files()} files for the Resources demo under {home}/code")
     print(f"wrote {len(plan)} logs, screens and scripts under {state_dir}")
 
     if only is not None and not only <= {e["agent"]["name"] for e in plan}:

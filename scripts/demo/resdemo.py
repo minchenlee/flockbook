@@ -10,6 +10,7 @@ local servers and other links. Tool calls (Read, Write, Edit, Bash, Glob) name t
 """
 import os
 import struct
+import uuid
 import zlib
 
 HOME = os.path.expanduser("~")
@@ -116,29 +117,29 @@ def t(rel):
 
 # ------------------------------------------------------------------ writing them
 
-def _md(title, rel):
+def _md(title, rel, project="Lighthouse"):
     return (f"# {title}\n\n"
-            f"Part of the Lighthouse docs (fictional, for the Flockbook demo). File: `{rel}`.\n\n"
+            f"Part of the {project} docs (fictional, for the Flockbook demo). File: `{rel}`.\n\n"
             "## Summary\n\n"
             "- What this page covers, in one line.\n"
             "- Who reads it: co-op developers and operators.\n"
             "- Last reviewed: November 2026.\n")
 
 
-def _html(title):
+def _html(title, project="Lighthouse"):
     return ("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
             f"<title>{title}</title>\n"
             "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;color:#1d2a24}"
             "h1{color:#2f6b55}</style>\n</head>\n<body>\n"
-            f"<h1>{title}</h1>\n<p>A page of the fictional Lighthouse docs, for the Flockbook demo.</p>\n"
+            f"<h1>{title}</h1>\n<p>A page of the fictional {project} docs, for the Flockbook demo.</p>\n"
             "</body>\n</html>\n")
 
 
-def _pdf(title):
+def _pdf(title, project="Lighthouse"):
     """A real one-page PDF (Helvetica text), with a correct xref table."""
     esc = title.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
     stream = (f"BT /F1 24 Tf 72 720 Td ({esc}) Tj ET\n"
-              "BT /F1 12 Tf 72 690 Td (Fictional Lighthouse docs, for the Flockbook demo.) Tj ET\n").encode()
+              f"BT /F1 12 Tf 72 690 Td (Fictional {project} docs, for the Flockbook demo.) Tj ET\n").encode()
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -207,8 +208,8 @@ def write_files(cwd=CWD):
     files += [(rel, _pdf(title)) for rel, title in PDF]
     files += [(rel, _png(color)) for rel, color in PNG + [LATER[1]]]
     files += [(rel, _svg(title).encode()) for rel, title in SVG]
-    for rel, data in files:
-        path = f"{cwd}/{rel}"
+    files = [(f"{cwd}/{rel}", data) for rel, data in files] + extra_files()
+    for path, data in files:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             f.write(data)
@@ -355,3 +356,186 @@ REPLIES = [
     "Good idea. The redirects are in now; `specs/redirects-spec.md` lists all 23.",
     "On it. That's in now, and the build is green.",
 ]
+
+
+# ------------------------------------------------------------------ the other main agents
+
+# A few resources for each agent the recording and the shots open (owner 11-26), on that agent's own made-up project:
+# docs (md, html, pdf, png, svg) under HOME/code/<space dir>, an Artifact publish, GitHub links on fbdemo-coop, other
+# links and a command. extend() puts them right after the first user message, so the end of each conversation (a
+# question, an approval) stays as it is. Per agent: docs [(path, title)], art (an Artifact title or None),
+# gh [path on the repo], links [url], cmd (lead line, command).
+EXTRA = {
+    "orchard-api-dev": {"docs": [("docs/pricing/rounding-rules.md", "Rounding rules for order totals"),
+                                 ("docs/pricing/tax-table.md", "Tax rates by county"),
+                                 ("reports/cart-diff-2026-11.html", "Cart totals before and after"),
+                                 ("exports/receipt-sample.pdf", "Sample receipt"),
+                                 ("screenshots/cart-total-off-by-cent.png", "Cart total off by a cent")],
+                        "art": "Rounding before and after", "gh": ["pull/212", "issues/208", "actions/runs/1187"],
+                        "links": ["https://docs.python.org/3/library/decimal.html", "http://localhost:8000/cart"],
+                        "cmd": ("To check the totals against the fixtures:", "pytest tests/test_pricing.py -q")},
+    "orchard-promo-dev": {"docs": [("docs/checkout/promo-codes-spec.md", "Promo codes spec"),
+                                   ("docs/checkout/discount-examples.md", "Discount examples"),
+                                   ("diagrams/promo-stacking.svg", "How two codes stack"),
+                                   ("exports/promo-terms.pdf", "Promo terms for the shop"),
+                                   ("prototypes/promo-field.html", "Promo code field prototype")],
+                          "art": "Promo stacking options", "gh": ["issues/215", "pull/219"],
+                          "links": ["http://localhost:8000/checkout"],
+                          "cmd": ("The codes in the test shop:", "python -m orchard.promo --list")},
+    "atlas-import-dev": {"docs": [("docs/import/csv-format.md", "Harvest CSV format"),
+                                  ("docs/import/malformed-rows.md", "Malformed rows we have seen"),
+                                  ("reports/import-2026-11-24.html", "Import report, 24 November"),
+                                  ("exports/import-errors.pdf", "Import errors by farm"),
+                                  ("screenshots/import-errors.png", "Import errors in the admin")],
+                         "art": "Import error summary", "gh": ["pull/88", "issues/84", "actions/runs/2291"],
+                         "links": ["https://www.rfc-editor.org/rfc/rfc4180", "http://localhost:8080/imports"],
+                         "cmd": ("A dry run on the November file:", "atlas import samples/harvest-2026-11.csv --dry-run")},
+    "atlas-schema-dev": {"docs": [("docs/schema/variety-column.md", "Variety column"),
+                                  ("docs/schema/migrations.md", "How we run migrations"),
+                                  ("diagrams/harvest-schema.svg", "Harvest tables"),
+                                  ("reports/index-lock-test.html", "Index lock test")],
+                         "art": None, "gh": ["pull/91", "issues/90"],
+                         "links": ["https://www.postgresql.org/docs/current/sql-altertable.html"],
+                         "cmd": ("To see the SQL without running it:", "make migrate-dry-run")},
+    "harbor-deploy-ops": {"docs": [("docs/deploy/staging.md", "Staging deploys"),
+                                   ("docs/deploy/checklist.md", "Deploy checklist"),
+                                   ("reports/dry-run-2026-11-25.html", "Dry run, 25 November"),
+                                   ("exports/change-window.pdf", "Change window for staging"),
+                                   ("diagrams/deploy-flow.svg", "Deploy flow")],
+                          "art": "Staging deploy plan", "gh": ["pull/57", "actions/runs/4410", "actions/runs/4412"],
+                          "links": ["http://localhost:9090/targets", "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"],
+                          "cmd": ("The dry run on its own:", "sh scripts/deploy.sh staging --dry-run")},
+    "harbor-runbook-docs": {"docs": [("docs/runbooks/incident-roles.md", "Incident roles"),
+                                     ("docs/runbooks/rollback.md", "Rollback runbook"),
+                                     ("docs/runbooks/db-restore.md", "Restore the database"),
+                                     ("diagrams/rollback-steps.svg", "Rollback steps"),
+                                     ("exports/rollback-runbook.pdf", "Rollback runbook (print)"),
+                                     ("screenshots/error-rate.png", "Error rate during a rollback")],
+                            "art": "Rollback runbook", "gh": ["issues/61"],
+                            "links": ["http://localhost:3000/d/deploys"],
+                            "cmd": ("To practise it on staging:", "harbor rollback --to previous --dry-run")},
+    "lighthouse-start-docs": {"docs": [("docs/getting-started-draft.md", "Getting Started (draft)"),
+                                       ("docs/local-setup.md", "Run the docs site locally"),
+                                       ("screenshots/first-run.png", "The site on first run"),
+                                       ("site/_preview/getting-started.html", "Getting Started preview")],
+                              "art": None, "gh": ["pull/151", "issues/146"],
+                              "links": ["http://localhost:4321/getting-started"],
+                              "cmd": ("To see the draft:", "npm run dev")},
+    "tidepool-parse-dev": {"docs": [("docs/since-flag.md", "The --since flag"),
+                                    ("docs/time-formats.md", "Time formats we accept"),
+                                    ("benches/parse-before-after.svg", "Parse time before and after"),
+                                    ("reports/parse-bench.html", "Parser benchmark")],
+                           "art": None, "gh": ["pull/34", "issues/31", "actions/runs/905"],
+                           "links": ["https://docs.rs/chrono/latest/chrono/", "https://doc.rust-lang.org/book/"],
+                           "cmd": ("Only the new tests:", "cargo test -p tidepool-parse since")},
+    "tidepool-release-dev": {"docs": [("docs/release-0.6.0.md", "Release 0.6.0"),
+                                      ("docs/upgrade-0.5-to-0.6.md", "Upgrade from 0.5"),
+                                      ("screenshots/tail-color.png", "Colored output in 0.6"),
+                                      ("exports/release-notes-0.6.0.pdf", "Release notes 0.6.0")],
+                             "art": "0.6.0 release notes", "gh": ["pull/40", "actions/runs/951"],
+                             "links": ["https://github.com/fbdemo-coop/tidepool/releases/tag/v0.6.0"],
+                             "cmd": ("What the release would do:", "cargo release 0.6.0 --dry-run")},
+    "quarry-rank-dev": {"docs": [("docs/ranking/freshness.md", "Freshness in ranking"),
+                                 ("docs/ranking/bm25-notes.md", "BM25 notes"),
+                                 ("reports/ndcg-freshness.html", "NDCG with freshness"),
+                                 ("diagrams/decay-curve.svg", "Freshness decay curve"),
+                                 ("exports/ranking-review.pdf", "Ranking review")],
+                        "art": "Freshness decay curves", "gh": ["pull/73", "issues/70"],
+                        "links": ["https://en.wikipedia.org/wiki/Okapi_BM25", "http://localhost:7700/search?q=apples"],
+                        "cmd": ("The offline evaluation:", "quarry eval --set fresh-2026-11")},
+    "quarry-notes-docs": {"docs": [("notes/weekly-2026-11-24.md", "Weekly update, 24 November"),
+                                   ("notes/weekly-2026-11-17.md", "Weekly update, 17 November"),
+                                   ("reports/latency-week-47.html", "Search latency, week 47"),
+                                   ("screenshots/p95-latency.png", "p95 latency"),
+                                   ("exports/weekly-2026-11-24.pdf", "Weekly update (PDF)")],
+                          "art": "Weekly update 47", "gh": ["pull/76", "actions/runs/3302"],
+                          "links": ["http://localhost:7700/stats"],
+                          "cmd": ("The numbers come from:", "quarry report --week 47")},
+    "meadow-card-dev": {"docs": [("docs/design/harvest-card.md", "Harvest card design"),
+                                 ("screenshots/card-small.png", "Card on a small phone"),
+                                 ("screenshots/card-large.png", "Card on a large phone"),
+                                 ("diagrams/card-layout.svg", "Card layout"),
+                                 ("prototypes/card-sizes.html", "Card sizes prototype")],
+                        "art": "Harvest card sizes", "gh": ["pull/128", "issues/125", "actions/runs/7710"],
+                        "links": ["https://www.w3.org/WAI/WCAG22/Understanding/reflow.html"],
+                        "cmd": ("The UI tests on the small simulator:", "make ui-test DEVICE=small")},
+    "meadow-onboard-dev": {"docs": [("docs/onboarding/flow.md", "Onboarding flow"),
+                                    ("docs/onboarding/copy.md", "Onboarding copy"),
+                                    ("screenshots/onboard-step1.png", "Onboarding, step 1"),
+                                    ("diagrams/onboarding-flow.svg", "Sign-in choices"),
+                                    ("exports/sign-in-options.pdf", "Sign-in options")],
+                           "art": "Onboarding flow", "gh": ["issues/131", "pull/133"],
+                           "links": ["http://localhost:8090/auth/health"],
+                           "cmd": ("The sign-in tests:", "make test SUITE=onboarding")},
+    "beacon-retry-dev": {"docs": [("docs/push/retries.md", "Push retries"),
+                                  ("docs/push/backoff.md", "Backoff and Retry-After"),
+                                  ("diagrams/retry-backoff.svg", "Retry with backoff"),
+                                  ("reports/429-rates.html", "429 rates by provider")],
+                         "art": None, "gh": ["pull/64", "issues/60", "actions/runs/1530"],
+                         "links": ["https://www.rfc-editor.org/rfc/rfc6585#section-4", "http://localhost:8025/"],
+                         "cmd": ("Only the retry tests:", "go test ./internal/push/... -run Retry")},
+    "ledger-invoice-dev": {"docs": [("docs/invoices/multi-currency.md", "Multi-currency invoices"),
+                                    ("docs/invoices/rounding.md", "Rounding on invoices"),
+                                    ("exports/invoice-sample-eur.pdf", "Sample invoice (EUR)"),
+                                    ("exports/invoice-sample-jpy.pdf", "Sample invoice (JPY)"),
+                                    ("screenshots/invoice-totals.png", "Invoice totals"),
+                                    ("reports/fx-rates-2026-11.html", "Exchange rates, November")],
+                           "art": "Invoice rounding options", "gh": ["pull/45", "issues/42"],
+                           "links": ["https://en.wikipedia.org/wiki/ISO_4217"],
+                           "cmd": ("A sample invoice:", "ledger invoice render --sample eur")},
+}
+
+SPACE = {"orchard": "Orchard", "atlas": "Atlas", "harbor": "Harbor", "lighthouse": "Lighthouse", "tidepool": "Tidepool",
+         "quarry": "Quarry", "meadow": "Meadow", "beacon": "Beacon", "ledger": "Ledger"}
+_COLORS = [(47, 107, 85), (58, 96, 140), (140, 88, 52), (110, 70, 130), (60, 120, 120)]
+
+
+def _space(name):
+    return name.split("-")[0]
+
+
+def extra_files():
+    """[(absolute path, bytes)] of every EXTRA doc, under HOME/code/<space dir>."""
+    out = []
+    for name, spec in EXTRA.items():
+        d = _space(name)
+        for i, (rel, title) in enumerate(spec["docs"]):
+            ext = rel.rsplit(".", 1)[1]
+            data = {"md": lambda: _md(title, rel, SPACE[d]).encode(), "html": lambda: _html(title, SPACE[d]).encode(),
+                    "pdf": lambda: _pdf(title, SPACE[d]), "png": lambda: _png(_COLORS[i % len(_COLORS)]),
+                    "svg": lambda: _svg(title).encode()}[ext]()
+            out.append((f"{HOME}/code/{d}/{rel}", data))
+    return out
+
+
+def extra_turns(name):
+    spec = EXTRA[name]
+    d = _space(name)
+    tilde, repo = f"~/code/{d}", f"https://github.com/fbdemo-coop/{d}"
+    docs = spec["docs"]
+    turns = [("read", docs[0][0], _md(docs[0][1], docs[0][0], SPACE[d])),
+             ("a", "Background first. What is already written:\n\n"
+                   + "\n".join(f"- [{title}]({tilde}/{rel})" for rel, title in docs))]
+    if spec["art"]:
+        page = next((rel for rel, _ in docs if rel.endswith(".html")), docs[0][0])
+        url = "https://claude.ai/artifact/" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"fbdemo-{name}"))
+        turns.append(("tool", "Artifact", {"action": "publish", "file_path": f"{HOME}/code/{d}/{page}", "title": spec["art"]},
+                      f"Published. Link: {url}"))
+    lead, cmd = spec["cmd"]
+    turns.append(("a", "Related work:\n\n" + "\n".join(f"- {repo}/{g}" for g in spec["gh"])
+                  + "\n" + "\n".join(f"- {u}" for u in spec["links"]) + "\n\n" + _sh(lead, cmd)))
+    return turns
+
+
+def extend(workspaces):
+    """Adds the EXTRA resources to those agents, right after their first (user) turn."""
+    seen = set()
+    for ws in workspaces:
+        for tab in ws["tabs"]:
+            for pane in tab["panes"]:
+                if pane["name"] in EXTRA:
+                    pane["turns"] = pane["turns"][:1] + extra_turns(pane["name"]) + pane["turns"][1:]
+                    seen.add(pane["name"])
+    missing = set(EXTRA) - seen
+    if missing:
+        raise SystemExit(f"resdemo.EXTRA: no such agent: {', '.join(sorted(missing))}")
