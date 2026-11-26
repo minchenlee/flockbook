@@ -19,8 +19,13 @@ pub struct HcSession {
 
 /// The user's home directory: `HOME` on Unix, `USERPROFILE` on Windows. Empty when unset.
 pub fn home_dir(env: &HashMap<String, String>) -> String {
-    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    var(env, key, cfg!(windows)).unwrap_or_default().to_string()
+    home_on(env, cfg!(windows))
+}
+
+/// `home_dir` for the platform `windows` says (tests check the other platform's rules too).
+fn home_on(env: &HashMap<String, String>, windows: bool) -> String {
+    let key = if windows { "USERPROFILE" } else { "HOME" };
+    var(env, key, windows).unwrap_or_default().to_string()
 }
 
 pub fn process_env() -> HashMap<String, String> {
@@ -93,7 +98,7 @@ impl HcSession {
         if let Some(run) = run_user {
             return HcSession::new(&format!("{run}/herdr-core/{session}.sock"));
         }
-        let state = non_empty(env, "XDG_STATE_HOME", windows).map(String::from).unwrap_or_else(|| home_dir(env) + "/.local/state");
+        let state = non_empty(env, "XDG_STATE_HOME", windows).map(String::from).unwrap_or_else(|| home_on(env, windows) + "/.local/state");
         HcSession::new(&format!("{state}/herdr-core/{session}/{session}.sock"))
     }
 

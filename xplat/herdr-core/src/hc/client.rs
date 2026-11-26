@@ -342,9 +342,9 @@ pub mod fake_core {
     mod pipe {
         use std::os::windows::ffi::OsStrExt;
         use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::Foundation::{GetLastError, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE};
         use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
-        use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES};
+        use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES};
 
         /// One more instance of the pipe `path`, in byte mode with blocking calls.
         pub fn instance(path: &str) -> OwnedHandle {
@@ -359,11 +359,24 @@ pub mod fake_core {
         }
 
         /// Waits for a client on the instance; `None` when that fails.
+        /// A client that connected and closed before ConnectNamedPipe (ERROR_NO_DATA) is disconnected and the same
+        /// instance waits again: dropping it would leave no instance of the name until the next one is made, and a
+        /// client in that gap gets "file not found".
         pub fn accept(h: OwnedHandle) -> Option<std::fs::File> {
-            // SAFETY: `h` is a pipe instance opened for blocking calls; no OVERLAPPED.
-            let ok = unsafe { ConnectNamedPipe(h.as_raw_handle(), std::ptr::null_mut()) } != 0;
-            // A client that came between CreateNamedPipeW and ConnectNamedPipe is connected too.
-            (ok || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED).then(|| std::fs::File::from(h))
+            loop {
+                // SAFETY: `h` is a pipe instance opened for blocking calls; no OVERLAPPED.
+                let ok = unsafe { ConnectNamedPipe(h.as_raw_handle(), std::ptr::null_mut()) } != 0;
+                // SAFETY: GetLastError right after the failed call, on this thread.
+                let err = if ok { 0 } else { unsafe { GetLastError() } };
+                // A client that came between CreateNamedPipeW and ConnectNamedPipe is connected too.
+                if ok || err == ERROR_PIPE_CONNECTED {
+                    return Some(std::fs::File::from(h));
+                }
+                // SAFETY: `h` is a valid pipe instance; disconnecting a closed client makes it listen-ready again.
+                if err != ERROR_NO_DATA || unsafe { DisconnectNamedPipe(h.as_raw_handle()) } == 0 {
+                    return None;
+                }
+            }
         }
     }
 }
