@@ -44,6 +44,7 @@ extension ConversationParser {
                 if run.isEmpty { runKey = id }
                 run.append((name, Self.label(for: name), id))
                 callById[id] = ToolCall(id: id, toolName: name, summary: Self.summary(name: name, input: input), input: Self.cut(Self.prettyJSON(input)))
+                callSeq += 1; callById[id]?.seq = callSeq
             default: break
             }
         }

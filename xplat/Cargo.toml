@@ -7,6 +7,23 @@ edition = "2021"
 license = "MIT"
 publish = false
 
+# Lints for every crate (each member has `[lints] workspace = true`). Old warnings are frozen, not fixed: the gate is
+# scripts/clippy-baseline.mjs (CI job xplat / Clippy), which fails when a count passes xplat/clippy-baseline.json.
+# The default groups stay as clippy has them (style, complexity, perf: warn); the two below are errors.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+# A panic in the helper or the app ends the person's session: `?`, or `expect("why it cannot fail")`. Tests may.
+unwrap_used = "warn"
+# The helper's stdout is its protocol: a stray println! breaks the mod. Real output: #[allow(.., reason = "…")].
+print_stdout = "warn"
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+
 [workspace.dependencies]
 iced = { version = "0.14", features = ["advanced", "markdown"] }
 iced_test = "0.14"

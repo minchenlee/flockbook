@@ -30,6 +30,19 @@ public struct ConversationWindow: Equatable, Sendable {
         endId = end < ids.count && end > 0 ? ids[end - 1] : nil
     }
 
+    /// Brings the row `id` into the window (the Since you left card's Jump): the window starts at it, with up to
+    /// `maxRows` after it, and at least a page when there are rows for one. A row already shown moves nothing. False
+    /// when the row is not in `ids`.
+    @discardableResult
+    public mutating func reveal(_ id: String, _ ids: [String], page: Int = ConversationWindow.page, maxRows: Int = ConversationWindow.maxRows) -> Bool {
+        guard let i = ids.firstIndex(of: id) else { return false }
+        guard !range(ids).contains(i) else { return true }
+        let end = min(ids.count, i + maxRows), start = max(0, min(i, end - page))
+        shown = end - start
+        endId = end < ids.count ? ids[end - 1] : nil
+        return true
+    }
+
     /// Back to the newest page.
     public mutating func jumpToLatest(page: Int = ConversationWindow.page) {
         let loads = loads

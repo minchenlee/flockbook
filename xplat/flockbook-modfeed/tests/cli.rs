@@ -4,6 +4,7 @@
 mod common;
 use common::{claude, FakeHc};
 use serde_json::Value;
+use std::io::Write;
 use std::process::Command;
 
 fn run(sock: &str, args: &[&str]) -> Vec<Value> {
@@ -18,11 +19,27 @@ fn run(sock: &str, args: &[&str]) -> Vec<Value> {
     String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
+/// A real path that is not UTF-8 is not sent (the mod would open another path than the one checked).
+/// APFS does not allow such names, so Linux only.
+#[test]
+#[cfg(target_os = "linux")]
+fn open_check_refuses_a_real_path_that_is_not_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path().canonicalize().unwrap();
+    let bad = d.join(std::ffi::OsStr::from_bytes(b"r\xff.md"));
+    std::fs::write(&bad, "# R").unwrap();
+    std::os::unix::fs::symlink(&bad, d.join("a.md")).unwrap();
+    let v = run("/nonexistent.sock", &["open-check", "--path", d.join("a.md").to_str().unwrap()]);
+    assert_eq!((v[1]["type"].as_str(), v[1]["ok"].as_bool()), (Some("openable"), Some(false)), "{v:?}");
+    assert!(v[1].get("path").is_none());
+}
+
 #[test]
 fn protocol_lines() {
     let v = run("/nonexistent.sock", &["version"]);
     assert_eq!(v[0], serde_json::json!({"type":"header","protocol":1,"sidecar":"0.1.0","cmd":"version"}));
-    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage"]));
+    assert_eq!(v[1]["commands"], serde_json::json!(["version", "feed", "status", "card", "approve", "answer", "send", "paste-image", "helper", "update-check", "queue", "phone", "commands", "glance", "summary", "summary-models", "summary-usage", "resources", "open-check"]));
     assert_eq!(v.last().unwrap()["type"], "end");
     assert_eq!(v.last().unwrap()["ok"], true);
 
@@ -31,6 +48,24 @@ fn protocol_lines() {
     assert_eq!(u.last().unwrap()["ok"], false);
     assert_eq!(run("/nonexistent.sock", &["feed"])[1]["message"], "feed needs --terminal <addr>");
     assert_eq!(run("/nonexistent.sock", &["feed", "--terminal", "t1"])[1]["code"], "no-core");
+    assert_eq!(run("/nonexistent.sock", &["resources"])[1]["message"], "resources needs --terminal <addr>");
+    assert_eq!(run("/nonexistent.sock", &["resources", "--terminal", "t1"])[1]["code"], "no-core");
+    assert_eq!(run("/nonexistent.sock", &["open-check"])[1]["message"], "open-check needs --path <file>");
+
+    // open-check: local, no core needed; the real file, or why not.
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path().canonicalize().unwrap();
+    std::fs::write(d.join("b.md"), "# B").unwrap();
+    std::fs::write(d.join("notes.txt"), "x").unwrap();
+    std::os::unix::fs::symlink(d.join("b.md"), d.join("a.md")).unwrap();
+    std::os::unix::fs::symlink(d.join("notes.txt"), d.join("preview.md")).unwrap();
+    let ok = run("/nonexistent.sock", &["open-check", "--path", d.join("a.md").to_str().unwrap()]);
+    assert_eq!(ok[1], serde_json::json!({"type": "openable", "ok": true, "path": d.join("b.md").to_str().unwrap()}));
+    assert_eq!(ok.last().unwrap()["ok"], true);
+    let no = run("/nonexistent.sock", &["open-check", "--path", d.join("preview.md").to_str().unwrap()]);
+    assert_eq!((no[1]["type"].as_str(), no[1]["ok"].as_bool()), (Some("openable"), Some(false)));
+    assert!(no[1]["why"].as_str().is_some_and(|w| !w.is_empty()));
+    assert_eq!(run("/nonexistent.sock", &["open-check", "--path", "/nonexistent/x.md"])[1]["why"], "File not found.");
 
     let fake = FakeHc::start();
     fake.set_terminals(vec![claude("t1", "blocked", "permission"), common::terminal("t2", &["zsh"], Some(9), None, None)]);
@@ -153,4 +188,77 @@ fn send_refuses_when_the_agents_box_has_text() {
     fake.clear_screen("t1");
     assert_ne!(send()["result"], "box_not_empty", "no screen: it goes as before");
     assert!(fake.calls("terminal.send").len() > typed);
+}
+
+
+/// `resources --cache`: the state kept beside the cache (one file per terminal) makes the next call parse only the new
+/// lines, with the same answer as the whole log.
+#[test]
+#[cfg(unix)]
+fn resources_does_not_follow_a_linked_state_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache.json");
+    let cache_s = cache.to_string_lossy().to_string();
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    run(&fake.path, &["glance", "--cache", &cache_s]);
+    let log = dir.path().join("s.jsonl");
+    let say = serde_json::json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-03T01:40:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"See https://a.example.com"}]}}).to_string();
+    std::fs::write(&log, say + "\n").unwrap();
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+    c["entries"]["t1"]["path"] = serde_json::json!(log);
+    std::fs::write(&cache, c.to_string()).unwrap();
+    // resources/ is a link to another folder with JSON files of its own, one of them old.
+    let other = dir.path().join("elsewhere");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("abc.json"), b"{}").unwrap();
+    std::fs::File::options().write(true).open(other.join("abc.json")).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(9 * 24 * 3600)).unwrap();
+    std::os::unix::fs::symlink(&other, dir.path().join("resources")).unwrap();
+    let out = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s]);
+    assert_eq!(out.last().unwrap()["ok"], true, "{out:?}");
+    assert_eq!(out.iter().filter(|l| l["type"] == "res").count(), 1);
+    let names: Vec<String> = std::fs::read_dir(&other).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, vec!["abc.json".to_string()], "nothing written or removed through the link");
+}
+
+#[test]
+fn resources_keeps_a_state_beside_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache.json");
+    let cache_s = cache.to_string_lossy().to_string();
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    run(&fake.path, &["glance", "--cache", &cache_s]);
+    let log = dir.path().join("s.jsonl");
+    let say = |id: &str, text: &str| serde_json::json!({"type":"assistant","uuid":id,"timestamp":"2026-11-03T01:40:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":text}]}}).to_string();
+    let lines: Vec<String> = (0..40).map(|i| say(&format!("a{i}"), &format!("Step {i}: https://s{}.example.com", i % 5))).collect();
+    std::fs::write(&log, lines.join("\n") + "\n").unwrap();
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+    c["entries"]["t1"]["path"] = serde_json::json!(log);
+    std::fs::write(&cache, c.to_string()).unwrap();
+    let res = |v: &[Value]| -> Vec<Value> { v.iter().filter(|l| l["type"] == "res").cloned().collect() };
+    let first = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s]);
+    assert_eq!(first.last().unwrap()["ok"], true, "{first:?}");
+    assert_eq!(res(&first).len(), 5);
+    let kept_dir = dir.path().join("resources");
+    let files: Vec<_> = std::fs::read_dir(&kept_dir).expect("resources/ beside the cache").flatten().map(|e| e.path()).collect();
+    assert_eq!(files.len(), 1, "one file for the terminal");
+    let state: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+    let at = state["at"].as_u64().unwrap();
+    assert!(at > 0, "{state}");
+    // More lines: parsed from the kept start, the same answer as the whole log.
+    std::fs::OpenOptions::new().append(true).open(&log).unwrap().write_all(format!("{}\n", say("b1", "New https://new.example.com and https://s1.example.com")).as_bytes()).unwrap();
+    let more = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s]);
+    let whole = modfeedkit::resources::answer(&log, None, Some(std::path::Path::new("/nonexistent-home"))).unwrap();
+    let want: Vec<Value> = whole.items.iter().map(|r| serde_json::to_value(r).unwrap()).collect();
+    assert_eq!(res(&more), want);
+    assert_eq!(more.last().unwrap()["cursor"], serde_json::json!(whole.cursor));
+    let state: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+    assert!(state["at"].as_u64().unwrap() > at, "the start moved on: {state}");
+    // A broken state file is no state: the whole log is read, the answer is the same, and a good file is written again.
+    std::fs::write(&files[0], b"{\"rules\":1,\"at\":").unwrap();
+    let broken = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s]);
+    assert_eq!(res(&broken), want);
+    let again: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).expect("written whole again");
+    assert!(again["at"].as_u64().unwrap() > 0, "{again}");
 }

@@ -1,0 +1,153 @@
+{
+  "about": "Frozen clippy counts per lint and file: scripts/clippy-baseline.mjs fails when one goes up. Update with node scripts/clippy-baseline.mjs --update on this platform and clippy.",
+  "platform": "darwin",
+  "clippy": "0.1.95",
+  "total": 253,
+  "counts": {
+    "clippy::assertions_on_constants": {
+      "fb-ui/src/theme.rs": 2
+    },
+    "clippy::bool_assert_comparison": {
+      "flockbook/tests/cards.rs": 5
+    },
+    "clippy::cloned_ref_to_slice_refs": {
+      "herdr-core/tests/resolver.rs": 2
+    },
+    "clippy::collapsible_match": {
+      "fb-ui/src/selectable/widget.rs": 1,
+      "flockbook/src/conversation.rs": 1,
+      "herdr-core/src/conversation/mod.rs": 1,
+      "herdr-core/src/question/tests.rs": 1,
+      "spike-select/src/widget.rs": 1
+    },
+    "clippy::disallowed_methods": {
+      "fb-ui/src/term/widget.rs": 1,
+      "flockbook-modfeed/src/serve/hub.rs": 4,
+      "flockbook/src/snapshot.rs": 1
+    },
+    "clippy::double_ended_iterator_last": {
+      "flockbook/src/toprow.rs": 1
+    },
+    "clippy::drain_collect": {
+      "flockbook/tests/conversation.rs": 1
+    },
+    "clippy::field_reassign_with_default": {
+      "flockbook-modfeed/src/glance.rs": 1
+    },
+    "clippy::if_same_then_else": {
+      "flockbook/src/search.rs": 1
+    },
+    "clippy::int_plus_one": {
+      "herdr-core/src/question/tests.rs": 1
+    },
+    "clippy::items_after_test_module": {
+      "flockbook-modfeed/src/serve/net.rs": 1
+    },
+    "clippy::large_enum_variant": {
+      "fb-ui/src/selectable/model.rs": 1,
+      "flockbook/src/state.rs": 1,
+      "spike-select/src/model.rs": 1
+    },
+    "clippy::manual_clamp": {
+      "spike-virt/src/gen.rs": 1
+    },
+    "clippy::manual_is_multiple_of": {
+      "spike-virt/src/gen.rs": 1
+    },
+    "clippy::manual_repeat_n": {
+      "flockbook/src/sidebar.rs": 2
+    },
+    "clippy::manual_strip": {
+      "fb-ui/src/highlight.rs": 1
+    },
+    "clippy::needless_lifetimes": {
+      "flockbook/src/toprow.rs": 1,
+      "herdr-core/src/question/mod.rs": 1
+    },
+    "clippy::needless_range_loop": {
+      "fb-ui/src/selectable/flow/model.rs": 1,
+      "flockbook/tests/glass.rs": 1
+    },
+    "clippy::nonminimal_bool": {
+      "herdr-core/src/question/claude_exact.rs": 1,
+      "herdr-core/src/store.rs": 1
+    },
+    "clippy::overly_complex_bool_expr": {
+      "fb-ui/src/selectable/flow/widget.rs": 2
+    },
+    "clippy::print_stdout": {
+      "flockbook-modfeed/src/install.rs": 18,
+      "flockbook-modfeed/src/serve/mod.rs": 1,
+      "flockbook/src/main.rs": 1,
+      "spike-virt/src/main.rs": 9
+    },
+    "clippy::redundant_guards": {
+      "herdr-core/src/question/mod.rs": 2
+    },
+    "clippy::single_match": {
+      "flockbook/src/conversation.rs": 1
+    },
+    "clippy::too_many_arguments": {
+      "flockbook-modfeed/src/summary.rs": 1,
+      "flockbook-modfeed/tests/common/mod.rs": 1
+    },
+    "clippy::type_complexity": {
+      "fb-ui/src/cjk.rs": 1,
+      "flockbook-modfeed/src/cli.rs": 1,
+      "flockbook/src/demo.rs": 1,
+      "flockbook/src/search.rs": 2,
+      "herdr-core/src/approval.rs": 1
+    },
+    "clippy::undocumented_unsafe_blocks": {
+      "flockbook/src/glass.rs": 2,
+      "herdr-core/src/hc/session.rs": 1,
+      "herdr-core/src/hc/wrapper.rs": 1,
+      "spike-virt/src/main.rs": 2
+    },
+    "clippy::unnecessary_map_or": {
+      "herdr-core/src/question/mod.rs": 1,
+      "herdr-core/src/session_log.rs": 1,
+      "herdr-core/src/store.rs": 2,
+      "herdr-core/tests/session_log.rs": 7,
+      "herdr-core/tests/terminal.rs": 2
+    },
+    "clippy::unwrap_used": {
+      "fb-ui/src/highlight.rs": 1,
+      "fb-ui/src/selectable/flow/model.rs": 1,
+      "fb-ui/src/selectable/words.rs": 2,
+      "flockbook-modfeed/src/install.rs": 2,
+      "flockbook-modfeed/src/locate.rs": 2,
+      "flockbook-modfeed/src/phone.rs": 2,
+      "flockbook-modfeed/src/queue.rs": 2,
+      "flockbook-modfeed/src/update.rs": 1,
+      "flockbook/src/actions.rs": 10,
+      "flockbook/src/snapshot.rs": 1,
+      "flockbook/src/terminal.rs": 11,
+      "flockbook/src/toprow.rs": 5,
+      "herdr-core/src/approval.rs": 1,
+      "herdr-core/src/conversation/cursor.rs": 1,
+      "herdr-core/src/conversation/mod.rs": 5,
+      "herdr-core/src/hc/client.rs": 6,
+      "herdr-core/src/hc/keys.rs": 1,
+      "herdr-core/src/hc/mapper.rs": 1,
+      "herdr-core/src/hc/observe.rs": 18,
+      "herdr-core/src/resolver.rs": 1,
+      "herdr-core/src/session_log.rs": 14,
+      "herdr-core/src/statusline.rs": 1,
+      "herdr-core/src/store.rs": 33,
+      "herdr-core/src/terminal.rs": 24,
+      "herdr-core/src/util.rs": 1,
+      "spike-virt/src/main.rs": 1
+    },
+    "dead_code": {
+      "flockbook/tests/cards.rs": 1
+    },
+    "unused_imports": {
+      "flockbook/tests/terminal.rs": 1,
+      "herdr-core/tests/common/mod.rs": 1
+    },
+    "unused_mut": {
+      "flockbook/tests/needs_you.rs": 1
+    }
+  }
+}
