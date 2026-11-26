@@ -20,15 +20,30 @@ pub struct HcSession {
 /// The user's home directory: `HOME` on Unix, `USERPROFILE` on Windows. Empty when unset.
 pub fn home_dir(env: &HashMap<String, String>) -> String {
     let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    env.get(key).cloned().unwrap_or_default()
+    var(env, key, cfg!(windows)).unwrap_or_default().to_string()
 }
 
 pub fn process_env() -> HashMap<String, String> {
     std::env::vars().collect()
 }
 
-fn non_empty<'a>(env: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
-    env.get(k).map(String::as_str).filter(|s| !s.is_empty())
+/// The variable `k`. `windows`: names ignore case, as `std::env::var` does there (Rust 1.95.0,
+/// library/std/src/sys/env/windows.rs: `getenv` calls `GetEnvironmentVariableW`, and Windows compares variable
+/// names without case); hc 0.1.22 reads `HC_SESSION`, `HC_SOCKET` (paths.rs:18, paths.rs:28) and `USERNAME`
+/// (platform/windows.rs:377) that way. An exact match wins; among names that differ only in case, the first in
+/// sort order, so the choice does not depend on the map's order.
+fn var<'a>(env: &'a HashMap<String, String>, k: &str, windows: bool) -> Option<&'a str> {
+    if let Some(v) = env.get(k) {
+        return Some(v);
+    }
+    if !windows {
+        return None;
+    }
+    env.iter().filter(|(n, _)| n.eq_ignore_ascii_case(k)).min_by(|a, b| a.0.cmp(b.0)).map(|(_, v)| v.as_str())
+}
+
+fn non_empty<'a>(env: &'a HashMap<String, String>, k: &str, windows: bool) -> Option<&'a str> {
+    var(env, k, windows).filter(|s| !s.is_empty())
 }
 
 impl HcSession {
@@ -58,27 +73,27 @@ impl HcSession {
                 return HcSession::new(p);
             }
         }
-        if let Some(p) = non_empty(env, "HERDR_DESK_HC_SOCKET") {
+        if let Some(p) = non_empty(env, "HERDR_DESK_HC_SOCKET", windows) {
             return HcSession::new(p);
         }
-        if let Some(p) = non_empty(env, "HC_SOCKET") {
+        if let Some(p) = non_empty(env, "HC_SOCKET", windows) {
             return HcSession::new(p);
         }
-        let session = non_empty(env, "HC_SESSION").unwrap_or("default");
+        let session = non_empty(env, "HC_SESSION", windows).unwrap_or("default");
         if windows {
-            let raw = |k: &str| env.get(k).map(String::as_str);
+            let raw = |k: &str| var(env, k, true);
             return match windows_pipe(raw("USERNAME"), raw("HC_SESSION")) {
                 Ok(p) => HcSession::new(&p),
                 Err(why) => HcSession::refused(why),
             };
         }
-        if let Some(r) = non_empty(env, "XDG_RUNTIME_DIR") {
+        if let Some(r) = non_empty(env, "XDG_RUNTIME_DIR", windows) {
             return HcSession::new(&format!("{r}/herdr-core/{session}.sock"));
         }
         if let Some(run) = run_user {
             return HcSession::new(&format!("{run}/herdr-core/{session}.sock"));
         }
-        let state = non_empty(env, "XDG_STATE_HOME").map(String::from).unwrap_or_else(|| home_dir(env) + "/.local/state");
+        let state = non_empty(env, "XDG_STATE_HOME", windows).map(String::from).unwrap_or_else(|| home_dir(env) + "/.local/state");
         HcSession::new(&format!("{state}/herdr-core/{session}/{session}.sock"))
     }
 
@@ -240,6 +255,9 @@ mod tests {
         assert_eq!(on(&[("UserName", "someone"), ("Hc_Socket", r"\\.\pipe\h.sock")]), r"\\.\pipe\h.sock");
         assert_eq!(on(&[("HC_SOCKET", r"\\.\pipe\h.sock"), ("herdr_desk_hc_socket", r"\\.\pipe\d.sock")]), r"\\.\pipe\d.sock");
         assert!(HcSession::resolve_on(&env(&[("hc_session", "a/b")]), &[], None, true).refused.is_some());
+        // An exact name wins over one that differs only in case.
+        let both = [("USERNAME", "someone"), ("hc_session", "other"), ("HC_SESSION", "work")];
+        assert_eq!(on(&both), r"\\.\pipe\herdr-core-someone-work.sock");
     }
 
     /// Unix names are case-sensitive: `hc_session` is not `HC_SESSION`.
