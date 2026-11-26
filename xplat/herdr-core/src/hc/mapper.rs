@@ -486,20 +486,30 @@ mod tests {
     fn windows_shell_in_front_gets_no_key_identity() {
         crate::resolver::test_windows::run(|| {
             let base_ms: i64 = 1_794_500_000_000;
-            let term = |fg: &str| {
-                Term::parse(&json!({
+            let record = |fg: &str| {
+                json!({
                     "address": "t-win",
+                    "state": "live",
                     "argv": [fg],
                     "pid": 400,
                     "created_ms": 7,
                     "foreground": {"name": fg, "argv": [fg], "pid": 500},
                     "status": {"state": "done", "app": "claude-code"},
                     "status_ms": base_ms + 2000
-                }))
-                .unwrap()
+                })
             };
+            let term = |fg: &str| Term::parse(&record(fg)).unwrap();
             let claude = r"C:\Users\me\.local\bin\claude.exe";
             let tree = |fg: &str| tree_with(vec![proc_(500, 400, base_ms, fg), proc_(501, 500, base_ms + 1000, claude)]);
+            // terminal.list record -> snapshot -> key gate (as the sidecar builds it): does a key go?
+            let key_goes = |fg: &str| {
+                let ws = workspaces_with(&[record(fg)], &tree(fg));
+                let agent = ws[0].tabs[0].panes[0].agent.clone();
+                let screen = crate::fake::FakeScreen::new(ws, vec![""]);
+                let gate = crate::keygate::KeyGate::new(agent, Some(std::sync::Arc::new(|| true)));
+                let sent = crate::keygate::gated_keys(&screen, &["Enter".to_string()], Some(&gate), "hc:t-win", None);
+                sent.is_ok() && screen.sent() == ["Enter"]
+            };
             let mut shells: Vec<String> =
                 SHELLS.iter().flat_map(|s| [format!("{s}.exe"), format!("{}.EXE", s.to_uppercase())]).collect();
             shells.extend([
@@ -509,11 +519,13 @@ mod tests {
             ]);
             for sh in &shells {
                 assert_eq!(process_with(&term(sh), Some("claude"), &tree(sh)), None, "{sh} in front: no key identity");
+                assert!(!key_goes(sh), "{sh} in front: the key gate sends no key");
             }
             // Controls: Claude itself in front, and a wrapper that is no shell, keep their identities.
             assert_eq!(process_with(&term(claude), Some("claude"), &PanicCheck).as_deref(), Some("500@7"));
             let wrap = r"C:\Program Files\secretspec\secretspec.exe";
             assert_eq!(process_with(&term(wrap), Some("claude"), &tree(wrap)).as_deref(), Some("500/501@7"));
+            assert!(key_goes(claude) && key_goes(wrap), "keys reach Claude in front and under a wrapper");
         });
     }
 
