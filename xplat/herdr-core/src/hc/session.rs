@@ -48,6 +48,11 @@ impl HcSession {
 
     /// `run_user`: `/run/user/<uid>` when it exists on this machine (Swift checks the file system; passed in for checks).
     pub fn resolve(env: &HashMap<String, String>, arguments: &[String], run_user: Option<&str>) -> HcSession {
+        Self::resolve_on(env, arguments, run_user, cfg!(windows))
+    }
+
+    /// `resolve` with the platform's rules chosen by `windows`, so both sets can be checked on any host.
+    fn resolve_on(env: &HashMap<String, String>, arguments: &[String], run_user: Option<&str>, windows: bool) -> HcSession {
         if let Some(i) = arguments.iter().position(|a| a == "--hc-socket") {
             if let Some(p) = arguments.get(i + 1) {
                 return HcSession::new(p);
@@ -60,7 +65,7 @@ impl HcSession {
             return HcSession::new(p);
         }
         let session = non_empty(env, "HC_SESSION").unwrap_or("default");
-        if cfg!(windows) {
+        if windows {
             let raw = |k: &str| env.get(k).map(String::as_str);
             return match windows_pipe(raw("USERNAME"), raw("HC_SESSION")) {
                 Ok(p) => HcSession::new(&p),
@@ -225,5 +230,22 @@ mod tests {
     #[test]
     fn missing_socket_is_not_available() {
         assert!(!HcSession::new("/nonexistent/herdr-core/x.sock").is_available());
+    }
+
+    /// hc on Windows reads its variables with `std::env::var`, which ignores case there; so must Flockbook.
+    #[test]
+    fn windows_env_names_ignore_case() {
+        let on = |kv: &[(&str, &str)]| HcSession::resolve_on(&env(kv), &[], None, true).socket_path;
+        assert_eq!(on(&[("username", "someone"), ("hc_session", "work")]), r"\\.\pipe\herdr-core-someone-work.sock");
+        assert_eq!(on(&[("UserName", "someone"), ("Hc_Socket", r"\\.\pipe\h.sock")]), r"\\.\pipe\h.sock");
+        assert_eq!(on(&[("HC_SOCKET", r"\\.\pipe\h.sock"), ("herdr_desk_hc_socket", r"\\.\pipe\d.sock")]), r"\\.\pipe\d.sock");
+        assert!(HcSession::resolve_on(&env(&[("hc_session", "a/b")]), &[], None, true).refused.is_some());
+    }
+
+    /// Unix names are case-sensitive: `hc_session` is not `HC_SESSION`.
+    #[test]
+    fn unix_env_names_keep_case() {
+        let s = HcSession::resolve_on(&env(&[("HOME", "/home/someone"), ("hc_session", "work")]), &[], None, false);
+        assert_eq!(s.socket_path, "/home/someone/.local/state/herdr-core/default/default.sock");
     }
 }
