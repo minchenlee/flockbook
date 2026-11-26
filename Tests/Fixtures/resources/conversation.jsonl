@@ -1,0 +1,5 @@
+{"type":"user","uuid":"u1","timestamp":"2026-11-03T01:40:00.000Z","message":{"role":"user","content":"Make the plan. Context: https://pasted.example.com"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-11-03T01:40:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Draft: ~/notes/plan.md and the PR https://github.com/o/r/pull/12"}]}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-11-03T01:40:06.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"Artifact","input":{"action":"publish","file_path":"/tmp/plan.html","title":"Launch plan"}}]}}
+{"type":"user","uuid":"r2","timestamp":"2026-11-03T01:40:07.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"c1","content":"Published: https://claude.ai/code/artifact/0f3a-11"}]}}
+{"type":"assistant","uuid":"a3","timestamp":"2026-11-03T01:40:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Running on localhost:5173 — see `~/notes/plan.md` again; run https://github.com/o/r/actions/runs/1870."}]}}

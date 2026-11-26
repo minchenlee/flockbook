@@ -1,0 +1,16 @@
+# clippy's settings for the workspace (the lints themselves: [workspace.lints] in Cargo.toml).
+
+# unwrap_used, dbg_macro and print_stdout are for the code that ships: #[test] functions and #[cfg(test)] modules may.
+# (Helpers in tests/ and examples/ are not seen as tests by clippy: scripts/clippy-baseline.mjs does not count
+# these lints in test, example, bench and build-script targets.)
+allow-unwrap-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+
+disallowed-methods = [
+  # Not thread safe: another thread that reads the environment at the same time (getenv in a dependency, a
+  # Command spawn) is undefined behavior on Unix, and Rust 2024 makes these unsafe. The helper's server and the app
+  # are threaded. Give a child its variables with Command::env, or pass the value in.
+  { path = "std::env::set_var", reason = "not thread safe; use Command::env or pass the value" },
+  { path = "std::env::remove_var", reason = "not thread safe; use Command::env_remove or pass the value" },
+]

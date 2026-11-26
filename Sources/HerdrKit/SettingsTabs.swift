@@ -32,7 +32,7 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     /// The controls the tab shows, top to bottom. Some show only in a state (Connect with: Remote access on).
     public var controls: [SettingsControl] {
         switch self {
-        case .general: [.machines, .backend, .window, .textSize, .readingWidth, .terminalColors, .plusButton]
+        case .general: [.machines, .backend, .window, .textSize, .readingWidth, .terminalColors, .plusButton, .summaries, .summaryBy, .summaryModel]
         case .agents: [.allowInput, .statusLine, .grokStatusLine, .claudeQuestions]
         case .remote: [.remoteAccess, .connectWith, .tailscaleSteps, .address, .devices, .pictures, .phoneNotifications, .agentCommand]
         case .updates: [.autoUpdate, .version]
@@ -52,7 +52,7 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
 
 /// One control (row) of the Settings page.
 public enum SettingsControl: String, CaseIterable, Sendable {
-    case machines, backend, window, textSize, readingWidth, terminalColors, plusButton
+    case machines, backend, window, textSize, readingWidth, terminalColors, plusButton, summaries, summaryBy, summaryModel
     case allowInput, statusLine, grokStatusLine, claudeQuestions
     case remoteAccess, connectWith, tailscaleSteps, address, devices, pictures, phoneNotifications, agentCommand
     case autoUpdate, version

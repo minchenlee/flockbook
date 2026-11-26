@@ -25,6 +25,12 @@ public actor RemoteLogMirror {
     private var end: UInt64 = 0
     private var filled = false
     private var queue: Task<Void, Never>?
+    /// The last sync read the host file to its end (a fetch that stopped part way has not caught up).
+    private var caughtUp = false
+    /// Largest read in one host command (`chunk`; checks use less).
+    private let readSize: Int
+    /// Reads of the host file in place of `files.read` (checks: a read that fails part way).
+    private let readOverride: (@Sendable (String, UInt64, Int) async -> Data?)?
 
     /// The folder for mirror files. Checks point it at a temp folder.
     nonisolated(unsafe) public static var directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -43,6 +49,13 @@ public actor RemoteLogMirror {
     private static let live = Locked<Set<String>>([])
 
     public init(host: RemoteHost, path: String, dir: URL = RemoteLogMirror.directory) throws {
+        try self.init(host: host, path: path, dir: dir, chunk: Self.chunk, read: nil)
+    }
+
+    init(host: RemoteHost, path: String, dir: URL = RemoteLogMirror.directory, chunk: Int,
+         read: (@Sendable (String, UInt64, Int) async -> Data?)?) throws {
+        self.readSize = chunk
+        self.readOverride = read
         try Self.prepare(dir)
         Self.sweep(dir: dir)
         var key = host.label + "\u{0}" + path
@@ -57,11 +70,13 @@ public actor RemoteLogMirror {
         self.url = url; self.path = path; self.host = host; self.fd = fd
         self.files = RemoteFiles(host: host)
         Self.live.update { _ = $0.insert(name) }
+        MirrorSyncs.register(url.path)
     }
 
     deinit {
         close(fd)
         unlink(url.path)
+        MirrorSyncs.drop(url.path)
         let name = url.lastPathComponent
         Self.live.update { _ = $0.remove(name) }
     }
@@ -90,7 +105,9 @@ public actor RemoteLogMirror {
 
     /// Brings the mirror up to the host file's size. The first call fetches the last `tail` bytes (holes before them).
     public func sync(tail: UInt64) async -> Change {
-        await serial { await self.doSync(tail: tail) }
+        let (c, done) = await serial { (await self.doSync(tail: tail), await self.caughtUp) }
+        if done { MirrorSyncs.bump(url.path) }   // the mirror has the host file to its end
+        return c
     }
 
     /// Makes sure `[from, to)` is fetched. False when the host did not give it all, or `to` is past the mirrored end.
@@ -107,6 +124,7 @@ public actor RemoteLogMirror {
     }
 
     private func doSync(tail: UInt64) async -> Change {
+        caughtUp = false
         let size: UInt64
         // the last bytes already mirrored, read again on the host: a file replaced by one that is not smaller differs
         let seam: Range<UInt64>? = filled && end > 0 ? (end - min(Self.seam, end))..<end : nil
@@ -125,12 +143,14 @@ public actor RemoteLogMirror {
             let got = await fetch(from, size)
             if got == from && size > from { return reset ? .reset : .unreachable }
             low = from; end = got; filled = true
+            caughtUp = got == size
             return reset ? .reset : .grew
         }
-        if size == end { return .unchanged }
+        if size == end { caughtUp = true; return .unchanged }
         let got = await fetch(end, size)
         if got == end { return .unreachable }
         end = got
+        caughtUp = got == size
         return .grew
     }
 
@@ -170,8 +190,9 @@ public actor RemoteLogMirror {
     private func fetch(_ from: UInt64, _ to: UInt64) async -> UInt64 {
         var at = from
         while at < to {
-            let n = Int(min(UInt64(Self.chunk), to - at))
-            guard let d = await files.read(path, offset: at, count: n), !d.isEmpty, write(d, at: at) else { break }
+            let n = Int(min(UInt64(readSize), to - at))
+            let got = if let r = readOverride { await r(path, at, n) } else { await files.read(path, offset: at, count: n) }
+            guard let d = got, !d.isEmpty, write(d, at: at) else { break }
             at += UInt64(d.count)
             if d.count < n { break }
         }
