@@ -864,10 +864,10 @@ fn ruled(lines: &[String], mark: Option<char>) -> Option<Vec<String>> {
 
 // MARK: on a live pane
 
-/// Claude Code's queue from the last `tail::BYTES` of its log (the part the app shows first).
+/// Claude Code's queue from the end of its log the app shows first (`tail::read_last`).
 pub fn log_at(path: Option<&std::path::Path>) -> ClaudeQueueLog {
-    match path.map(|p| crate::tail::read(p, None, crate::tail::BYTES)) {
-        Some(Ok(r)) => log_of(r.lines.iter().map(String::as_str)),
+    match path.map(|p| crate::tail::read_last(p, crate::tail::items_of)) {
+        Some(Ok((r, _))) => log_of(r.lines.iter().map(String::as_str)),
         _ => ClaudeQueueLog::default(),
     }
 }

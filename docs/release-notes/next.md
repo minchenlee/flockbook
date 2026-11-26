@@ -12,6 +12,7 @@ One short line: what this release is about.
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
+- A chat no longer shows "No messages yet" when the end of the agent's log is filled with large lines that are not messages (a request record, a message with pictures). The Herdr mod, its glance, cards and summaries, and the Mac app now read further back until they find the last messages.
 - Herdr app sidecar on Windows: Claude panes find their log, so Glance and the chat show them. It reads the start time and the program name as Claude Code writes them on Windows.
 
 ### ⚙️ Changes

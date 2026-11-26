@@ -159,9 +159,14 @@ pub fn current<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Pat
 }
 
 /// `.1`: the screen was read and the approval rules ran on it (a failed read is no evidence of anything).
+/// The items of the log's end, as the chat shows it first; none when it cannot be read.
+pub fn log_items(log: &Path) -> Vec<ConversationItem> {
+    tail::read_last(log, tail::items_of).map(|(_, items)| items).unwrap_or_default()
+}
+
 pub fn look<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>) -> (Option<Current>, bool) {
     let Some(agent) = &pane.agent else { return (None, false) };
-    let items = log.and_then(|l| tail::read(l, None, tail::BYTES).ok()).map(|r| tail::items(&r.lines)).unwrap_or_default();
+    let items = log.map(log_items).unwrap_or_default();
     let (mut perm, mut question): (Option<PermissionRequest>, Option<QuestionRequest>) = (None, None);
     for it in items.iter().rev() {
         match &it.kind {
