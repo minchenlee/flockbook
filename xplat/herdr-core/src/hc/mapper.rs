@@ -118,7 +118,8 @@ const WRAPPERS: [&str; 8] = ["node", "bun", "deno", "python", "python3", "env", 
 
 /// The agent kind one command line names, if any. Interpreters (`node …/codex`) are looked through.
 pub fn kind_of_argv(argv: &[String]) -> Option<String> {
-    let mut words: Vec<String> = argv.iter().filter(|a| !a.is_empty()).map(|a| last_path_component(a)).collect();
+    let mut words: Vec<String> =
+        argv.iter().filter(|a| !a.is_empty()).map(|a| crate::resolver::program_name(a).into_owned()).collect();
     if let Some(first) = words.first() {
         let second = words.get(1).cloned().unwrap_or_default();
         if WRAPPERS.contains(&first.as_str()) || WRAPPERS.contains(&second.as_str()) {
