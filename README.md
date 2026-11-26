@@ -59,6 +59,24 @@ A small helper, `flockbook-modfeed`, reads the agents' session logs for the chat
 
 The install never overwrites what you have: if a layout, mod or theme called flockbook is there and it did not put it there, it stops and writes nothing. An older Flockbook that nobody changed (a gallery copy, an older zip) is upgraded in place. [herdr-app/README.md](herdr-app/README.md) has the details, and [herdr-app/RECIPE.md](herdr-app/RECIPE.md) describes every part of the mod.
 
+#### Uninstall
+
+There is no uninstall command. Remove the files by hand. The paths below are in the herdr-app home: `~/.config/herdr-app` by default, else `$HERDR_APP_HOME` or the `--home` you gave the install. Do steps 1 and 2 while the Flockbook layout still shows.
+
+1. If you turned on the Phone page, turn it off in Flockbook settings (⌘⇧,). This stops the service and removes its file: `~/Library/LaunchAgents/dev.flockbook.serve.plist` on macOS, `~/.config/systemd/user/flockbook-serve.service` on Linux.
+2. If Flockbook put its helper on another machine, right-click a tab on that machine and choose **Remove helper from …**. (The item shows only when Helper on other machines is Ask.) This deletes `~/.local/share/flockbook/helper` there. Then delete `~/.cache/flockbook` on that machine by hand.
+3. Press `ctrl-shift-l` to switch back to your own layout.
+4. Delete these from the herdr-app home:
+   - `layouts/flockbook.json`
+   - `mods/flockbook/` (the whole folder)
+   - `themes/flockbook.json`, `themes/flockbook-light.json`, `themes/flockbook-mac.json` and `themes/flockbook-mac-light.json`
+   - `flockbook/` (the whole folder). It holds the helper (`bin/`), the helpers for other machines (`remote/`), `install.json`, your Flockbook settings (`config.json`), pasted images (`paste/`), the Phone page's files (`serve/`, `uploads/`) and the helper's state, such as `cache.json`, `answered/`, `resources/`, `glance.json`, `glance-marks.json`, `remote.json`, `summary.json`, `summary-usage.jsonl` and `update-check.json`.
+   - `layouts/.state/flockbook.json`, if it is there. Flockbook reads it to know if the sidebar was open.
+5. In `keys.json`, remove the `"layout:flockbook"` section. The install adds keys only to that section. If you added your own keys to it, remove only the Flockbook keys: they are listed in [herdr-app/keys.json](herdr-app/keys.json). A key that you set before the install kept your command, so it is yours.
+6. If you used the Phone page, also delete `~/.flockbook/serve/` and, on macOS, `~/Library/Logs/flockbook-modfeed-serve.log`.
+
+`flockbook/install.json` lists each layout, mod and theme file that the install wrote, with its SHA-256. Read it to see what Flockbook put in the home before you delete. A file whose hash is different is one you changed. The list does not include `keys.json` or the helpers.
+
 **Status: preview.** Built and tried on macOS; the helper also runs on Linux (x86_64 and arm64), where the + file dialog is off (drop files or paste an image instead). Agents it reads: Claude Code, Codex, Grok Build, Cursor, pi, oh-my-pi (omp) and Antigravity CLI (agy). omp needs version 18.9 or later: older omp does not report its status (OSC 7501), so Herdr does not list it as an agent and its tab shows the terminal (run `omp update`).
 
 ## Flockbook for Mac
@@ -79,6 +97,8 @@ The Rust code in `xplat/` is an early port of Flockbook to Linux and Windows, bu
 ## Privacy
 
 Flockbook runs locally. It reads agent session logs on your Mac (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.grok/sessions/`, `~/.cursor/projects/`, `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/`, `~/.gemini/antigravity-cli/`) and talks to Herdr through its local socket. It has no telemetry. It goes on the network only for the hourly update check (you can turn it off) and, when you turn them on, for remote access over Tailscale or your local network and for phone notifications through the phone's push service. The Herdr app mod and its helper read the same session logs and talk to herdr-core (`hc`) on your Mac; they go on the network only to check api.github.com once a day for a newer release (turn it off in the mod's Flockbook settings).
+
+In the Herdr app mod, Summaries are off by default. When they are on, the helper runs a coding agent's program (Claude Code, Codex or pi) once for each finished turn of an agent on this machine. The program gets your last message (at most 1,500 characters), the end of the agent's reply (at most 6,000 characters) and one line of facts from the log (files edited, commands run, the last failed command, the test state). It sends this text to its model provider under your account. With the default choice, **Each agent's own**, it is the program of the agent that wrote the turn; an agent of another program gets no summary. Claude Code and Codex run without your settings files for them, so a model provider that you set only there is not used. Flockbook sends the text nowhere else. It keeps only the latest summary of each agent in `flockbook/summary.json`, and a count of each run, with no text, in `flockbook/summary-usage.jsonl`.
 
 ## How this was built
 
