@@ -267,5 +267,5 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           printf '%s\n' "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          bad=$(printf '%s\n' "$RESULTS" | jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")')
-          if [ -n "$bad" ]; then echo "::error title=xplat result::failed or cancelled: $bad"; exit 1; fi
+          bad=$(printf '%s\n' "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(", ")')
+          if [ -n "$bad" ]; then echo "::error title=xplat result::not success or skipped: $bad"; exit 1; fi
