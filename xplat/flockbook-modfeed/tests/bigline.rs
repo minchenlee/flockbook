@@ -138,6 +138,41 @@ fn reader_limits_and_unfinished_lines() {
     assert_eq!(r4, tail::read(&f, None, 1000).unwrap(), "bigline reader: a tail with a message is the plain read");
 }
 
+fn tool(i: usize) -> [String; 2] {
+    [
+        format!(r#"{{"type":"assistant","uuid":"t{i}","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"c{i}","name":"Bash","input":{{"command":"echo {i}"}}}}]}}}}"#),
+        format!(r#"{{"type":"user","uuid":"r{i}","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"c{i}","content":"{}"}}]}}}}"#, "o".repeat(2000)),
+    ]
+}
+
+#[test]
+fn a_long_turn_of_tool_calls_reads_as_before() {
+    // More than 2 MB of tool calls with no text after the chat: the tail has rows, so it is the plain read, and growth
+    // keeps the range start (no new range).
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("s.jsonl");
+    let mut l = chat();
+    for i in 0..1200 {
+        l.extend(tool(i));
+    }
+    write(&f, &l, "");
+    let (r, items) = tail::read_last(&f, tail::items_of).unwrap();
+    assert_eq!(r, tail::read(&f, None, tail::BYTES).unwrap(), "bigline tools: the plain 2 MB read");
+    assert!(!items.is_empty() && !tail::has_message(&items), "bigline tools: tool rows, no message");
+    let mut out = JsonLines::new();
+    let mut s = feed::run(Some(&f), "claude", None, None, false, &mut out, &now(), &Utc).unwrap().unwrap();
+    let start = s.start;
+    for i in 2000..2005 {
+        let mut h = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
+        h.write_all((tool(i).join("\n") + "\n").as_bytes()).unwrap();
+        drop(h);
+        let mut o = JsonLines::new();
+        s = feed::run(Some(&f), "claude", Some(&s.cursor()), Some(&s), false, &mut o, &now(), &Utc).unwrap().unwrap();
+        // The calls fold into one row of chips, so the splice is at 0; the range start is what must stay.
+        assert_eq!(s.start, start, "bigline tools: growth keeps the range start");
+    }
+}
+
 #[test]
 fn older_skips_chunks_with_no_rows() {
     let dir = tempfile::tempdir().unwrap();

@@ -116,8 +116,9 @@ pub fn has_message(items: &[ConversationItem]) -> bool {
     items.iter().any(|it| matches!(it.kind, herdr_core::ItemKind::UserText(_) | herdr_core::ItemKind::AssistantText(_)))
 }
 
-/// The end of the log, as the app shows it first: the last `BYTES` (`read`), and, when they hold no message, the
-/// `BYTES` before them, and so on until a message is in (or the file's start, or `SEARCH_MAX` back). `parse`: how
+/// The end of the log, as the app shows it first: the last `BYTES` (`read`). When they parse to nothing at all (only
+/// large lines that are not chat), the `BYTES` before them too, and so on until a message is in (or the file's start,
+/// or `SEARCH_MAX` back). A tail with any item (a long turn of tool calls) is read as before. `parse`: how
 /// the caller reads items from a range; the items of the range returned come back with it, parsed whole.
 pub fn read_last(path: &Path, parse: impl Fn(&Range) -> Vec<ConversationItem>) -> std::io::Result<(Range, Vec<ConversationItem>)> {
     read_last_in(path, BYTES, SEARCH_MAX, parse)
@@ -127,7 +128,7 @@ pub fn read_last(path: &Path, parse: impl Fn(&Range) -> Vec<ConversationItem>) -
 pub fn read_last_in(path: &Path, bytes: u64, max: u64, parse: impl Fn(&Range) -> Vec<ConversationItem>) -> std::io::Result<(Range, Vec<ConversationItem>)> {
     let mut r = read(path, None, bytes)?;
     let items = parse(&r);
-    if has_message(&items) || r.start == 0 {
+    if !items.is_empty() || r.start == 0 {
         return Ok((r, items));
     }
     // With no whole line read, `start` may be inside a line still being written (no newline yet): step from its start.

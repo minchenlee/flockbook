@@ -101,8 +101,7 @@ pub fn run<Tz: chrono::TimeZone>(
     }
     let hashes: Vec<String> = enc.lines.iter().map(|l| fnv1a(l)).collect();
     let mut at = 0;
-    // The same start as the rows sent (kept, or a new range that found the same start): only the rows that changed.
-    if let Some(prev) = prev.filter(|p| p.path == path_s && p.start == range.start) {
+    if let (Some(prev), Some(_)) = (prev, keep) {
         while at < prev.hashes.len().min(hashes.len()) && prev.hashes[at] == hashes[at] {
             at += 1;
         }
