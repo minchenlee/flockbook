@@ -7,10 +7,13 @@
 # (install the mod there first: sh herdr-app/install-isolated.sh <demo home>/.config/herdr-app <flockbook-modfeed>).
 # This script never opens a window, never moves the mouse and never types: it only talks to the window whose home is
 # the demo's, with `herdr-app do` and `herdr-app shot`. Your own window (~/.config/herdr-app) is never reached.
-# usage: scripts/demo/desktop-shots-hc.sh check | shot <name> [agent] | all
+# usage: scripts/demo/desktop-shots-hc.sh check | shot <name> [agent] | resources [agent] | all
 #   check   the demo window is open and shows the demo spaces (Orchard, Harbor, ...), and nothing else
 #   shot    show <agent> (a demo agent name, e.g. orchard-api-dev), if given, then save <out>/desktop-a-<name>.png
-#   all     chat (orchard-api-dev), question (orchard-promo-dev), approval (harbor-deploy-ops), done (meadow-card-dev)
+#   resources  show <agent> (default lighthouse-audit-docs), open its Resources window (flockbook.resources, as ⌘⇧R),
+#           save <out>/desktop-a-resources.png, then close the window again
+#   all     chat (atlas-import-dev), question (orchard-promo-dev), approval (harbor-deploy-ops), done (meadow-card-dev),
+#           resources (lighthouse-audit-docs)
 # <demo home>: $FLOCKBOOK_DEMO_HOME, default the Shared folder beside your home, Shared/fbdemo.
 # out-dir: $FLOCKBOOK_SHOTS (default build/desktop-shots-hc).
 set -eu
@@ -64,8 +67,25 @@ shot() {
     dir=$(cd "$out" && pwd -P)
     demo herdr-app shot "$dir/desktop-a-$name.png"
 }
+# The Resources window of a demo agent: it opens over the chat, and `shot` takes overlays too.
+resources() {
+    agent=${1:-lighthouse-audit-docs}
+    set -- $(place "$agent")
+    [ $# -eq 3 ] || { echo "desktop-shots-hc: no demo agent $agent in the window" >&2; exit 1; }
+    demo herdr-app do space.select --id "$1" >/dev/null
+    demo herdr-app do tab.select --id "$2" >/dev/null
+    demo herdr-app do pane.focus --pane "$3" >/dev/null
+    sleep 2
+    demo herdr-app do flockbook.resources >/dev/null
+    sleep 3   # the helper reads the log, then the window draws
+    mkdir -p "$out"
+    dir=$(cd "$out" && pwd -P)
+    demo herdr-app shot "$dir/desktop-a-resources.png"
+    demo herdr-app do flockbook.resources >/dev/null
+}
 case ${1:-} in
 check) check ;;
+resources) check >/dev/null; resources "${2:-}" ;;
 shot) [ $# -ge 2 ] || { echo "usage: $0 shot <name> [agent]" >&2; exit 2; }; check >/dev/null; shot "$2" "${3:-}" ;;
 all)
     check
@@ -73,6 +93,7 @@ all)
     shot question orchard-promo-dev
     shot approval harbor-deploy-ops
     shot done meadow-card-dev
+    resources lighthouse-audit-docs
     ;;
-*) sed -n 2,15p "$0" >&2; exit 2 ;;
+*) sed -n 2,18p "$0" >&2; exit 2 ;;
 esac
