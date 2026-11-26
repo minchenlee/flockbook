@@ -452,12 +452,12 @@ public final class SessionLog: Sendable {
                             }
                             cont.yield(Snapshot(items: parser.items(), hasOpenToolUse: parser.hasOpenToolUse, queued: parser.queue))
                         }
-                        // Big lines that are not chat fill the tail (an api-request-blob): load the 2 MB before it until a
-                        // message is in, up to `searchMax` back (the mod's helper does the same: tail::read_last). Each
-                        // load wakes this loop, which parses the range again and looks once more.
+                        // Big lines that are not chat fill the tail (an api-request-blob) and it parses to no item: load the
+                        // 2 MB before it, up to `searchMax` back, until an item is in (the mod's helper does the same:
+                        // tail::read_last). Each load wakes this loop, which parses the range again and looks once more.
                         if stepBack, total > first,
                            state.lock.withLock({ state.wantFull && state.start > 0 && state.consumed - state.start < Self.searchMax }),
-                           !parser.items().contains(where: { if case .userText = $0.kind { true } else if case .assistantText = $0.kind { true } else { false } }) {
+                           parser.items().isEmpty {
                             if await self.loadEarlier(bytes: Int(Self.fullTail)) != .more { stepBack = false }
                         }
                     }
