@@ -1,7 +1,7 @@
 #!/bin/sh
 # The Flockbook demo on herdr-core: fictional agents in an isolated core, with a made-up HOME, and the phone page for them.
-# usage: scripts/demo-hc.sh seed | ping | serve [--user LOGIN] [--port N] [--hours H] [--helper PATH] | status | stop
-#   seed    (re)build the demo agents (scripts/demo/hc_seed.py)
+# usage: scripts/demo-hc.sh seed [--only NAME,...] | ping | serve [--user LOGIN] [--port N] [--hours H] [--helper PATH] | status | stop
+#   seed    (re)build the demo agents (scripts/demo/hc_seed.py); --only rebuilds just those (the others keep running)
 #   ping    rebuild only the three agents of the lock screen notices (scripts/demo/phone-frames.mjs): each turns
 #           blocked again, so a subscribed phone gets three "Needs you" pushes. Reset with seed.
 #   serve   the phone page on 127.0.0.1:PORT (8797) for the demo core only; it stops by itself after H hours (3).
@@ -39,7 +39,7 @@ seed)
     # Copies, not links: hc knows the agent by the process name, and a link runs under its target's name.
     for k in claude codex pi; do cp "$bin/demo-agent" "$bin/.$k.new" && mv -f "$bin/.$k.new" "$bin/$k"; done
     core_up
-    PYTHONDONTWRITEBYTECODE=1 demo python3 -I "$here/demo/hc_seed.py" "$bin"
+    PYTHONDONTWRITEBYTECODE=1 demo python3 -I "$here/demo/hc_seed.py" "$bin" "$@"
     ;;
 ping)
     core_up
