@@ -458,7 +458,8 @@ public final class SessionLog: Sendable {
                         if stepBack, total > first,
                            state.lock.withLock({ state.wantFull && state.start > 0 && state.consumed - state.start < Self.searchMax }),
                            parser.items().isEmpty {
-                            if await self.loadEarlier(bytes: Int(Self.fullTail)) != .more { stepBack = false }
+                            // Only the log's start ends the search. A failed read (ssh down) tries again on a later wake.
+                            if await self.loadEarlier(bytes: Int(Self.fullTail)) == .end { stepBack = false }
                         }
                     }
                     if let moveTo { watch.disarm(); url = moveTo; reset(); continue }
