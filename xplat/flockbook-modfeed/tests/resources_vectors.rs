@@ -76,6 +76,11 @@ fn the_shared_vectors() {
     }
     for part in ["detect", "commands", "collect"] {
         for (h, g) in have[part].as_array().unwrap().iter().zip(got[part].as_array().unwrap()) {
+            // The cases with files on disk hold POSIX paths ($ROOT/home/...): the Mac app and the mod read them on macOS.
+            // On Windows the helper joins and shortens paths with \, so those cases are not its answers.
+            if cfg!(windows) && h.get("files").is_some() {
+                continue;
+            }
             assert_eq!(h, g, "{part}: the helper gives another answer than vectors.json");
         }
     }
