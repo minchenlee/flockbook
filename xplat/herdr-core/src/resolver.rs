@@ -43,6 +43,9 @@ pub struct Proc {
     pub start: Date,
     /// Command line followed by the environment, as `ps -E` prints it.
     pub line: String,
+    /// The command line's words, when the source gives them apart (Windows): a word can hold spaces
+    /// (`C:\Program Files\…`). Empty: the words are `line` split at spaces.
+    pub argv: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -811,7 +814,7 @@ pub fn parse_ps_in<Tz: TimeZone>(text: &str, tz: &Tz) -> Vec<Proc> {
         }
         let (Ok(pid), Ok(ppid)) = (w[0].parse::<i32>(), w[1].parse::<i32>()) else { continue };
         let Some(start) = parse_lstart(&w[2..7]).and_then(|n| local_to_utc(tz, &n)) else { continue };
-        out.push(Proc { pid, ppid, start, line: rest.to_string() });
+        out.push(Proc { pid, ppid, start, line: rest.to_string(), argv: vec![] });
     }
     out
 }

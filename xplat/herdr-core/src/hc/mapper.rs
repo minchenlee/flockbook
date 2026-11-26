@@ -474,6 +474,7 @@ mod tests {
             ppid,
             start: chrono::DateTime::from_timestamp_millis(ms).unwrap(),
             line: line.into(),
+            argv: vec![],
         }
     }
 

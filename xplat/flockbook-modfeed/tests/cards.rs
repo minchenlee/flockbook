@@ -182,6 +182,7 @@ fn wrapper_child_restart_drops_stale_log_cache() {
         ppid,
         start: chrono::DateTime::from_timestamp_millis(ms).unwrap(),
         line: line.into(),
+        argv: vec![],
     };
     let procs = Arc::new(Mutex::new(vec![
         proc_at(500, 400, base_ms, "secretspec run -- codex"),

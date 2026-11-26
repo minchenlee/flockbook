@@ -25,7 +25,7 @@ impl ProcessSource for WindowsProcessSource {
                 let cmd = join(p.cmd());
                 let env = join(p.environ());
                 let line = if env.is_empty() { cmd } else { format!("{cmd} {env}") };
-                Some(Proc { pid: p.pid().as_u32() as i32, ppid: p.parent().map_or(0, |q| q.as_u32() as i32), start, line })
+                Some(Proc { pid: p.pid().as_u32() as i32, ppid: p.parent().map_or(0, |q| q.as_u32() as i32), start, line, argv: vec![] })
             })
             .collect()
     }

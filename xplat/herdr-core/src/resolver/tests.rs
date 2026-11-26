@@ -34,7 +34,13 @@ fn rollout_name(t: Date, id: &str) -> String {
 }
 
 fn proc_(pid: i32, ppid: i32, start: Date, line: &str) -> Proc {
-    Proc { pid, ppid, start, line: line.into() }
+    Proc { pid, ppid, start, line: line.into(), argv: vec![] }
+}
+
+/// A process whose source gives its argv apart (Windows), followed by `env` in `line`.
+fn proc_argv(pid: i32, ppid: i32, start: Date, argv: &[&str], env: &str) -> Proc {
+    let line = [argv.join(" "), env.to_string()].join(" ");
+    Proc { pid, ppid, start, line: line.trim_end().into(), argv: argv.iter().map(|a| a.to_string()).collect() }
 }
 
 fn resolver(dirs: impl FnOnce(&mut SessionResolver)) -> SessionResolver {
@@ -1012,6 +1018,48 @@ fn windows_programs_and_hc_claude_cases() {
     let mut res = resolver(|r| r.claude_dir = dir.clone());
     let got = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
     assert_eq!(got, Some("sid-win".to_string()), "hc Claude pane on Windows resolved by its pid file");
+}
+
+/// Windows: a program's name ignores case (`CLAUDE.EXE` runs claude), and a full path with spaces is one word, as
+/// the process source gives the argv apart. An hc Claude pane at such a path resolves by its pid file.
+#[test]
+fn windows_names_ignore_case_and_keep_spaced_paths() {
+    test_windows::run(|| {
+        let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+        let one = |p: Proc, kind: &str| agent_in_tree(1, kind, &[p], false).map(|p| p.pid);
+        assert_eq!(one(proc_(10, 1, t0, "CLAUDE.EXE --resume"), "claude"), Some(10), "CLAUDE.EXE");
+        assert_eq!(one(proc_(10, 1, t0, r"C:\Tools\Claude.Exe"), "claude"), Some(10), "Claude.Exe");
+        let spaced = [r"C:\Program Files\Claude\claude.exe", "--resume"];
+        assert_eq!(one(proc_argv(10, 1, t0, &spaced, "HC_TERMINAL_ID=t1"), "claude"), Some(10), "path with spaces");
+        let node = [r"C:\Program Files\nodejs\node.exe", r"C:\Program Files\x\bin\codex"];
+        assert_eq!(one(proc_argv(10, 1, t0, &node, ""), "codex"), Some(10), "interpreter at a path with spaces");
+        let helper = [r"C:\Program Files\Claude\claude-helper.exe"];
+        assert_eq!(one(proc_argv(10, 1, t0, &helper, ""), "claude"), None, "another program");
+
+        let procs = vec![
+            proc_argv(500, 1, t0, &[r"C:\Program Files\PowerShell\7\pwsh.exe"], "HC_TERMINAL_ID=t1"),
+            proc_argv(17144, 500, t0, &[r"C:\Program Files\Claude\CLAUDE.EXE"], "HC_TERMINAL_ID=t1"),
+        ];
+        let (_t, dir) = tmp();
+        let o = serde_json::json!({"pid": 17144, "sessionId": "sid-win", "procStart": "134396888779841927"});
+        fs::write(format!("{dir}/17144.json"), serde_json::to_vec(&o).unwrap()).unwrap();
+        let need = Need::new("hc:t1", "claude", r"C:\w", vec![500]);
+        let mut res = resolver(|r| r.claude_dir = dir.clone());
+        let got = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
+        assert_eq!(got, Some("sid-win".to_string()), "hc Claude pane at a path with spaces resolved by its pid file");
+    });
+}
+
+/// Outside Windows, names stay as they are: `CLAUDE` and `claude.exe` are other programs.
+#[cfg(not(windows))]
+#[test]
+fn non_windows_names_unchanged() {
+    let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+    let one = |line: &str| agent_in_tree(1, "claude", &[proc_(10, 1, t0, line)], false).map(|p| p.pid);
+    assert_eq!(one("/usr/local/bin/claude --resume"), Some(10));
+    assert_eq!(one("CLAUDE"), None);
+    assert_eq!(one("claude.exe"), None);
+    assert_eq!(one(r"C:\x\claude"), None);
 }
 
 /// Codex writes a rollout for each subagent it starts (the approvals reviewer "guardian", `spawn_agent` helpers)
