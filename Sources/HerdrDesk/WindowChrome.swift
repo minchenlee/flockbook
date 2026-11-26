@@ -101,8 +101,12 @@ enum ChromeProbe {
         }
         let frames = views.map(frame).filter { $0.width > 0 && $0.height > 0 }
         guard let island = frames.max(by: { $0.width < $1.width }), island.width >= 100 else { return nil }
-        let actions = frames.filter { $0.minX >= island.maxX - 1 && $0.minX < island.maxX + 60 && abs($0.midY - island.midY) < 8 }
-            .reduce(CGRect.null) { $0.union($1) }
+        // The buttons: each item that starts within 60 pt of the one before it (the island, then each button), same row.
+        var actions = CGRect.null, edge = island.maxX
+        for r in frames.filter({ $0.minX >= island.maxX - 1 && abs($0.midY - island.midY) < 8 }).sorted(by: { $0.minX < $1.minX }) {
+            guard r.minX < edge + 60 else { break }
+            actions = actions.union(r); edge = r.maxX
+        }
         guard !actions.isNull else { return nil }
         return (island, actions)
     }

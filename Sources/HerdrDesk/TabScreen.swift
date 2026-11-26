@@ -19,6 +19,8 @@ struct TabScreen: View {
                 }
             }
         }
+        // Resources: over the chat's right side; the chat keeps its place and size.
+        .overlay { ResourcesOverlay() }
         .overlay(alignment: .top) {
             // Under the top safe area (toolbar), label colour on material: readable in light and dark. Stays ~8 s or until
             // the next notice replaces it; VoiceOver reads it.
@@ -132,7 +134,11 @@ struct PaneView: View {
                                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.status = $0 } }
                             }
                             composer(agent)
-                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if SinceProbe.on { SinceProbe.composer = $0 } }
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                                    if SinceProbe.on { SinceProbe.composer = $0 }
+                                    // The Resources panel ends over the focused reply box.
+                                    if focused, model.resources.inputTop != $0.minY { model.resources.inputTop = $0.minY }
+                                }
                         }
                     }
                     .softScrollEdges([.top, .bottom])
@@ -154,6 +160,16 @@ struct PaneView: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { paneFrame = $0; QuestionProbe.paneFrame = $0 }
         .task(id: pane.cwd) { branch = await GitInfo.branch(cwd: pane.cwd, host: pane.composerRemote(model.store.session.remote)) }
         .task(id: pane.agent?.status) { await readScreenQuestion() }
+        // Resources' Show in chat: older rows are loaded until the row is there, then the conversation scrolls to it.
+        .task(id: model.resources.jump) {
+            guard let j = model.resources.jump, j.pane == pane.id, let sid = pane.agent?.sessionId else { return }
+            var tries = 0
+            while !model.store.conversation(for: sid).contains(where: { $0.id == j.row }), tries < 200 {
+                tries += 1
+                guard case .more = await model.store.loadEarlier(paneId: pane.id) else { break }
+            }
+            jump = SinceJump(id: j.row, token: (jump?.token ?? 0) + 1)
+        }
         // Since you left: on the way in, the time away; then a mark of what this conversation shows, while it shows.
         .task(id: "\(pane.id)|\(pane.agent?.sessionId ?? "")|\(sinceOnScreen)") { await model.since.watch(pane, onScreen: sinceOnScreen, model: model) }
         .task(id: "\(pane.agent?.status.rawValue ?? "")-\(focused)") {
