@@ -976,9 +976,12 @@ fn claude_pid_file_with_windows_filetime_proc_start() {
 
 /// Windows: a program is named by its last `\` or `/` component without `.exe`, so `claude.exe` runs claude and
 /// `node.exe` is an interpreter. An hc Claude pane then resolves by its pid file.
-#[cfg(windows)]
 #[test]
 fn windows_programs_and_hc_claude() {
+    test_windows::run(windows_programs_and_hc_claude_cases);
+}
+
+fn windows_programs_and_hc_claude_cases() {
     let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
     let one = |line: &str, kind: &str| agent_in_tree(1, kind, &[proc_(10, 1, t0, line)], false).map(|p| p.pid);
     for (line, kind) in [

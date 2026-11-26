@@ -864,7 +864,7 @@ pub(crate) fn program<'a>(words: &[&'a str]) -> Option<&'a str> {
 /// (`C:\x\claude.exe` is `claude`).
 fn program_name(w: &str) -> &str {
     let name = last_path_component(w);
-    if !cfg!(windows) {
+    if !windows_names() {
         return name;
     }
     let t = name.trim_end_matches('\\');
@@ -872,6 +872,44 @@ fn program_name(w: &str) -> &str {
     match name.len().checked_sub(4) {
         Some(i) if name.is_char_boundary(i) && name[i..].eq_ignore_ascii_case(".exe") => &name[..i],
         _ => name,
+    }
+}
+
+/// Program names follow Windows rules ([`program_name`]): on Windows, and in tests that turn them on with
+/// [`test_windows::run`] so other systems run the Windows cases too.
+fn windows_names() -> bool {
+    cfg!(windows) || test_windows::on()
+}
+
+#[cfg(not(test))]
+mod test_windows {
+    pub fn on() -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_windows {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ON: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub fn on() -> bool {
+        ON.with(Cell::get)
+    }
+
+    /// Runs `f` with Windows program names on this thread.
+    pub fn run<R>(f: impl FnOnce() -> R) -> R {
+        struct Reset(bool);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                ON.with(|on| on.set(self.0));
+            }
+        }
+        let _reset = Reset(ON.with(|on| on.replace(true)));
+        f()
     }
 }
 
