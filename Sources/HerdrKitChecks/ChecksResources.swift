@@ -87,6 +87,28 @@ func checksResources() throws {
     check(Resources.ago(.min, now: 1_000_000) == "\(Int(Double(1_000_000 - Double(Int64.min)) / 1000 / 86400))d" && Resources.ago(.max, now: 1_000_000) == "now",
           "resources: ago of a saturated timestamp does not overflow")
     check(Resources.collect(file: resFixtures.appendingPathComponent("no-such.jsonl"), home: nil) == nil, "resources: a file that cannot be read gives nil")
+    // A log read in steps (as it grows, cut in a line and at a line's end) gives what one read gives.
+    do {
+        let whole = try Data(contentsOf: resFixtures.appendingPathComponent("conversation.jsonl"))
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("res-reader-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let nl = whole.indices.filter { whole[$0] == 0x0A }
+        let cuts = [nl[nl.count / 3] + 1, nl[nl.count / 2] + 5, whole.count]
+        try Data().write(to: tmp)
+        let fh = try FileHandle(forWritingTo: tmp)
+        var r = Resources.Reader(), from = 0, steps = true
+        for c in cuts {
+            try fh.seekToEnd(); try fh.write(contentsOf: whole[from..<c]); from = c
+            steps = steps && r.read(tmp)
+            if c != whole.count { steps = steps && r.items(home: "/home/me") == Resources.collect(file: tmp, home: "/home/me") }
+        }
+        try fh.close()
+        check(steps && r.items(home: "/home/me") == items, "resources: a log read in steps gives what one read gives")
+        // A log that shrank is read again from its start.
+        try whole[0..<cuts[0]].write(to: tmp)
+        check(r.read(tmp) && r.items(home: "/home/me") == Resources.collect(file: tmp, home: "/home/me") && r.offset == cuts[0],
+              "resources: a log that shrank is read again from its start")
+    } catch { check(false, "resources: reader temp file (\(error))") }
     let cwds: [(String, String?)] = [
         (#"{"type":"user","cwd":"/a/b//","x":1}"#, "/a/b"), (#"{"cwd":"/"}"#, nil), (#"{"cwd":"rel/x"}"#, nil),
         (#"{"cwd":"/a\b"}"#, nil), (#"{"cwd":""}"#, nil), (#"{"cwd":"/a"#, nil), (#"{"c":1,"cwd":"/é/ü","cwd":"/z"}"#, "/é/ü"),

@@ -38,8 +38,12 @@ final class ResourcesModel {
     /// Runs a click's plan; returns a note (nil: done, nothing to say). Checks put their own.
     var perform: @MainActor (Resources.Plan) -> (text: String, ok: Bool)? = ResourcesModel.run
     private var reading: Set<String> = []
-    /// Agents whose log was read once (a list, or nothing to read): until then the panel says it is reading.
-    private var tried: Set<String> = []
+    /// Why an agent has no list (nil: its first read has not ended, and the panel says it is reading).
+    private(set) var problem: [String: Resources.Problem] = [:]
+    /// Each agent's log as read so far: a read parses only what the log grew by.
+    private var readers: [String: Resources.Reader] = [:]
+    /// When each agent's last read ended, and how long it took: a slow log is not read again at once.
+    private var lastRead: [String: (end: Date, took: TimeInterval)] = [:]
 
     init() {
         let d = AppDefaults.store
@@ -68,25 +72,49 @@ final class ResourcesModel {
         return Resources.badgeCount(l.items, seen: seen[key], removed: removed[key] ?? [])
     }
 
-    /// Reads the agent's log again when it changed (`force`: also when not, so docs are looked at again). Off the main
-    /// actor; one read an agent at a time.
-    func refresh(key: String, log: URL?, home: String?, agentDir: String?, force: Bool = false) async {
-        guard let log else { tried.insert(key); return }
+    /// Reads the agent's log when it changed (`force`: also when not, so docs are looked at again). Off the main
+    /// actor; one read an agent at a time; only what the log grew by is parsed. `state` is the store's word on the
+    /// log while it has no URL: still being found (the panel keeps saying it is reading), or not there.
+    func refresh(key: String, log: URL?, state: ConversationLoadState = .loading, home: String?, agentDir: String?,
+                 force: Bool = false) async {
+        guard let log else {
+            switch state {
+            case .loading: problem[key] = nil
+            case .failed: problem[key] = .unreadable
+            // Ready with no file to read (a preview) is as good as none.
+            case .missing, .ready: problem[key] = .noLog
+            }
+            return
+        }
         guard !reading.contains(key) else { return }
         let a = try? FileManager.default.attributesOfItem(atPath: log.path)
         let stamp = Stamp(size: (a?[.size] as? NSNumber)?.intValue ?? -1, date: a?[.modificationDate] as? Date ?? .distantPast)
         if !force, let was = lists[key], was.stamp == stamp { touch(key); return }
+        // A log that takes long to read waits 10× that before a background read (a live agent's log changes all the time).
+        if !force, lists[key] != nil, let l = lastRead[key], Date().timeIntervalSince(l.end) < 10 * l.took { return }
         reading.insert(key)
-        defer { reading.remove(key); tried.insert(key) }
+        defer { reading.remove(key) }
         // The first read is waited on (the panel says so): not behind background work. Later reads are background.
         let first = lists[key] == nil
-        let got = await Task.detached(priority: first ? .userInitiated : .utility) { Resources.collect(file: log, home: home, agent: agentDir) }.value
-        guard let got else { return }
+        let was = readers[key] ?? Resources.Reader()
+        let t0 = Date()
+        let (reader, got) = await Task.detached(priority: first ? .userInitiated : .utility) { () -> (Resources.Reader, [Resources.Item]?) in
+            var r = was
+            guard r.read(log) else { return (r, nil) }
+            return (r, r.items(home: home, agent: agentDir))
+        }.value
+        lastRead[key] = (Date(), Date().timeIntervalSince(t0))
+        guard let got else {
+            if lists[key] == nil { problem[key] = .unreadable }
+            return
+        }
+        readers[key] = reader
+        problem[key] = nil
         put(key, Entry(items: got, stamp: stamp))
     }
 
-    /// The agent's first read has not ended: no list yet, and its log was not read before.
-    func loading(_ key: String) -> Bool { lists[key] == nil && !tried.contains(key) }
+    /// The agent's first read has not ended (and nothing says it cannot be read): the panel says it is reading.
+    func loading(_ key: String) -> Bool { lists[key] == nil && problem[key] == nil }
     /// Keeps a list (checks put theirs).
     func put(_ key: String, _ e: Entry) {
         if lists[key]?.items != e.items || lists[key] == nil { lists[key] = e } else { lists[key]?.stamp = e.stamp }
@@ -99,7 +127,9 @@ final class ResourcesModel {
 
     private func touch(_ key: String) {
         order.removeAll { $0 == key }; order.append(key)
-        while order.count > Resources.cacheMax { let k = order.removeFirst(); lists[k] = nil; tried.remove(k) }
+        while order.count > Resources.cacheMax {
+            let k = order.removeFirst(); lists[k] = nil; readers[k] = nil; lastRead[k] = nil; problem[k] = nil
+        }
     }
 
     /// Shown is seen: the badge goes while the panel shows the list.
@@ -189,7 +219,10 @@ extension AppModel {
 
     func refreshResources(_ pane: Pane, force: Bool = false) async {
         let machine = ResourcesModel.machine(pane, remote: store.session.remote)
-        await resources.refresh(key: ResourcesModel.key(pane, session: store.session.name ?? ""), log: store.logURL(for: pane.agent?.sessionId),
+        let sid = pane.agent?.sessionId
+        let log = store.logURL(for: sid)
+        await resources.refresh(key: ResourcesModel.key(pane, session: store.session.name ?? ""), log: log,
+                                state: log == nil ? store.conversationState(for: sid) : .ready,
                                 home: machine == nil ? NSHomeDirectory() : nil, agentDir: machine == nil ? pane.cwd : nil, force: force)
     }
 
@@ -239,7 +272,9 @@ struct ResourcesOverlay: View {
                 guard let pane = model.resourcesPane else { return }
                 await model.refreshResources(pane, force: model.resources.open)
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(5))
+                    // No list yet: the log may be found any moment (the store does not tell), so look again soon.
+                    let none = model.resourcesKey.map(model.resources.loading) ?? false
+                    try? await Task.sleep(for: none ? .milliseconds(500) : .seconds(5))
                     guard let p = model.resourcesPane, ResourcesModel.key(p, session: model.store.session.name ?? "") == model.resourcesKey else { break }
                     await model.refreshResources(p)
                 }
@@ -289,7 +324,7 @@ struct ResourcesPanel: View {
             } else if let key, !items.isEmpty, let pane {
                 list(items, key: key, pane: pane)
             } else {
-                let t = Resources.emptyText(agent: pane != nil)
+                let t = key.flatMap { r.problem[$0] }.map(Resources.problemText) ?? Resources.emptyText(agent: pane != nil)
                 VStack(spacing: 6) {
                     Text(t.0).font(.headline)
                     Text(t.1).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)

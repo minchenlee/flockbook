@@ -11,22 +11,63 @@ extension Resources {
     /// The resources in a session log file, newest first: `collect(lines:)` with each line's byte offset, so the rows
     /// are the ids the conversation has (Codex rows are named by their offset). Nil when the file cannot be read.
     public static func collect(file: URL, home: String?, agent: String? = nil) -> [Item]? {
-        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { return nil }
-        var parser = ConversationParser()
-        var acc = Acc()
-        var last: String? = nil
-        var start = data.startIndex
-        while start < data.endIndex {
-            let end = data[start...].firstIndex(of: 0x0A) ?? data.endIndex
-            if end > start, let line = String(data: data[start..<end], encoding: .utf8) {
-                if let c = lineCwd(line), c != last { acc.cwd(c); last = c }
-                parser.feed(line: line, offset: UInt64(start - data.startIndex))
-            }
-            start = end < data.endIndex ? end + 1 : end
-        }
-        acc.add(parser.items(), home: home)
-        return acc.finish(home: home, agent: agent)
+        var r = Reader()
+        guard r.read(file) else { return nil }
+        return r.items(home: home, agent: agent)
     }
+
+    /// A log read in steps: each `read` parses only what the file grew by since the last one, so a live agent's big
+    /// log is not parsed again every poll. A file that shrank or was replaced is read again from its start. The last
+    /// line without its newline is parsed with the rest, and again in full once the newline comes.
+    public struct Reader: Sendable {
+        var parser = ConversationParser()
+        var cwds = Set<String>()
+        var last: String?
+        /// The byte after the last whole line parsed.
+        public private(set) var offset = 0
+        var file: UInt64?
+        /// Bytes after the last newline at the last read (a line being written).
+        var pending: String?
+
+        public init() {}
+
+        /// False: the file cannot be read (what was read before is kept).
+        public mutating func read(_ url: URL) -> Bool {
+            let a = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let id = (a?[.systemFileNumber] as? NSNumber)?.uint64Value
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
+            if data.count < offset || id != file { self = Reader(); file = id }
+            var start = data.startIndex + offset
+            pending = nil
+            while start < data.endIndex {
+                guard let end = data[start...].firstIndex(of: 0x0A) else {
+                    pending = String(data: data[start...], encoding: .utf8)
+                    break
+                }
+                if end > start, let line = String(data: data[start..<end], encoding: .utf8) {
+                    if let c = lineCwd(line), c != last { cwds.insert(c); last = c }
+                    parser.feed(line: line, offset: UInt64(start - data.startIndex))
+                }
+                start = end + 1
+                offset = start - data.startIndex
+            }
+            return true
+        }
+
+        public func items(home: String?, agent: String? = nil) -> [Item] {
+            var p = parser, cs = cwds
+            if let l = pending, !l.isEmpty {
+                if let c = lineCwd(l) { cs.insert(c) }
+                p.feed(line: l, offset: UInt64(offset))
+            }
+            var acc = Acc()
+            for c in cs { acc.cwd(c) }
+            acc.add(p.items(), home: home)
+            return acc.finish(home: home, agent: agent)
+        }
+    }
+
+
 
     /// An item taken off the list, with the last mention it had then (nil: for good).
     public struct Removed: Codable, Equatable, Sendable {
@@ -120,6 +161,17 @@ extension Resources {
     }
 
     /// The empty window's title and line.
+    /// Why an agent has no list: its log is not there, or cannot be read.
+    public enum Problem: Sendable, Equatable { case noLog, unreadable }
+
+    /// The panel when an agent's log is not there, or cannot be read.
+    public static func problemText(_ p: Problem) -> (String, String) {
+        switch p {
+        case .noLog: ("Can't find this chat's log", "Flockbook keeps looking. The list shows up when the log does.")
+        case .unreadable: ("Can't read this chat's log", "Flockbook tries again when the log changes.")
+        }
+    }
+
     public static func emptyText(agent: Bool) -> (String, String) {
         agent ? ("No resources yet", "Docs, artifacts and links the agent mentions in its replies show up here.")
               : ("No agent here", "Open an agent's tab to see what it pointed you to.")

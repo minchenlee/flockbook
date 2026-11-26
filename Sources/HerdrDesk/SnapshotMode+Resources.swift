@@ -154,8 +154,19 @@ extension SnapshotRunner {
             }
             win.orderOut(nil)
         }
-        await r.refresh(key: fk, log: nil, home: nil, agentDir: nil)
-        step("no log to read: the panel stops saying it is reading", !r.loading(fk))
+        // The log is still being found (the store has no URL yet): the panel keeps saying it is reading, never "No resources yet".
+        await r.refresh(key: fk, log: nil, state: .loading, home: nil, agentDir: nil)
+        step("log not found yet: the panel still says it is reading", r.loading(fk) && r.problem[fk] == nil)
+        // Then the log is there: the list, with no empty state between.
+        await r.refresh(key: fk, log: log, home: "/nonexistent-home", agentDir: root)
+        step("then read: the list", !r.loading(fk) && !r.items(fk).isEmpty)
+        // No log for this session: said so, not "No resources yet".
+        let nk = "s|no-log", uk = "s|unreadable"
+        await r.refresh(key: nk, log: nil, state: .missing, home: nil, agentDir: nil)
+        step("no log: Can't find this chat's log", !r.loading(nk) && r.problem[nk] == .noLog
+             && Resources.problemText(.noLog).0 == "Can't find this chat's log")
+        await r.refresh(key: uk, log: URL(fileURLWithPath: "/nonexistent-dir/x.jsonl"), state: .ready, home: nil, agentDir: nil)
+        step("a log that cannot be read: said so", !r.loading(uk) && r.problem[uk] == .unreadable)
         // Kept in memory: the last eight agents.
         for i in 0..<9 { r.put("s|other\(i)", .init(items: [], stamp: nil)) }
         step("the lists of the last \(Resources.cacheMax) agents stay in memory", r.lists.count == Resources.cacheMax && r.lists[key] == nil)
