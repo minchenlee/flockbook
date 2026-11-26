@@ -346,12 +346,14 @@ mod socket_tests {
                 ppid: 400,
                 start: chrono::DateTime::from_timestamp_millis(base_ms).unwrap(),
                 line: "secretspec run -- claude".into(),
+                argv: vec![],
             },
             crate::resolver::Proc {
                 pid: 501,
                 ppid: 500,
                 start: chrono::DateTime::from_timestamp_millis(base_ms + 1000).unwrap(),
                 line: "claude".into(),
+                argv: vec![],
             },
         ]));
         let p2 = procs.clone();

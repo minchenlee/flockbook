@@ -34,7 +34,13 @@ fn rollout_name(t: Date, id: &str) -> String {
 }
 
 fn proc_(pid: i32, ppid: i32, start: Date, line: &str) -> Proc {
-    Proc { pid, ppid, start, line: line.into() }
+    Proc { pid, ppid, start, line: line.into(), argv: vec![] }
+}
+
+/// A process whose source gives its argv apart (Windows), followed by `env` in `line`.
+fn proc_argv(pid: i32, ppid: i32, start: Date, argv: &[&str], env: &str) -> Proc {
+    let line = [argv.join(" "), env.to_string()].join(" ");
+    Proc { pid, ppid, start, line: line.trim_end().into(), argv: argv.iter().map(|a| a.to_string()).collect() }
 }
 
 fn resolver(dirs: impl FnOnce(&mut SessionResolver)) -> SessionResolver {
@@ -959,6 +965,138 @@ fn claude_pid_file_with_linux_tick_proc_start() {
     assert_eq!(claude_session_source_with(&[pid], &procs, |_| Some(ok.clone().into_bytes())), Some(("sid-linux".to_string(), pid)));
     let reused = file(ticks + 1_000_000); // pid reused: another start
     assert_eq!(claude_session_source_with(&[pid], &procs, |_| Some(reused.clone().into_bytes())), None);
+}
+
+/// Claude Code on Windows writes `procStart` as the process creation time in FILETIME units (100 ns after
+/// 1601-01-01 UTC), not `ps lstart`. The process list has whole seconds, as `ps lstart` does.
+#[test]
+fn claude_pid_file_with_windows_filetime_proc_start() {
+    let start = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+    let procs = vec![proc_(17144, 1, start, "claude HC_TERMINAL_ID=t1")];
+    let file = |ps: &str| serde_json::json!({"pid": 17144, "sessionId": "sid-win", "procStart": ps}).to_string().into_bytes();
+    let ok = file("134396888779841927"); // 2026-11-20T22:54:37.984Z, from a real pid file
+    assert_eq!(claude_session_source_with(&[17144], &procs, |_| Some(ok.clone())), Some(("sid-win".to_string(), 17144)));
+    let reused = file("134396889379841927"); // 60 s later: pid reused, another start
+    assert_eq!(claude_session_source_with(&[17144], &procs, |_| Some(reused.clone())), None);
+}
+
+/// Windows: a program is named by its last `\` or `/` component without `.exe`, so `claude.exe` runs claude and
+/// `node.exe` is an interpreter. An hc Claude pane then resolves by its pid file.
+#[test]
+fn windows_programs_and_hc_claude() {
+    test_windows::run(windows_programs_and_hc_claude_cases);
+}
+
+fn windows_programs_and_hc_claude_cases() {
+    let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+    let one = |line: &str, kind: &str| agent_in_tree(1, kind, &[proc_(10, 1, t0, line)], false).map(|p| p.pid);
+    for (line, kind) in [
+        (r"C:\Users\me\.local\bin\claude.exe HC_TERMINAL_ID=t1", "claude"),
+        ("claude.exe --resume", "claude"),
+        ("C:/Users/me/.local/bin/claude.EXE", "claude"),
+        (r"C:\nodejs\node.exe C:\x\bin\codex", "codex"),
+        (r"node22.exe C:\x\bin\claude", "claude"),
+    ] {
+        assert_eq!(one(line, kind), Some(10), "{line:?} runs {kind}");
+    }
+    for (line, kind) in [
+        (r"C:\Windows\System32\cmd.exe /c claude", "claude"),
+        ("claude.exe.bak", "claude"),
+        (r"C:\tools\claude-helper.exe", "claude"),
+    ] {
+        assert_eq!(one(line, kind), None, "{line:?} does not run {kind}");
+    }
+
+    let procs = vec![
+        proc_(500, 1, t0, r"C:\Program-Files\PowerShell\7\pwsh.exe HC_TERMINAL_ID=t1"),
+        proc_(17144, 500, t0, r"C:\Users\me\.local\bin\claude.exe HC_TERMINAL_ID=t1"),
+    ];
+    let (_t, dir) = tmp();
+    let o = serde_json::json!({"pid": 17144, "sessionId": "sid-win", "procStart": "134396888779841927"});
+    fs::write(format!("{dir}/17144.json"), serde_json::to_vec(&o).unwrap()).unwrap();
+    let need = Need::new("hc:t1", "claude", r"C:\w", vec![500]);
+    let mut res = resolver(|r| r.claude_dir = dir.clone());
+    let got = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
+    assert_eq!(got, Some("sid-win".to_string()), "hc Claude pane on Windows resolved by its pid file");
+}
+
+/// Windows: a program's name ignores case (`CLAUDE.EXE` runs claude), and a full path with spaces is one word, as
+/// the process source gives the argv apart. An hc Claude pane at such a path resolves by its pid file.
+#[test]
+fn windows_names_ignore_case_and_keep_spaced_paths() {
+    test_windows::run(|| {
+        let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+        let one = |p: Proc, kind: &str| agent_in_tree(1, kind, &[p], false).map(|p| p.pid);
+        assert_eq!(one(proc_(10, 1, t0, "CLAUDE.EXE --resume"), "claude"), Some(10), "CLAUDE.EXE");
+        assert_eq!(one(proc_(10, 1, t0, r"C:\Tools\Claude.Exe"), "claude"), Some(10), "Claude.Exe");
+        let spaced = [r"C:\Program Files\Claude\claude.exe", "--resume"];
+        assert_eq!(one(proc_argv(10, 1, t0, &spaced, "HC_TERMINAL_ID=t1"), "claude"), Some(10), "path with spaces");
+        let node = [r"C:\Program Files\nodejs\node.exe", r"C:\Program Files\x\bin\codex"];
+        assert_eq!(one(proc_argv(10, 1, t0, &node, ""), "codex"), Some(10), "interpreter at a path with spaces");
+        let helper = [r"C:\Program Files\Claude\claude-helper.exe"];
+        assert_eq!(one(proc_argv(10, 1, t0, &helper, ""), "claude"), None, "another program");
+
+        let procs = vec![
+            proc_argv(500, 1, t0, &[r"C:\Program Files\PowerShell\7\pwsh.exe"], "HC_TERMINAL_ID=t1"),
+            proc_argv(17144, 500, t0, &[r"C:\Program Files\Claude\CLAUDE.EXE"], "HC_TERMINAL_ID=t1"),
+        ];
+        let (_t, dir) = tmp();
+        let o = serde_json::json!({"pid": 17144, "sessionId": "sid-win", "procStart": "134396888779841927"});
+        fs::write(format!("{dir}/17144.json"), serde_json::to_vec(&o).unwrap()).unwrap();
+        let need = Need::new("hc:t1", "claude", r"C:\w", vec![500]);
+        let mut res = resolver(|r| r.claude_dir = dir.clone());
+        let got = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1").cloned();
+        assert_eq!(got, Some("sid-win".to_string()), "hc Claude pane at a path with spaces resolved by its pid file");
+    });
+}
+
+/// Windows (Codex R1 on PR 22): an hc terminal whose foreground is only `claude.exe`, with no OSC status yet, is a
+/// Claude pane through the mapper, and the resolver finds its log by the pid file.
+#[test]
+fn windows_hc_claude_exe_pane_through_the_mapper() {
+    test_windows::run(|| {
+        let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+        let claude = r"C:\Program Files\Claude\claude.exe";
+        let pwsh = r"C:\Program Files\PowerShell\7\pwsh.exe";
+        let record = serde_json::json!({
+            "address": "t1",
+            "state": "live",
+            "argv": [pwsh],
+            "pid": 500,
+            "cwd": r"C:\w",
+            "created_ms": 7,
+            "foreground": {"name": "claude.exe", "argv": [claude], "pid": 17144}
+        });
+        let ws = crate::hc::mapper::workspaces_with(&[record], &crate::hc::mapper::NoAgentCheck);
+        let pane = ws[0].tabs[0].panes[0].clone();
+        let agent = pane.agent.clone().expect("claude.exe in front is an agent pane");
+        assert_eq!(agent.kind, "claude");
+        assert_eq!(agent.process.as_deref(), Some("17144@7"), "claude.exe in front is the key identity");
+
+        let procs = vec![
+            proc_argv(500, 1, t0, &[pwsh], "HC_TERMINAL_ID=t1"),
+            proc_argv(17144, 500, t0, &[claude], "HC_TERMINAL_ID=t1"),
+        ];
+        let (_t, dir) = tmp();
+        let o = serde_json::json!({"pid": 17144, "sessionId": "sid-win", "procStart": "134396888779841927"});
+        fs::write(format!("{dir}/17144.json"), serde_json::to_vec(&o).unwrap()).unwrap();
+        let need = Need::new(&pane.id, &agent.kind, &pane.cwd, pane.process_ids.clone());
+        let mut res = resolver(|r| r.claude_dir = dir.clone());
+        let got = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get(&pane.id).cloned();
+        assert_eq!(got, Some("sid-win".to_string()), "the mapper's Claude pane resolved by its pid file");
+    });
+}
+
+/// Outside Windows, names stay as they are: `CLAUDE` and `claude.exe` are other programs.
+#[cfg(not(windows))]
+#[test]
+fn non_windows_names_unchanged() {
+    let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+    let one = |line: &str| agent_in_tree(1, "claude", &[proc_(10, 1, t0, line)], false).map(|p| p.pid);
+    assert_eq!(one("/usr/local/bin/claude --resume"), Some(10));
+    assert_eq!(one("CLAUDE"), None);
+    assert_eq!(one("claude.exe"), None);
+    assert_eq!(one(r"C:\x\claude"), None);
 }
 
 /// Codex writes a rollout for each subagent it starts (the approvals reviewer "guardian", `spawn_agent` helpers)
