@@ -47,6 +47,7 @@ public final class HCFramedConnection: @unchecked Sendable {
     private var attachCalls: Set<Int> = []
     static let maxEarlyFrames = 4096
     private var closed = false
+    private var partial = false
 
     private init(sock: LineSocket) { self.sock = sock }
 
@@ -73,6 +74,10 @@ public final class HCFramedConnection: @unchecked Sendable {
     public func shutdown() { fail(HerdrError.closed) }
 
     public var isClosed: Bool { lock.withLock { closed } }
+    /// Part of a frame is read and the rest has not come yet, or the frames of the last read are still being handed out.
+    public var hasPartialFrame: Bool { lock.withLock { partial } }
+    /// Closes the connection: pending calls and streams end with `closed`.
+    public func close() { fail(HerdrError.closed) }
     /// Frames parked for channels whose attach reply is being handled (checks only).
     var earlyCount: Int { lock.withLock { early.values.reduce(0) { $0 + $1.count } } }
 
@@ -139,12 +144,22 @@ public final class HCFramedConnection: @unchecked Sendable {
         lock.withLock { streams[ch] = nil; early[ch] = nil; awaiting.remove(ch) }
     }
 
+    /// Checks only: the reader thread waits this long after it hands out a DATA frame (a busy machine).
+    nonisolated(unsafe) static var pauseAfterData: TimeInterval = 0
+
     private func readLoop(_ leftover: [UInt8]) {
         var dec = HCFrameDecoder()
         do {
             var frames = try dec.feed(leftover[...])
             while true {
-                for f in frames { dispatch(f) }
+                // Not settled while this read's frames are handed out: a frame part read with them is already known.
+                if !frames.isEmpty { lock.withLock { partial = true } }
+                for f in frames {
+                    dispatch(f)
+                    if f.channel != 0, f.kind == .data, Self.pauseAfterData > 0 { Thread.sleep(forTimeInterval: Self.pauseAfterData) }
+                }
+                let p = dec.hasPartial
+                lock.withLock { partial = p }
                 frames = try dec.feed(try sock.readChunk())
             }
         } catch {
@@ -198,6 +213,9 @@ public final class HCAttachment: @unchecked Sendable {
     private let lock = NSLock()
     private var _closeReason: [String: Any]?
     private var done = false
+    private var _delivered = 0
+    /// DATA bytes handed to `bytes` so far.
+    public var deliveredBytes: Int { lock.withLock { _delivered } }
     /// Serializes delivery: the connection holds it while it hands over the backlog (see `attach`).
     let deliveryLock = NSLock()
 
@@ -234,7 +252,9 @@ public final class HCAttachment: @unchecked Sendable {
     /// Caller holds `deliveryLock`.
     func deliverLocked(_ f: HCFrame) {
         switch f.kind {
-        case .data: cont.yield(f.payload)
+        case .data:
+            lock.withLock { _delivered += f.payload.count }
+            cont.yield(f.payload)
         case .close:
             let reason = (try? JSONSerialization.jsonObject(with: f.payload)) as? [String: Any]
             lock.withLock { _closeReason = reason; done = true }

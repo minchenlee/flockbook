@@ -42,6 +42,10 @@ pub struct Card {
     /// An approval this sidecar already answered that is still on screen: no buttons.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answered: Option<bool>,
+    /// Question: why `answer` would refuse these answers before any key (`review_note`). The mod turns Send off and
+    /// shows this with a button that opens the terminal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<String>,
 }
 
 impl Card {
@@ -78,6 +82,10 @@ pub fn gate(pane: &Pane) -> KeyGate {
 pub fn agent_changed() -> Done {
     Done::new("changed", Some("another agent is in this pane now; nothing was sent"))
 }
+/// The same agent, in another log: the mod and the page show the new one.
+pub fn new_conversation() -> Done {
+    Done::new("changed", Some("the agent started a new conversation; the chat now shows it; nothing was sent"))
+}
 pub fn no_identity() -> Done {
     Done::new(
         "no-identity",
@@ -88,6 +96,17 @@ pub fn no_identity() -> Done {
 pub fn claude_suggests(home: Option<&Path>) -> bool {
     let v = home.and_then(|h| std::fs::read(h.join(".claude/settings.json")).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
     v.and_then(|v| v["promptSuggestionEnabled"].as_bool()).unwrap_or(true)
+}
+
+/// How long `send` looks at a pane's first paint for a dim suggestion.
+pub const LOOK_LIMIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Claude Code's box shows "/…" that may be its dim prompt suggestion, not typed text (issue #11, item 2). One
+/// watch-only look at the first paint (no keys, no resize; detached at once, `LOOK_LIMIT` at most): true only when it
+/// reads the same text, all dim, with the cursor at the box start. Any error or doubt: false (refused as before).
+fn dim_suggestion(client: &HcClient, pane_id: &str, screen: &str) -> bool {
+    let Some(text) = crate::queue::claude_slash_row(screen) else { return false };
+    client.first_paint(pane_id, LOOK_LIMIT).is_ok_and(|p| crate::queue::claude_suggestion_in_paint(&p, &text))
 }
 
 pub const BOX_NOT_EMPTY: &str = "The agent's box has text in it. Clear it in the terminal first. Nothing was sent.";
@@ -101,6 +120,25 @@ pub fn refused(pane: &Pane) -> Done {
     } else {
         no_identity()
     }
+}
+/// An answer the key gate stopped. Another agent, or no identity: as `refused`. The same agent with another screen
+/// (a render that never came, or another question): its own result, and "nothing was sent" only when no key went.
+pub fn answer_stop(pane: &Pane, e: &HerdrError) -> Done {
+    match e {
+        HerdrError::ScreenStop { keys_sent: false } => {
+            Done::new("screen_changed", Some("The question on screen changed before the answer went in. Nothing was sent."))
+        }
+        HerdrError::ScreenStop { keys_sent: true } => Done::new(
+            "screen_changed",
+            Some("The question on screen changed while answering. Some keys may already be in: check the terminal."),
+        ),
+        HerdrError::KeyGateStopSent => agent_changed_after_keys(),
+        _ => refused(pane),
+    }
+}
+/// Another agent (or the input level) stopped the keys after some went in: the screen may have moved.
+pub fn agent_changed_after_keys() -> Done {
+    Done::new("changed", Some("Another agent is in this pane now. Some keys may already be in: check the terminal."))
 }
 pub fn already_answered() -> Done {
     Done::new("answered", Some("this approval was already answered; waiting for the agent to move on"))
@@ -172,15 +210,63 @@ pub fn look<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>)
     (None, read)
 }
 
+/// The card's `blocked` line (`question::review_blocked`, the rule `answer` refuses with): Some when two distinct
+/// answers would look identical on the terminal's review screen. None while questions are unread (`answer` reads them
+/// first).
+pub const REVIEW_LABELS: &str = "Two answers here would look identical on the review screen. Answer in the terminal.";
+pub const REVIEW_PICKS: &str = "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.";
+pub const REVIEW_OWN: &str = "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.";
+pub const REVIEW_CUT: &str = "An option is too long for one line on the screen, so the review screen cannot be checked. Answer in the terminal.";
+
+pub fn review_note(q: &QuestionRequest, answers: &[QuestionAnswer]) -> Option<String> {
+    if q.unread() > 0 {
+        return None;
+    }
+    question::review_collision(q, answers).map(|kind| {
+        match kind {
+            question::CollisionKind::Labels => REVIEW_LABELS,
+            question::CollisionKind::Picks => REVIEW_PICKS,
+            question::CollisionKind::Own => REVIEW_OWN,
+            question::CollisionKind::Cut => REVIEW_CUT,
+        }
+        .into()
+    })
+}
+
 /// `all`: for a question with more behind it, walk the picker's tabs first (keys, on the owner's click).
 pub fn card<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>) -> Card {
+    card_with_question(pane, screen, log, all, cache, &[], None)
+}
+
+/// `card`, with the answers the mod has so far (`card --answers`): `blocked` covers the person's own answers too.
+pub fn card_with<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, all: bool, cache: Option<&Path>, answers: &[QuestionAnswer]) -> Card {
+    card_with_question(pane, screen, log, all, cache, answers, None)
+}
+
+/// `card`, optionally reusing a full question set kept from an earlier "Show all" (`--question`) so `blocked`
+/// can be re-evaluated against `answers` without sending keys to walk tabs again.
+pub fn card_with_question<S: PaneScreen + ?Sized>(
+    pane: &Pane,
+    screen: &S,
+    log: Option<&Path>,
+    all: bool,
+    cache: Option<&Path>,
+    answers: &[QuestionAnswer],
+    full: Option<&FeedQuestion>,
+) -> Card {
     let (mut now, read) = look(pane, screen, log);
     if all {
         if let Some(Current::Question(q)) = &now {
             if q.unread() > 0 {
-                if let Ok(Some(full)) = question::load_all_questions(screen, &pane.id, Some(&gate(pane)), Some(q)) {
-                    now = Some(Current::Question(full));
+                if let Ok(Some(full_q)) = question::load_all_questions(screen, &pane.id, Some(&gate(pane)), Some(q)) {
+                    now = Some(Current::Question(full_q));
                 }
+            }
+        }
+    } else if let (Some(Current::Question(q)), Some(fq)) = (&now, full) {
+        if q.unread() > 0 {
+            if let Some(restored) = restore_full_question(q, fq) {
+                now = Some(Current::Question(restored));
             }
         }
     }
@@ -216,6 +302,7 @@ pub fn card<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>,
                 request: Some(q.tool_use_id.clone()),
                 question: row.question,
                 unread: Some(q.unread()),
+                blocked: review_note(&q, answers),
                 ..Default::default()
             }
         }
@@ -248,6 +335,11 @@ pub fn approve<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Pat
         Ok(false) => {
             answered.release(&pane.id, &id);
             Done::new("changed", Some("the prompt on screen is not the one shown"))
+        }
+        Err(HerdrError::KeyGateStopSent) => {
+            // A grok Down went, then the gate said no before Enter: nothing was answered, but the focus moved.
+            answered.release(&pane.id, &id);
+            agent_changed_after_keys()
         }
         Err(HerdrError::Timeout(_)) => {
             // hc may still hold the key for its typing-quiet rule: not "nothing sent". The claim stays while blocked.
@@ -288,6 +380,57 @@ pub fn parse_answers(json: &str) -> Option<Vec<QuestionAnswer>> {
     Some(out)
 }
 
+pub fn parse_question(raw: &str) -> Option<FeedQuestion> {
+    serde_json::from_str::<FeedQuestion>(raw).ok()
+}
+
+fn restore_full_question(q: &QuestionRequest, fq: &FeedQuestion) -> Option<QuestionRequest> {
+    if fq.tool_use_id != q.tool_use_id || fq.questions.is_empty() || fq.questions.len() < q.questions.len() {
+        return None;
+    }
+    if !q.headers.is_empty() && !fq.questions.iter().map(|x| x.header.as_str()).eq(q.headers.iter().map(String::as_str)) {
+        return None;
+    }
+    let visible_matches = q.questions.iter().all(|vis| {
+        fq.questions.iter().any(|x| {
+            x.text == vis.text
+                && x.multi == vis.multi_select
+                && x.options.len() == vis.options.len()
+                && x.options.iter().zip(&vis.options).all(|(a, b)| a.label == b.label && a.recommended == b.recommended)
+        })
+    });
+    if !visible_matches {
+        return None;
+    }
+    Some(QuestionRequest {
+        tool_use_id: q.tool_use_id.clone(),
+        agent: q.agent.clone(),
+        delivery: q.delivery,
+        headers: if q.headers.is_empty() {
+            fq.questions.iter().map(|x| x.header.clone()).collect()
+        } else {
+            q.headers.clone()
+        },
+        state: q.state.clone(),
+        questions: fq
+            .questions
+            .iter()
+            .map(|x| Question {
+                id: if x.id.is_empty() { x.text.clone() } else { x.id.clone() },
+                header: x.header.clone(),
+                text: x.text.clone(),
+                options: x
+                    .options
+                    .iter()
+                    .map(|o| QOption { label: o.label.clone(), detail: o.detail.clone(), recommended: o.recommended })
+                    .collect(),
+                multi_select: x.multi,
+                cut_labels: x.cut_labels,
+            })
+            .collect(),
+    })
+}
+
 pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path>, request: &str, answers: &[QuestionAnswer]) -> Done {
     let Some(Current::Question(mut q)) = current(pane, screen, log) else {
         return Done::new("changed", Some("the question on screen is not the one shown"));
@@ -312,14 +455,16 @@ pub fn answer<S: PaneScreen + ?Sized>(pane: &Pane, screen: &S, log: Option<&Path
     match r {
         Ok(Some(d)) => d,
         Ok(None) => Done::new("sent", None),
-        Err(HerdrError::KeyGateStop) => refused(pane),
+        Err(e @ (HerdrError::KeyGateStop | HerdrError::KeyGateStopSent | HerdrError::ScreenStop { .. })) => answer_stop(pane, &e),
         Err(HerdrError::Question(QuestionFailure::NotOnScreen)) => Done::new("changed", Some("the question is not on screen")),
         Err(e) => Done::new("failed", Some(&e.to_string())),
     }
 }
 
-/// The composer: the text, with each file in `files` named in it.
-pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: Option<&Path>, expect_kind: Option<&str>, expect_path: Option<&str>) -> Done {
+/// The composer: the text, with each file in `files` named in it. `was`: the locate cache entry this terminal had
+/// before the send looked its log up again.
+#[allow(clippy::too_many_arguments)]
+pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: Option<&Path>, expect_kind: Option<&str>, expect_path: Option<&str>, was: Option<&crate::locate::Entry>) -> Done {
     // The agent the owner was reading: another agent, or a new conversation, in this terminal now gets nothing.
     if let Some(k) = expect_kind {
         if Some(k) != pane.agent.as_ref().map(|a| a.kind.as_str()) {
@@ -328,6 +473,12 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     }
     if let Some(p) = expect_path {
         if Some(p.to_string()) != log.map(|l| l.to_string_lossy().into_owned()) {
+            // The same agent process wrote the log the chat showed (`/clear`, `/resume`), and a log was found now: a new
+            // conversation. Still nothing is sent: the text was written for the conversation the chat showed.
+            let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
+            if log.is_some() && was.is_some_and(|w| crate::locate::same_agent(w, pane, kind, p)) {
+                return new_conversation();
+            }
             return Done::new("changed", Some("another agent or conversation is in this pane now; nothing was sent"));
         }
     }
@@ -345,13 +496,209 @@ pub fn send(pane: &Pane, client: &HcClient, text: &str, files: &[String], log: O
     // not read, or no screen: it goes as before.
     let kind = pane.agent.as_ref().map(|a| a.kind.as_str()).unwrap_or("");
     let suggests = kind == "claude" && claude_suggests(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref());
-    if client.visible_text(&pane.id).ok().and_then(|s| crate::queue::box_has_text(kind, &s, suggests)) == Some(true) {
-        return box_not_empty();
+    if let Ok(screen) = client.visible_text(&pane.id) {
+        if crate::queue::box_has_text(kind, &screen, suggests) == Some(true) {
+            if !(suggests && dim_suggestion(client, &pane.id, &screen)) {
+                return box_not_empty();
+            }
+            // The look took up to LOOK_LIMIT: another agent may have come in meanwhile. Gate again before typing.
+            if !keygate::passes(client, Some(&gate(pane)), &pane.id, None, None) {
+                return refused(pane);
+            }
+        }
     }
     let r = if files.is_empty() { client.deliver(text, &pane.id) } else { client.deliver_files(text, &pane.id, files) };
     match r {
         DeliveryOutcome::Sent => Done::new("sent", None),
         DeliveryOutcome::Unconfirmed => Done::new("unconfirmed", Some("no answer in time; the text may still arrive")),
         DeliveryOutcome::Failed => Done::new("failed", Some("herdr-core did not take the text")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn hooked(questions: Value) -> QuestionRequest {
+        let mut q = question::claude("toolu_R", json!({ "questions": questions }).as_object().unwrap()).unwrap();
+        q.headers = vec![];
+        q
+    }
+    fn two(a: &str, b: &str) -> QuestionRequest {
+        hooked(json!([{"question":"First?","header":"One","multiSelect":true,"options":[{"label":a,"description":""},{"label":b,"description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}]))
+    }
+    fn own(text: &str) -> Vec<QuestionAnswer> {
+        vec![QuestionAnswer { picks: vec![], other: Some(text.into()) }, QuestionAnswer::default()]
+    }
+
+    // Issue #11, item 4: the card says so before Send, with the rule `answer` refuses with.
+    #[test]
+    fn review_note_before_send() {
+        let three = hooked(json!([
+            {"question":"First?","header":"One","multiSelect":true,"options":[{"label":"x, y","description":""},{"label":"x","description":""},{"label":"y","description":""}]},
+            {"question":"Second?","header":"Two","multiSelect":false,"options":[{"label":"C","description":""},{"label":"D","description":""}]}
+        ]));
+        assert_eq!(review_note(&three, &[]).as_deref(), Some(REVIEW_LABELS), "a comma label with split siblings: blocked from the start");
+        assert_eq!(review_note(&two("A B", "AB"), &own("fine")), None, "own('fine') does not collide with colliding option labels");
+        assert_eq!(review_note(&two("A", "B"), &[]), None, "clean labels: Send stays on");
+        assert_eq!(review_note(&two("A", "B"), &own("x, y")), None, "own answer with non-colliding comma is allowed");
+        assert_eq!(review_note(&two("A", "B"), &own("A, B")).as_deref(), Some(REVIEW_OWN), "own answer colliding with [A, B]");
+        assert_eq!(review_note(&two("A", "B"), &own("  B ")).as_deref(), Some(REVIEW_OWN), "own answer alike an option");
+        assert_eq!(review_note(&two("A", "B"), &own("olive")), None, "a clean own answer");
+        // It is the answer's refusal: the same answers, the same verdict.
+        for (q, a) in [(three.clone(), vec![]), (two("A", "B"), own("A, B")), (two("A", "B"), own("olive"))] {
+            assert_eq!(review_note(&q, &a).is_some(), question::review_blocked(&q, &a));
+        }
+        // Round 5 P2 (1): a screen read whose labels may be cut (a wrapped label).
+        let mut cut = two("A", "B");
+        cut.questions[0].cut_labels = true;
+        assert_eq!(review_note(&cut, &[]).as_deref(), Some(REVIEW_CUT), "a cut label: blocked from the start");
+        let mut unread = two("A B", "AB");
+        unread.headers = vec!["One".into(), "Two".into(), "Three".into()];
+        assert_eq!(review_note(&unread, &[]), None, "questions unread: answer reads them first");
+    }
+
+    // Codex R1 on round 5: the full question set kept by "Show all" goes back through `--question` on the next
+    // poll; a cut label must still block there, as `answer` does.
+    #[test]
+    fn full_question_keeps_cut_labels() {
+        let mut cut = two("A", "B");
+        cut.questions[0].cut_labels = true;
+        let raw = serde_json::to_string(&crate::rows::question(&cut)).unwrap();
+        let fq = parse_question(&raw).unwrap();
+        let back = restore_full_question(&cut, &fq).unwrap();
+        assert!(back.questions[0].cut_labels && !back.questions[1].cut_labels, "the flag goes there and back");
+        assert_eq!(review_note(&back, &[]).as_deref(), Some(REVIEW_CUT), "still blocked after the poll");
+        let plain = crate::rows::question(&two("A", "B"));
+        assert!(!serde_json::to_string(&plain).unwrap().contains("cutLabels"), "no cut label: the JSON is as before");
+    }
+
+    #[test]
+    fn review_note_exact_cases_red() {
+        // Screen 2: multi-select comma option + split siblings
+        let red_blue = hooked(json!([
+            {"question":"Pick?","header":"C","multiSelect":true,"options":[{"label":"Red, Blue","description":""},{"label":"Red","description":""},{"label":"Blue","description":""}]},
+            {"question":"More?","header":"M","multiSelect":false,"options":[{"label":"X","description":""},{"label":"Y","description":""}]}
+        ]));
+        assert_eq!(
+            review_note(&red_blue, &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer { picks: vec![0], other: None }]),
+            None,
+            "Screen 2: picking quoted 'Red, Blue' alone must clear blocked note"
+        );
+        // Round 3 P2 conservative pre-flight
+        assert_eq!(
+            review_note(&red_blue, &[QuestionAnswer { picks: vec![1, 2], other: None }, QuestionAnswer { picks: vec![0], other: None }]).as_deref(),
+            Some(REVIEW_PICKS),
+            "Round 3 P2: [Red, Blue] stays conservatively blocked as REVIEW_PICKS"
+        );
+
+        // screen- request must not bypass review_note
+        let mut screen_ab = two("A B", "AB");
+        screen_ab.tool_use_id = "screen-ab".into();
+        assert_eq!(review_note(&screen_ab, &[]).as_deref(), Some(REVIEW_LABELS), "screen- request with colliding labels warns");
+        assert_eq!(review_note(&screen_ab, &own("fine")), None, "screen- non-colliding Other is allowed");
+
+        // Duplicate labels ['Yes', 'Yes', 'No'] partial / empty / [0] / [2]
+        let yes_no = hooked(json!([
+            {"question":"Q1?","header":"H1","multiSelect":false,"options":[{"label":"Yes","description":""},{"label":"Yes","description":""},{"label":"No","description":""}]},
+            {"question":"Q2?","header":"H2","multiSelect":false,"options":[{"label":"A","description":""},{"label":"B","description":""}]}
+        ]));
+        assert_eq!(review_note(&yes_no, &[]).as_deref(), Some(REVIEW_LABELS));
+        assert_eq!(
+            review_note(&yes_no, &[QuestionAnswer { picks: vec![2], other: None }, QuestionAnswer::default()]),
+            None,
+            "partial [2] ('No') clears the blocked note"
+        );
+        assert_eq!(
+            review_note(&yes_no, &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer::default()]).as_deref(),
+            Some(REVIEW_PICKS),
+            "partial [0] ('Yes') still warns with REVIEW_PICKS"
+        );
+
+        // New wording (§4.2)
+        assert_eq!(REVIEW_LABELS, "Two answers here would look identical on the review screen. Answer in the terminal.");
+        assert_eq!(REVIEW_PICKS, "This selection looks the same as another choice on the review screen. Change a selection, or answer in the terminal.");
+        assert_eq!(REVIEW_OWN, "Your own answer would look the same as another choice on the review screen. Change it, or answer in the terminal.");
+    }
+
+    #[test]
+    fn card_with_question_rechecks_blocked_without_keys() {
+        let pane = Pane {
+            id: "t1".into(),
+            terminal_id: "t1".into(),
+            cwd: "/tmp".into(),
+            agent: Some(Agent::new("t1", "claude", AgentStatus::Blocked)),
+            ..Default::default()
+        };
+        let screen_text = [
+            "←  ☐ One  ☐ Two  ✔ Submit  →",
+            "Q1?",
+            "❯ 1. Yes",
+            "  2. Yes",
+            "  3. No",
+            "  4. Type something.",
+            "────────────────────────",
+            "  5. Chat about this",
+            "",
+            "Enter to select · ↑/↓ to navigate · Esc to cancel",
+        ]
+        .join("\n");
+        let scr = herdr_core::fake::FakeScreen::new(vec![], vec![&screen_text]);
+
+        let first_only = card(&pane, &scr, None, false, None);
+        let reads_per_card = *scr.reads.borrow();
+        assert_eq!(first_only.unread, Some(1));
+        assert_eq!(first_only.blocked, None);
+        let req_id = first_only.request.clone().expect("screen request");
+        assert!(req_id.starts_with("screen-"));
+
+        let full_fq: FeedQuestion = serde_json::from_value(json!({
+            "toolUseId": req_id,
+            "agent": "claude",
+            "delivery": "picker",
+            "state": "pending",
+            "questions": [
+                {"id":"Q1?","header":"One","text":"Q1?","multi":false,"options":[{"label":"Yes"},{"label":"Yes"},{"label":"No"}]},
+                {"id":"Q2?","header":"Two","text":"Q2?","multi":false,"options":[{"label":"A"},{"label":"B"}]}
+            ]
+        }))
+        .unwrap();
+
+        let empty_pick = card_with_question(&pane, &scr, None, false, None, &[], Some(&full_fq));
+        assert_eq!(empty_pick.unread, Some(0));
+        assert_eq!(empty_pick.blocked.as_deref(), Some(REVIEW_LABELS));
+
+        let safe_pick = card_with_question(
+            &pane,
+            &scr,
+            None,
+            false,
+            None,
+            &[QuestionAnswer { picks: vec![2], other: None }, QuestionAnswer::default()],
+            Some(&full_fq),
+        );
+        assert_eq!(safe_pick.unread, Some(0));
+        assert_eq!(safe_pick.blocked, None, "unique 'No' clears blocked without sending keys");
+
+        let bad_pick = card_with_question(
+            &pane,
+            &scr,
+            None,
+            false,
+            None,
+            &[QuestionAnswer { picks: vec![0], other: None }, QuestionAnswer::default()],
+            Some(&full_fq),
+        );
+        assert_eq!(bad_pick.blocked.as_deref(), Some(REVIEW_PICKS));
+
+        let mut wrong_id = full_fq.clone();
+        wrong_id.tool_use_id = "screen-other".into();
+        let ignored = card_with_question(&pane, &scr, None, false, None, &[], Some(&wrong_id));
+        assert_eq!(ignored.unread, Some(1), "mismatched request id falls back to screen");
+
+        assert!(scr.sent.borrow().is_empty(), "re-checking blocked sends zero keys");
+        assert_eq!(*scr.reads.borrow(), reads_per_card * 5, "no extra screen reads beyond look() per card call");
     }
 }

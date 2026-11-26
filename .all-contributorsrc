@@ -40,6 +40,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "OMKE",
+      "name": "Omar Iriskic",
+      "avatar_url": "https://github.com/OMKE.png",
+      "profile": "https://github.com/OMKE",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

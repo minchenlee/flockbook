@@ -235,6 +235,102 @@ fn pi_tree() {
     assert!(p.has_open_tool_use() && p.items().iter().map(|i| i.id.clone()).collect::<Vec<_>>() == ids, "pi: incremental feed = batch, open tool call");
 }
 
+/// A synthetic omp log: pi's tree, with a title slot first, `activeLeafId` on off-branch entries and the newer
+/// entry types.
+fn omp_lines() -> Vec<String> {
+    let m = |id: &str, parent: &str, role: &str, text: &str, extra: &str| {
+        let parent = if parent.is_empty() { "null".to_string() } else { format!("\"{parent}\"") };
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":{parent},"timestamp":"2026-11-10T07:00:00.000Z"{extra},"message":{{"role":"{role}","content":[{{"type":"text","text":"{text}"}}],"timestamp":1}}}}"#
+        )
+    };
+    let e = |ty: &str, id: &str, parent: &str, extra: &str| {
+        format!(r#"{{"type":"{ty}","id":"{id}","parentId":"{parent}","timestamp":"2026-11-10T07:00:00.000Z"{extra}}}"#)
+    };
+    vec![
+        r#"{"type":"title","v":1,"title":"Fix the build","source":"auto","updatedAt":"2026-11-10T07:00:00.000Z","pad":"    "}"#.into(),
+        r#"{"type":"session","version":3,"id":"s0","title":"Fix the build","timestamp":"2026-11-10T07:00:00.000Z","cwd":"/home/u/src/app"}"#.into(),
+        e("session_init", "i1", "", r#","systemPrompt":"x""#).replace(r#""parentId":"""#, r#""parentId":null"#),
+        m("u1", "i1", "user", "Fix the build.", ""),
+        m("a1", "u1", "assistant", "On it.", ""),
+        m("u2", "a1", "user", "First try.", ""),
+        m("a2", "u2", "assistant", "Answer one.", ""),
+        m("u3", "a1", "user", "Second try.", ""),
+        m("a3", "u3", "assistant", "Answer two.", ""),
+        // 9: late usage and a background result written on the first branch while the second is shown.
+        e("model_usage", "k1", "a2", r#","activeLeafId":"a3","purpose":"title","api":"x","provider":"x","model":"x","usage":{},"stopReason":"stop""#),
+        m("b1", "a2", "assistant", "Late result.", r#","activeLeafId":"a3""#),
+        // 11: newer entry types in the chain.
+        e("mode_change", "mc1", "a3", r#","mode":"plan""#),
+        e("label", "l1", "mc1", r#","targetId":"a3","label":"good""#),
+        e("custom_message", "n1", "l1", r#","customType":"bg","content":"<system-notice>\nBackground job done.\n</system-notice>","display":true"#),
+        e("custom_message", "n2", "n1", r#","customType":"ext","content":"Subagent finished.","display":true"#),
+        m("u4", "n2", "user", "Third.", ""),
+        m("u5", "n2", "user", "Third again.", ""),
+    ]
+}
+
+#[test]
+fn omp_tree() {
+    let ol = omp_lines();
+    let shown = |n: usize| describe(&parse(&ol[..n]));
+    let second = ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two."];
+    assert_eq!(shown(9), second, "omp: title slot and session_init skipped; newest branch");
+    assert_eq!(shown(10), second, "omp: late usage keeps the shown branch (activeLeafId)");
+    assert_eq!(shown(11), second, "omp: an off-branch result is not shown and does not switch the branch");
+    assert_eq!(
+        shown(ol.len()),
+        ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two.", "status", "user:Third again."],
+        "omp: newer entry types keep the chain; a <system-notice> custom_message is no status row"
+    );
+    let items = parse(&ol);
+    assert!(matches!(&items[4].kind, herdr_core::ItemKind::Status(s) if s == "Subagent finished."), "omp: other custom_message rows stay");
+    let mut p = ConversationParser::new();
+    for l in &ol {
+        p.feed(l);
+    }
+    assert_eq!(describe(&p.items()), describe(&items), "omp: incremental feed = batch");
+}
+
+#[test]
+fn omp_cleared_leaf() {
+    // activeLeafId null: the leaf was cleared; the entry itself is not shown.
+    let ol = omp_lines();
+    let mut lines = ol[..9].to_vec();
+    lines.push(r#"{"type":"message","id":"b2","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","activeLeafId":null,"message":{"role":"assistant","content":[{"type":"text","text":"Hidden."}],"timestamp":1}}"#.into());
+    assert!(!describe(&parse(&lines)).iter().any(|d| d.contains("Hidden")), "omp: an entry with a cleared leaf is not shown");
+
+    // The shown branch goes too, with an open tool call; the next root starts a new list.
+    let mut lines = ol[..9].to_vec();
+    lines.push(r#"{"type":"message","id":"a4","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c9","name":"bash","arguments":{"command":"make"}}],"timestamp":1}}"#.into());
+    assert_eq!(describe(&parse(&lines)).last().map(String::as_str), Some("perm:make"), "omp: the open call before the clear");
+    lines.push(r#"{"type":"label","id":"z1","parentId":"a4","timestamp":"2026-11-10T07:00:00.000Z","activeLeafId":null,"targetId":"a4"}"#.into());
+    let mut p = ConversationParser::new();
+    for l in &lines {
+        p.feed(l);
+    }
+    assert!(p.items().is_empty() && !p.has_open_tool_use(), "omp: a cleared leaf clears the shown items ({:?})", describe(&p.items()));
+    lines.push(r#"{"type":"message","id":"u9","parentId":null,"timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Fresh start."}],"timestamp":1}}"#.into());
+    assert_eq!(describe(&parse(&lines)), ["user:Fresh start."], "omp: the next root is shown alone");
+    // The tree is kept: an entry on the old branch shows it again.
+    lines.push(r#"{"type":"message","id":"u8","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Back."}],"timestamp":1}}"#.into());
+    assert_eq!(
+        describe(&parse(&lines)),
+        ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two.", "user:Back."],
+        "omp: the old branch can be rebuilt"
+    );
+
+    // Cleared, then the old branch goes on at once (no new root first): its history comes back.
+    let mut lines = ol[..9].to_vec();
+    lines.push(r#"{"type":"label","id":"z2","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","activeLeafId":null,"targetId":"a3"}"#.into());
+    lines.push(r#"{"type":"message","id":"u7","parentId":"a3","timestamp":"2026-11-10T07:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Go on."}],"timestamp":1}}"#.into());
+    assert_eq!(
+        describe(&parse(&lines)),
+        ["user:Fix the build.", "asst:On it.", "user:Second try.", "asst:Answer two.", "user:Go on."],
+        "omp: an entry on the old branch right after a clear rebuilds it"
+    );
+}
+
 #[test]
 fn cursor_transcript() {
     let cl = fixture_lines("cursor.jsonl");

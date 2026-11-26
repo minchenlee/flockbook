@@ -3,7 +3,7 @@
 use herdr_core::ConversationItem;
 use herdr_core::ConversationParser;
 use serde_json::Value;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::Path;
 
 /// The app shows the last 2 MB first; the mod does the same.
@@ -137,6 +137,49 @@ pub fn items_at(range: &Range) -> Vec<ConversationItem> {
         p.feed_at(l, Some(*at));
     }
     p.items()
+}
+
+/// `items_at` without the picture offsets: rows then carry no pictures, as from `items`, but Codex, Grok and Cursor
+/// ids still come from line offsets. An id then names the same message whatever range was read (from the file's
+/// start in Resources, the last 2 MB in the feed, a page before it with --before).
+pub fn items_ids(range: &Range) -> Vec<ConversationItem> {
+    without_pictures(items_at(range))
+}
+
+/// The items with no picture offsets (see `items_ids`).
+pub fn without_pictures(mut items: Vec<ConversationItem>) -> Vec<ConversationItem> {
+    for it in &mut items {
+        for r in &mut it.images {
+            r.offset = None;
+        }
+        if let herdr_core::ItemKind::ToolChips(chips) = &mut it.kind {
+            for r in chips.iter_mut().flat_map(|c| &mut c.calls).flat_map(|x| &mut x.images) {
+                r.offset = None;
+            }
+        }
+    }
+    items
+}
+
+/// The whole lines in `from..to` (`from` a line start), read in pieces, not all at once: `f(line, offset)` for each
+/// line that is not empty, as `read` gives them. Returns where the last whole line ends; bytes after it (a line still
+/// being written) are left for the next read.
+pub fn each_line(path: &Path, from: u64, to: u64, mut f: impl FnMut(&str, u64)) -> std::io::Result<u64> {
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(from))?;
+    let mut r = std::io::BufReader::with_capacity(1 << 20, file.take(to.saturating_sub(from)));
+    let (mut at, mut buf) = (from, Vec::new());
+    loop {
+        buf.clear();
+        let n = r.read_until(b'\n', &mut buf)?;
+        if n == 0 || buf.last() != Some(&b'\n') {
+            return Ok(at);
+        }
+        if n > 1 {
+            f(&String::from_utf8_lossy(&buf[..n - 1]), at);
+        }
+        at += n as u64;
+    }
 }
 
 /// The model named by the newest assistant line, for logs with no status line.

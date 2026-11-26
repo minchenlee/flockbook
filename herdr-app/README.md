@@ -1,6 +1,6 @@
 # Flockbook for herdr-app
 
-<img src="preview.png" alt="Flockbook in herdr-app: the sidebar, a conversation with tool chips, and the composer" width="800">
+<img src="preview-chat.png" alt="Flockbook in herdr-app: the sidebar, a conversation with tool chips, and the composer" width="800">
 
 More screenshots (cards, Needs you, Overview, attachments, the terminal, menus and the floating sidebar) are in the [repository README](../README.md#flockbook-for-the-herdr-app).
 
@@ -24,8 +24,7 @@ version comes close or leaves the feature out.
 | `install-isolated.sh` | Copies the same into a test herdr-app home, for development. |
 
 The chat view reads conversations through a sidecar, `flockbook-modfeed`, built from this repo
-(Rust: `cd xplat && cargo build --release -p flockbook-modfeed`; the Swift one,
-`swift build -c release --product flockbook-modfeed`, speaks the same protocol). The mod finds it at
+(Rust: `cd xplat && cargo build --release -p flockbook-modfeed`). The mod finds it at
 `<herdr-app home>/flockbook/bin/flockbook-modfeed`. Its protocol is in `docs/protocol.md`.
 
 The layout and the mod work only together: the layout names the mod's views, and the mod expects

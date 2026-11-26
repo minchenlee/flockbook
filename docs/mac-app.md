@@ -2,7 +2,7 @@
 
 A native macOS app that shows your Herdr agents' conversations in a layout that is easier to read than the terminal.
 
-**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.11.0)** · [Website](https://flockbook.mclee.dev) · Requires macOS 15 or later. Back to the [README](../README.md).
+**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.13.1)** · [Website](https://flockbook.mclee.dev) · Requires macOS 15 or later. Back to the [README](../README.md).
 
 ## Features
 
@@ -157,7 +157,7 @@ Signed builds update themselves: once an hour Flockbook checks for a new release
 scripts/bundle.sh    # builds build/Flockbook.app (ad-hoc signed)
 scripts/package.sh   # dist/Flockbook-<version>.zip and .dmg
 scripts/test-update.sh build/update-test   # headless auto-update check with a throwaway key
-swift build -c release --product flockbook-modfeed   # the Herdr app mod's helper
+(cd xplat && cargo build --release -p flockbook-modfeed)   # the Herdr app mod's helper
 VERSION=0.7.0 scripts/package-mod.sh   # dist/Flockbook-herdr-mod-<version>.zip
 ```
 

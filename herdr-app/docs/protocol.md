@@ -2,8 +2,8 @@
 
 The Flockbook mod draws the screens. A sidecar program reads the agents' session logs and talks to
 herdr-core. This file is the contract between them. Any sidecar that prints these lines works with
-the mod, whatever language it is written in (the first one is Swift, `flockbook-modfeed` in the
-Flockbook repo).
+the mod, whatever language it is written in (the one in the Flockbook repo is Rust,
+`xplat/flockbook-modfeed`).
 
 ## Rules
 
@@ -45,18 +45,24 @@ does not download; `install-isolated.sh` copies the sidecar in.
 | `version` | — | `version` |
 | `feed` | `--terminal <addr>` `[--cursor <c>]` `[--cache <file>]` `[--pictures]` | `log`, then `unchanged`, or `splice` and `row`s |
 | `status` | `--terminal <addr>` `[--cache <file>]` | `status` |
-| `card` | `--terminal <addr>` `[--cache <file>]` | `card` |
+| `card` | `--terminal <addr>` `[--answers <json>]` `[--cache <file>]` | `card` |
 | `approve` | `--terminal <addr> --request <id> --allow\|--deny` `[--cache <file>]` | `done` |
 | `answer` | `--terminal <addr> --request <id> --answers <json>` `[--cache <file>]` | `done` |
-| `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one) |
+| `send` | `--terminal <addr> --text <s>` `[--file <path>]…` `[--expect-kind <agent>]` `[--expect-path <log>]` `[--cache <file>]` | `done` (`changed` when the terminal now runs another agent or conversation than the expected one; nothing is sent. Its message says "new conversation" when the same agent process wrote the expected log, e.g. after `/clear`. With `--cache` the log is looked up again and written to the cache, so the next `feed` reads it) |
 | `queue` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only; `serve` and other machines) | `queued` |
 | `commands` | `--terminal <addr>` `[--cache <file>]` (Rust sidecar only) | `commands` |
+| `glance` | `[--cache <file>]` (Rust sidecar only) | one `glance` per agent on this machine |
+| `summary` | `--terminal <addr> [--cache <file>]` (Rust sidecar only) | `summary`, only with the setting `summaries` on |
+| `summary-models` | `--by <claude\|codex\|pi>` (Rust sidecar only) | `models` |
+| `summary-usage` | `--cache <file> [--since <ms>]…` (Rust sidecar only) | one `summary-usage` per `--since` |
+| `resources` | `--terminal <addr>` `[--since <cursor>]` `[--cache <file>]` (Rust sidecar only) | one `res` per resource; `end` has `cursor` and `full` |
+| `open-check` | `--path <file>` (Rust sidecar only; this machine) | `openable` |
 | `helper install` | `--machine <m> --sha256 <hex> [--cache <file>]` | `installed` |
 | `helper remove` | `--machine <m> [--cache <file>]` | `removed` |
 | `update-check` | `--home <herdr-app home>` `[--dismiss <x.y.z>]` (Rust sidecar only) | `update` |
 | `phone status` / `on` / `off` | `--home <herdr-app home>` (Rust sidecar only) | `phone` |
 
-`card` and `commands` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
+`card`, `commands`, `glance`, `resources` and `open-check` only read. `approve` and `answer` send keys to the agent; the mod runs them only when the
 owner presses a button, never on a timer. `send` types a message and presses Enter.
 
 `<addr>` is the herdr-core terminal address (`t7`). The pane id form (`hc:t7`) also works.
@@ -79,8 +85,7 @@ exactly as given.
 Its lines come back unchanged, so `header`, `end` and everything between are the helper's there.
 The helper there keeps its own cache (`"$HOME"/.cache/flockbook/cache.json` there); this computer's
 `--cache` is not passed on. `send --file`: the file is first put beside the terminal there (`terminal.put`) and the
-text names that copy. Only one level: `a/b/t7` is `bad_terminal`. The Swift sidecar does not do
-this: it answers `not-agent` for these terminals.
+text names that copy. Only one level: `a/b/t7` is `bad_terminal`.
 
 The helper there must be this same version (`protocol` and `sidecar` both). It is never put on
 another machine without the user's yes:
@@ -161,7 +166,7 @@ Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `universal-a
 ### `version`
 
 ```json
-{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands"],"release":"0.9.0","type":"version"}
+{"commands":["version","feed","status","card","approve","answer","send","paste-image","helper","update-check","queue","phone","commands","glance","summary","summary-models","summary-usage","resources","open-check"],"release":"0.9.0","type":"version"}
 ```
 
 `commands`: the commands this sidecar has. The mod hides actions whose command is missing.
@@ -227,12 +232,12 @@ into PNG). Pastes older than a day in that folder are removed; other files never
 ### `log` (`feed`)
 
 ```json
-{"agent":"claude","cursor":"1.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
+{"agent":"claude","cursor":"3.9c1d….0.48213.5be0…","model":"claude-opus-5-5","path":"/…/session.jsonl","size":48213,"start":0,"type":"log"}
 ```
 
 | Field | Meaning |
 |---|---|
-| `agent` | The agent kind: `claude`, `codex`, `pi`, `cursor`, `grok`, … |
+| `agent` | The agent kind: `claude`, `codex`, `pi`, `omp`, `cursor`, `grok`, … |
 | `path` | The session log, or `null` when none was found yet (then `splice` has `count` 0). |
 | `start`, `size` | The byte range read: from `start` (a line start) to `size`. |
 | `cursor` | Opaque. Pass it back as `--cursor` on the next `feed` for this terminal. |
@@ -277,18 +282,18 @@ With `--pictures` (what `serve` asks for, also with `--before`), the log is pars
 `user` and `tools` rows with pictures get `pics`: one entry per picture, the owner's for a user row, the calls'
 result pictures in call order for a tools row. `{"format":"png","width":3,"height":4,"offset":1290,"index":0,
 "digest":"<16 hex digits>"}`: the line's file offset, the picture's place in that line, and the first 8 bytes of
-the SHA-256 of its base64. Codex, Grok and Cursor row ids then come from line offsets, so they differ from the
-rows without `--pictures`. The mod never passes it.
+the SHA-256 of its base64. The mod never passes it.
 
-One per conversation row, in order. `id` is stable for the same log and `start`: the mod keys row
-heights by it.
+One per conversation row, in order. `id` names the same message whatever range was read: the tail, a page
+with `--before`, or Resources (which reads from the file's start). Claude ids come from the log; Codex, Grok and
+Cursor ids from the message's line offset (`cx@1290`). The mod keys row heights by it.
 
 | `k` | Fields | Shown as |
 |---|---|---|
 | `user` | `text`, `ts`, `images` (count, when any) | A right-aligned bubble. |
 | | `pics` (with `--pictures` only) | Where the pictures are in the log, for `serve`. |
 | | `from` (a note from another agent) | One line, "↳ docs-worker: first line", that opens to the whole note. |
-| `assistant` | `text` (markdown), `ts` | Full-width markdown. |
+| `assistant` | `text` (markdown), `ts`, `links` (when it has any) | Full-width markdown; the links can be clicked. |
 | `tools` | `chips`, `ts` | A chip: "Ran 3 commands", expands to the calls. |
 | `perm` | `perm`, `text` (the title), `ts` | The approval card (when `perm.state` is `pending`). |
 | `question` | `question`, `ts` | The question card. |
@@ -306,6 +311,40 @@ without one) and `text` without the tag. A mod that does not know `from` shows t
 {"id":"a1","k":"assistant","text":"Looking at it now.","ts":1793670005000,"type":"row"}
 {"chips":[{"calls":[{"done":true,"error":false,"name":"Bash","output":"ok","summary":"swift test"}],"symbol":"terminal","text":"Ran a command"}],"id":"a1-t3","k":"tools","ts":1793670006000,"type":"row"}
 {"id":"f-a2","k":"footer","text":"01:40 · Worked 36s · 1 tool","type":"row"}
+```
+
+`links[]` (assistant rows only, left out when there are none): what the agent points the human to in its reply, found by
+the helper (`resources.rs`). Each: `start` and `end`, UTF-16 offsets into `text` (the text as sent, after the cut), and
+`res`, the kind:
+
+| `res` | What | Example |
+|---|---|---|
+| `doc` | An absolute path (`/…`, `~/…`) ending `.md .html .htm .pdf .png .svg` | `/home/me/plan.md` |
+| `artifact` | A claude.ai artifact | `https://claude.ai/artifact/…`, also without `https://` |
+| `pr` / `issue` / `ci` | A GitHub PR, issue or Actions run | `github.com/o/r/pull/12`, `/issues/7`, `/actions/runs/1870` |
+| `local` | localhost, 127.0.0.1, a LAN address or `.local` host | `http://localhost:5173`, `localhost:3000` |
+| `link` | Any other `http(s)` URL | `https://example.com/a` |
+
+Found: bare URLs and paths, a Markdown link's address (once, not its label), an autolink `<…>`, and a code span that
+holds only the target. The reply is read as CommonMark (pulldown-cmark, with tables);
+only plain text is searched. Not found: user rows, tool output, code blocks, other text in code spans, pictures
+(`![a](src)`), HTML (and the rest of a paragraph after an inline tag), reference links and definitions (`[a][1]`, `[1]: https://…`), a target that runs into an escape or
+an entity (`\_`, `&amp;`), relative paths, paths with spaces. A target cut by the
+`…` at the text cap is not a link. Punctuation at the end (`.` `,` `。`, a `)` without its `(`) is not part of a target.
+`block` (left out when not set): the UTF-16 start of the chat block (the mod's `splitBlocks`: the text between code
+fences and tables) where the mod writes the link as a Markdown link. The helper sets it only when both the whole reply
+and that block read alone (as the mod draws it, with TextView) read the range as plain text: not code, a link's address,
+an autolink, a picture (`!` before it) or HTML. So a link in a code box, a table, a code span, or on a line that drawn
+alone is indented code has no `block`. The mod only writes: it writes the web kinds whose `block` is the block it draws
+(TextView opens them); `doc` stays text for now. A link without `block` (an older helper, a row read before) stays
+text. Both sides check the same cases: `Tests/Fixtures/resources/md-links.json` (`xplat/flockbook-modfeed/tests/md_links.rs`,
+`herdr-app/test/links.test.mjs`).
+
+A mod that does not know `links` ignores it. The helper that adds `block` gives `3.` cursors: an older `--cursor`
+gets every row again in a `splice` at 0, so a chat read before gets its links with `block`.
+
+```json
+{"id":"a2","k":"assistant","links":[{"block":0,"end":33,"res":"pr","start":4}],"text":"PR: https://github.com/o/r/pull/9 ok","ts":1793670007000,"type":"row"}
 ```
 
 `chips[]`: `symbol` (an SF Symbols name such as `terminal` or `doc.text`; the mod maps it to its own icon), `text` (the chip label), `calls[]`. Each call: `name` (the
@@ -334,6 +373,122 @@ approval is the `card` command's job.
 
 The mod adds the cwd, the branch and the agent name from herdr-app's own `panes()` data.
 
+### `glance` (`glance`)
+
+What each agent's last turn did, read from its log by rules. No model runs and nothing leaves the machine. One line
+for every agent terminal on this machine, in herdr-core's order; a terminal on another machine gets none.
+
+```json
+{"agent":"claude","commands":3,"edited":5,"ended":1793670036000,"id":"a5-0","path":"/…/session.jsonl","said":"I found two ways.","terminal":"t7","tests":"passed","test":"pytest","type":"glance"}
+```
+
+The mod reads it for the chat's "Since you left" card: `id` to see whether the agent wrote more while the chat was
+not on screen, and the counts for the card's line from the log ("Edited 5 files · pytest passed after the last
+edit"). With the setting Summaries on, `said` and `ended` choose which agents' turns go to `summary`.
+
+The last turn is everything after the newest user message in the last 2 MB of the log.
+
+| Field | Meaning |
+|---|---|
+| `terminal`, `agent`, `path` | The terminal address, the agent kind, its log (`null`: none found; the counts are then 0). |
+| `id` | The id of the turn's newest item. Another id means the agent wrote more. Absent: an empty log. |
+| `ended` | When the turn's newest item came (ms since 1970). |
+| `edited` | Files the edit tools changed in the turn, each once. An edit made by a shell command is not seen. |
+| `commands` | Shell commands with a result. |
+| `failed` | The newest finished command's first line, when it failed. Absent: it passed, or no command. Codex's log has no error flag: its exit code is read from the start of the output. |
+| `tests` | The newest test command that finished after the last edit: `passed`, `failed`, or `ran` (its output went into a pipe without `pipefail`, so the exit code is not the tests'). `none`: a code file was edited and no test command finished after the last edit. Absent: no test command, and no edit but to files of words (`.md`, `.txt`, `.rst`, `.adoc`, `.org`, `.csv`, `.tsv`, `.log`). |
+| `test` | That command's short name (`pytest`, `cargo test`). A test command is known by its program's name only: `pytest`, `tox`, `nox`, `unittest`, `jest`, `vitest`, `mocha`, `ava`, `rspec`, `phpunit`, `ctest`, `npm`/`yarn`/`pnpm`/`bun` `test`, `go test`, `cargo test`, `cargo nextest`, `swift test`, `deno test`, `dotnet test`, `node --test`, `playwright test`, `mvn test`, `gradle test`, `make`/`just` `test`, `xcodebuild test`; also after `sudo`, `env`, `npx`, `uv run`, `python -m`, `timeout <n>`, and after the `--` of a wrapper. |
+| `said` | The first sentence of the turn's newest message, without markdown marks (at most 160 characters). In `said` a path that starts with `/` or `~/` is its last name only (`/w/src/a.rs` reads `a.rs`). |
+
+`--cache`: where each agent's log is (as for `feed`). The lines are kept beside it in `glance.json` and reused
+while a log's size and change time are the same, so a call is cheap when nothing was written. A line kept by a
+helper that wrote other fields is not reused.
+
+### `summary` (`summary`)
+
+Two lines about an agent's last turn (the state of the work, and what it needs from the owner), written by a small model, for the chat's "Since you left" card. Off unless config.json has `"summaries": "on"`
+(the mod's Flockbook settings, Summaries); while off the answer is the error `summaries-off`, nothing is read and
+no program runs. The mod asks only for an agent that stopped and wrote something, once per turn, at most 3 at a
+time (one call each, side by side), the newest first. It asks for every such agent on this machine, not only the one
+whose chat is open, but only while a chat screen is open (the mod polls from the chat screen). Back from the Overview,
+the card can show before its summary; the summary lines come in when the model answers.
+
+```json
+{"by":"claude","cached":false,"id":"a5-0","model":"claude-haiku-5-5","needs":"Say whether to update the changelog.","state":"The parser skips empty lines and the tests pass.","terminal":"t7","type":"summary"}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | The turn's newest item, as in `glance`. A summary is for that turn only. |
+| `state` | One sentence: the state of the work (at most 240 characters). |
+| `needs` | What the owner must do or decide now, or `null`. |
+| `by` | The program that wrote it: `claude`, `codex` or `pi`. |
+| `model` | The model that wrote it; for Codex and pi with none named, "Codex's default model" or "pi's default model". |
+| `cached` | The kept answer for this turn (`summary.json` beside `--cache`); the model did not run. When a new answer is kept, the answers of terminals that are no agent on this machine any more are dropped. |
+
+How it runs: one program, once, without a terminal (hc `machine.exec` `argv`, no shell, 60 s), in an empty folder
+(`flockbook-summary` in the temp folder). Which program: config.json `"summary_by"` (Flockbook settings, Summary
+written by): `own` (the default: the program of the agent that wrote the turn; Claude Code, Codex and pi agents), or
+`claude`, `codex` or `pi` for the turns of every agent. `"summary_model"` (Summary model) names the model for a chosen
+program: letters, digits and `._:/-`, at most 80, not led by `-`; anything else is not used. With `own` it is not used.
+
+| Program | Arguments | Model when none is named |
+|---|---|---|
+| Claude Code | `claude -p --model <model> --no-session-persistence --tools "" --disable-slash-commands --strict-mcp-config --setting-sources "" --system-prompt <fixed text>` | `claude-haiku-5-5` |
+| Codex | `codex exec --sandbox read-only --ephemeral --skip-git-repo-check --ignore-rules --ignore-user-config --color never -c model_reasoning_effort="low" --disable hooks --disable apps [-m <model>] -` | the one Codex uses by default |
+| pi | `pi -p --no-session --no-tools --no-extensions --no-mcp --no-skills --no-prompt-templates --no-context-files --no-approve --no-themes --system-prompt <fixed text> [--model <model>]` | the one pi uses by default |
+
+Claude Code and pi run with no tools, no saved session, no settings or context files, no MCP servers. (`claude
+--bare` is not used: it reads no login, so an account without an API key would fail. Hooks of installed plugins may
+still start.) Codex cannot run without its tools: it runs in a sandbox that only reads, with no rules, no config
+file, no hooks and no session file, and it has no system prompt option, so the fixed text leads its stdin.
+The stdin: the owner's message that started the last turn (at most 1 500 characters), the end of what the agent wrote in that
+turn (at most 6 000), and one line of the `glance` facts. With `own` the text goes to the provider that agent's
+conversation already goes to, on that agent's account, and nowhere else; with one program chosen it goes to that
+program's provider, also for the turns of other agents.
+The answer must have a line `STATE: …`; `NEEDS: …` is optional and `NEEDS: nothing` means none. Other
+lines are dropped. A kept answer is for one turn, one program and one model: after a change of either the turn is
+asked again, and so is an answer kept by a helper that asked for other lines.
+
+Each run of a model adds one line to `summary-usage.jsonl` beside `--cache`: the time, the program, the model, the
+characters that went (the stdin, and the fixed text when it goes apart) and came, the time it took, and whether it
+worked. No word of the turn or of the answer is in it. A kept answer is not a run.
+
+`summary-usage --cache <file> [--since <ms>]…`: one line for each `--since` (0 with none), from that count:
+
+```json
+{"failed":1,"got":5149,"ms":412000,"runs":42,"sent":96321,"since":1793635200000,"type":"summary-usage"}
+```
+
+`runs`: the runs of a model from `since` on; `failed`: those that gave no summary; `sent`, `got`: characters, not
+tokens (the programs do not all say their tokens); `ms`: the time they took together. The command only reads the
+count. When the file is over 512 KB, lines older than 35 days are dropped (the file is written whole through a temp file).
+
+Errors: `summaries-off`; `summary-unsupported` (with `own`, an agent whose program writes none; or a terminal on another machine);
+`summary-none` (no conversation, or the agent wrote nothing in its last turn); `summary-failed` (the program is
+missing, failed, ran out of time, or answered in another shape; `message` says which). A failure is not kept, so the
+next call tries again.
+
+### `models` (`summary-models`)
+
+The models a program can run for a summary, for the list in the mod's settings. Nothing of an agent is read or sent.
+
+```json
+{"by":"pi","models":[{"id":"opencode-go/glm-5.3-flash","note":"1M context"}],"source":"program","type":"models"}
+```
+
+| `source` | Where the list is from |
+|---|---|
+| `built-in` | Claude Code: it has no command that lists models, so a short list is kept in the helper. |
+| `file` | Codex: `models_cache.json` in its home (`CODEX_HOME`, else `~/.codex`), the models it shows in its picker. No program runs. |
+| `program` | pi: `pi --offline --list-models`, run once without a terminal (hc `machine.exec`, 20 s). |
+
+`id` is what `summary_model` takes. A name that is not in the list can still be set. Errors: `usage` (no such
+program), `models-failed` (pi did not run).
+
+The "Since you left" card shows the two lines under "Summary · written by a model, may be wrong", above the line
+from the log, never in its place. After any error it shows the line from the log alone. No other screen shows them.
+
 ### `card` (`card`)
 
 What the agent waits for now, or nothing. The mod polls it only for an agent that herdr-app shows
@@ -353,6 +508,7 @@ as blocked, and for a pending `question` row.
 | `answered` | Approval: `true` when this prompt was answered already (by any view) and is still drawn. The mod shows no buttons. |
 | `question` | Question: the same object as in a `question` row. |
 | `unread` | Question: how many more questions exist than the card shows (Claude shows one at a time). `answer` reads them itself. |
+| `blocked` | Question: why `answer` would refuse before any key, because the terminal's review screen could not show the answers (a hooked Claude question set: an option with a comma or a `●`/`→` mark, two options alike, or such an own answer). `card --answers` (the `answer` format, the answers so far) also checks the own answers. Missing while `unread` > 0. The mod turns Send off and shows it with a button that opens the terminal. |
 
 An approval card appears only when the screen shows the prompt ("Do you want …?" with "1. Yes").
 A running tool is not an approval.
@@ -370,18 +526,89 @@ while a Claude Code, Codex or Grok Build agent works. No queue: `agent` is `""` 
 - `pullable`: the agent's input box is empty, so the queue can be pulled back now.
 - `pullsAll`: Claude Code (Up takes back every queued message as one text).
 
-### `commands` (`commands`)
+### `res` (`resources`)
 
-The "/" commands of an agent's terminal, for the list above the reply box: Claude Code, Codex, pi and agy. Read from
-files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
+What the agent pointed the human to in this conversation: one line per resource, newest first (by the last mention; in
+one reply, the later target first). Read only.
 
 ```json
-{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new conversation (clears the history)","source":"builtin"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["config","help","hooks","mcp","memory","permissions","plugin","rewind","status","usage"]}
+{"type":"res","id":"9c1e…","kind":"doc","target":"/home/user/notes/plan.md","title":"The plan","detail":"~/notes","row":"a3-0","first_ts":1793670005000,"last_ts":1793670020000,"mentions":2,"exists":true}
+```
+
+- Collected with the same rules as a row's `links` (assistant text only), and the claude.ai artifact URL in the result of
+  a successful Artifact publish (its `title` from the call's input). Not collected: what the person typed, other
+  tools' input and output, relative paths.
+- Commands (`cmd`, assistant text only): a fenced code block whose language (the info's first word, any case) is
+  none, `sh`, `bash`, `zsh`, `shell` or `console`, holding one command: one line, or lines joined by a `\` at
+  their end; a leading `$ ` is dropped; at most 400 characters. Not commands: a block with more lines (a script, a
+  command and its output), other languages (`text`, `log`, `json`…), indented code, inline code, a comment.
+  `target`: the command as written (its lines kept), trimmed.
+- `kind`: `doc`, `artifact`, `pr`, `issue`, `ci`, `local`, `link`, `cmd`. A mod ignores kinds it does not know.
+- `id`: FNV-1a (hex) of the normalized target; the same target is one item. A doc: its absolute path (`~/` is the
+  home of the machine the agent runs on).
+- Docs also come from relative paths in a reply (`docs/a.md`, `./a.md`, in text, a code span or a link; not a bare
+  file name, an address without its scheme, a pattern or a placeholder). Where it opens: the one file under the
+  folders the log names (`cwd`) or the pane's folder; else the one under a folder a command went to (`cd /…`) or the
+  one doc path a tool call named that ends in it. None, or more than one: not listed (once its file is there, a
+  later read lists it). Found, it is the item of that file: one `id` with the absolute mentions of it. Feed `row`
+  `links` do not carry relative paths. `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
+  GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`. A
+  command: the command trimmed (key `cmd:<command>`).
+- `title`: a doc's first `# ` heading (Markdown) or `<title>` (HTML) in its first 4 KB, else its file name; an
+  artifact's title (from the publish call, else its page's `<title>` when that file is here); `o/r#12`, `CI run 1870`, `localhost:5173`, host and path; a command's: the last line of the paragraph or heading right
+  before its block (an ending `:` or `：` dropped, at most 80 characters), else the command's start (60). `detail`: a
+  doc's folder (`~` for the home), a URL's host, or `o/r`; a command on one line (each line's ending `\` dropped).
+- `row`: the `id` of the feed `row` with the last mention. `first_ts`, `last_ts`: ms, or null.
+- `exists`: docs only; the path's real file (links followed) is a file now, and the real file's extension is a doc kind
+  (`md`, `html`, `htm`, `pdf`, `png`, `svg`). A `preview.md` link to `notes.txt` or to a folder: `false`. It can be old
+  by the time the person clicks: the mod asks `open-check` before it opens a file.
+- The whole log is counted, at any length. `row` can be older than the rows the chat has loaded: then "Show in chat"
+  does nothing.
+- With `--cache`, the helper keeps what it parsed in `resources/<hash of the terminal>.json` beside it (one file per
+  terminal, written through a temp file and renamed; at most 64 files, the newest kept, and files not changed for 7
+  days are dropped; a file that does not parse counts as none). Next time it parses only the lines after a safe start and gives
+  the same answer as a whole read; a log that is shorter, changed at its start or another file is read whole. Without
+  `--cache` the whole log is read each time.
+- `end` has `cursor` (null when the agent has no log) and `full`. Pass the cursor back as `--since`: the same log,
+  unchanged, gives no `res`; the same log, grown, gives only the resources mentioned after the cursor's newest one
+  (`full` false: merge them by `id`). Another log, a shorter one or a bad cursor gives them all (`full` true: replace).
+  The cursor (`r4.…`) holds a mark of the log file (device, inode, birth time) and of its bytes: another file at the same path
+  (a log written again, of the same size or bigger) is another log. A kept state of other rules also gives them all, and so does a relative doc path that now
+  opens another file (or opens one now): its item has another `id`. An older cursor (`r1.`, `r2.`, `r3.`) gives them all once. A result that comes for a tool call
+  before the kept start also gives them all.
+
+```json
+{"type":"end","ok":true,"ms":4,"cursor":"r4.af63…ce1.48213.1793670020000.9c1e…07.5d2a…e4","full":false}
+```
+
+### `openable` (`open-check`)
+
+The real file a doc path opens, looked at now: links followed (`canonicalize`), the real path must be a file, and the
+real file's extension (lowercase) a doc kind (`md`, `html`, `htm`, `pdf`, `png`, `svg`). Read only; on this machine.
+
+```json
+{"type":"openable","ok":true,"path":"/home/user/notes/b.md"}
+{"type":"openable","ok":false,"why":"Flockbook does not open this kind of file."}
+```
+
+- `path`: the real file. The mod opens this path, not the one it asked about.
+- `why`: `File not found.`, `Not a file.`, `Flockbook does not open this kind of file.` or `The file name is not plain text.`
+  (a real path that is not UTF-8, on Linux: it is not sent, so the mod never opens another path than the one checked), for
+  the person to read.
+- A helper without `open-check` (its `version` does not list it): the mod opens no file.
+
+### `commands` (`commands`)
+
+The "/" commands of an agent's terminal, for the list above the reply box: Claude Code, Codex, pi, agy, omp and
+grok. Read from files only; no key goes to the agent. Another agent: `commands` is empty (the mod shows no list).
+
+```json
+{"type":"commands","agent":"claude","commands":[{"name":"clear","description":"Start a new session with empty context; previous session stays on disk (resumable with /resume)","source":"builtin","hint":"[name]"},{"name":"deploy","description":"Deploy the app","source":"project"},{"name":"model","description":"Set the AI model for Claude Code","source":"builtin","hint":"<model>","args":[{"value":"claude-fable-5-2","label":"Fable 5.2"},{"value":"claude-opus-5-5","label":"Opus 5.5"},{"value":"opus","label":"The latest Opus"}],"screen":true}],"screens":["diff","help","hooks","memory","permissions","plugin","release-notes","rewind","skills","status","tasks","usage"]}
 ```
 
 - Sources per agent (`agent`), the first one with a name wins:
   - `claude`: built-ins (the ones people use most that the chat can send: `add-dir`, `clear`, `compact`, `context`,
-    `effort`, `export`, `init`, `model`, `resume`, `review`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
+    `effort`, `export`, `init`, `model`, `resume`, `code-review`); `.claude/commands/**/*.md` in the terminal's folder (`project`), then in the user's
     home (`user`); `.claude/skills/<name>/SKILL.md` there and in the home (`skill`; not when its front matter says
     `user-invocable: false`); installed plugins that are not turned off (`enabledPlugins`), their commands and
     skills as `<plugin>:<name>` (`plugin`).
@@ -394,11 +621,18 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     listed.
   - `agy`: its built-ins (one row a command; its other names in the description); skills from `~/.gemini/skills`
     and `~/.gemini/antigravity/skills` (`skill`).
+  - `omp`: its built-ins only. Its custom commands and skills come from many providers turned on in its settings, so
+    they are not read.
+  - `grok`: its built-ins; skills (`.grok/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md`, one level; not
+    when its front matter says `user-invocable: false`) and commands (`.grok/commands/*.md`, `.agents/commands/*.md`,
+    top level; `project` up to the repository root, `user` in the home), from the terminal's folder up to the
+    repository root, then in the home (the nearest wins); skills have the source `skill`. Not read: the Claude and
+    Cursor folders and `[skills]` folders of its `config.toml`.
 - `description`: the front matter's `description`, else the file's first line; at most 120 characters.
 - Each when it says something: `hint`, what may follow the name (`<model>`, `[file]`; for a file, its front matter's
   `argument-hint`); built-ins only: `args`, the values the mod offers after `/<name> `, each `{"value", "label"}` (no
-  `label` where the value says it all; the mod also takes plain strings). Fixed lists in the helper: Claude Code's and
-  agy's `effort`, pi's `thinking`. `model`, per agent (models.rs), where its `/model <value>` switches with no screen:
+  `label` where the value says it all; the mod also takes plain strings). Fixed lists in the helper: Claude Code's, agy's,
+  omp's and grok's `effort`, pi's `thinking`. `model`, per agent (models.rs), where its `/model <value>` switches with no screen:
   - `claude`: its current models' full ids, then the aliases (a table: its list is inside its program), plus ids in
     `~/.claude/settings.json` (`modelSettings`, `availableModels`) and `~/.claude.json`
     `additionalModelOptionsCache`. It also saves the model as the default for new sessions, as its picker does.
@@ -409,6 +643,7 @@ files only; no key goes to the agent. Another agent: `commands` is empty (the mo
     pi's picker.
   - `agy`: a table (agy reads its list from its server): its slugs, `gemini-4-argon-medium`; it also saves the
     default.
+  - `omp`, `grok`: no value list. omp's `/model` is in `screens`; grok's has a hint and `screen: true`.
   A value list with no hint gets the hint `<model>`. The mod finds a value by any part of its value or label.
   `screen: true`, sent bare
   it opens a screen in the terminal (a picker or a dialog: the chat cannot show it), so it goes out only with a

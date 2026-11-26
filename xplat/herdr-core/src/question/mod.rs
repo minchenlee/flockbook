@@ -7,7 +7,7 @@
 //! spaces and tabs only (never newlines), `count`/`prefix` count grapheme clusters.
 
 use crate::error::{HerdrError, QuestionFailure};
-use crate::keygate::{gated, gated_keys, KeyGate};
+use crate::keygate::{fresh_agent, gated, passes, KeyGate};
 use crate::model::*;
 use crate::screen::PaneScreen;
 use serde_json::{Map, Value};
@@ -153,7 +153,7 @@ pub fn option(label: &str, detail: &str, recommended: bool) -> QOption {
 
 /// Swift `Question(id:header:text:options:multiSelect:)`: `id` None is the text (Swift's default).
 pub fn new_question(id: Option<&str>, header: &str, text: &str, options: Vec<QOption>, multi_select: bool) -> Question {
-    Question { id: id.unwrap_or(text).into(), header: header.into(), text: text.into(), options, multi_select }
+    Question { id: id.unwrap_or(text).into(), header: header.into(), text: text.into(), options, multi_select, cut_labels: false }
 }
 
 /// Swift `QuestionRequest(toolUseId:agent:delivery:questions:)`: pending, no headers.
@@ -474,6 +474,19 @@ pub fn picker_region(agent: &str, screen: &str) -> Option<String> {
     }
 }
 
+/// `picker_region` holds `s`. For Claude also with the 2.1.322 quote bar ("│" at a line start) dropped: a long
+/// question wrapped inside its needle has the bar between the two parts. A presence check only; the keys are
+/// gated by the exact checks.
+pub(crate) fn picker_has(agent: &str, screen: &str, s: &str) -> bool {
+    if picker_region(agent, screen).is_some_and(|r| r.contains(s)) {
+        return true;
+    }
+    agent == "claude" && {
+        let unbarred: Vec<&str> = screen.split('\n').map(|l| trim_ws(l).strip_prefix('│').unwrap_or(l)).collect();
+        picker_region(agent, &unbarred.join("\n")).is_some_and(|r| r.contains(s))
+    }
+}
+
 /// Where Claude's focus must be for the next key (`shows`). `Auto`: from `other` (None: off the Other row;
 /// "": on it, anywhere for multiSelect; text: on it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -755,14 +768,14 @@ pub fn shows_any(q: &QuestionRequest, screen: &str) -> bool {
 /// Claude's review screen of `q`: the request's headers and every one of its questions listed. A hooked request
 /// needs the exact review of `answers` (`claude_review_exact`).
 pub fn shows_review(q: &QuestionRequest, screen: &str, answers: Option<&[QuestionAnswer]>) -> bool {
-    if !q.tool_use_id.starts_with("screen-") {
+    if q.agent == "claude" {
         return answers.is_some_and(|a| claude_review_exact(q, a, screen));
     }
     let Some(region) = picker_region(&q.agent, screen) else { return false };
     if !region.contains("Review your answers") {
         return false;
     }
-    q.headers.iter().all(|h| region.contains(h.as_str())) && q.questions.iter().all(|x| region.contains(&flat(&x.text)))
+    q.headers.iter().all(|h| region.contains(h.as_str())) && q.questions.iter().all(|x| picker_has(&q.agent, screen, &flat(&x.text)))
 }
 
 pub fn picker_shown(q: &QuestionRequest, screen: &str) -> bool {
@@ -771,8 +784,8 @@ pub fn picker_shown(q: &QuestionRequest, screen: &str) -> bool {
 
 /// The picker is open and shows the first question.
 pub fn screen_shows(q: &QuestionRequest, screen: &str) -> bool {
-    let (Some(first), Some(region)) = (q.questions.first(), picker_region(&q.agent, screen)) else { return false };
-    region.contains(&needle(first))
+    let Some(first) = q.questions.first() else { return false };
+    picker_has(&q.agent, screen, &needle(first))
 }
 
 /// The key sequence for a picker question. Errs with `Unsupported` before anything is sent.
@@ -1093,10 +1106,14 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
     // `marks` counts the focus marks on rows and on Submit; a mark on any other line means the hub does not
     // know where the focus is (focus_marks 0: no key).
     let (mut marks, mut since_row, mut row_column, mut stray_mark) = (0usize, 0usize, None::<usize>, false);
+    // Per row: its line's width and the width of the first word on the next line of its text (a wrapped label?);
+    // the separator's width is the line width.
+    let (mut row_widths, mut next_words, mut line_width) = (Vec::<usize>::new(), Vec::<Option<usize>>::new(), 0usize);
     for l in &lines[bar + 1..end] {
         let t = trim_ws(l);
         if t.starts_with("──") {
             closed = true;
+            line_width = claude_exact::display_width(l.trim_end());
             break;
         }
         let marked = t.starts_with('❯');
@@ -1134,6 +1151,8 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             }
             let (clean, rec) = strip_recommended(&label);
             options.push(option(&clean, "", rec));
+            row_widths.push(claude_exact::display_width(l.trim_end()));
+            next_words.push(None);
             last_raw = label;
             last_focused = trim_ws(l).starts_with('❯');
         } else if in_options {
@@ -1142,6 +1161,9 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             }
             if !t.is_empty() {
                 since_row += 1;
+            }
+            if let (false, Some(w @ None)) = (t.is_empty(), next_words.last_mut()) {
+                *w = Some(claude_exact::display_width(t.split_whitespace().next().unwrap_or(t)));
             }
             if let (false, Some(o)) = (t.is_empty(), options.last_mut()) {
                 if !o.detail.is_empty() {
@@ -1156,6 +1178,14 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
             text.push(t.to_string());
         }
     }
+    // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line has it
+    // and the text without it is long (claude_exact::QUOTE_MIN); a short text's own "│" stays.
+    if !text.is_empty() && text.iter().all(|t| t.starts_with('│')) {
+        let unquoted: Vec<String> = text.iter().map(|t| trim_ws(&t['│'.len_utf8()..]).to_string()).collect();
+        if claude_exact::display_width(&unquoted.join(" ")) >= claude_exact::QUOTE_MIN {
+            text = unquoted;
+        }
+    }
     // The last row is the "Other" row.
     if !closed || options.pop().is_none() {
         return None;
@@ -1165,8 +1195,12 @@ pub fn claude_parse(screen: &str) -> Option<ClaudeParse> {
     if options.is_empty() || text.is_empty() {
         return None;
     }
+    // A row whose next line's first word would not have fit on it (2 columns to spare): Claude Code wrapped the
+    // label, and the rest of it was read as detail. Which part is label cannot be told, so the labels may be cut.
+    let cut = (0..options.len()).any(|i| next_words[i].is_some_and(|w| row_widths[i] + 1 + w + 2 > line_width));
     let header = if headers.len() == 1 { headers[0].clone() } else { String::new() };
-    let question = new_question(None, &header, &text.join(" "), options, multi);
+    let mut question = new_question(None, &header, &text.join(" "), options, multi);
+    question.cut_labels = cut;
     Some(ClaudeParse {
         headers,
         question,
@@ -1194,6 +1228,55 @@ fn wait_screen<S: PaneScreen + ?Sized>(screen: &S, pane_id: &str, timeout_ms: u6
         screen.pause(150);
         slept += 150;
     }
+}
+
+/// How long a gated answer key waits for its exact screen (the render of the key before it) before it stops. A busy
+/// machine renders slower than the 1.5 s the checks used to give.
+const KEY_WAIT_MS: u64 = 5000;
+
+/// The gate before one key of an answer. A gate with a screen check first waits (up to `KEY_WAIT_MS`) for `ok`, so a
+/// slow render is waited for and not taken for a change; then the full check runs on a fresh read right before the
+/// key, as `gated`. A stop names its cause: the agent or the input level changed (`KeyGateStop`; `KeyGateStopSent`
+/// once keys of this input went in), or the
+/// same agent shows another screen (`ScreenStop`, with `sent`: keys of this answer went in before).
+fn answer_gated<S: PaneScreen + ?Sized>(screen: &S, gate: Option<&KeyGate>, pane_id: &str, ok: &dyn Fn(&str) -> bool, sent: bool) -> Result<(), HerdrError> {
+    let Some(g) = gate else { return Ok(()) };
+    let _ = wait_screen(screen, pane_id, KEY_WAIT_MS, ok); // read-only; a failed read stops below
+    if passes(screen, Some(g), pane_id, Some(ok), None) {
+        return Ok(());
+    }
+    let same_agent = g.agent.as_ref().is_none_or(|a| fresh_agent(screen, a, pane_id).is_some());
+    let allowed = g.allowed.as_ref().is_none_or(|f| f());
+    Err(match (same_agent && allowed, sent) {
+        (true, _) => HerdrError::ScreenStop { keys_sent: sent },
+        (false, true) => HerdrError::KeyGateStopSent,
+        (false, false) => HerdrError::KeyGateStop,
+    })
+}
+
+/// Named keys of an answer, each behind `answer_gated` (one key per call, so no committing key rides in a batch past
+/// a check). No gate: one call. `sent` is set once a key went.
+fn answer_keys<S: PaneScreen + ?Sized>(screen: &S, keys: &[String], gate: Option<&KeyGate>, pane_id: &str, ok: &dyn Fn(&str) -> bool, sent: &mut bool) -> Result<(), HerdrError> {
+    if gate.is_none() {
+        screen.send_named_keys(keys, pane_id)?;
+        *sent = true;
+        return Ok(());
+    }
+    for k in keys {
+        answer_gated(screen, gate, pane_id, ok, *sent)?;
+        screen.send_named_keys(std::slice::from_ref(k), pane_id)?;
+        *sent = true;
+    }
+    Ok(())
+}
+
+/// Why `review_blocked` refuses (`QuestionFailure::Unsupported`).
+pub const REVIEW_BLOCKED: &str = "two distinct answers would look identical on the review screen";
+
+/// The refusal `answer_question` makes before any key when pre-flight review checks find a collision
+/// (`review_collision`). A card shows it before Send.
+pub fn review_blocked(q: &QuestionRequest, answers: &[QuestionAnswer]) -> bool {
+    review_collision(q, answers).is_some()
 }
 
 /// Answers a pending question in `pane_id`, one `QuestionAnswer` per question.
@@ -1227,17 +1310,21 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         return screen.send_text(&message_text(q, answers), pane_id); // the composer path: text + Enter
     }
     let steps = steps(q, answers)?;
+    // Typed answers go key by key: refused before any key when the backend cannot type one of their characters.
+    if let Some(bad) = answers.iter().filter_map(other_text).find(|t| !screen.can_type(t)) {
+        let shown: String = bad.chars().filter(|c| !screen.can_type(&c.to_string())).collect::<BTreeSet<char>>().into_iter().collect();
+        return Err(unsupported(format!("the typed answer has characters Herdr cannot type yet ({shown}): answer in the terminal")));
+    }
     // `gate` (a remote device): before every key, the same agent, the exact question the key is for on screen
     // (its text, options, the request's headers; the review screen for the last key), input allowed.
     let any = |s: &str| shows_any(q, s);
     // A hooked request whose review cannot prove the answers: refused before any key (the Left below too).
     let hooked = q.agent == "claude" && !q.tool_use_id.starts_with("screen-");
-    if hooked && (q.questions.len() > 1 || q.questions.last().is_some_and(|x| x.multi_select)) && review_ambiguous(q, answers) {
-        return Err(unsupported(
-            "the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)",
-        ));
+    if review_blocked(q, answers) {
+        return Err(unsupported(REVIEW_BLOCKED));
     }
     let now = screen.visible_text(pane_id)?;
+    let mut sent = false; // a key of this answer went in
     if !screen_shows(q, &now) {
         // Claude: the user may have moved the picker to a later question of THIS request; go back to question 1.
         let back = q.agent == "claude"
@@ -1246,7 +1333,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         if !back {
             return Err(not_on_screen());
         }
-        gated_keys(screen, &vec!["Left".to_string(); q.questions.len() - 1], gate, pane_id, Some(&any))?;
+        answer_keys(screen, &vec!["Left".to_string(); q.questions.len() - 1], gate, pane_id, &any, &mut sent)?;
         if !wait_screen(screen, pane_id, 2000, |s| screen_shows(q, s))? {
             return Err(stuck("back to question 1"));
         }
@@ -1277,7 +1364,9 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
                 shows(q, k, s, in_row.as_deref(), f, fr, ck.as_ref())
             }
         };
-        if hooked && step.sends_keys() {
+        // No gate: no check runs, but the render of the last key is still waited for a moment (with a gate,
+        // `answer_gated` waits for the exact screen).
+        if hooked && gate.is_none() && step.sends_keys() {
             let _ = wait_screen(screen, pane_id, 1500, same)?;
         }
         // Grok and agy on the Mac (no gate): the exact question before each key too, not only its first words.
@@ -1286,8 +1375,9 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
         }
         match step {
             Step::Text(s) => {
-                gated(screen, gate, pane_id, Some(&same))?;
+                answer_gated(screen, gate, pane_id, &same, sent)?;
                 screen.send_keys(s.as_bytes(), pane_id)?; // typed as is: no Enter, not as a paste
+                sent = true;
                 // By step purpose, not by text (the typed text may equal a digit): Claude's first text step for
                 // "Other" is its digit, which opens the row; the next text step is the typed text.
                 let typed = if k < answers.len() { other_text(&answers[k]) } else { None };
@@ -1309,7 +1399,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
                 }
             }
             Step::Keys(ks) => {
-                gated_keys(screen, ks, gate, pane_id, Some(&same))?;
+                answer_keys(screen, ks, gate, pane_id, &same, &mut sent)?;
                 let multi_other = q.agent == "claude" && other_open && at < q.questions.len() && q.questions[at].multi_select;
                 if multi_other && !typed_in && ks.iter().all(|x| x == "Down") {
                     focus = FieldFocus::Other; // now on the row
@@ -1335,7 +1425,7 @@ pub fn answer_question<S: PaneScreen + ?Sized>(
                 focus = FieldFocus::Auto;
                 row = None;
                 checked.clear();
-                if !wait_screen(screen, pane_id, 3000, |x| picker_region(&q.agent, x).is_some_and(|r| r.contains(s.as_str())))? {
+                if !wait_screen(screen, pane_id, 3000, |x| picker_has(&q.agent, x, s))? {
                     return Err(stuck(s.clone()));
                 }
             }
@@ -1393,15 +1483,19 @@ pub fn load_all_questions<S: PaneScreen + ?Sized>(
         let headers = headers.clone();
         move |s: &str| claude_screen(s).is_some_and(|(h, q)| h == headers && same_question(&q, &want))
     };
+    // The answer's gate before each key (`answer_gated`): the exact screen is waited for, and a stop says whether
+    // keys of this read went in.
+    let mut sent = false;
     // To question 1 (Left stops there). Navigation keys only; none of them chooses anything.
-    gated(screen, gate, pane_id, Some(&exact(shown.clone())))?;
+    answer_gated(screen, gate, pane_id, &exact(shown.clone()), sent)?;
     screen.send_named_keys(&vec!["Left".to_string(); n - 1], pane_id)?;
+    sent = true;
     screen.pause(200);
     let Some(first) = now()? else { return Err(stuck("question 1")) };
     let mut questions = vec![first];
     for _ in 1..n {
         let last = questions[questions.len() - 1].clone();
-        gated(screen, gate, pane_id, Some(&exact(last.clone())))?;
+        answer_gated(screen, gate, pane_id, &exact(last.clone()), sent)?;
         screen.send_named_keys(&["Right".to_string()], pane_id)?;
         let mut next: Option<Question> = None;
         let _ = wait_screen(screen, pane_id, 2000, |s| match claude_screen(s) {
@@ -1417,7 +1511,7 @@ pub fn load_all_questions<S: PaneScreen + ?Sized>(
     // Back to where the picker was.
     let back = n - 1 - questions.iter().position(|x| x.text == shown.text).unwrap_or(0);
     if back > 0 {
-        gated(screen, gate, pane_id, Some(&exact(questions[questions.len() - 1].clone())))?;
+        answer_gated(screen, gate, pane_id, &exact(questions[questions.len() - 1].clone()), sent)?;
         screen.send_named_keys(&vec!["Left".to_string(); back], pane_id)?;
     }
     if !wait_screen(screen, pane_id, 2000, |s| claude_screen(s).is_some_and(|(_, q)| q.text == shown.text))? {

@@ -3,27 +3,37 @@
 // cannot be scrolled from code, and the chat must open at the newest message. Every row shows in full.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { theme, run, shared } from "herdr";
+import { theme, run, shared, setShared, settings } from "herdr";
 import { currentAgent, machineOf, icon, SPIN_MS, FADE, shownScreen, watchEdge, noteWindowHeight, KEY_WIN_H } from "./state.js";
 import { Appear } from "./motion.js";
 import { now, record, flush, loadTiming } from "./timing.js";
 import * as sidecar from "./sidecar.js";
 import { emptyFeed, applyFeed, applyOlder, olderFrom } from "./feedstate.js";
+import { notify } from "herdr";
 import { GUTTER, columnWidth, rowHeight } from "./estimate.js";
 import { ROW_PAD_Y, BUBBLE_PAD_X, BUBBLE_PAD_Y, BUBBLE_GAP, IMAGES_FS, bubbleWidth, bubbleTextWidth, CHIP_H, CHIP_PAD_Y, CHIP_GAP, OPEN_INDENT,
   CALL_H, SEP_H, FOOTER_H, STATUS_H, CARD_ROW_H, OTHER_H } from "./metrics.js";
 import { Composer } from "./composer.js";
 import { markdownView, codeBlockAt } from "./mdblocks.js";
+import { textScale } from "./config.js";
+
+// Herdr's zoom: line heights round in zoomed px (estimate.js lineHeight).
+const appZoom = () => { const z = Number(settings?.()?.zoom); return z > 0 ? z : 1; };
 import { openMenu } from "./menu.js";
 import { Cards, wanted } from "./cards.js";
-import { startTop, overBar, BAR_H } from "./top.js";
+import { startTop, BAR_H } from "./top.js";
 import { HelperUI, isRemoteProblem } from "./helpercard.js";
+import { pollGlance, glanceOn, glanceFor, glancedAt, seenFor, markSeen, summaryFor } from "./glance.js";
+import { arrive, sinceLeft, sinceCard } from "./since.js";
+import { KEY_JUMP, KEY_INPUT_H, term, readingLayout } from "./resources.js";
 
 export const POLL_MS = 2000;
 const CHECK_MS = 400;
 // Older rows load by themselves while all rows fit on screen (with FILL_PX to spare), at most AUTO_OLDER
 // times a chat is opened: a log whose last 2 MB is only tool output can hold no rows for a long way back.
 const AUTO_OLDER = 5, FILL_PX = 400;
+const JUMP_WAIT_MS = 15000;   // Show in chat: a click this recent is for a chat made after it; the chat waits this long for its log
+const JUMP_PAGES = 32;   // Show in chat reads back at most this many 2 MB pages (Resources reads 64 MB)
 
 // A chat chip: a tool chip, a note from another agent, a running call. The caller adds what it shows.
 function chip(t) {
@@ -62,6 +72,12 @@ export function noteSender(from) {
   return name.join(" ") || id || "agent";
 }
 
+// The chat input's height, for the Resources window's bottom.
+function noteInputHeight(size) {
+  const h = Math.round(size?.height ?? 0);
+  if (h > 0 && shared(KEY_INPUT_H) !== h) setShared(KEY_INPUT_H, h);
+}
+
 export class ChatView {
   constructor(cx) {
     this.scroll = VirtualListScrollHandle.new();
@@ -70,7 +86,7 @@ export class ChatView {
     this.width = 0;              // the pane's width, from on_size_change
     this.follow = true;          // keep the newest row on screen
     this.open = new Set();       // tool rows that show their calls
-    this.heights = new WeakMap(); // row → { w, open, h }
+    this.heights = new WeakMap(); // row → { w, open, k, zoom, h }
     this.busy = false;
     this.lastPoll = 0;
     this.composer = new Composer(cx);
@@ -80,8 +96,12 @@ export class ChatView {
     this.cards = new Cards(cx);
     this.helper = new HelperUI();
     this.refresh = (cx) => { this.lastPoll = 0; return this.poll(cx); };
+    this.composer.onNewConversation = (_address, cx) => this.refresh(cx);
     this.cards.canFocus = () => this.composer?.empty !== false;
     this.switchTo(currentAgent()?.address ?? null);
+    // A jump from before this copy started is done, unless it is recent: Show in chat from another screen makes the chat after the click.
+    const j = shared(KEY_JUMP);
+    this.jumped = j?.at && Date.now() - j.at < JUMP_WAIT_MS ? null : j?.at ?? null;
     cx.spawn((cx) => this.poll(cx));
     cx.timer.every(CHECK_MS, (cx) => this.tick(cx));
     cx.spawn(async () => { if (await loadTiming()) cx.timer.every(1000, () => flush()); });
@@ -93,8 +113,32 @@ export class ChatView {
   switchTo(address) {
     this.address = address; this.cards.shown = address;
     if (address && !this.feeds.has(address)) this.feeds.set(address, emptyFeed(address));
-    this.follow = true; this.open = new Set(); this.autoOlder = 0;
+    this.follow = true; this.open = new Set(); this.autoOlder = 0; this.pendingJump = null;
+    this.arriving = Date.now(); this.away = null;
     this.toNewest();
+  }
+
+  // The chat is on screen with this agent's newest item: say so (glance.js). On the way in, first see how
+  // long the chat was away: that is the "Since you left" card. `arriving`: when the chat came on screen (ms).
+  // A glance line from before then can be old (nothing polls while the chat is not on screen), so the chat
+  // waits for a newer one, and marks nothing until then.
+  see(cx) {
+    const a = this.address, g = a && glanceOn() ? glanceFor(a) : null;
+    if (!g?.id) return;
+    if (this.arriving) {
+      if (glancedAt() < this.arriving) return;
+      this.arriving = 0;
+      this.away = arrive(a, seenFor(a), g, Date.now());
+      if (this.away) cx.notify();
+    }
+    cx.spawn(() => markSeen(a));
+  }
+
+  // The owner's message the card names: bring it to the top of the list.
+  jumpTo(id, cx) {
+    const i = this.feed()?.rows.findIndex((r) => r.id === id) ?? -1;
+    if (i < 0) return;
+    this.follow = false; this.scroll.scroll_to_item(i, "top"); cx.notify();
   }
 
   tick(cx) {
@@ -102,14 +146,54 @@ export class ChatView {
     if (a !== this.address) { this.switchTo(a); this.lastPoll = 0; cx.notify(); }
     // Coming back to the chat screen (from Overview, Needs you, a shell tab) also opens at the end.
     const screen = shownScreen();
-    if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.toNewest(); cx.notify(); }
+    if (screen === "chat" && this.screen !== "chat") { this.follow = true; this.arriving = Date.now(); this.toNewest(); cx.notify(); }
     this.screen = screen;
+    // "Show in chat" in the Resources window: once, for this agent, when its row is loaded (after the
+    // way-in above, which opens at the newest).
+    const j = shared(KEY_JUMP);
+    if (j?.at && j.at !== this.jumped) { this.jumped = j.at; if (term(j.terminal) === term(this.address)) this.pendingJump = { row: j.row, pages: 0, path: null, since: Date.now() }; }
+    this.showJump(cx);
+    // On the way in, the glance is asked now, not after the usual wait.
+    if (screen === "chat") { const force = Boolean(this.arriving) && this.forced !== this.arriving; if (force) this.forced = this.arriving; cx.spawn((cx) => pollGlance(cx, force)); this.see(cx); }
     if (this.helper.changed()) cx.notify();
     cx.spawn((cx) => this.composer.pollStatus(cx));
     const agent = currentAgent();
     cx.spawn((cx) => this.cards.poll(cx, this.address, wanted(agent, this.feed()?.rows)));
     if (this.wantOlder) { this.wantOlder = false; cx.spawn((cx) => this.loadOlder(cx)); }
     if (Date.now() - this.lastPoll >= POLL_MS) return this.poll(cx);
+  }
+
+  // Show in chat (Resources): the row when it is loaded. An older one: read back (--before, JUMP_PAGES at most) to
+  // it, then show it. Waits for the chat's first read; another agent or log drops it. Not found: a hint, not nothing.
+  showJump(cx) {
+    const p = this.pendingJump, f = this.feed();
+    if (!p || !f) return;
+    // Not read yet (or only an error so far, or no log): wait, JUMP_WAIT_MS at most.
+    if (!f.loaded || f.path === null) {
+      if (Date.now() - p.since < JUMP_WAIT_MS) return;
+      this.pendingJump = null;
+      notify({ title: "Could not show the message", body: "The chat could not read this agent's conversation.", level: "info", timeout: 4000 });
+      return;
+    }
+    if (this.olderBusy) return;
+    if (p.path === null) p.path = f.path;
+    else if (p.path !== f.path) { this.pendingJump = null; return; }
+    if (f.rows.some((r) => r.id === p.row)) { this.pendingJump = null; this.jumpTo(p.row, cx); return; }
+    const back = olderFrom(f);
+    if (back !== null && p.pages < JUMP_PAGES && !p.failed) {
+      p.pages++;
+      cx.spawn(async (cx) => {
+        const n = f.rows.length;
+        await this.loadOlder(cx);
+        if (f.rows.length === n && olderFrom(f) === back) p.failed = true;   // the read failed: nothing more came
+        this.showJump(cx);
+      });
+      return;
+    }
+    this.pendingJump = null;
+    notify(back === null
+      ? { title: "Message not found", body: "Could not find this message in the chat's conversation.", level: "info", timeout: 4000 }
+      : { title: "Message not loaded", body: "This message is older than what the chat has loaded. Scroll up to load older messages, then try again.", level: "info", timeout: 4000 });
   }
 
   // The first row is on screen and the log goes back further: read the 2 MB before and put it on
@@ -156,20 +240,22 @@ export class ChatView {
     if (n) this.scroll.scroll_to_item(n - 1, "top");
   }
 
-  colWidth() { return columnWidth(this.width); }
+  // The same with the Resources window open or closed (resources.js readingLayout).
+  colWidth() { return readingLayout(this.width).width; }
 
   height(row) {
-    const w = this.colWidth(), open = this.open.has(row.id);
+    const w = this.colWidth(), open = this.open.has(row.id), k = textScale(), zoom = appZoom();
     const c = this.heights.get(row);
-    if (c && c.w === w && c.open === open) return c.h;
-    const h = rowHeight(row, w, open);
-    this.heights.set(row, { w, open, h });
+    if (c && c.w === w && c.open === open && c.k === k && c.zoom === zoom) return c.h;
+    const h = rowHeight(row, w, open, k, zoom);
+    this.heights.set(row, { w, open, k, zoom, h });
     return h;
   }
 
   // A row's content, without the list's fixed height. No handlers: list rows cannot have any.
   body(row, t) {
-    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w);
+    // Links only on the agent's replies (the helper sends them for no other row).
+    const md = (text, w = this.colWidth()) => markdownView(row.id, text || "", t, w, textScale(), row.k === "assistant" ? row.links : null);
     switch (row.k) {
       case "user":
         if (row.from != null) return this.agentNote(row, t, md);
@@ -241,8 +327,9 @@ export class ChatView {
 
   // One list row: the guessed height and the reading column.
   item(row, t) {
-    const pad = Math.max(GUTTER, Math.floor((this.width - this.colWidth()) / 2));
-    return div().h(this.height(row)).w_full().px(pad).overflow_hidden().child(this.body(row, t));
+    const r = readingLayout(this.width);
+    const pad = Math.max(GUTTER, Math.floor((this.width - r.width) / 2));
+    return div().h(this.height(row)).w_full().pl(pad).pr(pad).overflow_hidden().child(this.body(row, t));
   }
 
   // Right-click on a message (the user's, the agent's, a note from another agent): "Copy message", its markdown
@@ -259,7 +346,7 @@ export class ChatView {
     const w = this.colWidth();
     const at = typeof y0 !== "number" ? null : row.k === "assistant" ? { y: y0 - ROW_PAD_Y, w }
       : row.from == null ? { y: y0 - ROW_PAD_Y - BUBBLE_PAD_Y, w: bubbleTextWidth(w) } : null;
-    const code = at ? codeBlockAt(row.text || "", at.w, at.y - (i === 0 ? BAR_H : 0)) : null;
+    const code = at ? codeBlockAt(row.text || "", at.w, at.y, textScale(), appZoom()) : null;
     if (code !== null) items.push({ label: "Copy code", act: "copy", args: { text: code } });
     items.push({ label: "Copy message", act: "copy", args: { text: row.text || "" } });
     return openMenu(items);
@@ -300,8 +387,7 @@ export class ChatView {
 
   list(t, f) {
     const rows = f.rows, n = rows.length;
-    // The first row starts below the bar; the rest scroll up under it.
-    const sizes = rows.map((r, i) => this.height(r) + (i === 0 ? BAR_H : 0));
+    const sizes = rows.map((r) => this.height(r));
     const box = v_flex().relative().flex_1().min_h(0)
       .on_scroll_wheel((e, cx) => {
         const up = e?.delta?.y > 0;
@@ -319,7 +405,7 @@ export class ChatView {
           this.autoOlder++; this.wantOlder = true;
         }
         const out = [];
-        for (let i = range.start; i < range.end; i++) out.push(i === 0 ? div().w_full().pt(BAR_H).child(this.item(rows[i], t)) : this.item(rows[i], t));
+        for (let i = range.start; i < range.end; i++) out.push(this.item(rows[i], t));
         record("chat.rows", now() - t0, range.end - range.start);
         return out;
       }).track_scroll(this.scroll).on_item_click((key, cx) => this.click(key, cx))
@@ -336,7 +422,7 @@ export class ChatView {
           .child(svg(icon("arrow-down")).size(15))));
     }
     // While older rows load: a small note under the bar's tabs. Drawn only then: a hidden spinner still costs frames.
-    if (this.olderBusy) box.child(h_flex().absolute().top(BAR_H + 6).left(0).right(0).justify_center()
+    if (this.olderBusy) box.child(h_flex().absolute().top(6).left(0).right(0).justify_center()
       .child(h_flex().id("older").h(26).px(12).gap(6).items_center().rounded(13).bg(t.raised).border(1).border_color(t.border)
         .text_size(12).text_color(t.muted)
         .child(svg(icon("spinner")).size(11).spin(SPIN_MS)).child("Loading earlier messages")));
@@ -359,23 +445,26 @@ export class ChatView {
     else main = this.list(t, f);
     const stop = (_e, cx) => cx.stop_propagation();
     return watchEdge(v_flex().id("root").relative().size_full().min_w(0).bg(t.background))
-      .on_size_change((size, cx) => { noteWindowHeight(size); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
+      .on_size_change((size, cx) => { noteWindowHeight(size, BAR_H); if (Math.abs(size.width - this.width) >= 1) { this.width = size.width; cx.notify(); } })
       .on_drop((e, cx) => this.composer.addFiles(e?.paths, cx))
       // The chat input keeps ⌘⌥↑/↓ from the app's keys, so the chat switches spaces itself.
       .on_key_down((e, cx) => { const go = spaceKey(e); if (go) { cx.stop_propagation?.(); run(go); } })
       // Another agent's chat fades in; a new card fades in and rises into place.
-      // No press stop on the content: under Herdr 0.1.13 an ancestor's stop_propagation on the left press
-      // makes TextView text unselectable. Put the stop back (so content presses don't drag the window; the
-      // block has window_drag for the bar) once Herdr fixes that. The reply box and the cards keep theirs.
+      // No press stop on the content: an ancestor's stop_propagation on the left press makes TextView text
+      // unselectable (Herdr 0.1.13 to 0.1.16 at least). No stop is needed: the block has no window_drag, only
+      // the top bar above the screens moves the window.
       .child(v_flex().flex_1().min_h(0)
         .child(this.appear.wrap(main, "chat-body", this.address, cx).flex_1().min_h(0).flex().flex_col()))
       .when(Boolean(this.helper.removeCard(t, this.refresh)), (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
         .on_mouse_down("left", stop).child(this.helper.removeCard(t, this.refresh))))
+      .when(Boolean(f?.rows.length) && this.away?.address === this.address, (el) => el.child(h_flex().w_full().px(16).pt(8).justify_center()
+        .on_mouse_down("left", stop).child(sinceCard(t, sinceLeft(f.rows, this.away, glanceFor(this.address)), summaryFor(this.address),
+          (id, cx) => this.jumpTo(id, cx), (cx) => { this.away = null; cx.notify(); }))))
       .when(Boolean(f) && f.error?.code !== "not-agent" && !isRemoteProblem(f.error), (el) => {
         const card = this.cards.view(this.address, t, "chat-card");
         if (card) el.child(this.appear.wrap(h_flex().w_full().px(16).pt(8).justify_center().on_mouse_down("left", stop).child(card), "chat-card-in", `${this.address}:${this.cards.key?.(this.address) ?? ""}`, cx, 10));
-        return el.child(div().w_full().on_mouse_down("left", stop).child(this.composer.render(currentAgent(), t)));
+        // Its height: the Resources window ends above it (resources.js placement).
+        return el.child(div().id("composer-size").w_full().on_mouse_down("left", stop).on_size_change(noteInputHeight).child(this.composer.render(currentAgent(), t)));
       })
-      .child(overBar(t));
   }
 }

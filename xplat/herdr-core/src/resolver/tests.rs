@@ -309,7 +309,8 @@ fn codex_foreign_claim() {
 // MARK: checksPiSession, checksPiTwoInOneCwd, checksHCResolverNewProgram (ChecksPiSession)
 
 fn pi_head(id: &str, started: Date, cwd: &str) -> String {
-    format!(r#"{{"type":"session","version":3,"id":"{id}","timestamp":"{}","cwd":"{cwd}"}}"#, iso(started))
+    // cwd as a JSON string: a Windows path has backslashes
+    format!(r#"{{"type":"session","version":3,"id":"{id}","timestamp":"{}","cwd":{}}}"#, iso(started), serde_json::to_string(cwd).unwrap())
 }
 
 #[test]
@@ -416,6 +417,231 @@ fn hc_resolver_new_program() {
     let b = vec![proc_(930_002, 1, second, "node /opt/homebrew/bin/pi HC_TERMINAL_ID=t7")];
     let again = r.resolve_with(&[Need::new("hc:t7", "pi", cwd, vec![930_002])], &set(&[]), &HashMap::new(), Some(&b));
     assert_eq!(again.get("hc:t7"), Some(&two), "a new pid in the pane -> its log at once, not the old one");
+}
+
+// omp (oh-my-pi, a pi fork): pi's files under ~/.omp/agent/sessions, folders named by session-paths.ts.
+
+#[test]
+fn omp_session_folder_names() {
+    let d = |cwd: &str, home: &str, tmp: &str| omp_session_dir(cwd, "/s", home, tmp);
+    assert_eq!(d("/home/u/src/app", "/home/u", "/tmp"), "/s/-src-app", "under home: '-' + the path from home");
+    assert_eq!(d("/home/u", "/home/u", "/tmp"), "/s/-", "home itself");
+    assert_eq!(d("/tmp/x/y", "/home/u", "/tmp"), "/s/-tmp-x-y", "under the temp root: '-tmp-' + the path from it");
+    assert_eq!(d("/tmp", "/home/u", "/tmp"), "/s/-tmp", "the temp root itself");
+    assert_eq!(d("/home/u/.t/a", "/home/u", "/home/u/.t"), "/s/-tmp-a", "the temp root wins when it is inside home");
+    assert_eq!(d("/srv/app", "/home/u", "/tmp"), "/s/--srv-app--", "elsewhere: the absolute path in '--'");
+    assert_eq!(
+        d("/private/tmp/app", "/home/u", "/private/var/folders/ab/T"),
+        "/s/--private-tmp-app--",
+        "macOS: /tmp is /private/tmp, outside TMPDIR"
+    );
+    assert_eq!(d("/home/u/a:b\\c", "/home/u", "/tmp"), "/s/-a-b-c", "':' and '\\' become '-'");
+    assert_eq!(d("/home/user2/x", "/home/u", "/tmp"), "/s/--home-user2-x--", "a sibling of home is not under home");
+    // Windows: `\` separates too (path.relative); the drive's ':' becomes '-'.
+    assert_eq!(d(r"C:\Users\u\src\app", r"C:\Users\u", r"C:\T"), "/s/-src-app", "Windows: under home");
+    assert_eq!(d(r"C:\T\x", r"C:\Users\u", r"C:\T"), "/s/-tmp-x", "Windows: under the temp root");
+    assert_eq!(d(r"D:\w\x", r"C:\Users\u", r"C:\T"), "/s/--D--w-x--", "Windows: elsewhere");
+}
+
+#[test]
+fn verbatim_prefix_dropped() {
+    // Windows canonicalize gives \\?\C:\...; Node's realpath gives C:\...
+    assert_eq!(strip_verbatim(r"\\?\C:\Users\u"), r"C:\Users\u");
+    assert_eq!(strip_verbatim(r"\\?\UNC\srv\share\a"), r"\\srv\share\a");
+    assert_eq!(strip_verbatim("/home/u"), "/home/u");
+}
+
+#[test]
+fn omp_title_line_first() {
+    let start = Utc::now() - Duration::seconds(600);
+    let s = |n: i64| start + Duration::seconds(n);
+    let title = r#"{"type":"title","v":1,"title":"Fix the build","source":"auto","updatedAt":"2026-11-10T07:35:44.761Z","pad":"    "}"#;
+    let lines = vec![
+        ("/r/a.jsonl".to_string(), s(50), format!("{title}\n{}\n", pi_head("a", s(2), "/r/w")).into_bytes()),
+        ("/r/b.jsonl".to_string(), s(80), format!("{title}\n").into_bytes()),
+    ];
+    assert_eq!(pi_pick(&lines, "/r/w", start, &[], |_| false), Some("/r/a.jsonl".into()), "the session header after a title slot");
+}
+
+/// The test's temp root in an agent's env, under the name omp reads first on this OS.
+fn tmp_env() -> String {
+    let t = std::env::temp_dir().to_string_lossy().into_owned();
+    if cfg!(windows) { format!("TEMP={t}") } else { format!("TMPDIR={t}") }
+}
+
+#[test]
+fn omp_temp_root_from_env() {
+    // omp's os.tmpdir() reads its own env (Bun, as Node), not ours.
+    #[cfg(unix)]
+    {
+        assert_eq!(omp_tmp("omp TMPDIR=/a TMP=/b TEMP=/c"), "/a", "TMPDIR first");
+        assert_eq!(omp_tmp("omp TMP=/b TEMP=/c"), "/b", "then TMP");
+        assert_eq!(omp_tmp("omp TEMP=/c HOME=/h"), "/c", "then TEMP");
+        assert_eq!(omp_tmp("omp HOME=/h"), "/tmp", "else /tmp, not Flockbook's own temp folder");
+        assert_eq!(omp_tmp("omp TMPDIR=/a/"), "/a", "no trailing '/'");
+    }
+    #[cfg(windows)]
+    {
+        assert_eq!(omp_tmp(r"omp TMP=C:\b TEMP=C:\a"), r"C:\a", "TEMP first");
+        assert_eq!(omp_tmp(r"omp TMP=C:\b"), r"C:\b", "then TMP");
+        assert_eq!(omp_tmp(r"omp SystemRoot=C:\Windows"), r"C:\Windows\temp", "else the Windows folder's temp");
+    }
+}
+
+/// `env -u TMPDIR omp` in a folder under /tmp: omp names it -tmp-<name>, whatever Flockbook's TMPDIR is.
+#[cfg(unix)] // /tmp is omp's last temp root only on Unix
+#[test]
+fn omp_without_tmpdir_uses_tmp() {
+    let start = Utc::now() - Duration::seconds(600);
+    let (_t, agent_dir) = tmp();
+    let work = tempfile::Builder::new().prefix("omp-t").tempdir_in("/tmp").unwrap();
+    let work = work.path().to_string_lossy().into_owned();
+    let name = Path::new(&work).file_name().unwrap().to_string_lossy().into_owned();
+    let dir = format!("{agent_dir}/sessions/-tmp-{name}");
+    fs::create_dir_all(&dir).unwrap();
+    let p = format!("{dir}/2026-11-10T07-35-44-761Z_d.jsonl");
+    fs::write(&p, pi_head("d", start + Duration::seconds(3), &work) + "\n").unwrap();
+    set_mtime(&p, start + Duration::seconds(60));
+    let line = format!("omp PI_CODING_AGENT_DIR={agent_dir} HOME=/h HC_TERMINAL_ID=t4");
+    let procs = vec![proc_(980_001, 1, start, &line)];
+    let need = Need::new("hc:t4", "omp", &work, vec![980_001]);
+    let mut r = resolver(|_| {});
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(got.get("hc:t4"), Some(&p), "folder from /tmp (dir {})", r.pi_dir("omp", &work, &line));
+}
+
+#[test]
+fn omp_session() {
+    let (_t, agent_dir) = tmp();
+    let start = Utc::now() - Duration::seconds(600);
+    let write = |dir: &str, name: &str, cwd: &str| {
+        fs::create_dir_all(dir).unwrap();
+        let p = format!("{dir}/{name}.jsonl");
+        let title = r#"{"type":"title","v":1,"title":"t","source":"auto","updatedAt":"2026-11-10T07:35:44.761Z","pad":"  "}"#;
+        fs::write(&p, format!("{title}\n{}\n", pi_head(name, start + Duration::seconds(3), cwd))).unwrap();
+        set_mtime(&p, start + Duration::seconds(60));
+        p
+    };
+    // A cwd outside home and temp, sessions under the default root.
+    let cwd = "/w/omp-proj";
+    let root = agent_dir.clone() + "/default/sessions";
+    let mine = write(&format!("{root}/--w-omp-proj--"), "2026-11-10T07-35-44-761Z_a", cwd);
+    write(&agent_dir.clone(), "decoy", cwd);
+    let procs = vec![proc_(940_001, 1, start, "omp HC_TERMINAL_ID=t8")];
+    let need = Need::new("hc:t8", "omp", cwd, vec![940_001]);
+    let mut r = resolver(|r| r.omp_sessions_dir = root.clone());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(got.get("hc:t8"), Some(&mine), "omp's file in its cwd's folder");
+
+    // PI_CODING_AGENT_DIR in the process env moves the root; a cwd in the temp root gets the -tmp- name.
+    let (_w, work) = tmp();
+    let real = fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
+    let base = Path::new(&real).file_name().unwrap().to_string_lossy().into_owned();
+    let moved = agent_dir.clone() + "/moved";
+    let other = write(&format!("{moved}/sessions/-tmp-{base}"), "2026-11-10T07-35-44-761Z_b", &work);
+    let line = format!("bun /usr/local/bin/omp PI_CODING_AGENT_DIR={moved} {} HC_TERMINAL_ID=t9", tmp_env());
+    let procs = vec![proc_(940_002, 1, start, &line)];
+    let need = Need::new("hc:t9", "omp", &work, vec![940_002]);
+    let mut r = resolver(|r| r.omp_sessions_dir = root.clone());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    assert_eq!(
+        got.get("hc:t9"),
+        Some(&other),
+        "agent dir from the process env, folder from the real cwd (dir {}, real cwd {}, real tmp {})",
+        r.pi_dir("omp", &work, &line),
+        real_path(&work),
+        real_path(&std::env::temp_dir().to_string_lossy())
+    );
+}
+
+#[test]
+fn omp_env_values_with_spaces() {
+    let line = "omp --x PI_CODING_AGENT_DIR=/data/omp profiles/work TMPDIR=/t/my tmp HC_TERMINAL_ID=t1";
+    assert_eq!(env_value(line, "PI_CODING_AGENT_DIR").as_deref(), Some("/data/omp profiles/work"), "a value runs to the next NAME=");
+    assert_eq!(env_value(line, "TMPDIR").as_deref(), Some("/t/my tmp"));
+    assert_eq!(env_value(line, "HC_TERMINAL_ID").as_deref(), Some("t1"), "the last value runs to the end");
+    assert_eq!(env_value("omp PI_CODING_AGENT_DIR= HOME=/h", "PI_CODING_AGENT_DIR"), None, "empty is unset");
+    assert_eq!(env_value("omp XPI_CODING_AGENT_DIR=/a", "PI_CODING_AGENT_DIR"), None, "whole names only");
+}
+
+#[test]
+fn pi_folder_shared_by_two_cwds() {
+    // /w/a-b and /w/a/b both name the folder --w-a-b--: the two pi are not rivals.
+    let (_t, agent_dir) = tmp();
+    let dir = pi_session_dir("/w/a-b", &agent_dir);
+    assert_eq!(dir, pi_session_dir("/w/a/b", &agent_dir));
+    fs::create_dir_all(&dir).unwrap();
+    let a0 = Utc::now() - Duration::seconds(900);
+    let b0 = a0 + Duration::seconds(300);
+    let file = |id: &str, started: Date, cwd: &str| {
+        let p = format!("{dir}/{id}.jsonl");
+        fs::write(&p, pi_head(id, started, cwd) + "\n").unwrap();
+        set_mtime(&p, started + Duration::seconds(10));
+        p
+    };
+    let fa = file("a", b0 + Duration::seconds(100), "/w/a-b");
+    let fb = file("b", b0 + Duration::seconds(1), "/w/a/b");
+    let procs = vec![proc_(960_001, 1, a0, "node pi"), proc_(960_002, 1, b0, "node pi")];
+    let na = Need::new("hc:ta", "pi", "/w/a-b", vec![960_001]);
+    let nb = Need::new("hc:tb", "pi", "/w/a/b", vec![960_002]);
+    let mut r = resolver(|r| r.pi_agent_dir = agent_dir.clone());
+    let got = r.resolve_with(&[na, nb], &set(&[]), &HashMap::new(), Some(&procs));
+    assert!(got.get("hc:ta") == Some(&fa) && got.get("hc:tb") == Some(&fb), "each pi keeps its own cwd's file ({got:?})");
+}
+
+#[test]
+fn omp_relative_agent_dir() {
+    // PI_CODING_AGENT_DIR=./.omp-agent is resolved from omp's cwd, as omp's path.resolve does.
+    let start = Utc::now() - Duration::seconds(600);
+    let (_w, work) = tmp();
+    let real = fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
+    let dir = format!("{work}/.omp-agent/sessions/-tmp-{}", Path::new(&real).file_name().unwrap().to_string_lossy());
+    fs::create_dir_all(&dir).unwrap();
+    let p = format!("{dir}/2026-11-10T07-35-44-761Z_c.jsonl");
+    fs::write(&p, pi_head("c", start + Duration::seconds(3), &work) + "\n").unwrap();
+    set_mtime(&p, start + Duration::seconds(60));
+    let line = format!("omp PI_CODING_AGENT_DIR=./.omp-agent {} HC_TERMINAL_ID=t3", tmp_env());
+    let procs = vec![proc_(970_001, 1, start, &line)];
+    let need = Need::new("hc:t3", "omp", &work, vec![970_001]);
+    let mut r = resolver(|r| r.omp_sessions_dir = "/nonexistent/sessions".into());
+    let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs));
+    // The folder is built from the cwd with '/' (Windows: either separator names the same file).
+    let same = |a: &String| fs::canonicalize(a).ok() == fs::canonicalize(&p).ok();
+    assert!(
+        got.get("hc:t3").is_some_and(same),
+        "{:?} is not {p}: a relative agent dir under the agent's cwd (dir {})",
+        got.get("hc:t3"),
+        r.pi_dir("omp", &work, &line)
+    );
+}
+
+#[test]
+fn omp_two_in_one_cwd_apart() {
+    // Two omp in one cwd with their own PI_CODING_AGENT_DIR: different folders, so no rivals.
+    let (_t, base) = tmp();
+    let cwd = "/w/omp-two";
+    let a0 = Utc::now() - Duration::seconds(900);
+    let b0 = a0 + Duration::seconds(300);
+    let file = |agent: &str, id: &str, started: Date| {
+        let dir = format!("{base}/{agent}/sessions/--w-omp-two--");
+        fs::create_dir_all(&dir).unwrap();
+        let p = format!("{dir}/{id}.jsonl");
+        fs::write(&p, pi_head(id, started, cwd) + "\n").unwrap();
+        set_mtime(&p, started + Duration::seconds(10));
+        p
+    };
+    // A's /new after B started: a header later than B's start, in A's own folder.
+    let fa = file("a", "a", b0 + Duration::seconds(100));
+    let fb = file("b", "b", b0 + Duration::seconds(1));
+    let procs = vec![
+        proc_(950_001, 1, a0, &format!("omp PI_CODING_AGENT_DIR={base}/a HC_TERMINAL_ID=ta")),
+        proc_(950_002, 1, b0, &format!("omp PI_CODING_AGENT_DIR={base}/b HC_TERMINAL_ID=tb")),
+    ];
+    let na = Need::new("hc:ta", "omp", cwd, vec![950_001]);
+    let nb = Need::new("hc:tb", "omp", cwd, vec![950_002]);
+    let mut r = resolver(|r| r.omp_sessions_dir = format!("{base}/default/sessions"));
+    let got = r.resolve_with(&[na, nb], &set(&[]), &HashMap::new(), Some(&procs));
+    assert!(got.get("hc:ta") == Some(&fa) && got.get("hc:tb") == Some(&fb), "each omp reads its own folder ({got:?})");
 }
 
 // MARK: checksGrok (resolver part)
@@ -798,4 +1024,121 @@ fn codex_open_subagent_rollout_is_not_the_pane() {
     });
     let got = r.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t5").cloned();
     assert_eq!(got, Some(lead), "the lead's open rollout, not its guardian's");
+}
+
+#[test]
+fn hc_wrapper_feed_and_stale_shell() {
+    let (_t, dir) = tmp();
+    let base = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let procs = vec![
+        proc_(500, 1, base, "-zsh HC_TERMINAL_ID=t1"),
+        proc_(501, 500, base + Duration::seconds(1), "secretspec run -- claude"),
+        proc_(502, 501, base + Duration::seconds(2), "claude HC_TERMINAL_ID=t1"),
+    ];
+    write_pid_file(&dir, 502, "sid-wrap", base + Duration::seconds(2));
+
+    // Test 22: wrapper tree zsh -> secretspec -> claude with Need.pids = [secretspec, zsh] resolves the log.
+    let term = crate::hc::mapper::Term::parse(&serde_json::json!({
+        "address": "t1",
+        "argv": ["zsh"],
+        "pid": 500,
+        "foreground": {"name": "secretspec", "argv": ["secretspec", "run", "--", "claude"], "pid": 501},
+        "status": {"state": "working", "app": "claude-code"}
+    })).unwrap();
+    let pane = crate::hc::mapper::pane(&term);
+    let a = pane.agent.as_ref().unwrap();
+    assert_eq!(a.kind, "claude");
+    assert_eq!(pane.process_ids, vec![501, 500]);
+    let need = Need::new(&pane.id, &a.kind, "/tmp", pane.process_ids.clone());
+    let mut r = resolver(|r| r.claude_dir = dir.clone());
+    assert_eq!(
+        r.resolve_with(&[need], &set(&[]), &HashMap::new(), Some(&procs)).get("hc:t1"),
+        Some(&"sid-wrap".to_string()),
+        "feed resolves log through wrapper tree"
+    );
+
+    // Test 23: shell in front, kind from a stale status.app, no agent process: no log resolves, no panic.
+    let procs_shell = vec![proc_(600, 1, base, "-zsh HC_TERMINAL_ID=t2")];
+    let term_shell = crate::hc::mapper::Term::parse(&serde_json::json!({
+        "address": "t2",
+        "argv": ["zsh"],
+        "pid": 600,
+        "foreground": {"name": "zsh", "argv": ["zsh"], "pid": 600},
+        "status": {"state": "done", "app": "claude-code"}
+    })).unwrap();
+    let pane_shell = crate::hc::mapper::pane(&term_shell);
+    let need_shell = Need::new(&pane_shell.id, &pane_shell.agent.as_ref().unwrap().kind, "/tmp", pane_shell.process_ids.clone());
+    let mut r2 = resolver(|r| r.claude_dir = dir);
+    assert!(
+        r2.resolve_with(&[need_shell], &set(&[]), &HashMap::new(), Some(&procs_shell)).is_empty(),
+        "stale shell resolves no log"
+    );
+}
+
+#[test]
+fn agent_in_tree_nearest_and_ties() {
+    let t0 = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let procs = vec![
+        // Tree 1: wrapper (10) -> claude (11, older) -> bash (12) -> claude -p helper (13, newer)
+        proc_(10, 1, t0, "secretspec run -- claude"),
+        proc_(11, 10, t0 + Duration::seconds(1), "claude"),
+        proc_(12, 11, t0 + Duration::seconds(2), "bash -c helper"),
+        proc_(13, 12, t0 + Duration::seconds(10), "claude -p summarize"),
+        // Tree 2: wrapper (20) -> two claude children at depth 1 (21 older, 22 newer)
+        proc_(20, 1, t0, "secretspec run -- claude"),
+        proc_(21, 20, t0 + Duration::seconds(1), "claude"),
+        proc_(22, 20, t0 + Duration::seconds(5), "claude"),
+        // Tree 3: two-step wrapper (30 -> 31) -> claude (32) and deeper helper (33)
+        proc_(30, 1, t0, "secretspec run -- claude"),
+        proc_(31, 30, t0 + Duration::seconds(1), "env FOO=1"),
+        proc_(32, 31, t0 + Duration::seconds(2), "claude"),
+        proc_(33, 32, t0 + Duration::seconds(8), "claude -p sub"),
+    ];
+
+    assert_eq!(agent_in_tree(10, "claude", &procs, false).map(|p| p.pid), Some(11), "gate: nearest wins over newer helper");
+    assert_eq!(agent_in_tree(10, "claude", &procs, true).map(|p| p.pid), Some(11), "feed: nearest wins over newer helper");
+    assert_eq!(hc_agent_process(&[10], "claude", &procs).map(|p| p.pid), Some(11), "hc_agent_process: nearest wins over helper");
+
+    assert_eq!(agent_in_tree(20, "claude", &procs, false), None, "gate: tie at same depth fails closed");
+    assert_eq!(agent_in_tree(20, "claude", &procs, true).map(|p| p.pid), Some(22), "feed: tie at same depth picks newest");
+    assert_eq!(hc_agent_process(&[20], "claude", &procs).map(|p| p.pid), Some(22), "hc_agent_process: tie picks newest");
+
+    assert_eq!(agent_in_tree(30, "claude", &procs, false).map(|p| p.pid), Some(32), "nearest at depth 2 wins over depth 3");
+    assert_eq!(agent_in_tree(999, "claude", &procs, false), None, "unknown root -> None");
+}
+
+/// Codex P1 (wrapper-agent twin): a process runs the agent only when its program is the agent (`claude …`), or an
+/// interpreter whose script is the agent (`node …/codex`). A program that only names it (`script claude`) does not.
+#[test]
+fn runs_checks_the_real_executable() {
+    let t0 = DateTime::parse_from_rfc3339("2026-10-31T10:00:00Z").unwrap().with_timezone(&Utc);
+    let one = |line: &str, kind: &str| agent_in_tree(1, kind, &[proc_(10, 1, t0, line)], false).map(|p| p.pid);
+    for (line, kind) in [
+        ("claude --resume", "claude"),
+        ("/usr/local/bin/claude HC_TERMINAL_ID=t1", "claude"),
+        ("node /opt/x/bin/codex HC_TERMINAL_ID=t1", "codex"),
+        ("node22 /opt/x/bin/claude", "claude"),
+        ("python3.12 /opt/x/bin/pi", "pi"),
+        ("bun /usr/local/bin/omp", "omp"),
+        ("/usr/local/bin/cursor-agent", "cursor"),
+    ] {
+        assert_eq!(one(line, kind), Some(10), "{line:?} runs {kind}");
+    }
+    for (line, kind) in [
+        ("script claude", "claude"),
+        ("vim claude", "claude"),
+        ("cat codex", "codex"),
+        ("less /tmp/claude", "claude"),
+        ("node --inspect /opt/x/bin/codex", "codex"),
+        ("nodemon codex", "codex"),
+        ("node", "claude"),
+        ("", "claude"),
+    ] {
+        assert_eq!(one(line, kind), None, "{line:?} does not run {kind}");
+    }
+    // A wrapper still works through the tree: its child is the agent.
+    let procs = [proc_(10, 1, t0, "secretspec run -- claude"), proc_(11, 10, t0, "claude")];
+    assert_eq!(agent_in_tree(1, "claude", &procs, false).map(|p| p.pid), Some(11));
+    let procs = [proc_(10, 1, t0, "script claude"), proc_(11, 10, t0, "-zsh")];
+    assert_eq!(agent_in_tree(1, "claude", &procs, false), None, "script with a shell under it: no agent");
 }

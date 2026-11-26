@@ -140,6 +140,7 @@ so pasted text that quotes these tags is kept as is. Pasted blocks are not marke
 | Claude Code | `~/.claude/projects/<slug>/<id>.jsonl` | thinking hidden, except words logged as thinking right before a tool call of the same message (shown as text, as in the terminal); sidechains skipped; a log whose last line is `continued-in` is followed to the newest log of the chain |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl` | `response_item` lines only |
 | pi | `~/.pi/agent/sessions/<cwd-slug>/<time>_<uuid>.jsonl` (herdr gives the path) | see below |
+| oh-my-pi (omp) | `~/.omp/agent/sessions/<cwd folder>/<time>_<uuid>.jsonl`, or `$PI_CODING_AGENT_DIR/sessions/…` | pi's format; see below |
 | Cursor | `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl` | see below |
 
 pi entries form a tree (`id`/`parentId`). The conversation is the branch that ends at the newest entry: when an entry hangs off an earlier one (an edited or retried turn), the items are rebuilt from that branch, so the abandoned turn disappears. Item ids are `<entry id>-<block>`.
@@ -149,6 +150,14 @@ pi entries form a tree (`id`/`parentId`). The conversation is the branch that en
 - `stopReason` `error` → `.status("Error: <first line>")`; `aborted` → `.status("Interrupted")`.
 - `compaction` → `.status("Context compacted")`. `custom_message` with `display: true` → `.status(<first line>)`.
 - Not shown: `session`, `model_change`, `thinking_level_change`, `session_info`, `custom` (e.g. worked-for, permission-gate decisions), `context_edit`, the system prompt, images in user messages.
+
+omp (a pi fork) writes pi's tree, read by the same parser. What differs (the helper has the same rules, `xplat/herdr-core`):
+- The folder: the cwd, home and temp root are resolved first (realpath); under the temp root `-tmp-<rel>`, else under home `-<rel>`, else `--<absolute path>--`, with `/`, `\` and `:` as `-`. The temp root is omp's own: `TMPDIR`, `TMP`, `TEMP` from its env, else `/tmp`. The root is `$PI_CODING_AGENT_DIR/sessions` from the omp process's env (a relative one is under its cwd), else `~/.omp/agent/sessions`. On another machine only the default root is looked in (`ps` there gives no env).
+- A `title` line can come before the `session` header.
+- `activeLeafId` on an entry: the shown leaf after it. Another leaf: the entry is kept in the tree and not shown (late usage, a background result). `null`: nothing is shown until the next entry, which shows its own branch.
+- A `custom_message` that starts with `<system-notice>` is not a status row.
+- Not shown: `title`, `title_change`, `model_usage`, `service_tier_change`, `label`, `session_init`, `reset_boundary`, `mode_change`, `ttsr_injection`, `credential_pin`.
+- Not read yet: `XDG_DATA_HOME`, `OMP_PROFILE`, `PI_CONFIG_DIR`, `--session-dir`, `reset_boundary` as a cut; omp has no "/" list and no input-box check.
 
 Cursor transcripts have no ids, no times and no tool results. Item ids come from the line's byte offset (`cu@<offset>-<block>`), like Codex.
 - User text: the body of `<user_query>`; its `<timestamp>` (minute precision, with the UTC offset) is the item time. User lines without `<user_query>` that start with a tag or `[` are injected context and are skipped. Assistant items have no time.

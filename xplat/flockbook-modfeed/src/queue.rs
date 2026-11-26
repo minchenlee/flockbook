@@ -596,11 +596,18 @@ fn claude_box(lines: &[String]) -> Vec<String> {
     box_rows(&lines[a + 1..b], '❯')
 }
 
-/// Codex: the last row that starts with "› ", and the rows under it down to the footer.
+/// Codex: the last row that starts with "› ", and the rows under it down to the footer. A newer footer has a
+/// status line with no "% left" (model · folder · thread title, after a blank line): that line is the footer's.
 fn codex_box(lines: &[String]) -> Vec<String> {
     let Some(i) = lines.iter().rposition(|l| l.starts_with("› ")) else { return vec![] };
     let Some(end) = lines[i + 1..].iter().position(|l| l.contains("% left") || l.contains("? for shortcuts")) else { return vec![] };
-    box_rows(&lines[i..i + 1 + end], '›')
+    let mut rows = &lines[i..i + 1 + end];
+    if let [.., blank, status] = rows {
+        if rows.len() > 2 && trim(blank).is_empty() && status.starts_with("  ") && status.contains(" · ") {
+            rows = &rows[..rows.len() - 2];
+        }
+    }
+    box_rows(rows, '›')
 }
 
 fn box_rows(lines: &[String], mark: char) -> Vec<String> {
@@ -678,6 +685,163 @@ pub fn box_has_text(kind: &str, screen: &str, claude_suggests: bool) -> Option<b
         _ => return None,
     };
     Some(rows.iter().any(|r| !trim(r).is_empty()))
+}
+
+/// Claude Code's box when it is one row starting with "/" (with prompt suggestions on, `box_has_text` counts it as
+/// text, and it may be a dim suggestion): that row, trimmed.
+pub fn claude_slash_row(screen: &str) -> Option<String> {
+    let rows = ruled(&lines_of(screen), Some('❯'))?;
+    match &rows[..] {
+        [r] if r.trim_start().starts_with('/') => Some(trim(r).to_string()),
+        _ => None,
+    }
+}
+
+/// Whether Claude Code's box row in `paint` (a terminal's first paint, from a watch-only attach) holds only a dim
+/// prompt suggestion that reads `text`: every character after "❯ " is dim, they read `text`, and the cursor stands at
+/// the box's start. Typed text is not dim and the cursor stands after it. Any doubt: false (the send is refused).
+pub fn claude_suggestion_in_paint(paint: &[u8], text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+    let Some((cells, cursor)) = paint_cells(&String::from_utf8_lossy(paint)) else { return false };
+    // The box row: the last row whose first visible character is "❯".
+    let mut rows: Vec<u32> = cells.keys().map(|&(r, _)| r).collect();
+    rows.dedup();
+    let Some((row, mark)) = rows.into_iter().rev().find_map(|r| {
+        let (&(_, c), &(ch, _)) = cells.range((r, 0)..(r + 1, 0)).find(|(_, &(c, _))| c != ' ' && c != '\u{a0}')?;
+        (ch == '❯').then_some((r, c))
+    }) else {
+        return false;
+    };
+    if cursor != (row, mark + 2) {
+        return false;
+    }
+    let after: Vec<&(char, bool)> = cells.range((row, mark + 2)..(row + 1, 0)).map(|(_, v)| v).collect();
+    let shown: String = after.iter().map(|(c, _)| if *c == '\u{a0}' { ' ' } else { *c }).collect();
+    shown.trim() == text && after.iter().all(|(c, dim)| *dim || c.is_whitespace())
+}
+
+/// No screen has more rows or columns: a position or move past it is doubt. Swift: `AgentBox.maxCoord`.
+const MAX_COORD: u32 = 10_000;
+
+/// Cells by (row, col): the character and whether it is dim.
+type Cells = std::collections::BTreeMap<(u32, u32), (char, bool)>;
+
+/// A small VT reading of a paint: each written cell (row, col, 1-based) with its character and whether it is dim
+/// (SGR 2, off with 22 or 0), and the cursor at the end. Wide characters count one column: a paint with them gets a
+/// cursor that does not match, which reads as doubt. `None` when the paint ends inside a control sequence (its rest
+/// still coming in a later frame): the cut sequence may move the cursor or clear the row, so nothing can be told.
+fn paint_cells(s: &str) -> Option<(Cells, (u32, u32))> {
+    let mut cells = std::collections::BTreeMap::new();
+    let (mut row, mut col, mut dim) = (1u32, 1u32, false);
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '\x1b' => match it.next() {
+                None => return None,
+                Some('[') => {
+                    let mut params = String::new();
+                    let mut fin = None;
+                    for c in it.by_ref() {
+                        if ('\x40'..='\x7e').contains(&c) {
+                            fin = Some(c);
+                            break;
+                        }
+                        params.push(c);
+                    }
+                    fin?;
+                    let private = params.starts_with(['?', '>', '<', '=']);
+                    // A number no screen has (or none at all to read) is doubt: no overflow, no "1" in its place.
+                    let mut nums: Vec<u32> = vec![];
+                    // Only the moves and erases read numbers ("m" reads its own; other sequences are passed over).
+                    if !private && matches!(fin, Some('H' | 'f' | 'A' | 'B' | 'C' | 'D' | 'G' | 'd' | 'K' | 'J')) {
+                        for p in params.split(';') {
+                            if p.is_empty() {
+                                nums.push(0);
+                                continue;
+                            }
+                            let v: u32 = p.parse().ok()?;
+                            if v > MAX_COORD {
+                                return None;
+                            }
+                            nums.push(v);
+                        }
+                    }
+                    if nums.is_empty() {
+                        nums.push(0);
+                    }
+                    let n = |i: usize| nums.get(i).copied().filter(|&v| v > 0).unwrap_or(1);
+                    match fin {
+                        _ if private => {}
+                        Some('H') | Some('f') => (row, col) = (n(0), n(1)),
+                        Some('A') => row = row.saturating_sub(n(0)).max(1),
+                        Some('B') => row += n(0),
+                        Some('C') => col += n(0),
+                        Some('D') => col = col.saturating_sub(n(0)).max(1),
+                        Some('G') => col = n(0),
+                        Some('d') => row = n(0),
+                        Some('K') => match nums[0] {
+                            0 => cells.retain(|&(r, c), _| r != row || c < col),
+                            1 => cells.retain(|&(r, c), _| r != row || c > col),
+                            _ => cells.retain(|&(r, _), _| r != row),
+                        },
+                        Some('J') if nums[0] == 2 || nums[0] == 3 => cells.clear(),
+                        Some('m') => {
+                            let ps: Vec<&str> = params.split(';').collect();
+                            let mut i = 0;
+                            while i < ps.len() {
+                                match ps[i] {
+                                    "" | "0" => dim = false,
+                                    "2" => dim = true,
+                                    "22" => dim = false,
+                                    // A colour's own numbers: "2;r;g;b" or "5;n" (a "2" there is not dim).
+                                    "38" | "48" | "58" => match ps.get(i + 1) {
+                                        Some(&"2") => i += 4,
+                                        Some(&"5") => i += 2,
+                                        _ => {}
+                                    },
+                                    _ => {}
+                                }
+                                i += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // OSC: up to BEL or ST.
+                Some(']') => {
+                    let mut closed = false;
+                    while let Some(c) = it.next() {
+                        if c == '\x07' || (c == '\x1b' && it.next_if_eq(&'\\').is_some()) {
+                            closed = true;
+                            break;
+                        }
+                    }
+                    if !closed {
+                        return None;
+                    }
+                }
+                Some('(') | Some(')') => {
+                    it.next()?;
+                }
+                _ => {}
+            },
+            '\r' => col = 1,
+            '\n' => row += 1,
+            '\x08' => col = col.saturating_sub(1).max(1),
+            c if (c as u32) < 0x20 || c == '\x7f' => {}
+            c => {
+                cells.insert((row, col), (c, dim));
+                col += 1;
+            }
+        }
+        if row > MAX_COORD || col > MAX_COORD {
+            return None;
+        }
+    }
+    Some((cells, (row, col)))
 }
 
 /// The rows between the last two rule lines, the first starting with `mark` (taken off with its space); another
@@ -778,6 +942,70 @@ mod box_tests {
         assert_eq!(c("❯\u{a0}Try \"fix typecheck errors\""), Some(false));
     }
 
+    // A first paint as Claude Code 2.1.322 gives it (spike 11-12, redacted): rule, box row, rule, footer; the cursor
+    // last. Its empty-box placeholder is dim (SGR 2) with the cursor at the box start; typed text has a colour and
+    // the cursor after it.
+    fn paint(row: &str, cursor_col: u32) -> Vec<u8> {
+        let rule = "─".repeat(40);
+        format!("\x1b[2J\x1b[1;1H● Done.\x1b[3;1H\x1b[38;2;136;136;136m{rule}\x1b[0m\x1b[4;1H{row}\x1b[5;1H{rule}\x1b[6;3H\x1b[2m? for shortcuts\x1b[0m\x1b[4;{cursor_col}H").into_bytes()
+    }
+    const DIM: &str = "❯\u{a0}\x1b[0m\x1b[2m/clear\x1b[0m";
+    const TYPED: &str = "❯\u{a0}\x1b[0m\x1b[38;2;177;185;249m/clear\x1b[0m";
+
+    #[test]
+    fn suggestion_in_paint() {
+        let s = super::claude_suggestion_in_paint;
+        assert!(s(&paint(DIM, 3), "/clear"), "dim, cursor at the box start: a suggestion");
+        assert!(!s(&paint(TYPED, 9), "/clear"), "typed: a colour, cursor after it");
+        assert!(!s(&paint(TYPED, 3), "/clear"), "not dim, wherever the cursor is");
+        assert!(!s(&paint(DIM, 9), "/clear"), "dim but the cursor after it: no proof");
+        assert!(!s(&paint(DIM, 3), "/compact"), "another text than the screen's");
+        assert!(!s(&paint("❯\u{a0}\x1b[2m/cl\x1b[22mear", 3), "/clear"), "only part dim");
+        assert!(!s(&paint("❯\u{a0}\x1b[38;2;2;2;2m/clear\x1b[0m", 3), "/clear"), "a truecolor 2 is not dim");
+        assert!(!s(&paint("❯\u{a0}\x1b[38;5;2m/clear\x1b[0m", 3), "/clear"), "a 256-colour 2 is not dim");
+        assert!(s(&paint("❯\u{a0}\x1b[0m\x1b[38;2;1;2;3;2m/clear\x1b[0m", 3), "/clear"), "dim after a truecolor");
+        assert!(!s(b"", "/clear"), "no paint");
+        assert!(!s(&paint("hello", 3), "/clear"), "no box row");
+        assert!(!s(&paint(DIM, 3), ""), "nothing to match");
+    }
+
+    /// Codex R1 (Mac parity): a paint cut inside a control sequence (its rest in a later DATA frame, after the quiet
+    /// time) is doubt: the cut sequence may move the cursor or clear the row.
+    #[test]
+    fn a_cut_sequence_is_doubt() {
+        let s = super::claude_suggestion_in_paint;
+        for (cut, why) in [("\x1b[4;", "a CSI without its final byte"), ("\x1b", "a lone ESC"), ("\x1b]0;title", "an OSC without BEL or ST"),
+                           ("\x1b]0;title\x1b", "an OSC cut inside its ST"), ("\x1b(", "a charset choice without its charset")] {
+            let mut p = paint(DIM, 3);
+            p.extend_from_slice(cut.as_bytes());
+            assert!(!s(&p, "/clear"), "{why} at the end: no proof");
+        }
+        let mut whole = paint(DIM, 9);
+        whole.extend_from_slice(b"\x1b[4;3H");
+        assert!(s(&whole, "/clear"), "the same sequence whole: read");
+        let mut modes = paint(DIM, 9);
+        modes.extend_from_slice(b"\x1b[?25h\x1b[2 q\x1b[>4;2m\x1b[4;3H");
+        assert!(s(&modes, "/clear"), "private modes and a cursor style are passed over");
+    }
+
+    /// Codex R2 (Mac parity): a number too big for a screen is doubt: no overflow (a debug panic, a release wrap), no
+    /// "1" in its place.
+    #[test]
+    fn a_number_too_big_is_doubt() {
+        let s = super::claude_suggestion_in_paint;
+        for (tail, why) in [
+            ("\x1b[4;2H\x1b[99999999999C", "a number too big to read"),
+            ("\x1b[4;2H\x1b[99999C", "a move past any screen"),
+            ("\x1b[4294967295B", "a huge move down"),
+            ("\x1b[4294967295C", "a huge move right"),
+            ("\x1b[4294967295;4294967295H", "a huge position"),
+        ] {
+            let mut p = paint(DIM, 3);
+            p.extend_from_slice(tail.as_bytes());
+            assert!(!s(&p, "/clear"), "{why}: doubt");
+        }
+    }
+
     #[test]
     fn codex_box() {
         let codex = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · Context 100% left · 0 in\n  ← for agents · ? for shortcuts\n");
@@ -785,6 +1013,11 @@ mod box_tests {
         assert_eq!(box_has_text("codex", &codex("› hi there")), Some(true));
         assert_eq!(box_has_text("codex", &codex("› /")), Some(true));
         assert_eq!(box_has_text("codex", "nothing"), None);
+        // A newer Codex footer: a blank line, then model · folder · thread title (no "% left"), then the shortcuts.
+        let titled = |row: &str| format!("• Ran ls\n\n{row}\n\n  GPT-6.1-Sol high · ~/src/app · Fix the login form · Main [default]\n  ← for agents · ? for shortcuts\n");
+        assert_eq!(box_has_text("codex", &titled("› Ask Codex to do anything")), Some(false));
+        assert_eq!(box_has_text("codex", &titled("› hi there")), Some(true));
+        assert_eq!(box_has_text("codex", &titled("› first line\n  second line")), Some(true));
     }
 
     #[test]

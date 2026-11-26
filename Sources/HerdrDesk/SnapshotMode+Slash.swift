@@ -45,9 +45,11 @@ extension ContentTests {
         func clear() async { tv.selectAll(nil); tv.delete(nil); await wait() }
 
         await type("/")
+        // The scroll steps need more rows than the window and the 9 steps below (pick 10): a floor, not the exact count.
+        let n = want.commands.count
         step("\"/\" shows the agent's commands (\(probe.slash?.items.count ?? -1) of \(want.commands.count)), 8 rows (\(probe.slash?.shown.count ?? -1))",
-             probe.slash?.items.map(\.name) == want.commands.map(\.name) && probe.slash?.shown.count == 8 && want.commands.count == 12)
-        step("the count says there are more (\(probe.slash?.count ?? "none"))", probe.slash?.count == "1–8 of 12")
+             probe.slash?.items.map(\.name) == want.commands.map(\.name) && probe.slash?.shown.count == 8 && n > 11)
+        step("the count says there are more (\(probe.slash?.count ?? "none"))", probe.slash?.count == "1–8 of \(n)")
         step("its own commands and skills are in it", probe.slash?.items.contains { $0.name == "deploy" && $0.hint == "[target]" } == true && probe.slash?.items.contains { $0.name == "take-notes" } == true)
         capture(win, to: "\(dir)/slash-list.png")
         press(win, down.0, down.1, arrows); press(win, down.0, down.1, arrows); await wait()
@@ -56,11 +58,11 @@ extension ContentTests {
         step("↑ moves it back (\(probe.slash?.pick ?? -1))", probe.slash?.pick == 1)
         for _ in 0..<9 { press(win, down.0, down.1, arrows) }
         await wait()
-        step("↓ past the last row moves the window (\(probe.slash?.count ?? "none"), pick \(probe.slash?.pick ?? -1))", probe.slash?.count == "4–11 of 12" && probe.slash?.pick == 10)
+        step("↓ past the last row moves the window (\(probe.slash?.count ?? "none"), pick \(probe.slash?.pick ?? -1))", probe.slash?.count == "4–11 of \(n)" && probe.slash?.pick == 10)
         capture(win, to: "\(dir)/slash-list-scrolled.png")
-        for _ in 0..<9 { press(win, down.0, down.1, arrows) }
+        for _ in 0..<n { press(win, down.0, down.1, arrows) }
         await wait()
-        step("↓ stops at the last match (\(probe.slash?.pick ?? -1))", probe.slash?.pick == 11 && tv.string == "/")
+        step("↓ stops at the last match (\(probe.slash?.pick ?? -1) of \(n))", probe.slash?.pick == n - 1 && probe.slash?.count == "\(n - 7)–\(n) of \(n)" && tv.string == "/")
 
         // The wheel over the list: a real scroll event through the app's event path.
         await clear(); await type("/")
@@ -166,6 +168,29 @@ extension ContentTests {
         var r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
         step("text in the agent's box: not sent (\(r), typed \(typed))", r == .failed && typed.isEmpty)
         step("the note is the agent-box note", MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        // A dim "/" prompt suggestion (issue #11, item 2): one watch-only look at the first paint. Dim with the cursor at
+        // the box start: a suggestion, sent. Typed (a colour, the cursor after it) or no paint: held back as before.
+        func paint(_ row: String, _ col: Int) -> Data {
+            Data("\u{1b}[2J\u{1b}[1;1H● Done.\u{1b}[3;1H\(rule)\u{1b}[4;1H\(row)\u{1b}[5;1H\(rule)\u{1b}[6;3H~/proj\u{1b}[4;\(col)H".utf8)
+        }
+        screen = claude("❯\u{a0}/clear")
+        var looked = 0
+        var painted: Data? = paint("❯\u{a0}\u{1b}[0m\u{1b}[38;2;177;185;249m/clear\u{1b}[0m", 9)
+        model.paintHook = { _ in looked += 1; return painted }
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("typed \"/clear\" (a colour, the cursor after it): not sent (\(r))", r == .failed && typed.isEmpty && looked == 1 && MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        painted = nil
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("no paint: not sent (\(r))", r == .failed && typed.isEmpty && MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        painted = paint("❯\u{a0}\u{1b}[0m\u{1b}[2m/clear\u{1b}[0m", 3)
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("a dim \"/clear\" suggestion, the cursor at the box start: sent (\(r), typed \(typed))", r == .sent && typed == ["hello"])
+        screen = claude("❯\u{a0}/compact")
+        r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
+        step("dim, but the paint reads other text than the screen: not sent (\(r))", r == .failed && typed == ["hello"] && MessageSender.takeRefusal("hello") == AgentBox.notEmpty)
+        model.paintHook = nil
+        typed = []
+        screen = claude("❯\u{a0}/sta")
         screen = claude("❯\u{a0}run the tests")
         r = await model.deliverResult("hello", pane: pane.id, kind: "claude")
         step("Claude Code with prompt suggestions on: other text may be a suggestion, so it is sent (\(r))", r == .sent && typed == ["hello"])

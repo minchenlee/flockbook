@@ -1,4 +1,4 @@
-//! Rust only: the Swift sidecar skips terminals on other machines. A terminal `m/tN` is on machine `m`: the same
+//! Terminals on other machines. A terminal `m/tN` is on machine `m`: the same
 //! helper runs there (`machine.exec`) with the same command and `--terminal tN`, and its lines come back as they are,
 //! so the chat reads every log with one parser. Its core there is its own (hc gives it `HC_SESSION`).
 //!

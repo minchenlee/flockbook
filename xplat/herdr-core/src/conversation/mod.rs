@@ -119,6 +119,7 @@ pub struct ConversationParser {
     grok: GrokState, // Grok Build chunk merging (see grok.rs)
     queue: ClaudeQueueLog,
     codex_seq: u64,
+    late: usize, // results whose call was not fed (it came before the first line fed)
 }
 
 impl ConversationParser {
@@ -137,6 +138,12 @@ impl ConversationParser {
     }
 
     /// True while the newest tool call has no result yet. Also true while the tool runs, so it is not proof of a prompt.
+    /// How many results came for a call this parser was not fed (Claude Code, Codex, Grok): a read that starts after
+    /// the call misses what the result changes.
+    pub fn late_results(&self) -> usize {
+        self.late
+    }
+
     pub fn has_open_tool_use(&self) -> bool {
         !self.open_order.is_empty()
     }
@@ -365,6 +372,8 @@ impl ConversationParser {
                         c.output = Some(cut(&result_text(b.get("content"))));
                         c.is_error = json::bool_(b.get("is_error")).unwrap_or(false);
                         c.images = pics.iter().filter(|p| p.0.as_deref() == Some(id)).map(|p| p.1.clone()).collect();
+                    } else {
+                        self.late += 1;
                     }
                     self.close_call(id);
                 }
@@ -533,6 +542,8 @@ impl ConversationParser {
                 if let Some(c) = self.call_by_id.get_mut(id) {
                     c.output = Some(cut(&result_text(payload.get("output"))));
                     c.images = log_image::refs(&log_image::found_codex(payload), offset).into_iter().map(|p| p.1).collect();
+                } else {
+                    self.late += 1;
                 }
                 self.close_call(id);
             }
@@ -607,7 +618,7 @@ fn chips(run: &[RunEntry], key: &str, calls: &HashMap<String, ToolCall>, at: Opt
     let mut counts: HashMap<&str, usize> = HashMap::new();
     let mut labels: HashMap<&str, &ToolLabel> = HashMap::new();
     let mut groups: HashMap<&str, Vec<ToolCall>> = HashMap::new();
-    for r in run {
+    for (seq, r) in run.iter().enumerate() {
         let k = r.label.singular.as_str();
         if !counts.contains_key(k) {
             order.push(k);
@@ -615,7 +626,7 @@ fn chips(run: &[RunEntry], key: &str, calls: &HashMap<String, ToolCall>, at: Opt
         }
         *counts.entry(k).or_insert(0) += 1;
         if let Some(c) = calls.get(&r.id) {
-            groups.entry(k).or_default().push(c.clone());
+            groups.entry(k).or_default().push(ToolCall { seq, ..c.clone() });
         }
     }
     let chips = order

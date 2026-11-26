@@ -379,7 +379,7 @@ fn with_log(dir: &std::path::Path, log: &std::path::Path) -> (FakeHc, String) {
     fake.set_terminals(vec![claude("t1", "idle", "")]);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
     let cache = dir.join("cache.json");
-    let c = json!({"entries": {"t1": {"kind": "claude", "cwd": "/tmp/proj", "pids": [4242], "path": log, "checked": now}}, "feeds": {}});
+    let c = json!({"entries": {"t1": {"kind": "claude", "cwd": "/tmp/proj", "pids": [4242], "process": "4242@1", "path": log, "checked": now}}, "feeds": {}});
     std::fs::write(&cache, c.to_string()).unwrap();
     (fake, cache.to_string_lossy().to_string())
 }

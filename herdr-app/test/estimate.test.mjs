@@ -4,7 +4,7 @@
 // a full-width character 16 px wide, inline code Menlo 8.4 px a character plus 4 px padding each side.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { markdownHeight, rowHeight } from "../mods/flockbook/estimate.js";
+import { markdownHeight, rowHeight, lineHeight } from "../mods/flockbook/estimate.js";
 
 const W = 748;
 const LINE = 26, GAP = 10, ITEM_GAP = 4;
@@ -24,6 +24,42 @@ const reply = [
   "",
   "要不要做？要的話，我等 build-bot 修完 Shift+Enter，再接著交給它。它熟 `grid.js`，也最能避開和設定畫面的衝突，順便補上測試。",
 ].join("\n");
+
+test("line heights round like gpui's: whole px of the window, so a zoom or a text size can round them up", () => {
+  assert.deepEqual([lineHeight(16), lineHeight(13), lineHeight(13.5)], [26, 21, 22], "the measured heights at zoom 1");
+  // Zoom 0.9: code lines are drawn 19 px apart (measured), 21.11 px at zoom 1; counted as 21, a 113-line
+  // code box came out 12 px short and cut the reply's last line.
+  assert.equal(lineHeight(13, 0.9), 19 / 0.9);
+  const code = "```\n" + Array.from({ length: 113 }, (_v, i) => `line_${i} = ${i}`).join("\n") + "\n```";
+  assert.ok(markdownHeight(code, W, null, 1, 0.9) >= 34 + 113 * 19 / 0.9);
+  // Small text (14 px): prose lines are 22.65 px, drawn 23 on a 1× screen and 22.5 on a 2× one; 23 covers both.
+  assert.equal(lineHeight(14), 23);
+  // 21.3 px is drawn 21.5 on a 2× screen: counted as 21 it would come out short.
+  assert.equal(lineHeight(21.3 / 1.618), 21.5);
+  const para = "目".repeat(400);
+  assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(400 / Math.floor(W / 14)) * 23);
+});
+
+test("text size: the default guesses as before; a smaller size is shorter but not under its own drawing", () => {
+  assert.equal(markdownHeight(reply, W, null, 1), markdownHeight(reply, W));
+  const small = markdownHeight(reply, W, null, 14 / 16), large = markdownHeight(reply, W, null, 18 / 16);
+  assert.ok(small < markdownHeight(reply, W) && markdownHeight(reply, W) < large);
+  // Full-width text at 14 px: 14 px characters on 23 px lines.
+  const para = "目".repeat(120);
+  assert.ok(markdownHeight(para, W, null, 14 / 16) >= Math.ceil(120 / Math.floor(W / 14)) * lineHeight(14));
+  assert.equal(rowHeight({ k: "assistant", text: reply }, W, false, 1), rowHeight({ k: "assistant", text: reply }, W));
+});
+
+test("lines ending in two spaces or a backslash are hard breaks: each starts a line, as drawn", () => {
+  // A report shaped like Codex's: label lines ended with two spaces, then a paragraph after a code box.
+  const lines = ["Result: **the call worked.**", "To do: none", "Open: why the earlier call failed", "Checked: one row came back", "Branch: none"];
+  const twoSpaces = lines.join("  \n");
+  assert.ok(markdownHeight(twoSpaces, W) >= lines.length * LINE, `${markdownHeight(twoSpaces, W)} < ${lines.length * LINE}`);
+  const backslash = lines.join("\\\n");
+  assert.ok(markdownHeight(backslash, W) >= lines.length * LINE, `${markdownHeight(backslash, W)} < ${lines.length * LINE}`);
+  // A soft break still joins: the same lines without the marks are one wrapped paragraph.
+  assert.ok(markdownHeight(lines.join("\n"), W) < lines.length * LINE);
+});
 
 test("a CJK reply with inline code and a list is not guessed shorter than drawn (the cut last line)", () => {
   // Drawn: 1 + (2 + 1) + 1 + 2 lines; gaps: title to list, between items, list to paragraph, paragraph to paragraph.
@@ -137,4 +173,28 @@ test("a user row with pictures counts the \"N images\" line under its text (4 px
     // gpui's line height is about 1.618 × the size: 18.6 px, counted 19.
     assert.equal(with2 - plain, 4 + 19, JSON.stringify(text));
   }
+});
+
+// A table whose first column is narrow and starts with long inline code (2× screenshot of a 760 px column,
+// Herdr app, 11-10): cell text 13.5 px on 22 px lines; inline code Menlo 11.8 px (7.05 px a character) with
+// about 4.5 px padding each side; a code word that does not fit breaks after its hyphen; a full-width ）
+// that does not fit goes to a line of its own. A row is 8 + 8 px padding and a 1 px line, plus its tallest
+// cell; the table 6 px above and below and a 1 px frame. Synthetic text of the same shape as the cut reply.
+const narrowFirst = [
+  "| 工具 | 現在的問題 | 新版改了什麼 |",
+  "|---|---|---|",
+  "| `kite-press`（收件的看門員） | 風箏線收不回來時只顯示「失敗」，沒有原因；Kite 的 `.spool`、舊的備用線軸都被拒 | 多三條收線規則：線軸的下載副本、倉庫資料夾裡面的子資料夾、有登記過的備用線軸。`--explain` 只看不收，會清楚列出每一項沒通過的檢查和下一步要做什麼。每次收線都會寫進同一份新的紀錄檔 `kite-moves.jsonl` |",
+  "| `kite-guard`（每 30 分鐘量一次剩餘空間） | 風太大的時候要叫 `kite-inventory` 點名，但從 10-29 起一次都沒送出 | 找到原因了：排程的工作一結束，就把背景跑的 `kite-inventory` 一起停掉。改成在前景跑，大約 20 秒。另外每 30 分鐘寫一行時間線，之後才能看出風是在什麼時候、怎麼變大的 |",
+  "| `kite-inventory`（點名 admin 清理） | 同上，通知送不出去 | 修好送出；單位改成正確的 m/s |",
+  "| `kite-deletes-read`（新增） | — | 讀收線紀錄：誰、什麼時候、收了什麼、多長 |",
+].join("\n");
+
+test("a narrow table column with long inline code is guessed at least as drawn (the cut reply)", () => {
+  // First column, 78 px inside at 760: kite- / press（收 / 件的看門員 / ） = 4 lines; kite- / guard（每 /
+  // 30 分鐘量一 / 次剩餘空間 / ） = 5; kite- / inventory / （點名 / admin 清理 / ） = 5; kite- / deletes- /
+  // read（新增 / ） = 4. The other columns take fewer lines.
+  const drawn = 6 + 6 + 2 + (16 + 22) + [4, 5, 5, 4].reduce((a, n) => a + 17 + 22 * n, 0);
+  const guess = markdownHeight(narrowFirst, 760);
+  assert.ok(guess >= drawn, `${guess} < ${drawn}`);
+  assert.ok(guess - drawn < 22, `${guess} is a line or more over ${drawn}`);
 });

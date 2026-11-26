@@ -52,6 +52,10 @@ public actor HCClient {
     /// Seconds `terminal.send` waits: the core answers only after nobody typed for ~3 s and the program went `working`.
     public let sendTimeout: TimeInterval
 
+    /// Finds a wrapper-started agent's process for the key identity (issue #15); checks swap it.
+    var wrapperCheck: HCAgentCheck = HCTreeCheck()
+    public func setWrapperCheck(_ c: HCAgentCheck) { wrapperCheck = c }
+
     public init(session: HCSession, callTimeout: TimeInterval = 10, sendTimeout: TimeInterval = 60) {
         self.session = session; self.callTimeout = callTimeout; self.sendTimeout = sendTimeout
     }
@@ -86,6 +90,43 @@ public actor HCClient {
         return try HCRPC.result(o)
     }
 
+    /// `call` for a run of a program (`machine.exec`): `HCNotSent` when nothing was written, as herdr-core could not
+    /// be reached (not started yet, restarting). Nothing ran then; any other error came after the request went.
+    /// Called off with its task: the connection closes, and herdr-core ends the program and all it started ("when the
+    /// caller goes away", `machine.exec`). hc has no other way to end a run; its `timeout` is the last limit.
+    /// `go` is asked once the connection is open, right before the request is written: false (Summaries went off,
+    /// another writer), or a run called off by then, writes nothing (`HCNotSent`).
+    func run(_ method: String, json params: HCJSON, timeout: TimeInterval, go: @escaping @Sendable () async -> Bool = { true }) async throws -> HCJSON {
+        seq += 1
+        let id = seq
+        let path = session.socketPath
+        let body = try HCRPC.request(id: id, method: method, params: params.object)
+        let conn = HCRunConnection()
+        let line = try await withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) { () async throws -> Data in
+                let sock: LineSocket
+                do { sock = try LineSocket(path: path, timeout: timeout) } catch { throw HCNotSent() }
+                defer { sock.close() }
+                guard conn.open(sock) else { throw HCNotSent() }   // called off before the request went
+                guard await go(), !conn.isCancelled else { throw HCNotSent() }
+                // Known limit: Summaries turned off after go() said yes and before this write still sends the request.
+                // A request once written cannot be taken back; closing the connection then makes herdr-core end the run.
+                var sent = 0
+                do { try sock.writeLine(body, sent: &sent) } catch where sent == 0 {
+                    throw HCNotSent()   // herdr-core closed before it took a byte (going down): nothing went
+                }
+                while true {
+                    let line = try sock.readLine()
+                    if let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any], HCRPC.id(of: o) == id { return line }
+                }
+            }.value
+        } onCancel: {
+            conn.cancel()
+        }
+        guard let o = try JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw HerdrError.protocolError("hc reply is not an object") }
+        return try HCRPC.result(o)
+    }
+
     /// The shared framed connection, opened on first use and reopened after it drops.
     public func framedConnection() async throws -> HCFramedConnection {
         if let f = framed, !f.isClosed { return f }
@@ -102,6 +143,11 @@ public actor HCClient {
     public func attach(terminal: String, cols: Int, rows: Int, history: Int = 0, observe: Bool = false,
                        resumed: Bool = false) async throws -> HCAttachment {
         try await framedConnection().attach(terminal: terminal, cols: cols, rows: rows, history: history, observe: observe, resumed: resumed)
+    }
+
+    /// The pane's first paint (attributes and cursor), through a watch-only attach. Rust: `HcClient::first_paint`.
+    public func firstPaint(paneId: String, limit: TimeInterval) async throws -> Data {
+        try await HCFirstPaint.read(socketPath: session.socketPath, terminal: try address(paneId), limit: limit)
     }
 
     // MARK: - Snapshot
@@ -135,7 +181,7 @@ public actor HCClient {
         while machineDocsTask != nil, Date() < deadline { try? await Task.sleep(nanoseconds: 25_000_000) }
         let value = appDoc?["value"]
         let remote: [(String, Any?)] = machineDocs.map { m, d in let v = d["value"]; return (m, v is NSNull ? nil : v) }
-        return HCMapper.workspaces(terminals: terms, appDoc: value is NSNull ? nil : value, machineDocs: remote)
+        return HCMapper.workspaces(terminals: terms, appDoc: value is NSNull ? nil : value, machineDocs: remote, check: wrapperCheck)
     }
 
     /// The layout documents of the machines the official app shows: connected and not temporary (window.rs
@@ -312,9 +358,29 @@ public actor HCClient {
         _ = try await call("terminal.keys", ["terminal": try address(paneId), "keys": [allow ? ApprovalKeys.allowOnce : HCKeys.translate(ApprovalKeys.deny)]])
     }
 
+    /// Whether `sendKeys` can type every character of `text` (`HCKeys.typeable`).
+    nonisolated public func canType(_ text: String) -> Bool { text.allSatisfy(HCKeys.typeable) }
+
     /// herdr key names ("Enter", "Down", "C-c") translated to hc's ("enter", "down", "ctrl+c").
     public func sendNamedKeys(_ keys: [String], to paneId: String) async throws {
         _ = try await call("terminal.keys", ["terminal": try address(paneId), "keys": keys.map(HCKeys.translate)])
+    }
+}
+
+/// A run's request never went to herdr-core: nothing ran.
+public struct HCNotSent: Error, Sendable {}
+
+/// The connection of one run, closed when the run is called off (also before it is open: then it is never used).
+final class HCRunConnection: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sock: LineSocket?
+    private var cancelled = false
+    /// Keeps `s` for `cancel`; false when the run was called off already.
+    func open(_ s: LineSocket) -> Bool { lock.withLock { guard !cancelled else { return false }; sock = s; return true } }
+    var isCancelled: Bool { lock.withLock { cancelled } }
+    func cancel() {
+        let s = lock.withLock { cancelled = true; return sock }
+        s?.close()
     }
 }
 
@@ -338,8 +404,18 @@ public enum HCKeys {
         return l
     }
 
+    /// The characters hc's `terminal.keys` can type (tested live 2026-11-11): its key names are read without case
+    /// ("A" types "a"), so a capital goes as "shift+a"; digits, space and the unshifted symbols type as themselves;
+    /// every other character (! ? ( ) " : and anything outside ASCII) is refused as an unknown key name, and "shift+1"
+    /// types "1", not "!". Typed answers are checked with this before any key goes (`PaneScreen.canType`).
+    /// Twin of herdr-core `hc::keys::typeable`.
+    public static func typeable(_ c: Character) -> Bool {
+        guard c.isASCII else { return false }
+        return c.isLetter || c.isNumber || " ',.;/-=[]\\`".contains(c)
+    }
+
     /// Bytes → key names: CR/LF enter, ESC esc, tab, DEL backspace, 0x01–0x1A ctrl+letter, arrow escape sequences,
-    /// every other character as itself.
+    /// a capital letter as shift+letter, every other character as itself.
     public static func names(for bytes: [UInt8]) -> [String] {
         var out: [String] = []
         let s = String(decoding: bytes, as: UTF8.self)
@@ -358,6 +434,7 @@ public enum HCKeys {
             case 0x7F, 0x08: out.append("backspace")
             case 0x01...0x1A: out.append("ctrl+" + String(Character(Unicode.Scalar(c.value + 0x60)!)))
             case 0x20: out.append("space")
+            case 0x41...0x5A: out.append("shift+" + String(Character(c)).lowercased())
             default: out.append(String(Character(c)))
             }
         }

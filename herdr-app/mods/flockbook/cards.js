@@ -4,8 +4,8 @@
 // walks the picker's tabs (`card --all`).
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
-import { shared, setShared } from "herdr";
-import { icon } from "./state.js";
+import { shared, setShared, agents } from "herdr";
+import { icon, openTerminal, KEY_TERM } from "./state.js";
 import * as sidecar from "./sidecar.js";
 
 export const CARD_MS = 1500;
@@ -20,16 +20,33 @@ export function wanted(agent, rows) {
   return Boolean(last && (last.perm?.state === "pending" || last.question?.state === "pending"));
 }
 
+// Claude single-choice: non-empty own answer overrides any option pick (matches claude_steps).
+const answerItem = (q, picks, others, i, otherWins) => {
+  const other = (others.get(i) ?? "").trim();
+  const p = otherWins && !q?.multi && other ? [] : [...(picks.get(i) ?? [])].sort((a, b) => a - b);
+  return other ? { picks: p, other } : { picks: p };
+};
+
 // The answers `answer --answers` takes, from the picks and "other" texts. Null while one is empty.
 export function answersFor(question, picks, others) {
+  const qs = question?.questions ?? [];
+  const otherWins = question?.agent === "claude";
   const out = [];
-  for (let i = 0; i < (question?.questions ?? []).length; i++) {
-    const p = [...(picks.get(i) ?? [])].sort((a, b) => a - b);
-    const other = (others.get(i) ?? "").trim();
-    if (!p.length && !other) return null;
-    out.push(other ? { picks: p, other } : { picks: p });
+  for (let i = 0; i < qs.length; i++) {
+    const item = answerItem(qs[i], picks, others, i, otherWins);
+    if (!item.picks.length && !item.other) return null;
+    out.push(item);
   }
   return out.length ? out : null;
+}
+
+// The answers so far, for `card --answers` (the sidecar checks the own answers against the review rule). Null
+// while no own answer is typed: then the card's labels alone decide.
+export function draftFor(question, picks, others) {
+  const qs = question?.questions ?? [];
+  const otherWins = question?.agent === "claude";
+  if (!qs.some((_q, i) => (picks.get(i)?.size ?? 0) > 0 || (others.get(i) ?? "").trim())) return null;
+  return qs.map((q, i) => answerItem(q, picks, others, i, otherWins));
 }
 
 export const MAX_QUESTIONS = 4;
@@ -58,6 +75,8 @@ export class Cards {
         const e = this.byAgent.get(this.address); if (!e) return;
         const was = Boolean((e.others.get(qi) ?? "").trim());
         e.others.set(qi, input.value());
+        // The card's `blocked` may change with it: the next poll reads it again at once.
+        if (e.card?.kind === "question") e.at = 0;
         if (was !== Boolean(input.value().trim())) cx.notify();
       });
       return input;
@@ -82,18 +101,21 @@ export class Cards {
   async poll(cx, address, want, force = false) {
     if (!address) return;
     const e = this.entry(address);
-    if (!want) { if (e.card) { e.card = null; e.note = null; cx.notify(); } return; }
+    if (!want) { if (e.card || e.note) { e.card = null; e.note = null; cx.notify(); } return; }
     if (e.busy || e.sending || (!force && Date.now() - e.at < CARD_MS)) return;
     e.busy = true; e.at = Date.now();
     try {
-      const r = await sidecar.card(address);
+      const full = shared(KEY_FULL);
+      const fromFull = full?.address === address && full.card?.kind === "question" && !full.card.unread && (!e.card || e.card.request === full.card.request) ? full.card : null;
+      const kept = e.card?.kind === "question" && !e.card.unread && (fromFull || e.card.request?.startsWith("screen-")) ? e.card : fromFull;
+      const qSrc = kept ?? (e.card?.kind === "question" ? e.card : null);
+      const r = await sidecar.card(address, false, qSrc ? draftFor(qSrc.question, e.picks, e.others) : null, kept?.question ?? null);
       const line = r.error ? null : r.lines.find((l) => l.type === "card");
       let card = line && line.kind ? line : null;
       // The screen shows one question at a time; keep the full set read with "Show all".
-      if (card && e.card && card.request === e.card.request && card.unread > 0 && !e.card.unread) card = e.card;
-      // Another view read it in full already.
-      const full = shared(KEY_FULL);
-      if (card?.unread > 0 && full?.address === address && full.card?.request === card.request) card = full.card;
+      if (card && kept && card.request === kept.request && card.unread > 0) card = kept;
+      // Keep the shared full card updated too so another view sees the latest `blocked`.
+      if (card && !card.unread && full?.address === address && full.card?.request === card.request) setShared(KEY_FULL, { address, card });
       const fresh = card && card.request !== e.card?.request;
       if (JSON.stringify(card) !== JSON.stringify(e.card)) {
         if (card?.request !== e.card?.request) { e.picks = new Map(); e.others = new Map(); e.note = null; e.step = 0; if (this.address === address) this.others.forEach((i) => i.set_value("")); }
@@ -139,7 +161,7 @@ export class Cards {
         if (!answered(en, step)) return false;
         en.step = step + 1; cx.notify(); return true;
       }
-      if (answersFor(c.question, en.picks, en.others)) { cx.spawn((cx) => this.answer(cx, address)); return true; }
+      if (!c.blocked && answersFor(c.question, en.picks, en.others)) { cx.spawn((cx) => this.answer(cx, address)); return true; }
       return false;
     }
     if (n === null) return false;
@@ -158,6 +180,8 @@ export class Cards {
     const s = new Set(q.multi ? en.picks.get(qi) ?? [] : []);
     if (s.has(oi)) s.delete(oi); else s.add(oi);
     en.picks.set(qi, s);
+    // The card's `blocked` may change with picks: the next poll reads it again at once.
+    if (en.card?.kind === "question") en.at = 0;
     if (!q.multi && s.size && qi < qs.length - 1) en.step = qi + 1;
     return true;
   }
@@ -166,17 +190,18 @@ export class Cards {
     const e = this.entry(address);
     if (e.sending || !e.card) return;
     e.sending = true; e.note = null; cx.notify();
-    let note = null;
+    let note = null, changedNoMsg = false;
     try {
       const r = await run(e.card);
       const done = r.lines.find((l) => l.type === "done");
       if (r.error) note = r.error.message;
       else if (done?.result === "sent") e.card = null;
-      else if (sidecar.agentChanged(done)) note = sidecar.AGENT_CHANGED;
-      else if (done?.result === "changed") note = "It changed on screen. Here is what it shows now.";
+      else if (sidecar.agentChanged(done)) note = sidecar.keysMayBeIn(done) ? done.message : sidecar.AGENT_CHANGED;
+      else if (done?.result === "changed") { changedNoMsg = !done?.message; note = done?.message || "It changed on screen. Here is what it shows now."; }
       else note = done?.message || "The keys did not go out.";
     } finally { e.sending = false; }
     await this.poll(cx, address, true, true);
+    if (changedNoMsg && !e.card) note = "The screen changed. Answer in the terminal.";
     e.note = note;  // after the read: a new card would clear it
     cx.notify();
   }
@@ -194,7 +219,7 @@ export class Cards {
   view(address, t, id = "card") {
     const e = this.byAgent.get(address);
     const c = e?.card;
-    if (!c) return null;
+    if (!c && !e?.note) return null;
     const button = (bid, label, primary, action, off = false) => div().id(`${id}-${bid}`).h(30).px(14).flex().items_center().rounded(8).text_size(13)
       .bg(off ? t.chrome : primary ? t.accent : t.chrome).text_color(off ? t.dim : primary ? t.background : t.foreground)
       .border(1).border_color(primary && !off ? t.accent : t.border)
@@ -209,7 +234,22 @@ export class Cards {
     const head = (text) => h_flex().gap(8).items_center()
       .child(div().size(8).flex_none().rounded(4).bg(t.blocked))
       .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child(text));
+    // The terminal window for this agent (one at a time: an open one closes first).
+    const toTerminal = async () => {
+      const a = (agents() ?? []).find((x) => x.address === address) ?? { address };
+      if (shared(KEY_TERM)) openTerminal(null);
+      openTerminal(a);
+    };
     const tail = () => e.note ? div().id(`${id}-note`).text_size(12).text_color(t.blocked).child(e.note) : null;
+
+    if (!c) {
+      return box
+        .child(head("The agent waits in the terminal"))
+        .child(tail())
+        .child(h_flex().gap(10).items_center()
+          .child(div().flex_1())
+          .child(button("terminal", "Answer in terminal", false, toTerminal)));
+    }
 
     if (c.kind === "approval") {
       box.child(head(c.title || (c.tool ? `${c.tool} wants to run` : "Approval needed")));
@@ -236,11 +276,13 @@ export class Cards {
     q.questions.forEach((qq, qi) => {
       if (qi !== step) return;
       const picks = e.picks.get(qi) ?? new Set();
+      const claude = q.agent === "claude";
+      const own = Boolean((e.others.get(qi) ?? "").trim());
       const sec = v_flex().gap(6);
       if (qq.header) sec.child(div().text_size(11.5).text_color(t.muted).child(qq.header));
       sec.child(div().text_size(13.5).text_color(t.foreground).child(qq.text || ""));
       (qq.options ?? []).forEach((o, oi) => {
-        const on = picks.has(oi);
+        const on = picks.has(oi) && (Boolean(qq.multi) || !claude || !own);
         sec.child(h_flex().id(`${id}-q${qi}-o${oi}`).px(10).py(7).gap(10).items_center().rounded(8)
           .bg(on ? t.selected : t.background).border(1).border_color(on ? t.accent : t.border).hover((s) => s.bg(on ? t.selected : t.hover))
           .on_click((_e, cx) => { this.pick(e, q.questions, qi, oi); cx.notify(); })
@@ -256,7 +298,6 @@ export class Cards {
       if (this.address !== address) { this.others.forEach((b, k) => b.set_value(e.others.get(k) ?? "")); this.address = address; }
       // Own answer: a row like the options. Clicks and keys stay in the text box: the card would
       // take the focus on a press and read 1-9 and Enter as picks.
-      const own = Boolean((e.others.get(qi) ?? "").trim());
       const keep = (_ev, cx) => cx.stop_propagation();
       if (input) sec.child(h_flex().id(`${id}-q${qi}-other`).px(10).py(7).gap(10).items_center().rounded(8)
         .bg(own ? t.selected : t.background).border(1).border_color(own ? t.accent : t.border)
@@ -266,6 +307,10 @@ export class Cards {
         .when((qq.options ?? []).length < 9, (el) => el.child(hint((qq.options ?? []).length + 1))));
       box.child(sec);
     });
+    // The terminal's review screen could not show these answers: `answer` would refuse, so Send is off from the start.
+    if (c.blocked && !(c.unread > 0)) box.child(h_flex().id(`${id}-blocked`).gap(10).items_center()
+      .child(div().flex_1().min_w(0).text_size(12).text_color(t.blocked).child(c.blocked))
+      .child(button("terminal", "Answer in terminal", false, toTerminal)));
     if (c.unread > 0) {
       const total = q.questions.length + c.unread;
       box.child(h_flex().gap(10).items_center()
@@ -273,7 +318,7 @@ export class Cards {
         .child(div().text_size(12.5).text_color(t.muted)
           .child(`${c.unread} more question${c.unread === 1 ? " follows" : "s follow"}. Answer them all here, then send.`)));
     } else {
-      const ready = Boolean(answersFor(q, e.picks, e.others));
+      const ready = !c.blocked && Boolean(answersFor(q, e.picks, e.others));
       const last = step >= count - 1;
       // The hint on the left; Back, then Next or Send answer at the right end.
       box.child(h_flex().gap(10).items_center()

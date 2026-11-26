@@ -132,6 +132,9 @@ public struct ToolCall: Identifiable, Sendable, Hashable {
     public var output: String?     // nil until the result arrives
     public var isError: Bool
     public var images: [LogImage.Ref] = []   // pictures in the result, in order
+    /// The call's place in the log (the parser counts from 1; 0: not counted). A tool chip groups a run's calls by kind,
+    /// so the order of the log is this, not the order in the chips.
+    public var seq = 0
     public init(id: String, toolName: String, summary: String, input: String, output: String? = nil, isError: Bool = false) {
         self.id = id; self.toolName = toolName; self.summary = summary; self.input = input; self.output = output; self.isError = isError
     }
@@ -185,6 +188,9 @@ public struct QuestionRequest: Sendable, Hashable {
         public var text: String
         public var options: [Option]
         public var multiSelect: Bool
+        /// Screen reads only: a row's label may go on in the next line (a wrapped label read as its detail), so the
+        /// labels may be cut. The review screen cannot be checked then.
+        public var cutLabels = false
         public init(id: String? = nil, header: String, text: String, options: [Option], multiSelect: Bool = false) {
             self.id = id ?? text; self.header = header; self.text = text; self.options = options; self.multiSelect = multiSelect
         }

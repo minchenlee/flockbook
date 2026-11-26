@@ -5,7 +5,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme } from "herdr";
 import { needing, agentName, showAgent, icon, watchEdge, noteWindowHeight } from "./state.js";
 import { Cards } from "./cards.js";
-import { startTop, overBar, BAR_H } from "./top.js";
+import { startTop, BAR_H } from "./top.js";
 
 export class NeedsView {
   constructor(cx) {
@@ -23,13 +23,11 @@ export class NeedsView {
     if (cur) cx.spawn((cx) => this.cards.poll(cx, cur.address, true));
   }
 
-  // The screen with the bar drawn over it. Presses on the content don't drag the window.
+  // The top bar sits above the screens (layout block "top"), so presses here never move the window.
   render(cx) {
     const t = theme();
-    const stop = (_e, cx) => cx.stop_propagation();
-    return v_flex().id("needs-screen").relative().size_full().bg(t.background).on_size_change((size) => noteWindowHeight(size))
-      .child(div().size_full().pt(BAR_H).on_mouse_down("left", stop).child(this.content(t)))
-      .child(overBar(t));
+    return v_flex().id("needs-screen").relative().size_full().bg(t.background).on_size_change((size) => noteWindowHeight(size, BAR_H))
+      .child(div().size_full().child(this.content(t)));
   }
 
   content(t) {

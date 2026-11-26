@@ -351,12 +351,11 @@ public enum QuestionAdapter {
         q.questions.indices.contains { shows(q, question: $0, screen: screen) }
     }
 
-    /// Claude's review screen of `q`: the request's headers and every one of its questions listed. A hooked request
-    /// needs the exact review of `answers` (`claudeReviewExact`).
+    /// Claude's review screen of `q`, verifying exact rendering and unique answer mapping (`claudeReviewExact`).
     public static func showsReview(_ q: QuestionRequest, screen: String, answers: [QuestionAnswer]? = nil) -> Bool {
-        if !q.toolUseId.hasPrefix("screen-") { return answers.map { claudeReviewExact(q, answers: $0, screen: screen) } ?? false }
+        if q.agent == "claude" { return answers.map { claudeReviewExact(q, answers: $0, screen: screen) } ?? false }
         guard let region = pickerRegion(agent: q.agent, screen: screen), region.contains("Review your answers") else { return false }
-        return q.headers.allSatisfy { region.contains($0) } && q.questions.allSatisfy { region.contains(flat($0.text)) }
+        return q.headers.allSatisfy { region.contains($0) } && q.questions.allSatisfy { pickerHas(agent: q.agent, screen: screen, flat($0.text)) }
     }
 
     public static func pickerShown(_ q: QuestionRequest, screen: String) -> Bool {
@@ -365,8 +364,21 @@ public enum QuestionAdapter {
 
     /// The picker is open and shows the first question.
     public static func screenShows(_ q: QuestionRequest, screen: String) -> Bool {
-        guard let first = q.questions.first, let region = pickerRegion(agent: q.agent, screen: screen) else { return false }
-        return region.contains(needle(first))
+        guard let first = q.questions.first else { return false }
+        return pickerHas(agent: q.agent, screen: screen, needle(first))
+    }
+
+    /// `pickerRegion` holds `s`. For Claude also with the 2.1.322 quote bar ("│" at a line start) dropped: a long
+    /// question wrapped inside its needle has the bar between the two parts. A presence check only; the keys are
+    /// gated by the exact checks. Twin of herdr-core `question::picker_has`.
+    static func pickerHas(agent: String, screen: String, _ s: String) -> Bool {
+        if pickerRegion(agent: agent, screen: screen)?.contains(s) == true { return true }
+        guard agent == "claude" else { return false }
+        let unbarred = screen.components(separatedBy: "\n").map { l -> String in
+            let t = l.trimmingCharacters(in: .whitespaces)
+            return t.hasPrefix("│") ? String(t.dropFirst()) : l
+        }
+        return pickerRegion(agent: agent, screen: unbarred.joined(separator: "\n"))?.contains(s) == true
     }
 
     /// The key sequence for a picker question. Throws `.unsupported` before anything is sent.
@@ -562,9 +574,16 @@ extension QuestionAdapter {
         // `marks` counts the focus marks on rows and on Submit; a mark on any other line means the hub does not
         // know where the focus is (focusMarks 0: no key).
         var marks = 0, sinceRow = 0, rowColumn: Int?, strayMark = false
+        // A wrapped label: each row's width, the first word of its next line, and the separator's width.
+        var rowWidths: [Int] = [], nextWords: [Int?] = [], lineWidth = 0
+        let endWidth: (String) -> Int = { l in
+            var s = Substring(l)
+            while let c = s.last, c.isWhitespace { s = s.dropLast() }
+            return displayWidth(String(s))
+        }
         for l in lines[(bar + 1)..<end] {
             let t = l.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("──") { closed = true; break }
+            if t.hasPrefix("──") { closed = true; lineWidth = endWidth(l); break }
             let marked = t.hasPrefix("❯")
             if !t.isEmpty, submitFocused { submitFocused = false; strayMark = true; sinceRow += 1 }   // that was not Submit
             if inOptions, sinceRow == 0, marked, t.dropFirst().trimmingCharacters(in: .whitespaces) == "Submit" { submitFocused = true; marks += 1; continue }
@@ -579,16 +598,27 @@ extension QuestionAdapter {
                 if m.3 != nil { multi = true }
                 let (clean, rec) = stripRecommended(label)
                 options.append(.init(label: clean, recommended: rec))
+                rowWidths.append(endWidth(l))
+                nextWords.append(nil)
                 lastRaw = label
                 lastFocused = l.trimmingCharacters(in: .whitespaces).hasPrefix("❯")
             } else if inOptions {
                 if marked { strayMark = true }
                 if !t.isEmpty { sinceRow += 1 }
+                if !t.isEmpty, let last = nextWords.indices.last, nextWords[last] == nil {
+                    nextWords[last] = displayWidth(String(t.split(whereSeparator: \.isWhitespace).first ?? Substring(t)))
+                }
                 if !t.isEmpty, !options.isEmpty { options[options.count - 1].detail += (options[options.count - 1].detail.isEmpty ? "" : " ") + t }
             } else if !t.isEmpty {
                 if marked { strayMark = true }
                 text.append(t)
             }
+        }
+        // A long question's text is drawn with "│ " in front of each line (2.1.322): drop it when every line
+        // has it and the text without it reaches `quoteMin`; a short text's own "│" stays.
+        if !text.isEmpty && text.allSatisfy({ $0.hasPrefix("│") }) {
+            let unquoted = text.map { String($0.dropFirst()).trimmingCharacters(in: .whitespaces) }
+            if displayWidth(unquoted.joined(separator: " ")) >= quoteMin { text = unquoted }
         }
         // The last row is the "Other" row.
         guard closed, options.popLast() != nil else { return nil }
@@ -596,7 +626,11 @@ extension QuestionAdapter {
         let typed: String? = lastRaw == "Type something." || lastRaw == "Type something" ? nil : lastRaw
         guard !options.isEmpty, !text.isEmpty else { return nil }
         let q = text.joined(separator: " ")
-        return (headers, .init(header: headers.count == 1 ? headers[0] : "", text: q, options: options, multiSelect: multi), typed, lastFocused, submitFocused, strayMark ? 0 : marks)
+        // A row is cut when its next line's first word would have fit on it (2 columns to spare): word wrap moved it.
+        let cut = options.indices.contains { i in nextWords[i].map { rowWidths[i] + 1 + $0 + 2 > lineWidth } ?? false }
+        var question = QuestionRequest.Question(header: headers.count == 1 ? headers[0] : "", text: q, options: options, multiSelect: multi)
+        question.cutLabels = cut
+        return (headers, question, typed, lastFocused, submitFocused, strayMark ? 0 : marks)
     }
 }
 
@@ -628,13 +662,18 @@ extension PaneScreen {
             return
         }
         let steps = try QuestionAdapter.steps(for: q, answers: answers)
+        // Typed answers go key by key: refused before any key when the backend cannot type one of their characters.
+        if let bad = answers.compactMap(QuestionAdapter.otherText).first(where: { !canType($0) }) {
+            let shown = String(Set(bad.filter { !canType(String($0)) }).sorted())
+            throw QuestionAdapter.Failure.unsupported("the typed answer has characters Herdr cannot type yet (\(shown)): answer in the terminal")
+        }
         // `gate` (a remote device): before every key, the same agent, the exact question the key is for on screen
         // (its text, options, the request's headers; the review screen for the last key), input allowed.
         let any: @Sendable (String) -> Bool = { QuestionAdapter.showsAny(q, screen: $0) }
         // A hooked request whose review cannot prove the answers: refused before any key (the Left below too).
         let hooked = q.agent == "claude" && !q.toolUseId.hasPrefix("screen-")
-        if hooked, q.questions.count > 1 || q.questions.last?.multiSelect == true, QuestionAdapter.reviewAmbiguous(q, answers: answers) {
-            throw QuestionAdapter.Failure.unsupported("the review screen could not show which options were picked (a label with a comma or a review mark, or two alike)")
+        if QuestionAdapter.reviewBlocked(q, answers: answers) {
+            throw QuestionAdapter.Failure.unsupported(QuestionAdapter.reviewBlockedWhy)
         }
         let screen = try await visibleText(paneId: paneId)
         if !QuestionAdapter.screenShows(q, screen: screen) {
@@ -690,7 +729,7 @@ extension PaneScreen {
             case .waitFor(let s):
                 if s == "Review your answers" { review = true } else { at += 1 }
                 otherOpen = false; typedIn = false; shown = nil; focus = .auto; row = nil; checked = []
-                guard try await waitScreen(paneId: paneId, timeout: 3, { QuestionAdapter.pickerRegion(agent: q.agent, screen: $0)?.contains(s) == true }) else {
+                guard try await waitScreen(paneId: paneId, timeout: 3, { QuestionAdapter.pickerHas(agent: q.agent, screen: $0, s) }) else {
                     throw QuestionAdapter.Failure.stuck(s)
                 }
             }

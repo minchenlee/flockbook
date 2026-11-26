@@ -18,11 +18,17 @@ pub struct Config {
     pub phone_port: u16,
     /// The page only reads.
     pub phone_read_only: bool,
+    /// `summaries: "on"`: `summary` may give the end of an agent's turn to that agent's small model. Off unless set.
+    pub summaries: bool,
+    /// `summary_by`: the program that writes them: `own` (each agent's own program), `claude`, `codex` or `pi`.
+    pub summary_by: String,
+    /// `summary_model`: the model for a chosen program; None: that program's default (summary.rs).
+    pub summary_model: Option<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { check_updates: true, remote_never: false, phone_user: String::new(), phone_port: 8787, phone_read_only: false }
+        Config { check_updates: true, remote_never: false, phone_user: String::new(), phone_port: 8787, phone_read_only: false, summaries: false, summary_by: "own".into(), summary_model: None }
     }
 }
 
@@ -47,12 +53,18 @@ pub fn parse(text: &str) -> Config {
         phone_user: m.get("phone_user").and_then(Value::as_str).map(|s| s.trim().to_string()).unwrap_or_default(),
         phone_port: m.get("phone_port").and_then(Value::as_u64).filter(|p| (1..=65535).contains(p)).map(|p| p as u16).unwrap_or(d.phone_port),
         phone_read_only: m.get("phone_read_only").and_then(Value::as_bool).unwrap_or(d.phone_read_only),
+        summaries: m.get("summaries").and_then(Value::as_str) == Some("on"),
+        summary_by: m.get("summary_by").and_then(Value::as_str).filter(|b| crate::summary::PROGRAMS.contains(b)).unwrap_or("own").to_string(),
+        summary_model: m.get("summary_model").and_then(Value::as_str).and_then(crate::summary::model_name),
     }
 }
 
 pub fn load(dir: Option<&Path>) -> Config {
     dir.and_then(|d| std::fs::read_to_string(d.join("config.json")).ok()).map(|t| parse(&t)).unwrap_or_default()
 }
+
+/// What `summary` says while the setting is off.
+pub const SUMMARIES_OFF: &str = "Summaries are off. To change it: Flockbook settings, Summaries: On.";
 
 /// What a remote command says when the person chose Never.
 pub const REMOTE_OFF: &str = "Flockbook does not run its helper on other machines. To change it: Flockbook settings, Helper on other machines: Ask.";
@@ -79,6 +91,12 @@ mod tests {
         assert!(!parse(r#"{"remote_helper": "always"}"#).remote_never, "only ask and never exist; anything else is ask");
         let c = parse(r#"{"phone_user": " me@x.com ", "phone_port": 9000, "phone_read_only": true}"#);
         assert_eq!((c.phone_user.as_str(), c.phone_port, c.phone_read_only), ("me@x.com", 9000, true));
+        assert!(parse(r#"{"summaries": "on"}"#).summaries);
+        assert!(!parse(r#"{"summaries": "off"}"#).summaries && !parse(r#"{"summaries": true}"#).summaries, "only the word on turns it on");
+        let c = parse(r#"{"summary_by": "codex", "summary_model": " gpt-x-mini "}"#);
+        assert_eq!((c.summary_by.as_str(), c.summary_model.as_deref()), ("codex", Some("gpt-x-mini")));
+        let c = parse(r#"{"summary_by": "bash", "summary_model": "--help"}"#);
+        assert_eq!((c.summary_by.as_str(), c.summary_model), ("own", None), "not a program, not a model name: the defaults");
         assert_eq!(parse(r#"{"phone_port": 0}"#).phone_port, 8787);
         assert_eq!(parse(r#"{"phone_port": 70000}"#).phone_port, 8787);
         assert_eq!(parse(r#"{"phone_port": "9000"}"#).phone_port, 8787);

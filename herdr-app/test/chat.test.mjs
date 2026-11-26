@@ -62,8 +62,8 @@ test("estimates: wide characters wrap sooner; code and headings add height", () 
 test("estimates: code boxes and tables are guessed at their drawn height (no wrap margin, no gap)", () => {
   // codeBox: 6 px margin + 10 px padding + 1 px border, each side; 21 px per line (a TextView line at 13 px).
   assert.equal(markdownHeight("```\na\nb\nc\n```", 600), 3 * 21 + 34);
-  // table: 6 px margin + 1 px border each side; a row is 8 + 21 + 8 px plus a 1 px line (1 px high on the head row, on purpose).
-  assert.equal(markdownHeight("| A | B |\n|---|---|\n| a | b |", 600), 14 + 17 + 21 + 17 + 21);
+  // table: 6 px margin + 1 px border each side; a row is 8 + 22 + 8 px plus a 1 px line (1 px high on the head row, on purpose).
+  assert.equal(markdownHeight("| A | B |\n|---|---|\n| a | b |", 600), 14 + 17 + 22 + 17 + 22);
   // The prose gets a small pad at the end, once per text, so a long answer with code is not guessed far too tall.
   const prose = "word ".repeat(30);
   const code = "```\n" + "x = 1\n".repeat(30) + "```";
@@ -432,4 +432,44 @@ test("Copy message copies the row's markdown as written, for user, assistant and
   assert.equal(copy("a1"), reply);
   assert.equal(copy("n1"), "Notes updated.\nSee notes.md");
   assert.equal(copy("s1"), null, "a status row has no menu");
+});
+
+test("links in a reply: drawn as Markdown links; the row's height, Copy message and user rows stay as they were", async () => {
+  const text = "PR: https://github.com/o/r/pull/9 and /home/me/plan.md";
+  const links = [{ start: 4, end: 33, res: "pr", block: 0 }, { start: 38, end: 54, res: "doc", block: 0 }];
+  fake.exec = () => jl(header, logLine("c1"), { type: "splice", at: 0, count: 2 }, user("u1", "see https://x.com"),
+    { ...asst("a1", text), links }, end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle(); v.width = 900;
+  v.render(cx);
+  const rows = lastList._args.render({ start: 0, end: lastList._args.n });
+  const views = (el) => { const out = []; (function walk(n) { if (!n) return; if (n.tag === "md") out.push(n._a.text); (n.kids ?? []).forEach(walk); })(el); return out; };
+  const all = rows.flatMap(views);
+  assert.ok(all.includes("PR: [https://github.com/o/r/pull/9](https://github.com/o/r/pull/9) and /home/me/plan.md"), JSON.stringify(all));
+  assert.ok(all.includes("see https://x.com"), "a user row is not rewritten");
+  const plain = rowHeight({ ...asst("a1", text) }, v.colWidth());
+  assert.equal(v.height(v.feed().rows.find((r) => r.id === "a1")), plain, "the height is guessed from the text as written");
+  lastList._h.on_item_secondary_click("a1", { button: "right", position: { x: 0, y: 10 }, local_position: { x: 50, y: 10 } }, cx);
+  assert.equal(log.overlays.at(-1).props.items.at(-1).args.text, text, "Copy message copies the text as written");
+});
+
+
+test("a feed with a new cursor version drops the rows read with the old ids; Show in chat then finds the row (Codex R2 P1)", async () => {
+  const { KEY_JUMP } = await import("../mods/flockbook/resources.js");
+  const chat = new ChatView(fakeCx());
+  const f = chat.feed();
+  const codex = (cursor, start) => ({ ...logLine(cursor), agent: "codex", start });
+  // Before the update: the tail and an older page, Codex ids numbered from each range's start.
+  applyFeed(f, parseAnswer(jl(header, codex("1.9c1d.5000.9000.aa", 5000), { type: "splice", at: 0, count: 2 }, user("cx1", "old tail"), asst("cx2", "x"), end).stdout));
+  applyOlder(f, parseAnswer(jl(header, { type: "older", path: "/logs/s.jsonl", start: 2000, count: 2 }, user("cx1-older", "a"), asst("cx3", "b"), end).stdout), 5000);
+  assert.equal(f.rows.length, 4);
+  // After it: the same log, the same start, a "2." cursor and offset ids. The older page had the old ids: gone.
+  applyFeed(f, parseAnswer(jl(header, codex("2.9c1d.5000.9000.bb", 5000), { type: "splice", at: 0, count: 2 }, user("cx@5000", "old tail"), asst("cx@6100", "x"), end).stdout));
+  assert.deepEqual(f.rows.map((r) => r.id), ["cx@5000", "cx@6100"]);
+  assert.equal(olderFrom(f), 5000, "older rows are read again from the tail's start, with the new ids");
+  // Resources names the row by its offset id: the chat scrolls to it.
+  calls.length = 0;
+  fake.shared[KEY_JUMP] = { terminal: "t1", row: "cx@6100", at: 7 };
+  chat.screen = "chat"; fake.shared["flockbook.screen"] = "chat";
+  chat.tick(fakeCx());
+  assert.deepEqual(calls.filter((c) => c[0] === "scroll_to_item"), [["scroll_to_item", 1, "top"]]);
 });

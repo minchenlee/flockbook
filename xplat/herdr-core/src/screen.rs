@@ -32,6 +32,11 @@ pub trait PaneScreen {
     fn send_keys(&self, bytes: &[u8], pane_id: &str) -> Result<(), HerdrError>;
     /// Types `text` and presses Enter.
     fn send_text(&self, text: &str, pane_id: &str) -> Result<(), HerdrError>;
+    /// Whether `send_keys` can type every character of `text` (hc: `keys::typeable`). Checked before any key of
+    /// an answer goes, so an answer never stops half typed.
+    fn can_type(&self, _text: &str) -> bool {
+        true
+    }
     /// Sleeps between screen polls (fakes skip it).
     fn pause(&self, ms: u64) {
         std::thread::sleep(std::time::Duration::from_millis(ms));

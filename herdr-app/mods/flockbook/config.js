@@ -1,17 +1,33 @@
 // Flockbook settings: <appHome>/flockbook/config.json, set in the Flockbook settings dialog.
-// {"check_updates": true, "status_row": "show", "remote_helper": "ask"}. A missing file or key is the default;
+// {"check_updates": true, "status_row": "show", "remote_helper": "ask", "text_size": "default", "summaries": "off",
+// "summary_by": "own", "summary_model": ""}. A missing file or key is the default;
 // the install never creates the file. A file that is not JSON is the defaults too, and is left alone
 // (the screen says so). The helper reads the same file (the mod passes --home) for check_updates and
 // remote_helper. Kept in shared(), so every copy of this mod redraws when one changes it.
-import { appHome, readTextFile, writeTextFile, shared, setShared } from "herdr";
+import { appHome, readTextFile, writeTextFile, shared, setShared, notify } from "herdr";
 import * as sidecar from "./sidecar.js";
 
 export const KEY_CONFIG = "flockbook.config";    // { file, bad, text }: the parsed file, and the text it was read from
 export const KEY_UPDATE = "flockbook.update";    // the helper's last `update` line
 const KEY_UPDATE_AT = "flockbook.update.at";     // when the mod last asked (ms)
 const KEY_UPDATE_SEEN = "flockbook.update.seen"; // the version whose line was seen in the open sidebar
-export const DEFAULTS = { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false };
-export const CHOICES = { check_updates: [true, false], status_row: ["show", "hide"], remote_helper: ["ask", "never"], phone_read_only: [false, true] };
+export const DEFAULTS = { check_updates: true, status_row: "show", remote_helper: "ask", phone_read_only: false, text_size: "default", summaries: "off", summary_by: "own", summary_model: "" };
+export const CHOICES = { check_updates: [true, false], status_row: ["show", "hide"], remote_helper: ["ask", "never"], phone_read_only: [false, true], text_size: ["small", "default", "large"], summaries: ["off", "on"], summary_by: ["own", "claude", "codex", "pi"] };
+// The settings that are a line of text, not one of a few choices.
+const TEXTS = ["summary_model"];
+// The chat's text size (text_size) over the default 16 px: messages, code boxes and tables follow it.
+const TEXT_PX = { small: 14, default: 16, large: 18 };
+export const textScale = () => TEXT_PX[setting("text_size")] / 16;
+const TEXT_NAME = { small: "Small", default: "Default", large: "Large" };
+// The text-smaller / text-larger / text-default keys: one step along Small, Default, Large (no wrap).
+export async function stepTextSize(c) {
+  const order = CHOICES.text_size, i = order.indexOf(setting("text_size"));
+  const to = c === "text-default" ? "default" : order[Math.max(0, Math.min(order.length - 1, i + (c === "text-larger" ? 1 : -1)))];
+  if (to === order[i]) return false;
+  const ok = await setSetting("text_size", to);
+  if (ok) notify({ title: `Chat text: ${TEXT_NAME[to]}`, level: "info", timeout: 1500 });
+  return ok;
+}
 export const configPath = () => `${appHome()}/flockbook/config.json`;
 
 export function parseConfig(text) {
@@ -25,6 +41,7 @@ export function parseConfig(text) {
 
 export function setting(key) {
   const v = shared(KEY_CONFIG)?.file?.[key];
+  if (TEXTS.includes(key)) return typeof v === "string" ? v.trim() : DEFAULTS[key];
   return CHOICES[key].includes(v) ? v : DEFAULTS[key];
 }
 export const configBad = () => shared(KEY_CONFIG)?.bad === true;

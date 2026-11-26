@@ -1,4 +1,4 @@
-//! Swift: `ChecksModFeed.swift`. Rows, footers, the tail reader, the incremental feed, status tags, locate.
+//! Rows, footers, the tail reader, the incremental feed, status tags, locate.
 
 use chrono::{TimeZone, Utc};
 use herdr_core::util::Date;
@@ -155,6 +155,17 @@ fn feed_splices() {
     let mut o4 = JsonLines::new();
     feed::run(Some(&f), "claude", Some("1.bad.0.0.x"), s3.as_ref(), false, &mut o4, &now(), &Utc).unwrap();
     assert!(o4.lines.iter().any(|l| l.contains(r#""at":0"#) && l.contains(r#""type":"splice""#)), "an unknown cursor gets everything again");
+    // An older cursor ("1.": the old Codex ids; "2.": links without `block`) for the same state and the same size:
+    // never unchanged, all rows again.
+    let c3 = s3.as_ref().unwrap().cursor();
+    assert!(c3.starts_with("3."), "{c3}");
+    for v in ["1.", "2."] {
+        let old = c3.replacen("3.", v, 1);
+        let mut o6 = JsonLines::new();
+        feed::run(Some(&f), "claude", Some(&old), s3.as_ref(), false, &mut o6, &now(), &Utc).unwrap();
+        assert!(!o6.lines.iter().any(|l| l.contains(r#""type":"unchanged""#)), "a {v} cursor is not unchanged: {:?}", o6.lines);
+        assert!(o6.lines.iter().any(|l| l.contains(r#""at":0"#) && l.contains(r#""type":"splice""#)), "a {v} cursor gets everything again");
+    }
     let mut o5 = JsonLines::new();
     feed::run(None, "codex", None, None, false, &mut o5, &now(), &Utc).unwrap();
     assert!(o5.lines[0].contains(r#""path":null"#), "no log, path null");
@@ -174,7 +185,7 @@ fn feed_splices() {
     let now_s = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
     let log = dir.path().join("sess-1.jsonl");
     std::fs::write(&log, t.join("\n") + "\n").unwrap();
-    let e = locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![42, 41], path: Some(log.to_string_lossy().into()), checked: now_s - 5.0 };
+    let e = locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![42, 41], process: None, path: Some(log.to_string_lossy().into()), checked: now_s - 5.0 };
     assert!(locate::fresh(Some(&e), &pane, "claude", now_s), "locate: fresh entry used");
     let mut other = e.clone();
     other.pids = vec![43, 41];
@@ -222,7 +233,7 @@ fn cache_times_read_back_exactly() {
     // A value CI read back one ulp off (as ...617) before serde_json's float_roundtrip.
     let dir = tempfile::tempdir().unwrap();
     let mut cache = locate::Cache::default();
-    cache.entries.insert("t7".into(), locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![1], path: None, checked: 1793722804.7949615 });
+    cache.entries.insert("t7".into(), locate::Entry { kind: "claude".into(), cwd: "/w".into(), pids: vec![1], process: None, path: None, checked: 1793722804.7949615 });
     let cf = dir.path().join("cache.json");
     locate::write_cache(&cache, Some(&cf));
     assert_eq!(locate::read_cache(Some(&cf)), cache);

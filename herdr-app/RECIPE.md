@@ -39,9 +39,9 @@ Left to right:
      Flockbook settings dialog), and **Settings**.
    While the sidebar is hidden and a newer Flockbook is out, the top bar's sidebar button has a 7 px
    `accent` dot, until the sidebar opens (docked or floating) or **Not now**.
-2. **Work area**: a stack of four screens. The bar floats over the first three.
-   - **Top bar** (56 px, over the content, no background of its own). The sidebar button (28 px,
-     round, with a `chrome` backing) sits right of the window buttons while the sidebar is hidden.
+2. **Work area**: the top bar, then a stack of four screens under it.
+   - **Top bar** (56 px, `background`, the only part that moves the window). The sidebar button (28 px,
+     round) sits right of the window buttons while the sidebar is hidden.
      Centered: a tab capsule and a tools capsule, both 38 px tall, fully round, `chrome` with a 1 px
      border and a small shadow.
      - The tab capsule has one 30 px pill per tab that is not put away: a status mark, then the
@@ -118,6 +118,35 @@ Status marks: working is a 13 px spinner (`working` color: a quarter arc over a 
 per 900 ms, as Herdr's own); done is a check
 (`done`); blocked is a 9 px dot (`blocked`); idle is a 12 px empty ring (`dim`).
 
+**Resources** (a link button in the tools capsule, right of the terminal button, with the tooltip
+"Resources (⌘⇧R)"; only with a helper that has `resources`, and an agent in the tab). The button is
+`selected` with `accent` text while its window is open; a badge (`accent`, 15 px, 9.5 px semibold, top 2
+right 1) counts the resources newer than you last saw. ⌘⇧R or the button opens or closes a frameless
+window 12 px from the right edge under the bar (y 60). The chat never moves for it: its reading column, input and
+cards keep their place and width. The window takes the room right of the reading column less 24 px (left) and
+12 px (right), 260 to 320 px wide; with less than 260 px there, it is 320 px wide over the chat. It is one
+height for any list (empty, short, long, every group folded): from y 60 to 12 px above the chat input (the input's
+measured height; before it is measured, 160 px). It is opened again (the new one first, then the old one closed) when
+the window's size moves it or changes its height by 8 px or more (smaller: not while the pointer is on it). It cannot be dragged. Under 720 px, a drawer down the right side,
+from the top to 12 px above the chat input. A click beside it does not close it;
+Esc, its × and ⌘⇧R do. Inside: a 46 px header ("Resources", 13 px 600; a "This agent" chip; ×), groups
+**Markdown** (.md), **Web pages** (.html, .htm), **PDFs**, **Images** (.png, .svg), **Other docs** (any other file the
+agent named; by the extension, any case), **Artifacts**, **PRs & CI**, **Commands**, **Links** (local servers too), each
+with its count; a group with nothing in it is not shown. A doc's icon is its group's (doc, globe, file-text, image). A click on a
+group's title (a chevron on its left: down open, right folded) folds it, for every agent and over a restart; a folded
+group keeps its count and draws no rows. A group draws 30 rows, then "Show N more" (12 px muted; a click shows the
+rest until the agent changes); the window's height counts only the rows drawn. One row per
+resource: a 22 px icon square, the title (13 px 550), the time since its last mention ("4m"), and a
+second line (11.5 px muted; a doc's folder and a command in mono). New since you last opened it: a 6 px `accent` dot
+on the left. A doc that is not there: dim and struck through, its icon half clear, "· File not found";
+a click on it does nothing but say why. Hovering a row shows **Show in chat** (the chat scrolls to the
+reply that mentioned it, when loaded; a speech-bubble icon), **Copy** (a copy icon; not on a command) and
+**Remove from list** (an eye-off icon). A click on a command copies it (never runs it) and says "Copied.";
+a one-line shell command in a fenced block of a reply is one (docs/protocol.md `res`). A click opens a web address in
+the browser, or a doc (md, html, htm, pdf, png, svg; there now; an agent on this computer) with
+`open` (`xdg-open` off macOS). The header's count: "N items · M removed". Empty: "No resources yet" and "Docs,
+artifacts and links the agent mentions in its replies show up here."
+
 ## How it behaves
 
 - **Tabs**: click a pill to show that tab. A tab with one agent shows the chat; a split tab or a
@@ -187,21 +216,30 @@ per 900 ms, as Herdr's own); done is a check
   background `canvas`, theme light `flockbook-light` / dark `flockbook`) with:
   - `sidebar`: a `column`, 250 px (min 220, max 320), `hidden`, `chrome`, a 1 px divider, holding
     one block `side`.
-  - `work`: a `column` holding the `stack` `screen` (active `chat`) with the blocks `chat`,
-    `needs`, `overview` (each `window_drag`) and the `column` `tab`: the block `top` (56 px) above
-    `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
+  - `work`: a `column` holding the block `top` (56 px, `window_drag`, the only one) above the
+    `stack` `screen` (active `chat`) with the blocks `chat`, `needs`, `overview` and the `column`
+    `tab` holding `tab-panes` (`content: {tab: "active", pane: {gap 6, radius 8, border 1 border, focus 1 muted}}`,
     padding 8).
   - The ids `sidebar`, `screen`, `chat` and `tab` are what the mod switches.
 - **Mod** `mods/flockbook/` (`mod.json`: `place: "none"`): one mod, one view per block, picked
   by `props.view`: `side`, `chat`, `needs`, `overview`, `top`; overlays use `settings` (the Flockbook
-  settings dialog), `termbar` (the terminal window's bar), `menu` (right-click menus) and `side` with `peek: true` (the floating sidebar).
+  settings dialog), `termbar` (the terminal window's bar), `menu` (right-click menus), `resources` (the Resources window) and `side` with `peek: true` (the floating sidebar).
   All views are in one folder because a mod cannot import another mod's files.
 - **Shared state** (`shared` / `setShared`): `flockbook.agent` (the agent shown),
   `flockbook.screen` (the shown screen; an old `settings` shows the chat), `flockbook.settings` (the
   open settings dialog), `flockbook.sidebar`, `flockbook.sidebar.peek`,
   `flockbook.terminal`, `flockbook.window.height`, `flockbook.command`, `flockbook.overview.group`,
   `flockbook.config` (the settings file, parsed), `flockbook.update` and `flockbook.update.at` (the
-  last update line, and when the mod asked).
+  last update line, and when the mod asked). Resources: `flockbook.res.data` ({terminal, cursor, count, at, error, v}: small, what
+  changed last; `v` goes up at each change so every copy draws again; `error` "old"/"missing": the helper on its machine
+  cannot list them; the lists themselves are in memory, the last 8 agents, not persisted, so after a restart the first ask
+  is a full read), `flockbook.res.collapsed` (the ids of the folded groups), `flockbook.res.on` (the helper has the command), `flockbook.res.open`
+  and `flockbook.res.run` (the open window and the app run it was opened in: an id left from before a restart is not open),
+  `flockbook.res.scope` ("agent"), `flockbook.res.seen.<t>` (the newest `last_ts` seen in the window; the first
+  look at an agent sets it to its newest, so an old conversation has no badge), `flockbook.res.removed.<t>`
+  ([{id, last_ts}] taken off the list; one mentioned again later, with a newer `last_ts`, comes back; a bare id
+  stays removed), `flockbook.res.jump` ({terminal, row, at}: the chat scrolls to that row once),
+  `flockbook.window.width`, `flockbook.sidebar.width`.
 - **herdr functions**: `spaces`, `agents`, `panes`, `focused`, `theme`, `layout`, `window`,
   `settings`, `props`, `run`, `nextCommand`, `setAgentOrder`, `openOverlay`, `closeOverlay`,
   `exec`, `appHome`, `home`, `readTextFile`, `writeTextFile` (config.json only).
@@ -210,7 +248,7 @@ per 900 ms, as Herdr's own); done is a check
   `pane.split`, `space.select`, `space.new`, `space.rename`, `space.close`, `agent.focus`,
   `app.settings`. Its own key commands: `flockbook.terminal`, `flockbook.needs`,
   `flockbook.sidebar`, `flockbook.overview`, `flockbook.settings`, `flockbook.move-left`,
-  `flockbook.move-right`.
+  `flockbook.move-right`, `flockbook.resources` (⌘⇧R).
 - **Shipped mods**: `new-menu` (the + popup, 250 × 512).
 - **Programs**:
   - `flockbook-modfeed`, a helper program at `<herdr-app home>/flockbook/bin/flockbook-modfeed`
@@ -235,6 +273,16 @@ per 900 ms, as Herdr's own); done is a check
 - **Keys** `keys.json`: one `layout:flockbook` section.
 - **Art** `mods/flockbook/icons/`: arrow-down, bell, branch, check, close, doc, folder, gear, grid,
   plus, search, send, sidebar, sliders, spinner, split, terminal, tool (16 × 16 SVG, 1.8 px round strokes, `currentColor`).
+  From Lucide (lucide-static 1.79.0): copy, eye-off, message (`message-square-text`), the Resources row actions, and
+  chevron-right, chevron-down (a Resources group's title), globe, file-text, image (the Resources doc groups' rows). They keep
+  Lucide's 24 × 24 grid with 2.2 px strokes (as thin as 1.5 px on 16) and a license line at the top of each file.
+  Lucide is under the ISC License: Copyright (c) 2026 Lucide Icons and Contributors. Permission to use, copy, modify,
+  and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above
+  copyright notice and this permission notice appear in all copies. THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR
+  DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+  FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY
+  DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## Watch out
 

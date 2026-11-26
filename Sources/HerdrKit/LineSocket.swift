@@ -97,12 +97,18 @@ final class LineSocket: @unchecked Sendable {
     }
 
     func writeLine(_ data: Data) throws {
+        var sent = 0
+        try writeLine(data, sent: &sent)
+    }
+
+    /// `writeLine` that counts in `sent` the bytes written, also when it throws (0: nothing went).
+    func writeLine(_ data: Data, sent: inout Int) throws {
         let fd = try acquireFD()
         defer { releaseFD() }
         var out = data
         out.append(0x0A)
+        sent = 0
         try out.withUnsafeBytes { (p: UnsafeRawBufferPointer) in
-            var sent = 0
             while sent < p.count {
                 let n = Darwin.write(fd, p.baseAddress! + sent, p.count - sent)
                 if n < 0 { if errno == EINTR { continue }; throw HerdrError.socket("write errno \(errno)") }

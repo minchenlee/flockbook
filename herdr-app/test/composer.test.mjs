@@ -66,7 +66,7 @@ test("Enter sends the text and files through the sidecar, then empties the box",
   const b = c.box(fake.agents[0]);
   b.input.set_value("Fix it\n"); c.addFiles(["/tmp/a.png", "/tmp/a.png", "/tmp/b.txt"], cx);
   b.input._h.submit({}, cx); await cx.settle();
-  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Fix it /tmp/a.png /tmp/b.txt", "--file", "/tmp/a.png", "--file", "/tmp/b.txt", "--home", "/home/test/.config/herdr-app"]);
+  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Fix it /tmp/a.png /tmp/b.txt", "--file", "/tmp/a.png", "--file", "/tmp/b.txt", "--cache", "/home/test/.config/herdr-app/flockbook/cache.json", "--home", "/home/test/.config/herdr-app"]);
   assert.equal(b.input.value(), ""); assert.deepEqual(b.files, []);
 });
 
@@ -101,6 +101,18 @@ test("each agent keeps its own draft", () => {
   c.box(fake.agents[0]).input.set_value("for api");
   c.box(fake.agents[1]).input.set_value("for t2");
   assert.equal(c.box(fake.agents[0]).input.value(), "for api");
+});
+
+test("the chat keeps its input's height in shared(), for the Resources window's bottom", async () => {
+  fake.exec = (cmd, args) => args[0] === "feed"
+    ? jl(header("feed"), { type: "log", agent: "claude", path: "/l.jsonl", start: 0, size: 1, cursor: "c" }, { type: "splice", at: 0, count: 1 }, { type: "row", id: "u1", k: "user", text: "hi" }, end)
+    : jl(header(args[0]), end);
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  const find = (el) => (el?.kids ?? []).some((k) => k?._a?.id === "composer") ? el : (el?.kids ?? []).map(find).find(Boolean);
+  const wrap = find(v.render(cx));
+  assert.ok(wrap?._h.on_size_change, "the input's box is measured");
+  wrap._h.on_size_change({ width: 800, height: 151.6 });
+  assert.equal(fake.shared["flockbook.input.height"], 152);
 });
 
 test("the chat shows the composer, and a drop on it attaches files", async () => {
@@ -282,7 +294,34 @@ test("send names the agent and the log the chat showed, so the sidecar can refus
   c.seen = (address) => address === "t1" ? { agent: "claude", path: "/logs/a.jsonl" } : null;
   const b = c.box(fake.agents[0]);
   b.input.set_value("Go on"); b.input._h.submit({}, cx); await cx.settle();
-  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Go on", "--expect-kind", "claude", "--expect-path", "/logs/a.jsonl", "--home", "/home/test/.config/herdr-app"]);
+  assert.deepEqual(sent[0], ["send", "--terminal", "t1", "--text", "Go on", "--expect-kind", "claude", "--expect-path", "/logs/a.jsonl", "--cache", "/home/test/.config/herdr-app/flockbook/cache.json", "--home", "/home/test/.config/herdr-app"]);
+});
+
+test("after /clear the send says the agent started a new conversation, and the chat reads the new log at once", async () => {
+  const cx = fakeCx(); const c = new Composer(cx);
+  const moved = [];
+  c.onNewConversation = (address) => moved.push(address);
+  const b = c.box(fake.agents[0]);
+  fake.sendResult = "changed"; fake.sendMessage = "the agent started a new conversation; the chat now shows it; nothing was sent";
+  b.input.set_value("again"); await c.submit(cx);
+  assert.equal(b.input.value(), "again", "nothing was sent: the text comes back");
+  const note = textOf(byId(c.render(fake.agents[0], new Proxy({}, { get: (_t, k) => `#${k}` })), "send-note"));
+  assert.match(note, /The agent started a new conversation; the chat now shows it/);
+  assert.doesNotMatch(note, /Another agent/);
+  assert.deepEqual(moved, ["t1"]);
+  // Another agent: the old note, and the chat is not told of a new conversation.
+  fake.sendMessage = "another agent is in this pane now; nothing was sent";
+  b.input.set_value("third"); await c.submit(cx);
+  assert.deepEqual(moved, ["t1"]);
+});
+
+test("the chat polls its feed again when the composer reports a new conversation", async () => {
+  let feeds = 0;
+  fake.exec = (cmd, args) => { if (args[0] === "feed") feeds++; return jl(header(args[0]), end); };
+  const cx = fakeCx(); const v = new ChatView(cx); await cx.settle();
+  const before = feeds;
+  v.composer.onNewConversation?.("t1", cx); await cx.settle();
+  assert.ok(feeds > before, `feed asked again (${before} → ${feeds})`);
 });
 
 test("the chat gives the composer what its feed showed", async () => {

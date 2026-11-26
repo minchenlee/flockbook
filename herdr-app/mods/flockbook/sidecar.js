@@ -40,7 +40,7 @@ export async function call(cmd, args = []) {
 }
 
 // The commands this sidecar has (its `version` line), asked once. A failed ask is asked again next time.
-// The Swift sidecar and older helpers have fewer: the mod hides what a missing command would do.
+// Older helpers have fewer: the mod hides what a missing command would do.
 let known = null;
 export function hasCommand(name) {
   if (!known) {
@@ -58,7 +58,12 @@ export const forgetCommands = () => { known = null; };
 export const feed = (terminal, cursor) => call("feed", ["--terminal", terminal, "--cache", cachePath(), ...(cursor ? ["--cursor", cursor] : [])]);
 export const older = (terminal, before, path) => call("feed", ["--terminal", terminal, "--before", String(before), "--path", path]);
 export const status = (terminal) => call("status", ["--terminal", terminal, "--cache", cachePath()]);
-export const card = (terminal, all = false) => call("card", ["--terminal", terminal, ...(all ? ["--all"] : []), "--cache", cachePath()]);
+// `answers` (the `answer` format, the answers so far): the card's `blocked` also checks the own answers.
+// `question` (full question kept from an earlier `--all`): lets `card` re-check `blocked` without sending keys.
+export const card = (terminal, all = false, answers = null, question = null) => call("card", ["--terminal", terminal, ...(all ? ["--all"] : []),
+  ...(answers ? ["--answers", JSON.stringify(answers)] : []),
+  ...(question ? ["--question", JSON.stringify(question)] : []),
+  "--cache", cachePath()]);
 export const approve = (terminal, request, allow) => call("approve", ["--terminal", terminal, "--request", request, allow ? "--allow" : "--deny", "--cache", cachePath()]);
 export const answer = (terminal, request, answers) => call("answer", ["--terminal", terminal, "--request", request, "--answers", JSON.stringify(answers), "--cache", cachePath()]);
 // Only after the user pressed Install on the card; `sha256` is the one the card showed.
@@ -73,10 +78,32 @@ export const phone = (what) => call("phone", [what]);
 export const commands = (terminal) => call("commands", ["--terminal", terminal, "--cache", cachePath()]);
 export const pasteImage = () => call("paste-image", ["--dir", `${appHome()}/flockbook/paste`]);
 // `seen`: the agent kind and the log the chat last showed; the sidecar refuses another agent or conversation.
+// `--cache`: the sidecar looks the log up again and writes it there, so the next `feed` reads a new conversation at once.
 export const send = (terminal, text, files = [], seen = null) => call("send", ["--terminal", terminal, "--text", text,
   ...files.flatMap((f) => ["--file", f]),
-  ...(seen?.agent ? ["--expect-kind", seen.agent] : []), ...(seen?.path ? ["--expect-path", seen.path] : [])]);
+  ...(seen?.agent ? ["--expect-kind", seen.agent] : []), ...(seen?.path ? ["--expect-path", seen.path] : []),
+  "--cache", cachePath()]);
 
 // The sidecar's "changed" reply when another agent took the pane: nothing was sent.
 export const AGENT_CHANGED = "Another agent is in this pane now. Nothing was sent.";
 export const agentChanged = (done) => done?.result === "changed" && /another agent/i.test(done?.message ?? "");
+// A gate stop after some keys of the answer went in: its own message must stay (AGENT_CHANGED says nothing was sent).
+export const keysMayBeIn = (done) => agentChanged(done) && /some keys may already be in/i.test(done?.message ?? "");
+// The same agent started a new conversation (`/clear`): nothing was sent; the chat reads the new log.
+export const NEW_CONVERSATION = "The agent started a new conversation; the chat now shows it. Nothing was sent.";
+export const newConversation = (done) => done?.result === "changed" && /new conversation/i.test(done?.message ?? "");
+// What each agent's last turn did, by rules, from its log (docs/protocol.md, glance). Every agent on this
+// machine in one call; nothing goes to an agent.
+export const glance = () => call("glance", ["--cache", cachePath()]);
+// Two lines about one agent's last turn, by that agent's small model (docs/protocol.md, summary). The helper
+// refuses unless the setting Summaries is on.
+// The models a program (claude, codex, pi) can run for a summary, for the settings' list. Nothing of an agent is read.
+export const summaryModels = (by) => call("summary-models", ["--by", by]);
+// How many times a model ran for a summary since each time in `since` (ms), and how much text went and came
+// (docs/protocol.md, summary-usage). It reads the helper's count; nothing is sent.
+export const summaryUsage = (since) => call("summary-usage", ["--cache", cachePath(), ...since.flatMap((s) => ["--since", String(s)])]);
+export const summary = (terminal) => call("summary", ["--terminal", terminal, "--cache", cachePath()]);
+// What the agent pointed to (Rust helper only; ask hasCommand("resources") first). `since`: the last `end` cursor.
+// The real file a doc path opens (links followed), or why not: one `openable` line. Ask hasCommand("open-check") first.
+export const openCheck = (path) => call("open-check", ["--path", path]);
+export const resources = (terminal, since = null) => call("resources", ["--terminal", terminal, "--cache", cachePath(), ...(since ? ["--since", since] : [])]);

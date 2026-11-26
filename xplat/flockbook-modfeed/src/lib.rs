@@ -1,4 +1,4 @@
-//! ModFeedKit in Rust: the herdr-app mod's sidecar (contract: the mod's docs/protocol.md).
+//! The herdr-app mod's sidecar (contract: the mod's docs/protocol.md).
 
 pub mod answered;
 pub mod cards;
@@ -6,16 +6,20 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod feed;
+pub mod glance;
 pub mod install;
 pub mod locate;
+pub mod mdsplit;
 pub mod models;
 pub mod paste;
 pub mod protocol;
 pub mod queue;
 pub mod remote;
+pub mod resources;
 pub mod rows;
 pub mod serve;
 pub mod status;
+pub mod summary;
 pub mod tail;
 pub mod phone;
 pub mod update;

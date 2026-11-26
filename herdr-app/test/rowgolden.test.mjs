@@ -13,7 +13,8 @@ import { TEXTS, KNOWN_MISMATCH, WIDTHS, ROWS } from "./rowgolden.texts.mjs";
 const MARKDOWN = {
   short: [32, 32], latin: [110, 188], latinParas: [104, 182], softBreaks: [32, 58], cjk: [84, 136], cjkReply: [160, 238],
   inlineCode: [84, 162], nestedList: [178, 178], listAfterPara: [128, 128], heading: [166, 166], quote: [58, 58],
-  rule: [104, 104], table: [128, 149], tableInText: [158, 158], code: [134, 134], codeLong: [76, 118],
+  // table and tableInText were [128, 149] and [158, 158]: table lines are 22 px, not 21 (fix/cut-msg-table-list).
+  rule: [104, 104], table: [131, 153], tableInText: [160, 160], code: [134, 134], codeLong: [76, 118],
   twoCodes: [163, 163], codeUnclosed: [108, 108],
   // Were 68: the estimate saw no code box in a ~~~ fence and cut the drawn box off. fenceInfo kept its number
   // (the estimate counted its box already; the drawing now sees it too).
@@ -22,9 +23,10 @@ const MARKDOWN = {
 
 // rowHeight at WIDTHS.
 const ROW = {
+  // "assistant table" was [144, 165]: 22 px table lines (fix/cut-msg-table-list).
   // The image rows were 68 and 36: the "N images" line under the text was not counted (fix/user-image-row).
   "user": [222, 326], "user short": [68, 68], "user images": [91, 91], "user only images": [59, 59],
-  "note": [40, 40], "note open": [148, 226], "assistant": [150, 150], "assistant table": [144, 165],
+  "note": [40, 40], "note open": [148, 226], "assistant": [150, 150], "assistant table": [147, 169],
   "tools": [40, 40], "tools open": [126, 126], "sep": [40, 40], "footer": [30, 30], "status": [34, 34],
   "perm": [44, 44], "question": [44, 44], "other": [30, 30],
 };
