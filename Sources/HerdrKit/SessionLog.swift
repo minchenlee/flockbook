@@ -140,6 +140,8 @@ public final class SessionLog: Sendable {
     }
     static let shortTail: UInt64 = 256 * 1024
     static let fullTail: UInt64 = 2 * 1024 * 1024
+    /// How far back the full tail may step when it holds no message (`snapshots`).
+    static let searchMax: UInt64 = 8 * 1024 * 1024
 
     /// Pure parse for tests.
     public static func parse(lines: [String]) -> [ConversationItem] {
@@ -331,6 +333,7 @@ public final class SessionLog: Sendable {
                 var started = false
                 var skipPartial = false
                 var backfill = false
+                var stepBack = true   // the full tail may still step back past big lines that are not chat
                 var url: URL?
                 var mirror: RemoteLogMirror?
                 var gone = 0   // syncs in a row where the host said the file is not there
@@ -341,7 +344,7 @@ public final class SessionLog: Sendable {
                 }
                 func reset() {
                     offset = 0; leftover = Data(); leftoverPos = 0; parser = ConversationParser(); started = false
-                    skipPartial = false; backfill = false
+                    skipPartial = false; backfill = false; stepBack = true
                     state.lock.withLock { state.start = 0; state.consumed = 0; state.loaded = false; state.dirty = false }
                 }
                 reset()
@@ -448,6 +451,14 @@ public final class SessionLog: Sendable {
                                 pos += UInt64(raw.count) + 1
                             }
                             cont.yield(Snapshot(items: parser.items(), hasOpenToolUse: parser.hasOpenToolUse, queued: parser.queue))
+                        }
+                        // Big lines that are not chat fill the tail (an api-request-blob): load the 2 MB before it until a
+                        // message is in, up to `searchMax` back (the mod's helper does the same: tail::read_last). Each
+                        // load wakes this loop, which parses the range again and looks once more.
+                        if stepBack, total > first,
+                           state.lock.withLock({ state.wantFull && state.start > 0 && state.consumed - state.start < Self.searchMax }),
+                           !parser.items().contains(where: { if case .userText = $0.kind { true } else if case .assistantText = $0.kind { true } else { false } }) {
+                            if await self.loadEarlier(bytes: Int(Self.fullTail)) != .more { stepBack = false }
                         }
                     }
                     if let moveTo { watch.disarm(); url = moveTo; reset(); continue }
