@@ -84,6 +84,8 @@ func checksResources() throws {
     check(fromFile == items, "resources: collect(file:) gives what collect(lines:) gives")
     check(Resources.millis(Date(timeIntervalSince1970: 1e300)) == .max && Resources.millis(Date(timeIntervalSince1970: -1e300)) == .min
           && Resources.millis(Date(timeIntervalSince1970: 1.5)) == 1500, "resources: an out-of-range timestamp saturates, never traps")
+    check(Resources.ago(.min, now: 1_000_000) == "\(Int(Double(1_000_000 - Double(Int64.min)) / 1000 / 86400))d" && Resources.ago(.max, now: 1_000_000) == "now",
+          "resources: ago of a saturated timestamp does not overflow")
     check(Resources.collect(file: resFixtures.appendingPathComponent("no-such.jsonl"), home: nil) == nil, "resources: a file that cannot be read gives nil")
     checksResourcesList()
 }

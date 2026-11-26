@@ -82,7 +82,7 @@ extension Resources {
     /// "now", "4m", "3h", "2d" ("" without a time).
     public static func ago(_ ms: Int64?, now: Int64) -> String {
         guard let ms, ms != 0 else { return "" }
-        let s = max(0, Double(now - ms) / 1000)
+        let s = max(0, (Double(now) - Double(ms)) / 1000)   // in Double: a saturated timestamp never overflows
         if s < 60 { return "now" }
         if s < 3600 { return "\(Int(s / 60))m" }
         if s < 86400 { return "\(Int(s / 3600))h" }
