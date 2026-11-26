@@ -78,4 +78,50 @@ func checksResources() throws {
     let want = try resFixture("expected.json")
     if json(got) != json(want) { print("  got  \(json(got))\n  want \(json(want))") }
     check(json(got) == json(want), "resources: conversation.jsonl gives expected.json")
+
+    // The same log read as a file (with byte offsets): the same items.
+    let fromFile = Resources.collect(file: resFixtures.appendingPathComponent("conversation.jsonl"), home: "/home/me") ?? []
+    check(fromFile == items, "resources: collect(file:) gives what collect(lines:) gives")
+    check(Resources.collect(file: resFixtures.appendingPathComponent("no-such.jsonl"), home: nil) == nil, "resources: a file that cannot be read gives nil")
+    checksResourcesList()
+}
+
+/// The window's list rules, as the mod's resources.test.mjs.
+private func checksResourcesList() {
+    func res(_ id: String, _ kind: String, _ ts: Int64?, target: String? = nil, exists: Bool? = nil) -> Resources.Item {
+        Resources.Item(id: id, kind: kind, target: target ?? "https://x.com/\(id)", title: id, detail: "", row: "r\(id)", firstTs: ts, lastTs: ts, mentions: 1, exists: exists)
+    }
+    let items = [res("a", "link", 10), res("b", "doc", 20, target: "/p/b.md", exists: true)]
+    var removed = Resources.removing(items[0], from: [])
+    check(Resources.visible(items, removed: removed).map(\.id) == ["b"], "resources list: removed stays removed")
+    check(Resources.visible([res("a", "link", 50)] + items.dropFirst(), removed: removed).map(\.id) == ["a", "b"], "resources list: mentioned again later it comes back")
+    check(Resources.visible([res("a", "link", 99)], removed: [.init(id: "a", lastTs: nil)]).isEmpty, "resources list: removed for good")
+    removed = Resources.removing(res("a", "link", 30), from: removed)
+    check(removed == [.init(id: "a", lastTs: 30)], "resources list: one entry per id, with the last mention it had")
+    check(Resources.badgeCount(items, seen: 10, removed: []) == 1, "resources list: the badge counts the newer ones")
+    check(Resources.badgeCount(items, seen: nil, removed: []) == 0, "resources list: nothing seen yet is no badge")
+    check(Resources.badgeCount(items + [res("c", "link", 30)], seen: 10, removed: [.init(id: "c", lastTs: 30)]) == 1, "resources list: a removed one is not counted")
+    check(Resources.newest(items) == 20, "resources list: newest")
+
+    let many = (0..<35).map { res("l\($0)", "link", Int64(100 - $0)) } + [res("m", "doc", 5, target: "/p/m.MD"), res("c", "cmd", 4, target: "make")]
+    let laid = Resources.layoutGroups(many)
+    check(laid.map(\.group.id) == ["markdown", "commands", "links"], "resources list: the groups in order, only those with items")
+    check(laid.last?.shown.count == 30 && laid.last?.rest == 5, "resources list: 30 rows, then Show 5 more")
+    check(Resources.layoutGroups(many, expanded: ["links"]).last?.shown.count == 35, "resources list: Show more draws them all")
+    let folded = Resources.layoutGroups(many, collapsed: ["links"]).last
+    check(folded?.collapsed == true && folded?.shown.isEmpty == true && folded?.rest == 0 && folded?.items.count == 35, "resources list: a folded group draws no rows")
+
+    let now: Int64 = 1_000_000_000
+    check([Resources.ago(nil, now: now), Resources.ago(now - 5_000, now: now), Resources.ago(now - 240_000, now: now),
+           Resources.ago(now - 3 * 3_600_000, now: now), Resources.ago(now - 2 * 86_400_000, now: now)] == ["", "now", "4m", "3h", "2d"], "resources list: ago")
+
+    check(Resources.openPlan(res("p", "pr", 1, target: "https://github.com/o/r/pull/1")) == .url(URL(string: "https://github.com/o/r/pull/1")!), "resources plan: a web address opens in the browser")
+    if case .why = Resources.openPlan(res("j", "link", 1, target: "javascript:alert(1)")) {} else { check(false, "resources plan: no javascript:") }
+    check(Resources.openPlan(res("d", "doc", 1, target: "/home/me/plan.md", exists: true)) == .file("/home/me/plan.md"), "resources plan: a doc here opens")
+    check(Resources.openPlan(res("d", "doc", 1, target: "/home/me/r.HTML", exists: true)) == .file("/home/me/r.HTML"), "resources plan: any case")
+    check(Resources.openPlan(res("d", "doc", 1, target: "/home/me/plan.md", exists: false)) == .why("File not found."), "resources plan: a missing file")
+    check(Resources.openPlan(res("d", "doc", 1, target: "/home/me/plan.md", exists: true), machine: "box") == .why("This file is on box. Open it there."), "resources plan: a file on another machine")
+    check(Resources.openPlan(res("d", "doc", 1, target: "/home/me/run.sh", exists: true)) == .why("Flockbook does not open this kind of file."), "resources plan: a kind that does not open")
+    check(Resources.openPlan(res("d", "doc", 1, target: "~/plan.md", exists: true)) == .why("Not a full path."), "resources plan: not a full path")
+    check(Resources.openPlan(res("c", "cmd", 1, target: "cd ~/x && \\\n  make")) == .copy("cd ~/x && \\\n  make"), "resources plan: a command is copied, never run")
 }
