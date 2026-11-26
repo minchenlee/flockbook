@@ -86,7 +86,8 @@ final class ResourcesModel {
         touch(key)
         // The first look at an agent: what is there is seen (an old conversation does not light the badge).
         if seen[key] == nil { setSeen(key, Resources.newest(e.items)) }
-        if open { markSeen(key) }
+        // Only the list the panel shows: a read of another agent that ends while the panel is open stays unseen.
+        if open, key == shownKey { markSeen(key) }
     }
 
     private func touch(_ key: String) {

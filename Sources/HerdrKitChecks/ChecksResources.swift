@@ -82,6 +82,8 @@ func checksResources() throws {
     // The same log read as a file (with byte offsets): the same items.
     let fromFile = Resources.collect(file: resFixtures.appendingPathComponent("conversation.jsonl"), home: "/home/me") ?? []
     check(fromFile == items, "resources: collect(file:) gives what collect(lines:) gives")
+    check(Resources.millis(Date(timeIntervalSince1970: 1e300)) == .max && Resources.millis(Date(timeIntervalSince1970: -1e300)) == .min
+          && Resources.millis(Date(timeIntervalSince1970: 1.5)) == 1500, "resources: an out-of-range timestamp saturates, never traps")
     check(Resources.collect(file: resFixtures.appendingPathComponent("no-such.jsonl"), home: nil) == nil, "resources: a file that cannot be read gives nil")
     checksResourcesList()
 }

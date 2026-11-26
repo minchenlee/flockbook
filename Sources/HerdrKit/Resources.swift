@@ -1,6 +1,15 @@
 import Foundation
 
 extension Resources {
+    /// Milliseconds since 1970, saturating as Rust's `as i64` (NaN 0): a malformed timestamp in a log never traps.
+    static func millis(_ d: Date) -> Int64 {
+        let ms = (d.timeIntervalSince1970 * 1000).rounded()
+        if ms.isNaN { return 0 }
+        if ms >= 9.2e18 { return .max }
+        if ms <= -9.2e18 { return .min }
+        return Int64(ms)
+    }
+
     /// One thing the agent pointed the human to (the helper's \`res\` line).
     public struct Item: Identifiable, Equatable, Sendable {
         /// FNV-1a of the item's key (the normalized target): the same target is one item.
@@ -66,7 +75,7 @@ extension Resources {
 
         public mutating func add(_ items: [ConversationItem], home: String?) {
             for it in merged(items) {
-                let ts = it.timestamp.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) }
+                let ts = it.timestamp.map { Resources.millis($0) }
                 var found: [(String, String, Title?)] = []
                 switch it.kind {
                 case let .assistantText(s):
