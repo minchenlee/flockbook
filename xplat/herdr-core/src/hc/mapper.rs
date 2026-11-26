@@ -132,7 +132,7 @@ pub fn kind_of_argv(argv: &[String]) -> Option<String> {
 /// The key gate's direct path uses it; [`kind_of_argv`] (display) also looks through other words.
 fn exec_kind(argv: &[String]) -> Option<&'static str> {
     let words: Vec<&str> = argv.iter().map(String::as_str).filter(|a| !a.is_empty()).collect();
-    crate::resolver::program(&words).and_then(known_kind)
+    crate::resolver::program(&words).and_then(|p| known_kind(&p))
 }
 
 /// Agent kind reported by OSC 7501 `status.app`, for agents with live evidence.

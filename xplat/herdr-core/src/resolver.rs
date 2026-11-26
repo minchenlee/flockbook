@@ -17,6 +17,7 @@ use crate::session_log::{self, deleting_last_path_component, home_dir, is_abs_pa
 use crate::util::Date;
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
@@ -854,27 +855,32 @@ fn is_interpreter(w: &str) -> bool {
 /// The program a command line runs: its first word's name or, under an interpreter, the second word's name
 /// (`node /opt/x/bin/codex` runs `codex`). Interpreter flags are not skipped: `node --inspect …/codex` gives
 /// `--inspect` (fail closed). A program that only names another (`script claude`) runs itself.
-pub(crate) fn program<'a>(words: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn program<'a>(words: &[&'a str]) -> Option<Cow<'a, str>> {
     let first = program_name(words.first()?);
-    if is_interpreter(first) {
+    if is_interpreter(&first) {
         words.get(1).map(|w| program_name(w))
     } else {
         Some(first)
     }
 }
 
-/// A program word's name: its last path component. On Windows `\` separates too, and `.exe` is dropped
-/// (`C:\x\claude.exe` is `claude`).
-fn program_name(w: &str) -> &str {
+/// A program word's name, the one name rule for agents and shells: its last path component. On Windows
+/// ([`windows_names`]) `\` separates too, `.exe` is dropped and case is ignored (`C:\x\CLAUDE.EXE` is `claude`).
+pub(crate) fn program_name(w: &str) -> Cow<'_, str> {
     let name = last_path_component(w);
     if !windows_names() {
-        return name;
+        return Cow::Borrowed(name);
     }
     let t = name.trim_end_matches('\\');
     let name = t.rsplit('\\').next().unwrap_or(t);
-    match name.len().checked_sub(4) {
+    let name = match name.len().checked_sub(4) {
         Some(i) if name.is_char_boundary(i) && name[i..].eq_ignore_ascii_case(".exe") => &name[..i],
         _ => name,
+    };
+    if name.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(name)
     }
 }
 
@@ -929,8 +935,12 @@ fn executables(kind: &str) -> Vec<&str> {
 
 fn runs(p: &Proc, kind: &str) -> bool {
     let names = executables(kind);
-    let words: Vec<&str> = p.line.split(' ').filter(|w| !w.is_empty()).take(2).collect();
-    program(&words).is_some_and(|w| names.contains(&w))
+    let words: Vec<&str> = if p.argv.is_empty() {
+        p.line.split(' ').filter(|w| !w.is_empty()).take(2).collect()
+    } else {
+        p.argv.iter().map(String::as_str).filter(|w| !w.is_empty()).take(2).collect()
+    };
+    program(&words).is_some_and(|w| names.contains(&w.as_ref()))
 }
 
 /// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. At a tie in depth: `None` when
