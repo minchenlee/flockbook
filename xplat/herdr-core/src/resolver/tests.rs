@@ -1050,6 +1050,43 @@ fn windows_names_ignore_case_and_keep_spaced_paths() {
     });
 }
 
+/// Windows (Codex R1 on PR 22): an hc terminal whose foreground is only `claude.exe`, with no OSC status yet, is a
+/// Claude pane through the mapper, and the resolver finds its log by the pid file.
+#[test]
+fn windows_hc_claude_exe_pane_through_the_mapper() {
+    test_windows::run(|| {
+        let t0 = DateTime::parse_from_rfc3339("2026-11-20T22:54:37Z").unwrap().with_timezone(&Utc);
+        let claude = r"C:\Program Files\Claude\claude.exe";
+        let pwsh = r"C:\Program Files\PowerShell\7\pwsh.exe";
+        let record = serde_json::json!({
+            "address": "t1",
+            "state": "live",
+            "argv": [pwsh],
+            "pid": 500,
+            "cwd": r"C:\w",
+            "created_ms": 7,
+            "foreground": {"name": "claude.exe", "argv": [claude], "pid": 17144}
+        });
+        let ws = crate::hc::mapper::workspaces_with(&[record], &crate::hc::mapper::NoAgentCheck);
+        let pane = ws[0].tabs[0].panes[0].clone();
+        let agent = pane.agent.clone().expect("claude.exe in front is an agent pane");
+        assert_eq!(agent.kind, "claude");
+        assert_eq!(agent.process.as_deref(), Some("17144@7"), "claude.exe in front is the key identity");
+
+        let procs = vec![
+            proc_argv(500, 1, t0, &[pwsh], "HC_TERMINAL_ID=t1"),
+            proc_argv(17144, 500, t0, &[claude], "HC_TERMINAL_ID=t1"),
+        ];
+        let (_t, dir) = tmp();
+        let o = serde_json::json!({"pid": 17144, "sessionId": "sid-win", "procStart": "134396888779841927"});
+        fs::write(format!("{dir}/17144.json"), serde_json::to_vec(&o).unwrap()).unwrap();
+        let need = Need::new(&pane.id, &agent.kind, &pane.cwd, pane.process_ids.clone());
+        let mut res = resolver(|r| r.claude_dir = dir.clone());
+        let got = res.resolve_with(std::slice::from_ref(&need), &set(&[]), &HashMap::new(), Some(&procs)).get(&pane.id).cloned();
+        assert_eq!(got, Some("sid-win".to_string()), "the mapper's Claude pane resolved by its pid file");
+    });
+}
+
 /// Outside Windows, names stay as they are: `CLAUDE` and `claude.exe` are other programs.
 #[cfg(not(windows))]
 #[test]
