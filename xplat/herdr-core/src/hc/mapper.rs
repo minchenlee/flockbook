@@ -478,6 +478,44 @@ mod tests {
         }
     }
 
+    /// Windows (Codex R1 on PR 22): a shell in front is a shell with or without `.exe`, in any case, at any path. With
+    /// a Claude child and a Claude status that matches its start, it still gives no key identity: keys would reach the
+    /// prompt.
+    #[test]
+    fn windows_shell_in_front_gets_no_key_identity() {
+        crate::resolver::test_windows::run(|| {
+            let base_ms: i64 = 1_794_500_000_000;
+            let term = |fg: &str| {
+                Term::parse(&json!({
+                    "address": "t-win",
+                    "argv": [fg],
+                    "pid": 400,
+                    "created_ms": 7,
+                    "foreground": {"name": fg, "argv": [fg], "pid": 500},
+                    "status": {"state": "done", "app": "claude-code"},
+                    "status_ms": base_ms + 2000
+                }))
+                .unwrap()
+            };
+            let claude = r"C:\Users\me\.local\bin\claude.exe";
+            let tree = |fg: &str| tree_with(vec![proc_(500, 400, base_ms, fg), proc_(501, 500, base_ms + 1000, claude)]);
+            let mut shells: Vec<String> =
+                SHELLS.iter().flat_map(|s| [format!("{s}.exe"), format!("{}.EXE", s.to_uppercase())]).collect();
+            shells.extend([
+                r"C:\Program Files\PowerShell\7\pwsh.exe".to_string(),
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".to_string(),
+                r"C:\Windows\System32\cmd.exe".to_string(),
+            ]);
+            for sh in &shells {
+                assert_eq!(process_with(&term(sh), Some("claude"), &tree(sh)), None, "{sh} in front: no key identity");
+            }
+            // Controls: Claude itself in front, and a wrapper that is no shell, keep their identities.
+            assert_eq!(process_with(&term(claude), Some("claude"), &PanicCheck).as_deref(), Some("500@7"));
+            let wrap = r"C:\Program Files\secretspec\secretspec.exe";
+            assert_eq!(process_with(&term(wrap), Some("claude"), &tree(wrap)).as_deref(), Some("500/501@7"));
+        });
+    }
+
     #[test]
     fn wrapper_identities_and_fail_closed() {
         let base_ms: i64 = 1_794_500_000_000;
