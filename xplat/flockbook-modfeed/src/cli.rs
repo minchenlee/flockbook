@@ -307,7 +307,7 @@ pub fn run(argv: &[String]) -> String {
                     let Some(path) = log else { return r.finish_with(json!({"cursor": null, "full": true})) };
                     let user_home = std::env::var_os("HOME").map(PathBuf::from);
                     // What the last call kept (resources/<hash of the terminal>.json beside the cache): only the new lines are parsed.
-                    let kept_at = cache_url.and_then(|c| crate::resources::state_dir(c)).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&found.pane.terminal_id))));
+                    let kept_at = cache_url.and_then(crate::resources::state_dir).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&found.pane.terminal_id))));
                     let kept: Option<crate::resources::Kept> = kept_at.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok());
                     let linear = matches!(kind.as_str(), "claude" | "codex" | "cursor" | "grok");
                     // The pane's folder: where a relative doc path in a reply opens (when the log names none that has it).

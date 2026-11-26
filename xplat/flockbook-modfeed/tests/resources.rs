@@ -1240,7 +1240,7 @@ fn a_state_or_a_cursor_of_the_rules_before_is_all_again() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("s.jsonl");
     write(&log, &[user("u0", 0, "go"), say("a1", 1, "see https://a.example.com"), user("u1", 2, "ok")], false);
-    assert!(resources::RULES >= 3, "rules 3: states of 101da5e took paths from failed tools");
+    const { assert!(resources::RULES >= 3, "rules 3: states of 101da5e took paths from failed tools") };
     let (a, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
     let mut k = k.unwrap();
     k.rules = 2;
