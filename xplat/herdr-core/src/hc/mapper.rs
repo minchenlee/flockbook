@@ -198,7 +198,7 @@ const SHELLS: [&str; 14] = [
 ];
 
 fn is_shell_name(raw: &str) -> bool {
-    let base = last_path_component(raw);
+    let base = crate::resolver::program_name(raw);
     let base = base.strip_prefix('-').unwrap_or(&base);
     SHELLS.contains(&base)
 }
