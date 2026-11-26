@@ -8,6 +8,7 @@ All names, code and data here are made up. Turn forms:
   ("glob", pattern, output)        file search
   Claude only: ("u", text, [picture, ...])  a user message with pasted pictures (files in scripts/demo/pictures/)
                ("readimg", path, picture)   a Read of an image file
+  Claude only: ("tool", name, input, output)       any other tool call (an Artifact publish)
   Claude only: ("task", description, prompt, result)  ("todo", [(text, status)])  ("fetch", url, prompt, result)
                ("ask", questions, answers)  an answered AskUserQuestion
 Agent status: idle | working | done | question | approval. Codex, working: "queued" = follow-ups waiting on its screen. `start`/`end`: minutes ago of the first/last turn.
@@ -15,6 +16,8 @@ Prompts answer keys (Claude only; see gen.interactive):
   approval: the last turn is ("bash", cmd, None); "allow" = {"output", "then": [turns after it], "verb"}.
   question: "question" = one single-choice question; "answers" = {option label: follow-up text}.
 """
+
+import resdemo  # the Resources demo agent (lighthouse-audit-docs); scripts/demo is on the path
 
 # ------------------------------------------------------------------ Orchard: storefront web app
 
@@ -1042,6 +1045,11 @@ WORKSPACES = [
              "start": 180, "end": 140, "turns": LIGHTHOUSE_API},
             {"name": "lighthouse-links-check", "kind": "codex", "status": "idle", "title": "Dead link check",
              "start": 130, "end": 125, "turns": LIGHTHOUSE_LINKS, "split": "right"},
+        ]},
+        {"label": "docs audit", "panes": [
+            # The Resources demo: every group, Markdown past 30 rows (scripts/demo/resdemo.py).
+            {"name": "lighthouse-audit-docs", "kind": "claude", "status": "done", "title": "Docs audit before 2.0",
+             "start": 150, "end": 6, "turns": resdemo.TURNS, "replies": resdemo.REPLIES},
         ]},
     ]},
     {"label": "Tidepool", "dir": "tidepool", "about": "A small Rust CLI that tails and filters log files.", "tabs": [

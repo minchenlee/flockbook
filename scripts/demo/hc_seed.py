@@ -23,6 +23,7 @@ import json, os, pwd, re, socket, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import content  # noqa: E402
 import gen  # noqa: E402
+import resdemo  # noqa: E402
 
 REPLY_WORK_SECONDS = 4
 REPLIES = [
@@ -123,13 +124,14 @@ def slug(s):
 
 
 def reply_blocks(entry, label, state_dir):
-    """LINE blocks for a Claude agent: up to len(REPLIES) typed messages, each answered after a short working spell."""
+    """LINE blocks for a Claude agent: up to len(REPLIES) typed messages (the agent's own "replies", if it has them),
+    each answered after a short working spell."""
     agent, log, cwd, sid = entry["agent"], entry["log"], entry["cwd"], entry["sid"]
     d = f"{state_dir}/reply/{agent['name']}"
     turns = list(agent["turns"])
     base = len(gen.claude_log(agent, cwd, sid))
     blocks = []
-    for k, reply in enumerate(REPLIES):
+    for k, reply in enumerate(agent.get("replies", REPLIES)):
         asked = turns + [("u", "@@TEXT@@")]
         answered = asked + [("a", reply)]
         lines = gen.claude_log({**agent, "turns": answered}, cwd, sid)[base:]
@@ -194,6 +196,8 @@ def main():
     plan = gen.prepare(root, state_dir)
     scripts(plan, state_dir)
     skills(home)
+    # The files the Resources demo agent names (Resources lists a doc only when its file is there).
+    print(f"wrote {resdemo.write_files()} files for the Resources demo under {resdemo.CWD}")
     print(f"wrote {len(plan)} logs, screens and scripts under {state_dir}")
 
     if only is not None and not only <= {e["agent"]["name"] for e in plan}:

@@ -189,6 +189,8 @@ def claude_tool(t, cwd):
         return "TodoWrite", {"todos": todos}, "Todos have been modified successfully.", False
     if op == "fetch":
         return "WebFetch", {"url": t[1], "prompt": t[2]}, t[3], False
+    if op == "tool":   # any other tool: ("tool", name, input, output)
+        return t[1], t[2], t[3], False
     raise SystemExit(f"unknown turn {op}")
 
 
@@ -367,7 +369,8 @@ def claude_body(agent, cwd_label):
             name, inp, res, err = claude_tool(t, "")
             arg = {"Bash": inp.get("command", ""), "Read": t[1], "Edit": t[1], "Write": t[1],
                    "Grep": f'pattern: "{t[1]}"', "Glob": f'pattern: "{t[1]}"', "Agent": t[1] if op == "task" else "",
-                   "TodoWrite": "", "WebFetch": t[1] if op == "fetch" else ""}.get(name, "")
+                   "TodoWrite": "", "WebFetch": t[1] if op == "fetch" else "",
+                   "Artifact": inp.get("title", "") if op == "tool" else ""}.get(name, "")
             shown = {"Edit": "Update", "Grep": "Search", "Agent": "Explore", "TodoWrite": "Update Todos",
                      "WebFetch": "Fetch"}.get(name, name)
             dot = f"{RED}⏺{RESET}" if err else f"{GREEN}⏺{RESET}"
