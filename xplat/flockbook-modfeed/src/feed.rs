@@ -85,15 +85,24 @@ pub fn run<Tz: chrono::TimeZone>(
     }
     // Keep the old range start while the log only grew and the range is not too big.
     let keep = prev.and_then(|p| (p.path == path_s && size >= p.size && size - p.start <= MAX_SPAN).then_some(p.start));
-    let range = tail::read(url, keep, tail::BYTES)?;
-    let rs = rows::rows(&parsed(&range, pictures), now, tz);
+    // A new range: the end of the log, stepped back past large lines that are not chat (`tail::read_last`).
+    let (range, items) = match keep {
+        Some(k) => {
+            let r = tail::read(url, Some(k), tail::BYTES)?;
+            let items = parsed(&r, pictures);
+            (r, items)
+        }
+        None => tail::read_last(url, |r| parsed(r, pictures))?,
+    };
+    let rs = rows::rows(&items, now, tz);
     let mut enc = JsonLines::new();
     for r in &rs {
         enc.emit(r);
     }
     let hashes: Vec<String> = enc.lines.iter().map(|l| fnv1a(l)).collect();
     let mut at = 0;
-    if let (Some(prev), Some(_)) = (prev, keep) {
+    // The same start as the rows sent (kept, or a new range that found the same start): only the rows that changed.
+    if let Some(prev) = prev.filter(|p| p.path == path_s && p.start == range.start) {
         while at < prev.hashes.len().min(hashes.len()) && prev.hashes[at] == hashes[at] {
             at += 1;
         }
@@ -111,10 +120,22 @@ pub fn run<Tz: chrono::TimeZone>(
     Ok(Some(state))
 }
 
-/// `feed --before <start>`: the rows of the 2 MB before `start`. Keeps no state.
+/// `feed --before <start>`: the rows of the 2 MB before `start`. A range with no rows (large lines that are not chat)
+/// takes the 2 MB before it too, up to `tail::SEARCH_MAX` back. Keeps no state.
 pub fn older<Tz: chrono::TimeZone>(path: &Path, before: u64, pictures: bool, out: &mut JsonLines, now: &Date, tz: &Tz) -> std::io::Result<()> {
-    let range = tail::read_before(path, before, tail::BYTES)?;
-    let rs = rows::rows(&parsed(&range, pictures), now, tz);
+    let mut range = tail::read_before(path, before, tail::BYTES)?;
+    let mut rs = rows::rows(&parsed(&range, pictures), now, tz);
+    while rs.is_empty() && range.start > 0 && before - range.start < tail::SEARCH_MAX {
+        let more = tail::read_before(path, range.start, tail::BYTES)?;
+        if more.start >= range.start {
+            break;
+        }
+        range.lines.splice(0..0, more.lines);
+        range.offsets.splice(0..0, more.offsets);
+        range.start = more.start;
+        // Parsed whole: a tool result in the later part still finds its call.
+        rs = rows::rows(&parsed(&range, pictures), now, tz);
+    }
     out.emit_value(json!({"type": "older", "path": path.to_string_lossy(), "start": range.start, "count": rs.len()}));
     for r in &rs {
         out.emit(r);

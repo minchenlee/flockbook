@@ -106,6 +106,51 @@ pub fn read_before_max(path: &Path, before: u64, bytes: u64, max_line: u64) -> s
     Ok(Range { lines, offsets, start, size })
 }
 
+/// How far back the first read may go when the last `BYTES` hold no message (large lines that are not chat: an
+/// `api-request-blob`, a user line with pictures cut at the range start). Equal to `feed::MAX_SPAN`, so a feed that
+/// reads that far back still keeps its range start while the log grows.
+pub const SEARCH_MAX: u64 = 8 * 1024 * 1024;
+
+/// True when `items` hold a message (the owner's or the agent's text): what the chat, a glance and a summary need.
+pub fn has_message(items: &[ConversationItem]) -> bool {
+    items.iter().any(|it| matches!(it.kind, herdr_core::ItemKind::UserText(_) | herdr_core::ItemKind::AssistantText(_)))
+}
+
+/// The end of the log, as the app shows it first: the last `BYTES` (`read`), and, when they hold no message, the
+/// `BYTES` before them, and so on until a message is in (or the file's start, or `SEARCH_MAX` back). `parse`: how
+/// the caller reads items from a range; the items of the range returned come back with it, parsed whole.
+pub fn read_last(path: &Path, parse: impl Fn(&Range) -> Vec<ConversationItem>) -> std::io::Result<(Range, Vec<ConversationItem>)> {
+    read_last_in(path, BYTES, SEARCH_MAX, parse)
+}
+
+/// `read_last` with the step and the limit: `start` stays at least `size - max` (unless the file's start is nearer).
+pub fn read_last_in(path: &Path, bytes: u64, max: u64, parse: impl Fn(&Range) -> Vec<ConversationItem>) -> std::io::Result<(Range, Vec<ConversationItem>)> {
+    let mut r = read(path, None, bytes)?;
+    let items = parse(&r);
+    if has_message(&items) || r.start == 0 {
+        return Ok((r, items));
+    }
+    // With no whole line read, `start` may be inside a line still being written (no newline yet): step from its start.
+    if r.lines.is_empty() {
+        r.start = line_start(path, r.start)?;
+    }
+    let mut found = false;
+    while !found && r.start > 0 && r.size - r.start < max {
+        let left = max - (r.size - r.start);
+        let chunk = read_before_max(path, r.start, bytes.min(left), left)?;
+        if chunk.start >= r.start || (chunk.lines.is_empty() && r.size - chunk.start > max) {
+            break; // no step back, or a line longer than the limit: keep what was read
+        }
+        found = has_message(&parse(&chunk));
+        r.lines.splice(0..0, chunk.lines);
+        r.offsets.splice(0..0, chunk.offsets);
+        r.start = chunk.start;
+    }
+    // Parsed whole: a tool result in a later chunk still finds its call.
+    let items = parse(&r);
+    Ok((r, items))
+}
+
 /// The start of the line that holds byte `at`: just after the newline before it, or 0.
 fn line_start(path: &Path, at: u64) -> std::io::Result<u64> {
     const STEP: u64 = 64 * 1024;
@@ -119,6 +164,11 @@ fn line_start(path: &Path, at: u64) -> std::io::Result<u64> {
         end = from;
     }
     Ok(0)
+}
+
+/// `items` of a range's lines (for `read_last`).
+pub fn items_of(range: &Range) -> Vec<ConversationItem> {
+    items(&range.lines)
 }
 
 pub fn items(lines: &[String]) -> Vec<ConversationItem> {

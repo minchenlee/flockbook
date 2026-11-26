@@ -100,6 +100,11 @@ fn end_of(s: &str, n: usize) -> String {
 }
 
 /// What the model reads for the last turn in `items`: (the turn's id, the text). None: the agent wrote nothing.
+/// `input` from the log's end, as the chat shows it first. Err: the log could not be read.
+pub fn input_at(path: &Path, agent: &str) -> std::io::Result<Option<(String, String)>> {
+    tail::read_last(path, tail::items_ids).map(|(_, items)| input(&items, agent))
+}
+
 pub fn input(items: &[ConversationItem], agent: &str) -> Option<(String, String)> {
     let from = items.iter().rposition(|it| matches!(it.kind, ItemKind::UserText(_)));
     let turn = &items[from.map_or(0, |i| i + 1)..];
@@ -166,8 +171,8 @@ pub fn run(client: &HcClient, terminal: &str, kind: &str, by: &str, model: Optio
         return Err(("summary-unsupported", format!("No summary by {by} yet: Claude Code, Codex and pi can write one. To choose one: Flockbook settings, Summary written by.")));
     };
     let Some(path) = path else { return Err(("summary-none", "This agent has no conversation yet.".into())) };
-    let read = tail::read(path, None, tail::BYTES).map_err(|_| ("read", "The agent's conversation could not be read.".to_string()))?;
-    let Some((id, text)) = input(&tail::items_ids(&read), kind) else {
+    let read = input_at(path, kind).map_err(|_| ("read", "The agent's conversation could not be read.".to_string()))?;
+    let Some((id, text)) = read else {
         return Err(("summary-none", "The agent wrote nothing in its last turn.".into()));
     };
     let path_s = path.to_string_lossy().to_string();
