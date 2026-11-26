@@ -17,6 +17,7 @@ use crate::session_log::{self, deleting_last_path_component, home_dir, is_abs_pa
 use crate::util::Date;
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
@@ -43,6 +44,9 @@ pub struct Proc {
     pub start: Date,
     /// Command line followed by the environment, as `ps -E` prints it.
     pub line: String,
+    /// The command line's words, when the source gives them apart (Windows): a word can hold spaces
+    /// (`C:\Program Files\…`). Empty: the words are `line` split at spaces.
+    pub argv: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -757,10 +761,17 @@ fn parse_lstart(words: &[&str]) -> Option<NaiveDateTime> {
 }
 
 /// A pid file's `procStart`: `ps lstart` text on macOS; on Linux Claude Code writes `/proc/<pid>/stat` starttime
-/// (clock ticks after boot) instead.
+/// (clock ticks after boot) instead, and on Windows the creation time as a FILETIME (100 ns after 1601-01-01 UTC).
+/// The two numbers are told apart by size: a FILETIME after 1632 is at least 10^16; ticks after boot reach that only
+/// after some 3 million years at 100 Hz.
 fn proc_start(ps: &str) -> Option<Date> {
     if !ps.is_empty() && ps.bytes().all(|b| b.is_ascii_digit()) {
-        return linux::ticks_to_date(ps.parse().ok()?);
+        let n: u64 = ps.parse().ok()?;
+        if n >= 10_000_000_000_000_000 {
+            const UNIX_EPOCH_S: i64 = 11_644_473_600; // 1601-01-01 to 1970-01-01
+            return DateTime::<Utc>::from_timestamp((n / 10_000_000) as i64 - UNIX_EPOCH_S, (n % 10_000_000) as u32 * 100);
+        }
+        return linux::ticks_to_date(n);
     }
     let words: Vec<&str> = ps.split(' ').filter(|w| !w.is_empty()).collect();
     parse_lstart(&words).and_then(|n| local_to_utc(&Utc, &n))
@@ -804,7 +815,7 @@ pub fn parse_ps_in<Tz: TimeZone>(text: &str, tz: &Tz) -> Vec<Proc> {
         }
         let (Ok(pid), Ok(ppid)) = (w[0].parse::<i32>(), w[1].parse::<i32>()) else { continue };
         let Some(start) = parse_lstart(&w[2..7]).and_then(|n| local_to_utc(tz, &n)) else { continue };
-        out.push(Proc { pid, ppid, start, line: rest.to_string() });
+        out.push(Proc { pid, ppid, start, line: rest.to_string(), argv: vec![] });
     }
     out
 }
@@ -844,12 +855,70 @@ fn is_interpreter(w: &str) -> bool {
 /// The program a command line runs: its first word's name or, under an interpreter, the second word's name
 /// (`node /opt/x/bin/codex` runs `codex`). Interpreter flags are not skipped: `node --inspect …/codex` gives
 /// `--inspect` (fail closed). A program that only names another (`script claude`) runs itself.
-pub(crate) fn program<'a>(words: &[&'a str]) -> Option<&'a str> {
-    let first = last_path_component(words.first()?);
-    if is_interpreter(first) {
-        words.get(1).map(|w| last_path_component(w))
+pub(crate) fn program<'a>(words: &[&'a str]) -> Option<Cow<'a, str>> {
+    let first = program_name(words.first()?);
+    if is_interpreter(&first) {
+        words.get(1).map(|w| program_name(w))
     } else {
         Some(first)
+    }
+}
+
+/// A program word's name, the one name rule for agents and shells: its last path component. On Windows
+/// ([`windows_names`]) `\` separates too, `.exe` is dropped and case is ignored (`C:\x\CLAUDE.EXE` is `claude`).
+pub(crate) fn program_name(w: &str) -> Cow<'_, str> {
+    let name = last_path_component(w);
+    if !windows_names() {
+        return Cow::Borrowed(name);
+    }
+    let t = name.trim_end_matches('\\');
+    let name = t.rsplit('\\').next().unwrap_or(t);
+    let name = match name.len().checked_sub(4) {
+        Some(i) if name.is_char_boundary(i) && name[i..].eq_ignore_ascii_case(".exe") => &name[..i],
+        _ => name,
+    };
+    if name.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
+/// Program names follow Windows rules ([`program_name`]): on Windows, and in tests that turn them on with
+/// [`test_windows::run`] so other systems run the Windows cases too.
+fn windows_names() -> bool {
+    cfg!(windows) || test_windows::on()
+}
+
+#[cfg(not(test))]
+mod test_windows {
+    pub fn on() -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_windows {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ON: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub fn on() -> bool {
+        ON.with(Cell::get)
+    }
+
+    /// Runs `f` with Windows program names on this thread.
+    pub fn run<R>(f: impl FnOnce() -> R) -> R {
+        struct Reset(bool);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                ON.with(|on| on.set(self.0));
+            }
+        }
+        let _reset = Reset(ON.with(|on| on.replace(true)));
+        f()
     }
 }
 
@@ -866,8 +935,12 @@ fn executables(kind: &str) -> Vec<&str> {
 
 fn runs(p: &Proc, kind: &str) -> bool {
     let names = executables(kind);
-    let words: Vec<&str> = p.line.split(' ').filter(|w| !w.is_empty()).take(2).collect();
-    program(&words).is_some_and(|w| names.contains(&w))
+    let words: Vec<&str> = if p.argv.is_empty() {
+        p.line.split(' ').filter(|w| !w.is_empty()).take(2).collect()
+    } else {
+        p.argv.iter().map(String::as_str).filter(|w| !w.is_empty()).take(2).collect()
+    };
+    program(&words).is_some_and(|w| names.contains(&w.as_ref()))
 }
 
 /// The agent process nearest to `root` below it (depth >= 1) that runs `kind`. At a tie in depth: `None` when

@@ -109,7 +109,7 @@ impl ProcessSource for LinuxProcSource {
             if !env.is_empty() {
                 line = line + " " + &env;
             }
-            out.push(Proc { pid, ppid, start, line });
+            out.push(Proc { pid, ppid, start, line, argv: vec![] });
         }
         out
     }
