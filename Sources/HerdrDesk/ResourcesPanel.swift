@@ -38,6 +38,8 @@ final class ResourcesModel {
     /// Runs a click's plan; returns a note (nil: done, nothing to say). Checks put their own.
     var perform: @MainActor (Resources.Plan) -> (text: String, ok: Bool)? = ResourcesModel.run
     private var reading: Set<String> = []
+    /// Agents whose log was read once (a list, or nothing to read): until then the panel says it is reading.
+    private var tried: Set<String> = []
 
     init() {
         let d = AppDefaults.store
@@ -69,17 +71,22 @@ final class ResourcesModel {
     /// Reads the agent's log again when it changed (`force`: also when not, so docs are looked at again). Off the main
     /// actor; one read an agent at a time.
     func refresh(key: String, log: URL?, home: String?, agentDir: String?, force: Bool = false) async {
-        guard let log, !reading.contains(key) else { return }
+        guard let log else { tried.insert(key); return }
+        guard !reading.contains(key) else { return }
         let a = try? FileManager.default.attributesOfItem(atPath: log.path)
         let stamp = Stamp(size: (a?[.size] as? NSNumber)?.intValue ?? -1, date: a?[.modificationDate] as? Date ?? .distantPast)
         if !force, let was = lists[key], was.stamp == stamp { touch(key); return }
         reading.insert(key)
-        defer { reading.remove(key) }
-        let got = await Task.detached(priority: .utility) { Resources.collect(file: log, home: home, agent: agentDir) }.value
+        defer { reading.remove(key); tried.insert(key) }
+        // The first read is waited on (the panel says so): not behind background work. Later reads are background.
+        let first = lists[key] == nil
+        let got = await Task.detached(priority: first ? .userInitiated : .utility) { Resources.collect(file: log, home: home, agent: agentDir) }.value
         guard let got else { return }
         put(key, Entry(items: got, stamp: stamp))
     }
 
+    /// The agent's first read has not ended: no list yet, and its log was not read before.
+    func loading(_ key: String) -> Bool { lists[key] == nil && !tried.contains(key) }
     /// Keeps a list (checks put theirs).
     func put(_ key: String, _ e: Entry) {
         if lists[key]?.items != e.items || lists[key] == nil { lists[key] = e } else { lists[key]?.stamp = e.stamp }
@@ -92,7 +99,7 @@ final class ResourcesModel {
 
     private func touch(_ key: String) {
         order.removeAll { $0 == key }; order.append(key)
-        while order.count > Resources.cacheMax { lists[order.removeFirst()] = nil }
+        while order.count > Resources.cacheMax { let k = order.removeFirst(); lists[k] = nil; tried.remove(k) }
     }
 
     /// Shown is seen: the badge goes while the panel shows the list.
@@ -257,27 +264,35 @@ struct ResourcesPanel: View {
         let key = pane.map { ResourcesModel.key($0, session: model.store.session.name ?? "") }
         let items = key.map(r.items) ?? []
         let hidden = key.map(r.hidden) ?? 0
+        let loading = pane != nil && key.map(r.loading) == true
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("Resources").font(.system(size: 13, weight: .semibold))
-                Text("This agent").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    .padding(.horizontal, 7).frame(height: 22).background(Color.primary.opacity(0.07), in: Capsule())
+                Text("Resources").font(.headline)
                 Spacer(minLength: 0)
-                Text("\(items.count) item\(items.count == 1 ? "" : "s")\(hidden > 0 ? " · \(hidden) removed" : "")")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                if !loading {
+                    Text("\(items.count) item\(items.count == 1 ? "" : "s")\(hidden > 0 ? " · \(hidden) removed" : "")")
+                        .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
                 ResourceIconButton(name: "close", help: "Close (⌘⇧R)") { model.toggleResources() }
                     .accessibilityLabel("Close Resources")
             }
-            .padding(.horizontal, 14).frame(height: 46)
-            Divider()
-            if let key, !items.isEmpty, let pane {
+            .padding(.leading, 18).padding(.trailing, 12).frame(height: 44)
+            if loading {
+                // The first read of this agent's log (later reads keep the list in place).
+                VStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading this chat…").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .combine)
+            } else if let key, !items.isEmpty, let pane {
                 list(items, key: key, pane: pane)
             } else {
                 let t = Resources.emptyText(agent: pane != nil)
                 VStack(spacing: 6) {
-                    Text(t.0).font(.system(size: 13, weight: .semibold))
-                    Text(t.1).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text(t.0).font(.headline)
+                    Text(t.1).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 24).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -306,7 +321,7 @@ struct ResourcesPanel: View {
                     }
                     if g.rest > 0 {
                         Button { r.expanded.insert(g.group.id) } label: {
-                            Text("Show \(g.rest) more").font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text("Show \(g.rest) more").font(.subheadline).foregroundStyle(.secondary)
                                 .padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain).padding(.horizontal, 4)
@@ -319,12 +334,19 @@ struct ResourcesPanel: View {
     }
 }
 
-/// Glass, as the app's cards; flat in snapshots. A drawer has no corners.
+/// The sidebar's surface (as its hover panel, PeekGlass): the window surface in the sidebar's rounded shape, lifted off the
+/// chat by a hairline and a shadow. One look with the sidebar; flat in snapshots (GlassReader). A drawer has no corners.
 private struct PanelSurface: ViewModifier {
     let drawer: Bool
+    /// The sidebar panel's corners (macOS 26); macOS 15 has a square sidebar, so a floating panel takes the window's.
+    static var radius: CGFloat { SystemSidebar.cornerRadius > 0 ? SystemSidebar.cornerRadius : 10 }
     func body(content: Content) -> some View {
-        content.glassCard(radius: drawer ? 0 : 14)
-            .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        let shape = RoundedRectangle(cornerRadius: drawer ? 0 : Self.radius)
+        content
+            .background { GlassReader { WindowSurface(glass: $0) } }
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.25), radius: 18, y: 6)
     }
 }
 
@@ -368,13 +390,13 @@ struct ResourceGroupTitle: View {
     var body: some View {
         Button(action: onToggle) {
             HStack(spacing: 4) {
-                ResourceIcon(name: group.collapsed ? "chevron-right" : "chevron-down", size: 12)
                 Text(group.group.label).frame(maxWidth: .infinity, alignment: .leading)
-                Text("\(group.items.count)").monospacedDigit()
+                Text("\(group.items.count)").monospacedDigit().font(.subheadline)
+                ResourceIcon(name: group.collapsed ? "chevron-right" : "chevron-down", size: 11)
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(hover ? .primary : .secondary)
-            .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 3)
+            .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -416,31 +438,29 @@ struct ResourceRow: View {
     var body: some View {
         let mono = item.kind == "doc" || item.kind == "cmd"
         let sub = item.detail.isEmpty ? item.target : item.detail
-        HStack(alignment: .top, spacing: 10) {
-            ResourceIcon(name: icon, size: 12)
+        HStack(alignment: .top, spacing: 8) {
+            ResourceIcon(name: icon, size: 14)
                 .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: SidebarLine.box, height: SidebarLine.box)
                 .opacity(gone ? 0.5 : 1)
-                .padding(.top, 1)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(item.title.isEmpty ? item.target : item.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.body)
                         .foregroundStyle(gone ? .tertiary : .primary)
                         .strikethrough(gone)
                         .lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if !(hover || showActions) {
-                        Text(ago).font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit()
+                        Text(ago).font(.subheadline).foregroundStyle(.tertiary).monospacedDigit()
                     }
                 }
                 Text(gone ? "\(sub) · File not found" : sub)
-                    .font(mono ? .system(size: 11.5, design: .monospaced) : .system(size: 11.5))
+                    .font(mono ? .subheadline.monospaced() : .subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
                 if let note {
-                    Text(note.0).font(.system(size: 11.5)).foregroundStyle(note.1 ? Color.secondary : Color.orange)
+                    Text(note.0).font(.subheadline).foregroundStyle(note.1 ? Color.secondary : Color.orange)
                 }
             }
             if hover || showActions {
@@ -452,10 +472,10 @@ struct ResourceRow: View {
                 }
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(hover ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(hover ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 6))
         .overlay(alignment: .topLeading) {
-            if fresh { Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 2, y: 16).accessibilityHidden(true) }
+            if fresh { Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 2, y: 14).accessibilityHidden(true) }
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)

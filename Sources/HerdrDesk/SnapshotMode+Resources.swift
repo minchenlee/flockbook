@@ -125,6 +125,37 @@ extension SnapshotRunner {
         r.remove(r.items(key).first { $0.target.hasSuffix("report.html") }!, key: key)
         step("Remove from list: gone, counted as removed (\(r.items(key).count) items, \(r.hidden(key)) removed)", r.hidden(key) == 1 && !r.items(key).contains { $0.target.hasSuffix("report.html") })
         _ = await shot("resources-folded", dark: false)
+        r.toggleGroup("links")
+        // Beside the sidebar: one surface, one type (owner to compare); light and dark.
+        for dark in [false, true] {
+            let name = "resources-sidebar-\(dark ? "dark" : "light")"
+            let (win, host) = ContentTests.offscreen(RootView(flat: true).environment(model).environment(\.colorScheme, dark ? .dark : .light), NSSize(width: 1280, height: 800))
+            win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded(); host.displayIfNeeded() }
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+            }
+            step("\(name): picture written, the panel shows (\(ResourcesProbe.panel))", FileManager.default.fileExists(atPath: "\(dir)/\(name).png") && ResourcesProbe.panel.width > 0)
+            win.orderOut(nil)
+        }
+        // An agent whose log is not read yet: "Reading this chat…" (a later read keeps the list in place).
+        var fresh = pane; fresh.agent?.sessionId = "not-read-yet"
+        let fk = ResourcesModel.key(fresh, session: model.store.session.name ?? "")
+        step("not read yet: the panel says it is reading; a read agent does not", r.loading(fk) && !r.loading(key))
+        do {
+            let (win, host) = ContentTests.offscreen(ResourcesPanel(pane: fresh).frame(width: 320, height: 420).padding(20)
+                .environment(model).environment(\.flatGlass, true).environment(\.colorScheme, .light), NSSize(width: 360, height: 460))
+            win.appearance = NSAppearance(named: .aqua)
+            for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded(); host.displayIfNeeded() }
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/resources-loading.png"))
+            }
+            win.orderOut(nil)
+        }
+        await r.refresh(key: fk, log: nil, home: nil, agentDir: nil)
+        step("no log to read: the panel stops saying it is reading", !r.loading(fk))
         // Kept in memory: the last eight agents.
         for i in 0..<9 { r.put("s|other\(i)", .init(items: [], stamp: nil)) }
         step("the lists of the last \(Resources.cacheMax) agents stay in memory", r.lists.count == Resources.cacheMax && r.lists[key] == nil)
