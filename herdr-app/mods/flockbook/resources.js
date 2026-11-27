@@ -322,6 +322,8 @@ export async function pollResources(cx, force = false, full = false) {
     if (!on) return;
     let since = was && (!full || was.loading) ? was.cursor : null;
     for (;;) {
+      // A part of a load: PART_MS (a first read keeps BUSY_MS, so a dropped one does not hold the next asks long; asked
+      // twice, a part is read twice to the same answer and state).
       busyMs = since && was?.loading ? PART_MS : BUSY_MS;
       const r = await sidecar.resources(address, since, CHUNK);
       if (busy !== mine) return;
