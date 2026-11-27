@@ -1255,3 +1255,222 @@ fn a_state_or_a_cursor_of_the_rules_before_is_all_again() {
     let same = resources::answer_kept(&log, Some(&a.cursor), home, None, true).unwrap().0;
     assert!(!same.full && same.items.is_empty(), "this rules' cursor: nothing new");
 }
+
+
+// --- Progressive loading (`--chunk`): newest part first, the list so far after each part. ---
+
+/// Asks with `--chunk` until the load is done, with the states kept between calls as the helper keeps them: the
+/// final items, the answers on the way, and the state to keep.
+fn chunked(log: &Path, chunk: u64, cwd: Option<&Path>) -> (Vec<Value>, Vec<resources::Answer>, Option<resources::Kept>) {
+    let (mut since, mut part, mut kept, mut seen) = (None::<String>, None::<resources::Part>, None::<resources::Kept>, vec![]);
+    for _ in 0..100_000 {
+        let (a, k, p) = resources::answer_parts(log, since.as_deref(), Some(Path::new(HOME)), cwd, kept.as_ref(), part.as_ref(), true, Some(chunk)).unwrap();
+        (kept, part, since) = (k, p, Some(a.cursor.clone()));
+        let done = a.more.is_none();
+        seen.push(a);
+        if done {
+            assert!(part.is_none(), "no part state once done");
+            return (values(&seen.last().unwrap().items), seen, kept);
+        }
+    }
+    panic!("the load never ended");
+}
+
+fn every_chunk(lines: &[String], what: &str, cwd: Option<&Path>) {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, lines, false);
+    let size = std::fs::metadata(&log).unwrap().len();
+    let all = values(&resources::answer_in(&log, None, Some(Path::new(HOME)), cwd, None, true).unwrap().0.items);
+    for chunk in [1u64, 64, 200, 500, 1000, 3000, 1 << 20] {
+        let (got, seen, kept) = chunked(&log, chunk, cwd);
+        assert_eq!(got, all, "{what}: chunk {chunk}");
+        assert!(kept.is_some(), "{what}: chunk {chunk}: a state to keep once done");
+        if chunk < size / 4 && lines.len() >= 8 {
+            assert!(seen.len() > 1, "{what}: chunk {chunk} of {size} bytes in one call");
+        }
+        let mut read = 0;
+        for a in &seen[..seen.len() - 1] {
+            let (r, s) = a.more.unwrap();
+            assert_eq!(s, size, "{what}: the size is the log's");
+            assert!(r > read && r < s, "{what}: read {r} after {read}");
+            read = r;
+            assert!(a.full, "{what}: each part's answer is the whole list so far");
+            assert!(a.cursor.starts_with("p1."), "{what}: a part's cursor");
+        }
+        assert!(seen.last().unwrap().full && seen.last().unwrap().cursor.starts_with("r4."), "{what}: the last answer: all of it, a cursor for deltas");
+    }
+}
+
+#[test]
+fn a_load_in_parts_ends_with_the_same_list_as_one_read() {
+    every_chunk(&claude_mix(), "claude", None);
+    every_chunk(&codex_mix(), "codex", None);
+    every_chunk(&convo(), "convo", None);
+    // Parts that end at every place: each length of the log.
+    let lines = claude_mix();
+    for k in (3..lines.len()).step_by(4) {
+        every_chunk(&lines[..k], &format!("claude, the first {k} lines"), None);
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn a_load_in_parts_resolves_relative_docs_as_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("status/reports")).unwrap();
+    std::fs::create_dir_all(d.join("repos/docs")).unwrap();
+    std::fs::write(d.join("status/reports/map.md"), "# Map").unwrap();
+    std::fs::write(d.join("repos/docs/a.md"), "# A").unwrap();
+    every_chunk(&relative_mix(&d), "relative", None);
+    every_chunk(&relative_mix(&d), "relative, the pane's folder", Some(&d.join("repos")));
+}
+
+#[test]
+fn the_first_part_has_the_newest_items_and_later_parts_only_add() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &claude_mix(), false);
+    let (all, seen, _) = chunked(&log, 300, None);
+    let first = values(&seen[0].items);
+    assert!(!first.is_empty(), "the first part lists something");
+    assert_eq!(first[0]["id"], all[0]["id"], "the newest item is in the first part");
+    let ids = |v: &[Value]| v.iter().map(|r| r["id"].as_str().unwrap().to_string()).collect::<std::collections::BTreeSet<_>>();
+    for w in seen.windows(2) {
+        assert!(ids(&values(&w[0].items)).is_subset(&ids(&values(&w[1].items))), "a later part never drops an item");
+    }
+}
+
+#[test]
+fn after_a_load_in_parts_new_lines_come_as_a_delta() {
+    let lines = claude_mix();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &lines[..40], false);
+    let (_, seen, kept) = chunked(&log, 300, None);
+    let cursor = seen.last().unwrap().cursor.clone();
+    write(&log, &lines[40..], true);
+    let (a, k, p) = resources::answer_parts(&log, Some(&cursor), Some(Path::new(HOME)), None, kept.as_ref(), None, true, Some(300)).unwrap();
+    assert!(!a.full && a.more.is_none() && p.is_none(), "a delta, not a new load");
+    assert!(k.is_some());
+    // Merged by id as the mod does: the whole log's list.
+    let mut by: Vec<Value> = values(&seen.last().unwrap().items);
+    for r in values(&a.items) {
+        by.retain(|x| x["id"] != r["id"]);
+        by.push(r);
+    }
+    let key = |v: &Value| (std::cmp::Reverse(v["last_ts"].as_i64()), v["id"].as_str().unwrap().to_string());
+    let mut want = whole_log(&log);
+    by.sort_by_key(key);
+    want.sort_by_key(key);
+    assert_eq!(by, want);
+}
+
+#[test]
+fn lines_written_during_a_load_come_after_it() {
+    let lines = claude_mix();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &lines[..60], false);
+    let size = std::fs::metadata(&log).unwrap().len();
+    let home = Some(Path::new(HOME));
+    let (a, mut kept, mut part) = resources::answer_parts(&log, None, home, None, None, None, true, Some(300)).unwrap();
+    assert!(a.more.is_some());
+    write(&log, &lines[60..], true);
+    let mut since = a.cursor;
+    let last = loop {
+        let (a, k, p) = resources::answer_parts(&log, Some(&since), home, None, kept.as_ref(), part.as_ref(), true, Some(300)).unwrap();
+        (kept, part, since) = (k, p, a.cursor.clone());
+        if let Some((_, s)) = a.more {
+            assert_eq!(s, size, "a load reads the log as it was when it began");
+        } else {
+            break a;
+        }
+    };
+    let cut = tempfile::tempdir().unwrap();
+    let first = cut.path().join("s.jsonl");
+    write(&first, &lines[..60], false);
+    assert_eq!(values(&last.items), whole_log(&first), "the load: the log as it began");
+    let (d, _, _) = resources::answer_parts(&log, Some(&since), home, None, kept.as_ref(), None, true, Some(300)).unwrap();
+    assert!(!d.full && !d.items.is_empty(), "then the lines after it, as a delta");
+}
+
+#[test]
+fn a_lost_part_state_starts_the_load_again_and_no_chunk_is_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &claude_mix(), false);
+    let home = Some(Path::new(HOME));
+    let (a, _, p) = resources::answer_parts(&log, None, home, None, None, None, true, Some(300)).unwrap();
+    assert!(a.more.is_some() && p.is_some());
+    // The cursor of a part, but its state gone: the load begins again (the newest part, all of it so far).
+    let (b, _, p2) = resources::answer_parts(&log, Some(&a.cursor), home, None, None, None, true, Some(300)).unwrap();
+    assert_eq!(values(&b.items), values(&a.items));
+    assert_eq!(b.more, a.more);
+    assert!(p2.is_some());
+    // No --chunk (an older mod), or an agent whose log is not linear: one read, as before.
+    let (c, _, p3) = resources::answer_parts(&log, None, home, None, None, None, true, None).unwrap();
+    assert!(c.more.is_none() && c.full && p3.is_none());
+    assert_eq!(values(&c.items), whole_log(&log));
+    let (c, _, p3) = resources::answer_parts(&log, None, home, None, None, None, false, Some(300)).unwrap();
+    assert!(c.more.is_none() && p3.is_none());
+    // A part's cursor with no --chunk: one read, all of it.
+    let (c, _, _) = resources::answer_parts(&log, Some(&a.cursor), home, None, None, p.as_ref(), true, None).unwrap();
+    assert!(c.more.is_none() && c.full);
+    assert_eq!(values(&c.items), whole_log(&log));
+}
+
+#[test]
+fn a_state_kept_from_before_means_no_load_in_parts() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("s.jsonl");
+    write(&log, &claude_mix(), false);
+    let home = Some(Path::new(HOME));
+    let (_, k, _) = resources::answer_kept(&log, None, home, None, true).unwrap();
+    // A full read (no cursor) with a state that fits: from the kept start, at once.
+    let (a, _, p) = resources::answer_parts(&log, None, home, None, k.as_ref(), None, true, Some(300)).unwrap();
+    assert!(a.more.is_none() && p.is_none() && a.full);
+    assert_eq!(values(&a.items), whole_log(&log));
+}
+
+
+/// A real log (`RES_REAL_LOG=<path>`, a copy that does not grow) read in parts (`RES_CHUNK`, default 8 MiB) with each
+/// part's state written and read back as the helper does: the time to the first items and to the end, and the list
+/// at the end against one read (release, --ignored --nocapture). Prints numbers only.
+#[test]
+#[ignore]
+fn real_log_in_parts() {
+    let Some(src) = std::env::var_os("RES_REAL_LOG") else { return };
+    let log = Path::new(&src);
+    let chunk = std::env::var("RES_CHUNK").ok().and_then(|c| c.parse().ok()).unwrap_or(8u64 << 20);
+    // This machine's home, as the helper (a made-up /home/… waits on the automounter on a Mac).
+    let real_home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let home = real_home.as_deref();
+    let t = std::time::Instant::now();
+    let one = resources::answer_in(log, None, home, None, None, true).unwrap().0;
+    let one_s = t.elapsed().as_secs_f64();
+    let t = std::time::Instant::now();
+    let (mut since, mut part, mut kept, mut calls, mut first, mut first_n) = (None::<String>, None::<resources::Part>, None::<resources::Kept>, 0, 0.0, 0);
+    let mut biggest = 0;
+    let last = loop {
+        let (a, k, p) = resources::answer_parts(log, since.as_deref(), home, None, kept.as_ref(), part.as_ref(), true, Some(chunk)).unwrap();
+        calls += 1;
+        if calls == 1 {
+            (first, first_n) = (t.elapsed().as_secs_f64(), a.items.len());
+        }
+        // As the helper: the states through JSON.
+        let pj = p.as_ref().map(|p| serde_json::to_vec(p).unwrap());
+        biggest = biggest.max(pj.as_ref().map_or(0, |j| j.len()));
+        part = pj.map(|j| serde_json::from_slice(&j).unwrap());
+        kept = k.map(|k| serde_json::from_slice(&serde_json::to_vec(&k).unwrap()).unwrap());
+        since = Some(a.cursor.clone());
+        if a.more.is_none() {
+            break a;
+        }
+    };
+    let all_s = t.elapsed().as_secs_f64();
+    let same = values(&last.items) == values(&one.items);
+    println!("parts: {} bytes, chunk {chunk}; one read {one_s:.2}s {} items; in parts: first answer {first:.2}s {first_n} items, all {all_s:.2}s in {calls} calls, {} items, same list: {same}; biggest part state {biggest} bytes", std::fs::metadata(log).unwrap().len(), one.items.len(), last.items.len());
+    assert!(same);
+}
