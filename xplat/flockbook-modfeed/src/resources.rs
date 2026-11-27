@@ -168,7 +168,21 @@ fn whole(tok: &str) -> Option<(&'static str, String)> {
     if (tok.starts_with('/') && !tok.starts_with("//") || tok.starts_with("~/")) && doc_end(tok, 0, tok.len()) == Some(tok.len()) {
         return Some(("doc", tok.to_string()));
     }
-    None
+    // A `file:` URL on this machine (agy links its files so): the doc at its path.
+    file_url(tok).filter(|p| doc_end(p, 0, p.len()) == Some(p.len())).map(|p| ("doc", p))
+}
+
+/// The absolute path a `file:` URL on this machine names (`file:///a/b.md`, `file://localhost/a/b.md`), without its
+/// `?…` and `#…` and percent-decoded (it may then hold a space). None: another host, not UTF-8, not a full path.
+fn file_url(tok: &str) -> Option<String> {
+    let rest = tok.get(..7).filter(|s| s.eq_ignore_ascii_case("file://")).map(|_| &tok[7..])?;
+    let path = match rest.get(..9) {
+        Some(h) if h.eq_ignore_ascii_case("localhost") => &rest[9..],
+        _ => rest,
+    };
+    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+    let p = crate::paste::percent_decode(path)?;
+    (p.starts_with('/') && !p.starts_with("//") && !p.contains(['\n', '\r', '\0'])).then_some(p)
 }
 
 /// `whole`, and with `rel` a relative doc path too.
@@ -679,16 +693,18 @@ impl Acc {
     }
 
     /// The folders and doc paths a tool call that worked names (see `cwds`): the doc path of a file tool
-    /// (`file_path`, `path`, `notebook_path`) and the folders of a command's `cd /…` (`command`, `cmd`). Not any other
+    /// (`file_path`, `path`, `notebook_path`; agy: `Path`…) and the folders of a command's `cd /…` (`command`, `cmd`,
+    /// `CommandLine`). Not any other
     /// string: a command's text or a description names paths it did not open.
     fn places(&mut self, input: &str, home: Option<&Path>) {
         let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(input) else { return };
-        for k in ["file_path", "path", "notebook_path"] {
+        // agy's file tools name it `Path` (older: `AbsolutePath`, `TargetFile`) and its commands `CommandLine`.
+        for k in ["file_path", "path", "notebook_path", "Path", "AbsolutePath", "TargetFile"] {
             if let Some(("doc", t)) = o.get(k).and_then(|v| v.as_str()).and_then(|s| whole(s.trim())) {
                 self.files.insert(normal("doc", &t, home).2);
             }
         }
-        for k in ["command", "cmd"] {
+        for k in ["command", "cmd", "CommandLine"] {
             let cmds: Vec<&str> = match o.get(k) {
                 Some(serde_json::Value::String(s)) => vec![s],
                 Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.as_str()).collect(),
@@ -1112,7 +1128,7 @@ fn file_title(p: &Path) -> Option<String> {
 
 /// Bump when what is collected changes (`detect`, `commands`, `normal`, `Acc`): a state kept with another number is
 /// not used.
-pub const RULES: u32 = 3;
+pub const RULES: u32 = 4;
 
 /// What one log's last `resources` call keeps, so the next reads only from `at`: the resources of the lines before
 /// it. `at` is a line start where no tool call waits for its result and no run of tool calls goes on (see
@@ -1446,6 +1462,18 @@ mod tests {
         assert_eq!(one("http://192.168.1.5:8080/x").2, "local");
         assert_eq!(one("http://127.0.0.1:8787").2, "local");
         assert_eq!(one("http://box.local:9000").2, "local");
+    }
+
+    #[test]
+    fn file_urls_on_this_machine_are_docs() {
+        let t = "[a](file:///home/me/My%20Notes/plan.md)";
+        assert_eq!(one(t), (4, u16len(t) - 1, "doc", "/home/me/My Notes/plan.md".to_string()));
+        assert_eq!(one("[a](file:///home/me/%E7%AD%86%E8%A8%98/r.md)").3, "/home/me/筆記/r.md");
+        assert_eq!(one("[a](file:///home/me/r.md#L12)").3, "/home/me/r.md");
+        assert_eq!(one("[a](FILE://localhost/home/me/r.png)").3, "/home/me/r.png");
+        for t in ["[a](file://otherhost/home/me/r.md)", "[a](file:///home/me/src/main.ts)", "[a](file:///home/me/r.md%)", "[a](file:////srv/r.md)", "[a](file:///home/me/r%0A.md)"] {
+            assert!(kinds(t).is_empty(), "{t}: {:?}", detect(t));
+        }
     }
 
     #[test]

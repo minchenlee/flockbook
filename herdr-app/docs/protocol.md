@@ -319,7 +319,7 @@ the helper (`resources.rs`). Each: `start` and `end`, UTF-16 offsets into `text`
 
 | `res` | What | Example |
 |---|---|---|
-| `doc` | An absolute path (`/…`, `~/…`) ending `.md .html .htm .pdf .png .svg` | `/home/me/plan.md` |
+| `doc` | An absolute path (`/…`, `~/…`) ending `.md .html .htm .pdf .png .svg`; also a link's or autolink's `file:` URL on this machine (`file:///…`, `file://localhost/…`: the path, percent-decoded, without `?…` `#…`) | `/home/me/plan.md`, `file:///home/me/My%20Plan.md` |
 | `artifact` | A claude.ai artifact | `https://claude.ai/artifact/…`, also without `https://` |
 | `pr` / `issue` / `ci` | A GitHub PR, issue or Actions run | `github.com/o/r/pull/12`, `/issues/7`, `/actions/runs/1870` |
 | `local` | localhost, 127.0.0.1, a LAN address or `.local` host | `http://localhost:5173`, `localhost:3000` |
@@ -549,7 +549,7 @@ one reply, the later target first). Read only.
 - Docs also come from relative paths in a reply (`docs/a.md`, `./a.md`, in text, a code span or a link; not a bare
   file name, an address without its scheme, a pattern or a placeholder). Where it opens: the one file under the
   folders the log names (`cwd`) or the pane's folder; else the one under a folder a command went to (`cd /…`) or the
-  one doc path a tool call named that ends in it. None, or more than one: not listed (once its file is there, a
+  one doc path a tool call named (`file_path`, `path`, `notebook_path`; agy's `Path`, `AbsolutePath`, `TargetFile`) that ends in it. None, or more than one: not listed (once its file is there, a
   later read lists it). Found, it is the item of that file: one `id` with the absolute mentions of it. Feed `row`
   `links` do not carry relative paths. `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
   GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`. A

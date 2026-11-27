@@ -721,5 +721,25 @@
     "name": "entity in the address",
     "text": "go https://x.com/?a=1&amp;b=2",
     "wrapped": []
+  },
+  {
+    "blocks": [
+      0
+    ],
+    "links": [
+      {
+        "end": 46,
+        "res": "doc",
+        "start": 16
+      },
+      {
+        "end": 73,
+        "res": "link",
+        "start": 58
+      }
+    ],
+    "name": "file URL address (agy)",
+    "text": "Wrote [plan.md](file:///home/user/docs/plan.md) and [web](https://x.com/a).",
+    "wrapped": []
   }
 ]
