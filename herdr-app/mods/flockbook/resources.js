@@ -106,7 +106,8 @@ export function applyAnswer(prev, terminal, answer, at = Date.now()) {
   const hint = HELPER_HINT[code] ?? (code === "usage" && machineOf(terminal) ? "old" : undefined);
   if (hint) return prev?.terminal === terminal && prev.error === hint ? prev : { terminal, cursor: null, items: [], at, error: hint };
   // The log cannot be read: what was there stays; with nothing there, the window says so.
-  if (code === "read") return prev?.terminal === terminal && prev.items.length ? prev : prev?.terminal === terminal && prev.error === "unreadable" ? prev : { terminal, cursor: null, items: [], at, error: "unreadable" };
+  // A load in parts keeps its place (its cursor), also with nothing found yet.
+  if (code === "read") return prev?.terminal === terminal && (prev.items.length || prev.loading || prev.error === "unreadable") ? prev : { terminal, cursor: null, items: [], at, error: "unreadable" };
   if (answer?.error || !answer?.end) return prev ?? null;
   const lines = (answer.lines ?? []).filter((l) => l.type === "res" && l.id);
   const full = answer.end.full !== false || !prev || prev.terminal !== terminal;
@@ -290,13 +291,16 @@ export function badgeFor(address) {
 // and then its `finally` never runs: an ask not heard from for BUSY_MS no longer counts.
 // An ask that comes back after a newer one started drops its answer: it would write older data over the newer.
 export const BUSY_MS = 15000;
+// While a part of a load is read (a remote one can take longer): a poll waits this long before it asks again, so two
+// asks never read the same part at once.
+export const PART_MS = 60000;
 // The bytes of a long log the helper reads at a time the first time, newest first (owner 11-27: the newest items show
 // at once, "Loading earlier… N%" while older parts come). The same in the Mac app.
 export const CHUNK = 8 * 1024 * 1024;
 // `wantFull`: a full read was asked while another ask ran; it runs when that one ends (the window opened during
 // the bar's delta: docs are looked at again all the same).
-let busy = 0, busyAt = 0, last = 0, lastT = null, wantFull = false;
-export const forgetResources = () => { busy = 0; busyAt = 0; last = 0; lastT = null; wantFull = false; };
+let busy = 0, busyAt = 0, busyMs = BUSY_MS, last = 0, lastT = null, wantFull = false;
+export const forgetResources = () => { busy = 0; busyAt = 0; busyMs = BUSY_MS; last = 0; lastT = null; wantFull = false; };
 // The lists in memory gone, as after a restart (tests).
 export const forgetCache = () => cache.clear();
 // `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title). A load in
@@ -304,13 +308,13 @@ export const forgetCache = () => cache.clear();
 export async function pollResources(cx, force = false, full = false) {
   const address = currentAgent()?.address ?? null;
   if (!address) return;
-  if (busy && Date.now() - busyAt < BUSY_MS) { if (full) wantFull = true; return; }
+  if (busy && Date.now() - busyAt < busyMs) { if (full) wantFull = true; return; }
   if (full) wantFull = false;
   const t = term(address);
   // The cursor only with the list it belongs to: after a restart, a full read.
   let was = cache.get(t) ?? null;
   if (!force && was && lastT === t && Date.now() - last < RES_MS) return;
-  const mine = Date.now(); busy = mine; busyAt = mine; last = mine; lastT = t;
+  const mine = Date.now(); busy = mine; busyAt = mine; busyMs = BUSY_MS; last = mine; lastT = t;
   try {
     const on = await sidecar.hasCommand("resources");
     if (busy !== mine) return;
@@ -318,6 +322,7 @@ export async function pollResources(cx, force = false, full = false) {
     if (!on) return;
     let since = was && (!full || was.loading) ? was.cursor : null;
     for (;;) {
+      busyMs = since && was?.loading ? PART_MS : BUSY_MS;
       const r = await sidecar.resources(address, since, CHUNK);
       if (busy !== mine) return;
       const next = applyAnswer(since ? was : null, t, r);
@@ -332,6 +337,8 @@ export async function pollResources(cx, force = false, full = false) {
       else remember(was);
       // The next part at once, while this agent is shown (another one: it goes on when this one is shown again).
       if (!next.loading || next === was || term(currentAgent()?.address) !== t) return;
+      // No further than the last part (the helper could not keep its state): not again and again; a later poll tries.
+      if (was?.loading && next.cursor === was.cursor && next.loading.read <= was.loading.read) return;
       was = next; since = next.cursor; busyAt = Date.now(); last = busyAt;
     }
   } finally {
@@ -427,7 +434,8 @@ export function emptyText(address, error = null, d = undefined) {
   if (error === "missing") return ["No helper there", `${m} has no Flockbook helper yet. Install it from the chat to see resources here.`];
   if (error === "nolog") return ["Can't find this chat's log", "Resources show up here once the agent's conversation has a log."];
   if (error === "unreadable") return ["Can't read this chat's log", "Flockbook could not open the agent's log. It tries again in a moment."];
-  if (d === null || d?.loading) return ["Reading this chat…", "Docs, artifacts and links show up here as they are found."];
+  if (d?.loading) return ["Reading this chat…", loadingText(d.loading)];
+  if (d === null) return ["Reading this chat…", "Docs, artifacts and links show up here as they are found."];
   return ["No resources yet", "Docs, artifacts and links the agent mentions in its replies show up here."];
 }
 

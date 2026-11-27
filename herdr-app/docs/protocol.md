@@ -587,7 +587,8 @@ one reply, the later target first). Read only.
   lines written during the load come in the next delta. The load's state is a file of its own in `resources/` (another
   name than the kept state's, so an older helper never reads it), gone once the load is done. A `p1.…` cursor whose
   state is gone, or no longer fits the log, begins the load again; one without `--chunk` reads the log whole. Agents
-  whose log is not read line after line (pi, agy) are read whole. A helper before `--chunk` reads the log whole and
+  other than Claude Code and Codex are read whole (a Grok reply streams over several lines; pi and agy logs are
+  trees), and so is a log whose load state cannot be kept (no `--cache`, or a folder that cannot be written). A helper before `--chunk` reads the log whole and
   answers without `more`: the mod takes that as done.
 
 ```json

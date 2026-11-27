@@ -320,4 +320,21 @@ fn resources_in_parts_with_chunk() {
     let again = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s, "--since", since.as_deref().unwrap()]);
     assert_eq!(again.last().unwrap()["full"], false);
     assert!(again.last().unwrap().get("more").is_none());
+
+    // Where the load's state cannot be kept (no --cache, or its folder cannot be written): one read, no `more`
+    // (a cursor of a part no one kept would ask for the same part again and again).
+    let one = run(&fake.path, &["resources", "--terminal", "t1", "--chunk", "600"]);
+    assert!(one.last().unwrap().get("more").is_none(), "{:?}", one.last());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for f in std::fs::read_dir(&kept_dir).unwrap().flatten() {
+            std::fs::remove_file(f.path()).unwrap();
+        }
+        std::fs::set_permissions(&kept_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let ro = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s, "--chunk", "600"]);
+        std::fs::set_permissions(&kept_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(ro.last().unwrap().get("more").is_none(), "{:?}", ro.last());
+        assert_eq!(res(&ro), want);
+    }
 }

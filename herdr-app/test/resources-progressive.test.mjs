@@ -159,3 +159,58 @@ test("an older helper (no more, read whole): one ask, done", async () => {
   assert.equal(R.dataFor(addr()).loading, undefined);
   assert.equal(fake.shared[R.seenKey("t1")], 9);
 });
+
+test("a part that reads nothing more stops the ask (the helper could not keep its state)", async () => {
+  const asked = helper([
+    [[res("n1", 80)], part("p1.a", 300)],
+    [[res("n1", 80)], part("p1.a", 300)],
+    [[res("n1", 80)], part("p1.a", 300)],
+  ]);
+  await R.pollResources(fakeCx(), true);
+  assert.equal(asked.length, 2, "asked again once, then stopped");
+});
+
+test("a read error during a load keeps its place: the next ask goes on from the part's cursor", async () => {
+  const asked = helper([
+    [[], part("p1.a", 300)],
+    jl(header("resources"), { type: "error", code: "read", message: "x" }, { type: "end", ok: false, ms: 1 }),
+  ]);
+  await R.pollResources(fakeCx(), true);
+  assert.equal(R.dataFor(addr()).cursor, "p1.a");
+  assert.deepEqual(R.dataFor(addr()).loading, { read: 300, size: SIZE });
+  helper([[[res("o1", 40)], done("r4.z")]]).length;
+  const again = helper([[[res("o1", 40)], done("r4.z")]]);
+  await R.pollResources(fakeCx(), true, true);
+  assert.equal(since(again[0]), "p1.a");
+});
+
+test("an empty first part: Reading this chat… and how far it is", () => {
+  const v = view();
+  R.putData({ terminal: "t1", cursor: "p1.a", items: [], at: 1, loading: { read: 120, size: SIZE } });
+  const t = textOf(byId(v.render(fakeCx()), "res-empty"));
+  assert.match(t, /Reading this chat…/);
+  assert.match(t, /Loading earlier… 12%/);
+});
+
+test("while a part is read, a poll waits longer than BUSY_MS before it asks again", async () => {
+  let release;
+  const asked = [];
+  fake.exec = (_c, args) => {
+    if (args[0] === "version") return jl(header("version"), { type: "version", commands: ["version", "resources"] }, done());
+    asked.push(args);
+    if (asked.length === 1) return jl(header("resources"), res("n1", 80), part("p1.a", 300));
+    return new Promise((r) => { release = () => r(jl(header("resources"), res("n1", 80), res("o1", 40), done("r4.z"))); });
+  };
+  const first = R.pollResources(fakeCx(), true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(asked.length, 2, "the second part is being read");
+  const real = Date.now;
+  try {
+    Date.now = () => real() + R.BUSY_MS + 1000;
+    await R.pollResources(fakeCx(), true);
+    assert.equal(asked.length, 2, "not asked again past BUSY_MS while a part is read");
+  } finally { Date.now = real; }
+  release();
+  await first;
+  assert.equal(R.dataFor(addr()).loading, undefined);
+});

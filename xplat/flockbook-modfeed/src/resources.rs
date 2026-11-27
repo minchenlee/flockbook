@@ -1464,6 +1464,13 @@ fn next_start(log: &Path, items: &[ConversationItem], starts: &[(u64, usize)], f
     Ok((from, 0))
 }
 
+/// Whether an agent's log loads in parts (`--chunk`): only where each line is whole on its own and read line after
+/// line (Claude Code, Codex). A Grok reply streams in pieces over several lines (a cut between two would split a URL);
+/// pi and agy logs are trees; Cursor's is not tested in parts. Those are read whole.
+pub fn in_parts(kind: &str) -> bool {
+    matches!(kind, "claude" | "codex")
+}
+
 /// A load in parts, newest first (`answer_parts`): what is read so far, `from..size` of the log as it was when the
 /// load began. `acc`: the items of `from..at` (older parts are put under it); `tail`: those of `at..size`, read
 /// again by the next delta. Done (`from` 0), `acc` and `at` are the `Kept` state.

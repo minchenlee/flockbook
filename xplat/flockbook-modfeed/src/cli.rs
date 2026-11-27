@@ -315,13 +315,24 @@ pub fn run(argv: &[String]) -> String {
                     // `--chunk <bytes>` (optional): a long log read for the first time is read in parts, newest first.
                     // The load's state is a file of its own beside the kept one (another name: a helper before this one
                     // never reads it as a kept state).
-                    let chunk = opt("--chunk").and_then(|c| c.parse::<u64>().ok()).filter(|&c| c > 0);
                     let part_at = cache_url.and_then(crate::resources::state_dir).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&format!("part:{}", found.pane.terminal_id)))));
+                    // Only where the load's state can be kept (with --cache): a part's cursor asks for the state.
+                    let chunk = opt("--chunk").and_then(|c| c.parse::<u64>().ok()).filter(|&c| c > 0 && part_at.is_some() && crate::resources::in_parts(&kind));
                     let part: Option<crate::resources::Part> = match chunk {
                         Some(_) => part_at.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok()),
                         None => None,
                     };
-                    return match crate::resources::answer_parts(path, opt("--since").as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), part.as_ref(), linear, chunk) {
+                    let mut got = crate::resources::answer_parts(path, opt("--since").as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), part.as_ref(), linear, chunk);
+                    // The load's state could not be written (a folder that cannot be written): its cursor would ask for
+                    // the same part again and again. One read instead.
+                    if let (Ok((_, _, Some(p))), Some(at)) = (&got, part_at.as_deref()) {
+                        let d = serde_json::to_vec(p).unwrap_or_default();
+                        crate::locate::write_bytes(&d, Some(at));
+                        if std::fs::read(at).ok().as_deref() != Some(&d[..]) {
+                            got = crate::resources::answer_parts(path, opt("--since").filter(|c| !c.starts_with("p1.")).as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), None, linear, None);
+                        }
+                    }
+                    return match got {
                         Ok((a, next, next_part)) => {
                             if let Some(at) = kept_at.as_deref().filter(|_| next.as_ref().map(|k| (k.size, k.at)) != kept.as_ref().map(|k| (k.size, k.at))) {
                                 match &next {
@@ -330,10 +341,9 @@ pub fn run(argv: &[String]) -> String {
                                 }
                             }
                             if let Some(at) = part_at.as_deref().filter(|_| chunk.is_some()) {
-                                match &next_part {
-                                    Some(p) => crate::locate::write_json(p, Some(at)),
-                                    None if part.is_some() || at.exists() => _ = std::fs::remove_file(at),
-                                    None => {}
+                                // A part's state is written above.
+                                if next_part.is_none() && (part.is_some() || at.exists()) {
+                                    _ = std::fs::remove_file(at);
                                 }
                             }
                             for it in &a.items {

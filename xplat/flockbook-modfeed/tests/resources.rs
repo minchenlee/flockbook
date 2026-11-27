@@ -1474,3 +1474,14 @@ fn real_log_in_parts() {
     println!("parts: {} bytes, chunk {chunk}; one read {one_s:.2}s {} items; in parts: first answer {first:.2}s {first_n} items, all {all_s:.2}s in {calls} calls, {} items, same list: {same}; biggest part state {biggest} bytes", std::fs::metadata(log).unwrap().len(), one.items.len(), last.items.len());
     assert!(same);
 }
+
+
+/// Parts only for logs where each line is whole on its own (Claude Code, Codex): a Grok reply streams in pieces over
+/// several lines (a cut between them would split a URL), pi and agy are trees.
+#[test]
+fn only_claude_and_codex_logs_load_in_parts() {
+    assert!(resources::in_parts("claude") && resources::in_parts("codex"));
+    for k in ["grok", "cursor", "pi", "agy", "", "other"] {
+        assert!(!resources::in_parts(k), "{k}");
+    }
+}
