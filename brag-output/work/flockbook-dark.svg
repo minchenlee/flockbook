@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><linearGradient id="mdBg" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#2C2C2E"></stop><stop offset="1" stop-color="#0B0B0C"></stop></linearGradient></defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#mdBg)"></rect>
+<g transform="translate(512 500)">
+<path d="M-300 72 L-150 -48 L-150 18 Z" fill="#5E5E63"></path>
+<path d="M-150 -48 L0 -168 L0 -36 L-150 18 Z" fill="#D6D6DA"></path>
+<path d="M-150 -48 L0 -168 L-60 -60 Z" fill="#FFFFFF"></path>
+<path d="M0 -168 L150 -48 L150 18 L0 -36 Z" fill="#98989D"></path>
+<path d="M150 -48 L300 72 L150 18 Z" fill="#3E3E42"></path>
+</g>
+<g transform="translate(352 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"></path><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"></path></g>
+<g transform="translate(672 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"></path><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"></path></g>
+</svg>

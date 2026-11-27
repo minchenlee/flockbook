@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flockbook brag</title>
+<style>
+:root { --bg:#0d0d0e; --canvas:#202020; --chrome:#1c1c1c; --raised:#262626; --border:#363636; --fg:#ededed; --muted:#9a9a9a; --dim:#707070; --amber:#f5a524; --blue:#0a84ff; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--fg);
+  font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+.scene { position: absolute; inset: 0; display: none; overflow: hidden; }
+.disp { font-family: 'Inter Display', 'Inter', sans-serif; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+/* ---------- hook ---------- */
+#hook { background: #0a0a0b; }
+#grid { position: absolute; inset: 36px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 18px; transform-origin: 50% 50%; }
+.pane { position: relative; border: 1px solid #2a2a2a; border-radius: 12px; background: #111112; overflow: hidden; }
+.pane .head { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #232323; font: 500 15px 'JetBrains Mono', monospace; color: #8a8a8a; background: #151516; position: relative; z-index: 2; }
+.pane .head i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid #6a6a6a; }
+.pane .body { position: absolute; left: 14px; right: 14px; top: 46px; font: 400 14.5px/21px 'JetBrains Mono', monospace; color: #7d7d7d; white-space: pre; }
+.pane .body b { color: #b9b9b9; font-weight: 500; }
+.pane .body u { color: #5d5d5d; text-decoration: none; }
+.pane .ask { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 16px 18px; background: #151516; border-top: 1px solid #3a2f1a; font: 500 16px/25px 'JetBrains Mono', monospace; color: #e8e8e8; white-space: pre; z-index: 3; }
+.pane .ask em { color: var(--amber); font-style: normal; }
+.pane .ring { position: absolute; inset: 0; border: 3px solid var(--amber); border-radius: 12px; z-index: 4; }
+#scrim { position: absolute; inset: 0; background: radial-gradient(ellipse 62% 42% at 50% 50%, rgba(10,10,11,.96) 0%, rgba(10,10,11,.88) 45%, rgba(10,10,11,0) 100%); }
+.hl { position: absolute; left: 0; right: 0; top: 50%; text-align: center; font-size: 104px; font-weight: 700; letter-spacing: -0.035em; line-height: 1; margin-top: -52px; }
+
+/* ---------- reveal / outro ---------- */
+#reveal, #outro { background: radial-gradient(ellipse 80% 70% at 50% 40%, #1b1b1d 0%, #0b0b0c 70%); }
+#icon { position: absolute; left: 810px; top: 190px; width: 300px; height: 300px; }
+#wordmark { position: absolute; left: 0; right: 0; top: 520px; text-align: center; font-size: 132px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+#sub { position: absolute; left: 0; right: 0; top: 690px; text-align: center; font-size: 44px; font-weight: 500; letter-spacing: -0.015em; color: var(--muted); }
+#flock { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+#o-h { position: absolute; left: 0; right: 0; top: 470px; text-align: center; font-size: 100px; font-weight: 700; letter-spacing: -0.035em; line-height: 1; }
+#o-row { position: absolute; left: 0; right: 0; top: 640px; display: flex; justify-content: center; align-items: center; gap: 22px; }
+#o-row img { width: 84px; height: 84px; margin: 0 -8px 0 0; }
+#o-row .n { font-size: 52px; font-weight: 700; letter-spacing: -0.03em; }
+#o-url { font: 500 34px 'JetBrains Mono', monospace; color: var(--fg); padding: 14px 26px; border: 1px solid #3a3a3a; border-radius: 16px; background: #171718; margin-left: 18px; }
+#o-meta { position: absolute; left: 0; right: 0; top: 790px; text-align: center; font-size: 28px; font-weight: 500; color: var(--muted); letter-spacing: -0.005em; }
+
+/* ---------- product scenes ---------- */
+#cap { position: absolute; left: 120px; top: 62px; right: 420px; height: 96px; display: none; }
+.capline { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 24px; white-space: nowrap; font-size: 68px; font-weight: 650; letter-spacing: -0.032em; line-height: 96px; }
+.capline .tag { font: 600 26px 'Inter', sans-serif; letter-spacing: 0; color: #1a1304; background: var(--amber); padding: 0 16px; line-height: 44px; border-radius: 22px; margin-top: 8px; }
+#brand { position: absolute; right: 120px; top: 78px; display: none; align-items: center; gap: 8px; font-size: 32px; font-weight: 650; letter-spacing: -0.025em; color: #d6d6da; }
+#brand img { width: 64px; height: 64px; }
+.vp { position: absolute; left: 120px; top: 196px; width: 1680px; height: 844px; border-radius: 22px; overflow: hidden; background: var(--canvas); box-shadow: 0 0 0 1px #343434, 0 40px 90px rgba(0,0,0,.55); }
+.stage { position: absolute; left: 0; top: 0; width: 2000px; height: 1256px; transform-origin: 0 0; }
+.stage > img { position: absolute; left: 0; top: 0; width: 2000px; height: 1256px; display: block; }
+.cover, .pc { position: absolute; }
+.pc { background-size: 2000px 1256px; background-repeat: no-repeat; }
+.cursor { position: absolute; width: 34px; height: 34px; margin: -3px 0 0 -5px; z-index: 20; }
+.ringc { position: absolute; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%; border: 3px solid #fff; z-index: 19; }
+#typed { position: absolute; left: 643px; top: 1144px; height: 34px; font: 400 21.4px/34px 'Inter', sans-serif; color: var(--fg); white-space: pre; letter-spacing: -0.005em; }
+#typed i { display: inline-block; width: 2px; height: 25px; background: var(--blue); vertical-align: -5px; margin-left: 1px; }
+</style>
+</head>
+<body>
+
+<!-- 1. hook -->
+<div class="scene" id="hook">
+  <div id="grid"></div>
+  <div id="scrim"></div>
+  <div class="hl disp" id="hl1">Agent terminals are full of noise.</div>
+  <div class="hl disp" id="hl2" style="top:61%">Which one needs you?</div>
+</div>
+
+<!-- 2. reveal -->
+<div class="scene" id="reveal">
+  <svg id="icon" viewBox="100 100 824 824">
+    <defs><linearGradient id="mdBg" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#2C2C2E"/><stop offset="1" stop-color="#0B0B0C"/></linearGradient></defs>
+    <g id="ic-bg"><rect x="100" y="100" width="824" height="824" rx="185" fill="url(#mdBg)" stroke="#3a3a3c" stroke-width="3"/></g>
+    <g id="ic-big"><g transform="translate(512 500)">
+      <path d="M-300 72 L-150 -48 L-150 18 Z" fill="#5E5E63"/><path d="M-150 -48 L0 -168 L0 -36 L-150 18 Z" fill="#D6D6DA"/>
+      <path d="M-150 -48 L0 -168 L-60 -60 Z" fill="#FFFFFF"/><path d="M0 -168 L150 -48 L150 18 L0 -36 Z" fill="#98989D"/>
+      <path d="M150 -48 L300 72 L150 18 Z" fill="#3E3E42"/></g></g>
+    <g id="ic-s1"><g transform="translate(352 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"/><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"/></g></g>
+    <g id="ic-s2"><g transform="translate(672 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"/><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"/></g></g>
+  </svg>
+  <div id="wordmark" class="disp">Flockbook</div>
+  <div id="sub" class="disp">A reading view for your Herdr coding agents.</div>
+</div>
+
+<!-- 3-7. product scenes share caption + brand -->
+<div class="scene" id="s-read"><div class="vp"><div class="stage" id="st-read"><img src="shots/chat.png"></div></div></div>
+<div class="scene" id="s-needs"><div class="vp"><div class="stage" id="st-needs"><img src="shots/needs.png"></div></div></div>
+<div class="scene" id="s-appr"><div class="vp"><div class="stage" id="st-appr"><img src="shots/approval.png"></div></div></div>
+<div class="scene" id="s-reply"><div class="vp"><div class="stage" id="st-reply"><img src="shots/chat.png"></div></div></div>
+<div class="scene" id="s-res"><div class="vp"><div class="stage" id="st-res"><img src="shots/resources.png"></div></div></div>
+<div class="scene" id="s-phone"><div class="vp" style="background:#18181b"><div class="stage" id="st-phone"><img src="shots/phone.png"></div></div></div>
+
+<div id="cap" class="disp"></div>
+<div id="brand" class="disp"><img src="flockbook-dark.svg">Flockbook</div>
+
+<!-- 8. outro -->
+<div class="scene" id="outro">
+  <svg id="flock" viewBox="0 0 1920 1080"></svg>
+  <div id="o-h" class="disp">Your whole flock, on one page.</div>
+  <div id="o-row"><img src="flockbook-dark.svg"><span class="n disp">Flockbook</span><span id="o-url">github.com/minchenlee/flockbook</span></div>
+  <div id="o-meta">Free · MIT · macOS &amp; Linux · Unofficial, not affiliated with Herdr</div>
+</div>
+
+<script>
+// ---------- timeline (seconds). 120 BPM: a beat is 0.5 s, every cut is on a beat ----------
+const T = { hook: 0, reveal: 4, read: 7, needs: 10.5, appr: 12, reply: 14, res: 16.5, phone: 19, outro: 20.5, end: 24 };
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const pr = (t, t0, d) => clamp((t - t0) / d);
+const eo = (x) => 1 - Math.pow(1 - x, 3);            // ease out
+const eio = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const back = (x) => { const c = 1.6; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const lerp = (a, b, p) => a + (b - a) * p;
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+// enter animation: hidden before t0, fade + offset, settled after t0 + d
+function enter(el, t, t0, d, o = {}) {
+  const p = eo(pr(t, t0, d));
+  el.style.opacity = t < t0 ? 0 : p;
+  const x = (o.x || 0) * (1 - p), y = (o.y ?? 14) * (1 - p), s = lerp(o.s ?? 1, 1, o.back ? back(pr(t, t0, d)) : p);
+  el.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+}
+function exit(el, t, t0, d, o = {}) {
+  if (t < t0) return;
+  const p = eo(pr(t, t0, d));
+  el.style.opacity = 1 - p;
+  el.style.transform = `translate(${(o.x || 0) * p}px, ${(o.y ?? -14) * p}px)`;
+}
+
+// ---------- hook panes ----------
+const names = ['api-dev', 'docs-writer', 'test-runner', 'deploy', 'importer', 'getting started'];
+const noise = [
+  '<b>●</b> Read shop/pricing.py', '  <u>⎿</u> 212 lines', '<b>●</b> Bash(pytest -q tests/test_pricing.py)', '  <u>⎿</u> ....F...........  [ 40%]',
+  '  <u>⎿</u> E  assert 69.65 == 69.66', '<b>●</b> Edit shop/pricing.py', '  <u>⎿</u> - total = round(sum(prices), 2)', '  <u>⎿</u> + total = sum(prices, Decimal(0))',
+  '<b>●</b> Grep "quantize" shop/', '  <u>⎿</u> 3 matches in 2 files', '<b>●</b> Bash(git diff --stat)', '  <u>⎿</u> 2 files changed, 14 insertions(+), 6 deletions(-)',
+  '✻ Thinking… (41s · ↓ 2.1k tokens)', '<b>●</b> Read tests/test_pricing.py', '  <u>⎿</u> 88 lines', '<b>●</b> Bash(pytest -q)', '  <u>⎿</u> ........................................',
+  '  <u>⎿</u> 40 passed in 1.92s', '<b>●</b> Update Todos', '  <u>⎿</u> ☒ find the rounding error', '  <u>⎿</u> ☐ add regression carts', '<b>●</b> Read checkout.py', '  <u>⎿</u> 164 lines',
+  '<b>●</b> Bash(ruff check shop/)', '  <u>⎿</u> All checks passed!', '<b>●</b> Edit tests/test_pricing.py', '  <u>⎿</u> + def test_seven_small_items():', '✻ Compacting conversation…',
+];
+const panes = names.map((n, i) => {
+  const p = document.createElement('div'); p.className = 'pane';
+  let lines = []; for (let k = 0; k < 90; k++) lines.push(noise[(k * (3 + i) + i * 5) % noise.length]);
+  p.innerHTML = `<div class="head"><i></i>${n}</div><div class="body">${lines.join('\n')}</div>`;
+  if (i === 2) p.innerHTML += `<div class="ask"><em>Do you want to proceed?</em>\n<em>❯</em> 1. Yes\n  2. No, and tell the agent what to do</div><div class="ring"></div>`;
+  $('#grid').appendChild(p);
+  return { el: p, body: p.querySelector('.body'), speed: 46 + ((i * 37) % 5) * 17, ask: p.querySelector('.ask'), ring: p.querySelector('.ring') };
+});
+
+// ---------- product stages: covers and pieces (coordinates are in the 2000 x 1256 stage) ----------
+function cover(stage, x, y, w, h, c = '#202020') {
+  const d = document.createElement('div'); d.className = 'cover';
+  d.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${c}`; $(stage).appendChild(d); return d;
+}
+function piece(stage, img, x, y, w, h) {
+  const d = document.createElement('div'); d.className = 'pc';
+  d.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;background-image:url(shots/${img});background-position:${-x}px ${-y}px`;
+  $(stage).appendChild(d); return d;
+}
+const cursorSvg = `<svg viewBox="0 0 34 34"><path d="M6 3 L6 27 L12.5 21.5 L17 31 L21 29 L16.6 20 L25 19.5 Z" fill="#fff" stroke="#111" stroke-width="2" stroke-linejoin="round"/></svg>`;
+function cursor(stage) { const d = document.createElement('div'); d.className = 'cursor'; d.innerHTML = cursorSvg; $(stage).appendChild(d);
+  const r = document.createElement('div'); r.className = 'ringc'; $(stage).appendChild(r); return { d, r }; }
+
+// read: the agent's turn comes in block by block
+cover('#st-read', 630, 296, 1090, 786);
+const rd = {
+  chips: piece('#st-read', 'chat.png', 648, 310, 410, 46),
+  rows: [0, 1, 2, 3, 4].map(i => piece('#st-read', 'chat.png', 656, 357.5 + i * 35.4, 1044, 35.4)),
+  fixed: piece('#st-read', 'chat.png', 648, 554, 1050, 46),
+  bullets: piece('#st-read', 'chat.png', 648, 602, 1050, 88),
+  all: piece('#st-read', 'chat.png', 648, 694, 1050, 78),
+  meta: piece('#st-read', 'chat.png', 648, 776, 300, 32),
+};
+// needs you
+cover('#st-needs', 346, 128, 452, 232); cover('#st-needs', 806, 80, 1186, 760);
+const nd = {
+  rows: [[134, 72], [207, 72], [280, 74]].map(([y, h]) => piece('#st-needs', 'needs.png', 350, y, 442, h)),
+  panel: piece('#st-needs', 'needs.png', 812, 96, 1150, 730),
+};
+// approval card
+cover('#st-appr', 620, 890, 1100, 196);
+const ap = { card: piece('#st-appr', 'approval.png', 624, 894, 1092, 190), cur: cursor('#st-appr') };
+// reply: the same chat, the user's next message is typed and the answer arrives
+cover('#st-reply', 630, 812, 1090, 268); cover('#st-reply', 640, 1143, 300, 38, '#262626');
+const rp = {
+  bubble: piece('#st-reply', 'chat.png', 1136, 824, 556, 72),
+  chips: piece('#st-reply', 'chat.png', 648, 903, 400, 48),
+  answer: piece('#st-reply', 'chat.png', 648, 960, 1046, 80),
+  meta: piece('#st-reply', 'chat.png', 648, 1042, 300, 30),
+  cur: cursor('#st-reply'),
+};
+const typed = document.createElement('div'); typed.id = 'typed'; $('#st-reply').appendChild(typed);
+const MSG = 'Nice. Does the receipt template still format it right?';
+// resources panel (1470 px screenshot shown at 2000: factor 1.3605)
+const K = 2000 / 1470;
+cover('#st-res', 1140 * K - 6, 60 * K - 6, 320 * K + 12, 724 * K + 12);
+const rs = { panel: piece('#st-res', 'resources.png', 1140 * K - 4, 60 * K - 4, 320 * K + 8, 724 * K + 8) };
+// phone page
+cover('#st-phone', 350 * K, 290 * K, 770 * K, 633 * K, '#08080a');
+const ph = { cards: [297, 455, 614, 772].map(y => piece('#st-phone', 'phone.png', 352 * K, (y - 4) * K, 766 * K, 148 * K)) };
+
+function cam(stage, cx, cy, s) { $(stage).style.transform = `translate(${840 - cx * s}px, ${422 - cy * s}px) scale(${s})`; }
+
+// captions
+const caps = [
+  { t0: T.read, t1: T.needs, text: 'Read what each agent did.' },
+  { t0: T.needs, t1: T.appr, text: 'See which one needs you.' },
+  { t0: T.appr, t1: T.reply, text: 'Answer without opening the terminal.' },
+  { t0: T.reply, t1: T.res, text: 'Reply in one place.' },
+  { t0: T.res, t1: T.phone, text: 'Everything the session touched.', tag: 'Resources · Coming 12/1' },
+  { t0: T.phone, t1: T.outro, text: 'And from your phone.' },
+];
+caps.forEach(c => { const d = document.createElement('div'); d.className = 'capline';
+  d.innerHTML = `<span>${c.text}</span>` + (c.tag ? `<span class="tag">${c.tag}</span>` : ''); $('#cap').appendChild(d); c.el = d; });
+
+// outro flock: the icon's small arrowheads fly in and settle into a V (slots as in site/static/flock.js)
+const GAP = 60, N = 11;
+const birds = Array.from({ length: N }, (_, k) => {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.innerHTML = '<path d="M-50 12 L0 -28 L0 -6 Z" fill="#98989d"/><path d="M0 -28 L50 12 L0 -6 Z" fill="#5e5e63"/>';
+  $('#flock').appendChild(g);
+  const d = (k + 1) >> 1, side = k % 2 ? -1 : 1;
+  return { g, sx: -d * GAP, sy: side * d * GAP * 0.55, x0: -180 - rnd() * 900, y0: -120 + rnd() * 560, k };
+});
+
+const scenes = { hook: $('#hook'), reveal: $('#reveal'), read: $('#s-read'), needs: $('#s-needs'), appr: $('#s-appr'), reply: $('#s-reply'), res: $('#s-res'), phone: $('#s-phone'), outro: $('#outro') };
+const order = ['hook', 'reveal', 'read', 'needs', 'appr', 'reply', 'res', 'phone', 'outro'];
+
+window.seek = function (t) {
+  let cur = order[0]; for (const k of order) if (t >= T[k]) cur = k;
+  for (const k of order) scenes[k].style.display = k === cur ? 'block' : 'none';
+  const product = t >= T.read && t < T.outro;
+  $('#cap').style.display = product ? 'block' : 'none';
+  $('#brand').style.display = product ? 'flex' : 'none';
+  // each product window settles in over 0.2 s after its cut
+  if (product) {
+    const p = eo(pr(t, T[cur], 0.22)); const vp = scenes[cur].querySelector('.vp');
+    vp.style.opacity = lerp(0.35, 1, p); vp.style.transform = `translateY(${(1 - p) * 18}px)`;
+    for (const c of caps) { c.el.style.display = t >= c.t0 && t < c.t1 ? 'flex' : 'none'; if (t >= c.t0 && t < c.t1) enter(c.el, t, c.t0, 0.25, { y: 22 }); }
+    enter($('#brand'), t, T.read, 0.3, { y: 0 });
+  }
+
+  if (cur === 'hook') {
+    for (const p of panes) p.body.style.transform = `translateY(${-p.speed * t * 2.2}px)`;
+    const focus = eio(pr(t, 1.9, 0.3));
+    panes.forEach((p, i) => { p.el.style.opacity = i === 2 ? 1 : lerp(1, 0.32, focus); });
+    panes[2].ask.style.transform = `translateY(${(1 - eo(pr(t, 2.0, 0.25))) * 110}%)`;
+    panes[2].ring.style.opacity = t < 2 ? 0 : 0.55 + 0.45 * Math.cos((t - 2) * Math.PI * 4);   // pulse on the beat
+    const out = eio(pr(t, 3.7, 0.3));
+    $('#grid').style.transform = `scale(${lerp(1.04, 1, eo(pr(t, 0, 2)))}) scale(${lerp(1, 0.9, out)})`;
+    $('#grid').style.opacity = 1 - out;
+    $('#scrim').style.opacity = (1 - out);
+    $('#scrim').style.background = t < 1.9 ? '' : 'radial-gradient(ellipse 52% 26% at 50% 61%, rgba(10,10,11,.96) 0%, rgba(10,10,11,.85) 50%, rgba(10,10,11,0) 100%)';
+    enter($('#hl1'), t, 0.15, 0.3, { y: 26 }); exit($('#hl1'), t, 1.8, 0.2);
+    enter($('#hl2'), t, 2.0, 0.25, { y: 26 }); exit($('#hl2'), t, 3.75, 0.25);
+    // the highlighted pane sits top right; keep the scrim from hiding its prompt
+  }
+
+  if (cur === 'reveal') {
+    const a = (id, t0, d, x, y, s) => { const p = eo(pr(t, t0, d)); const el = $(id);
+      el.style.opacity = t < t0 ? 0 : clamp(p * 1.6); el.style.transform = `translate(${x * (1 - p)}px, ${y * (1 - p)}px) scale(${lerp(s, 1, p)})`; el.style.transformOrigin = '512px 512px'; };
+    a('#ic-bg', 4.0, 0.35, 0, 0, 0.82);
+    a('#ic-big', 4.1, 0.4, -520, 160, 1);
+    a('#ic-s1', 4.28, 0.36, -420, 200, 1);
+    a('#ic-s2', 4.36, 0.36, -420, 200, 1);
+    enter($('#wordmark'), t, 4.3, 0.35, { y: 34 });
+    enter($('#sub'), t, 4.5, 0.3, { y: 24 });
+    const z = 1 + 0.025 * pr(t, 4, 3); scenes.reveal.style.transform = `scale(${z})`;
+    if (t > 6.8) scenes.reveal.style.opacity = 1 - pr(t, 6.8, 0.2) * 0.85; else scenes.reveal.style.opacity = 1;
+  }
+
+  if (cur === 'read') {
+    const m = eio(pr(t, 7.3, 2.0));
+    cam('#st-read', lerp(1000, 1160, m), lerp(502, 478, m), lerp(0.84, 1.0, m));
+    enter(rd.chips, t, 7.5, 0.2);
+    rd.rows.forEach((r, i) => enter(r, t, 7.75 + i * 0.125, 0.16, { y: 0, x: -18 }));
+    enter(rd.fixed, t, 8.5, 0.22); enter(rd.bullets, t, 8.75, 0.22); enter(rd.all, t, 9.0, 0.22); enter(rd.meta, t, 9.25, 0.22, { y: 6 });
+  }
+
+  if (cur === 'needs') {
+    const m = eo(pr(t, 10.5, 1.5));
+    cam('#st-needs', 1000, lerp(506, 502, m), lerp(0.84, 0.845, m));
+    nd.rows.forEach((r, i) => enter(r, t, 10.6 + i * 0.2, 0.2, { y: 0, x: -24 }));
+    enter(nd.panel, t, 11.2, 0.28, { y: 18 });
+  }
+
+  if (cur === 'appr') {
+    const m = eio(pr(t, 12.0, 1.0));
+    cam('#st-appr', 1000, lerp(738, 744, m), lerp(0.84, 0.86, m));
+    enter(ap.card, t, 12.15, 0.3, { y: 44 });
+    const cm = eio(pr(t, 12.45, 0.5));
+    ap.cur.d.style.opacity = pr(t, 12.4, 0.1);
+    const cx = lerp(1180, 720, cm), cy = lerp(800, 1046, cm) - Math.sin(cm * Math.PI) * 40;
+    ap.cur.d.style.left = cx + 'px'; ap.cur.d.style.top = cy + 'px';
+    const click = pr(t, 13.0, 0.3);
+    ap.cur.d.style.transform = `scale(${t >= 13 && t < 13.12 ? 0.86 : 1})`;
+    ap.cur.r.style.left = '720px'; ap.cur.r.style.top = '1046px';
+    ap.cur.r.style.opacity = t < 13 ? 0 : (1 - click) * 0.9; ap.cur.r.style.transform = `scale(${0.3 + click * 1.5})`;
+    if (t >= 13.0) ap.card.style.filter = `brightness(${t < 13.14 ? 1.25 : 1})`; else ap.card.style.filter = 'none';
+    exit(ap.card, t, 13.4, 0.25, { y: 30 });
+    if (t >= 13.4) ap.cur.d.style.opacity = 1 - pr(t, 13.4, 0.2);
+  }
+
+  if (cur === 'reply') {
+    cam('#st-reply', 1170, 888, 1.15);
+    const n = t < 15 ? Math.round(MSG.length * pr(t, 14.15, 0.8)) : 0;
+    typed.innerHTML = t < 15 ? MSG.slice(0, n).replace(/</g, '&lt;') + '<i></i>' : '';
+    // pointer goes to the send button and presses it on the beat
+    const cm = eio(pr(t, 14.55, 0.42));
+    rp.cur.d.style.opacity = pr(t, 14.5, 0.1) * (1 - pr(t, 15.2, 0.2));
+    rp.cur.d.style.left = lerp(1500, 1679, cm) + 'px'; rp.cur.d.style.top = lerp(1010, 1208, cm) + 'px';
+    rp.cur.d.style.transform = `scale(${t >= 15 && t < 15.12 ? 0.86 : 1})`;
+    const click = pr(t, 15.0, 0.3);
+    rp.cur.r.style.left = '1677px'; rp.cur.r.style.top = '1205px';
+    rp.cur.r.style.opacity = t < 15 ? 0 : (1 - click) * 0.9; rp.cur.r.style.transform = `scale(${0.3 + click * 1.3})`;
+    enter(rp.bubble, t, 15.0, 0.25, { y: 60, s: 0.96 });
+    enter(rp.chips, t, 15.3, 0.2);
+    enter(rp.answer, t, 15.5, 0.01, { y: 0 });
+    rp.answer.style.clipPath = `inset(0 ${(1 - pr(t, 15.5, 0.45)) * 100}% 0 0)`;
+    enter(rp.meta, t, 16.0, 0.2, { y: 6 });
+  }
+
+  if (cur === 'res') {
+    const m = eio(pr(t, 16.5, 2.5));
+    cam('#st-res', lerp(1000, 1045, m), lerp(506, 512, m), lerp(0.84, 0.885, m));
+    enter(rs.panel, t, 16.65, 0.32, { y: 0, x: 70 });
+    rs.panel.style.clipPath = `inset(0 0 ${(1 - eo(pr(t, 16.7, 0.8))) * 86}% 0 round 18px)`;
+  }
+
+  if (cur === 'phone') {
+    const m = eo(pr(t, 19.0, 1.5));
+    cam('#st-phone', 1000, lerp(600, 640, m), 0.84);
+    ph.cards.forEach((c, i) => enter(c, t, 19.1 + i * 0.125, 0.22, { y: 30, s: 0.97 }));
+  }
+
+  if (cur === 'outro') {
+    const cx = 960 + 2.5 * GAP + (t - T.outro) * 10, cy = 250 + Math.sin((t - T.outro) * 1.4) * 5;
+    for (const b of birds) {
+      const p = eo(pr(t, T.outro + 0.02 + b.k * 0.035, 1.05));
+      const tx = cx + b.sx, ty = cy + b.sy, x = lerp(b.x0, tx, p), y = lerp(b.y0, ty, p) - Math.sin(p * Math.PI) * 30 * (b.k % 2 ? 1 : -1);
+      const h = Math.atan2(ty - b.y0, tx - b.x0) * (1 - p);
+      const s = b.k ? 0.62 : 0.84;
+      b.g.setAttribute('transform', `translate(${x} ${y}) rotate(${h * 180 / Math.PI + 90}) scale(${s})`);
+      b.g.style.opacity = clamp(p * 3);
+    }
+    enter($('#o-h'), t, 20.85, 0.35, { y: 34 });
+    enter($('#o-row'), t, 21.3, 0.3, { y: 22 });
+    enter($('#o-meta'), t, 21.6, 0.3, { y: 16 });
+    scenes.outro.style.opacity = t > 23.6 ? 1 - pr(t, 23.6, 0.4) * 0.0 : 1;
+  }
+};
+window.ready = Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode().catch(() => {}))]).then(() => {
+  const urls = ['chat', 'needs', 'approval', 'resources', 'phone'].map(n => new Promise(r => { const i = new Image(); i.onload = i.onerror = r; i.src = `shots/${n}.png`; }));
+  return Promise.all(urls);
+}).then(() => { window.seek(0); return true; });
+</script>
+</body>
+</html>

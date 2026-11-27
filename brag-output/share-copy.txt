@@ -1,0 +1,2 @@
+Agent terminals are full of noise. Flockbook is a reading view for your Herdr coding agents: read what each one did, see which one needs you, and reply in one place. Free, MIT, macOS and Linux (unofficial). Resources panel lands 12/1.
+https://github.com/minchenlee/flockbook
