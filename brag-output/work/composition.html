@@ -152,17 +152,33 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
 #ptr { position: absolute; left: 0; top: 0; width: 26px; height: 26px; z-index: 30; filter: drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
 #ripple { position: absolute; left: 0; top: 0; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; border: 2px solid rgba(255,255,255,.9); z-index: 29; }
 
-/* phone page (web/style.css: black glass, orange for "needs you") */
-#phone { position: absolute; zoom: 1.5; left: 410px; top: 20px; width: 460px; height: 980px; transform-origin: 50% 0; border-radius: 64px; background: #08080a; border: 7px solid #3a3a3e; box-shadow: 0 60px 140px rgba(0,0,0,.8), 0 0 0 1px #111, inset 0 0 0 1px #1a1a1c; padding: 54px 26px 0; overflow: hidden; }
-#phone .island { position: absolute; left: 50%; top: 16px; width: 118px; height: 32px; margin-left: -59px; border-radius: 16px; background: #000; }
-#phone .ttl { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
-#phone .ttl b { flex: 1; font: 700 34px 'Inter Display', sans-serif; letter-spacing: -0.02em; }
+/* phone: a device drawn in CSS (titanium band, black bezel, side buttons, island, glass), around the Phone page
+   in the look of web/style.css (black glass, orange for "needs you"). Proportions follow scripts/demo/phone-frames.mjs. */
+#phone { position: absolute; zoom: 1.42; left: 462px; top: 22px; width: 428px; height: 900px; transform-origin: 50% 0; }
+#phone .btn-l, #phone .btn-r { position: absolute; width: 5px; border-radius: 2px; background: linear-gradient(90deg, #1b1b1d, #6f6f73 45%, #3a3a3d); }
+#phone .btn-l { left: -3px; } #phone .btn-r { right: -3px; background: linear-gradient(270deg, #1b1b1d, #6f6f73 45%, #3a3a3d); }
+#phone .band { position: absolute; inset: 0; border-radius: 70px; padding: 4.5px;
+  background: linear-gradient(135deg, #8d8d91 0%, #4a4a4d 18%, #2b2b2d 42%, #56565a 60%, #a3a3a7 78%, #3c3c3f 100%);
+  box-shadow: 0 70px 150px rgba(0,0,0,.85), 0 20px 50px rgba(0,0,0,.6), inset 0 0 2px rgba(255,255,255,.5); }
+#phone .ant { position: absolute; background: rgba(0,0,0,.45); }
+#phone .bezel { width: 100%; height: 100%; border-radius: 66px; background: #020203; padding: 11px; box-shadow: inset 0 0 0 1.5px #1c1c1e, inset 0 0 6px rgba(255,255,255,.08); }
+#phone .screen { position: relative; width: 100%; height: 100%; border-radius: 55px; overflow: hidden; background: #08080a; padding: 0 22px;
+  background-image: radial-gradient(45% 22% at 8% 12%, rgba(255,255,255,.09), transparent 70%), radial-gradient(40% 20% at 96% 36%, rgba(255,255,255,.07), transparent 70%), radial-gradient(55% 22% at 18% 70%, rgba(255,255,255,.06), transparent 70%); }
+#phone .glass { position: absolute; inset: 0; border-radius: 55px; pointer-events: none; z-index: 5;
+  background: linear-gradient(118deg, rgba(255,255,255,.075) 0%, rgba(255,255,255,.03) 22%, transparent 34%, transparent 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+#phone .island { position: absolute; left: 50%; top: 12px; width: 122px; height: 35px; margin-left: -61px; border-radius: 18px; background: #000; z-index: 4; }
+#phone .island::after { content: ''; position: absolute; right: 14px; top: 11px; width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2a3350 0%, #0c0e18 55%, #000 100%); box-shadow: 0 0 0 1px #111; }
+#phone .sb { height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 6px 14px 0 20px; font: 600 16.5px 'Inter', sans-serif; letter-spacing: -0.01em; }
+#phone .sb .r { display: flex; align-items: center; gap: 6px; }
+#phone .sb svg { display: block; }
+#phone .ttl { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+#phone .ttl b { flex: 1; font: 700 32px 'Inter Display', sans-serif; letter-spacing: -0.02em; }
 #phone .pill { height: 32px; padding: 0 13px; border-radius: 16px; background: #f3f3f4; color: #08080a; font-size: 14.5px; font-weight: 500; display: flex; align-items: center; }
-#phone .sec { margin: 30px 0 12px; font-size: 21px; font-weight: 600; letter-spacing: -0.01em; }
-.pc { height: 86px; margin-bottom: 12px; border-radius: 24px; background: #25252a; box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 0 1px rgba(255,146,48,.55); display: flex; align-items: center; gap: 13px; padding: 0 16px; }
+#phone .sec { margin: 28px 0 12px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.pc { height: 84px; margin-bottom: 11px; border-radius: 24px; background: rgba(48,48,52,.72); box-shadow: inset 0 1px 0 rgba(255,255,255,.16), inset 0 0 0 .5px rgba(255,255,255,.06), 0 0 0 1px rgba(255,146,48,.6), 0 8px 26px rgba(0,0,0,.35); display: flex; align-items: center; gap: 12px; padding: 0 15px; }
 .pc .ex { width: 22px; height: 22px; border-radius: 11px; background: #ff9230; color: #111; font-size: 14px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
-.pc .tx { flex: 1; min-width: 0; } .pc .a { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
-.pc .b { font-size: 14px; color: rgba(255,255,255,.6); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc .tx { flex: 1; min-width: 0; } .pc .a { font-size: 17.5px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.pc .b { font-size: 13.5px; color: rgba(255,255,255,.6); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc svg { width: 14px; height: 14px; color: rgba(255,255,255,.28); flex: none; }
 </style>
 </head>
@@ -179,12 +195,13 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
   <svg id="icon" viewBox="100 100 824 824">
     <defs><linearGradient id="mdBg" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#2C2C2E"/><stop offset="1" stop-color="#0B0B0C"/></linearGradient></defs>
     <g id="ic-bg"><rect x="100" y="100" width="824" height="824" rx="185" fill="url(#mdBg)" stroke="#3a3a3c" stroke-width="3"/></g>
-    <g id="ic-big"><g transform="translate(512 500)">
+    <clipPath id="icClip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <g clip-path="url(#icClip)"><g id="ic-big"><g transform="translate(512 500)">
       <path d="M-300 72 L-150 -48 L-150 18 Z" fill="#5E5E63"/><path d="M-150 -48 L0 -168 L0 -36 L-150 18 Z" fill="#D6D6DA"/>
       <path d="M-150 -48 L0 -168 L-60 -60 Z" fill="#FFFFFF"/><path d="M0 -168 L150 -48 L150 18 L0 -36 Z" fill="#98989D"/>
       <path d="M150 -48 L300 72 L150 18 Z" fill="#3E3E42"/></g></g>
     <g id="ic-s1"><g transform="translate(352 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"/><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"/></g></g>
-    <g id="ic-s2"><g transform="translate(672 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"/><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"/></g></g>
+    <g id="ic-s2"><g transform="translate(672 720) scale(1.1)"><path d="M-50 12 L0 -28 L0 -6 Z" fill="#8E8E93"/><path d="M0 -28 L50 12 L0 -6 Z" fill="#4A4A4E"/></g></g></g>
   </svg>
   <div id="wordmark" class="disp">Flockbook</div>
   <div id="sub" class="disp">A reading view for your Herdr coding agents.</div>
@@ -214,10 +231,24 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
       <svg id="ptr" viewBox="0 0 26 26"><path d="M5 2.5 L5 21 L10 16.6 L13.4 24 L16.6 22.5 L13.2 15.4 L20 15 Z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg>
     </div>
     <div id="phone">
-      <div class="island"></div>
-      <div class="ttl"><b>Agents</b><span class="pill">Notify me</span><span class="pill">Input on</span></div>
-      <div class="sec">Needs you · 8</div>
-      <div id="pcards"></div>
+      <div class="btn-l" style="top:150px;height:30px"></div><div class="btn-l" style="top:208px;height:58px"></div><div class="btn-l" style="top:280px;height:58px"></div>
+      <div class="btn-r" style="top:250px;height:92px"></div>
+      <div class="band">
+        <div class="ant" style="left:0;top:92px;width:4.5px;height:5px"></div><div class="ant" style="right:0;top:92px;width:4.5px;height:5px"></div>
+        <div class="ant" style="left:86px;top:0;width:5px;height:4.5px"></div>
+        <div class="bezel"><div class="screen">
+          <div class="island"></div>
+          <div class="sb"><span>9:41</span><span class="r">
+            <svg width="19" height="12" viewBox="0 0 19 12" fill="#fff"><rect x="0" y="8" width="3.2" height="4" rx=".8"/><rect x="5" y="5.5" width="3.2" height="6.5" rx=".8"/><rect x="10" y="3" width="3.2" height="9" rx=".8"/><rect x="15" y="0" width="3.2" height="12" rx=".8"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round"><path d="M1.3 4.2a10.3 10.3 0 0 1 14.4 0"/><path d="M3.9 6.9a6.6 6.6 0 0 1 9.2 0"/><circle cx="8.5" cy="10" r="1.1" fill="#fff" stroke="none"/></svg>
+            <svg width="27" height="13" viewBox="0 0 27 13" fill="none"><rect x=".5" y=".5" width="23" height="12" rx="3.6" stroke="rgba(255,255,255,.45)"/><rect x="2" y="2" width="20" height="9" rx="2.2" fill="#fff"/><path d="M25 4.5v4c.9-.3 1.5-1.1 1.5-2s-.6-1.7-1.5-2z" fill="rgba(255,255,255,.5)"/></svg>
+          </span></div>
+          <div class="ttl"><b>Agents</b><span class="pill">Notify me</span><span class="pill">Input on</span></div>
+          <div class="sec">Needs you · 8</div>
+          <div id="pcards"></div>
+          <div class="glass"></div>
+        </div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -379,7 +410,7 @@ const resRows = [...document.querySelectorAll('.ra')];
 
 // ---------- phone cards ----------
 $('#pcards').innerHTML = [['Cart drawer accessibility', 'orchard-a11y-dev · Orchard · a11y'], ['Promo codes at checkout', 'orchard-promo-dev · Orchard · promo codes'],
-  ['Staging dry-run deploy', 'harbor-deploy-ops · Harbor · deploy'], ['Rotate staging DB password', 'harbor-secrets-ops · Harbor · secrets']]
+  ['Staging dry-run deploy', 'harbor-deploy-ops · Harbor · deploy'], ['Rotate staging DB password', 'harbor-secrets-ops · Harbor · secrets'], ['Onboarding rework', 'meadow-onboard-dev · Meadow · onboarding']]
   .map(([a, b]) => `<div class="pc"><span class="ex">!</span><div class="tx"><div class="a">✳ ${a}</div><div class="b">${b}</div></div>${IC.chevr}</div>`).join('');
 const pcards = [...document.querySelectorAll('.pc')];
 
@@ -497,7 +528,7 @@ window.seek = function (t) {
   if (cur === 'reveal') {
     const a = (id, t0, x, y, s) => { const p = clamp(spring(t - t0, 0.5, 0.78), 0, 1.5); const el = $(id);
       el.style.opacity = clamp((t - t0) / 0.12); el.style.transform = `translate(${x * (1 - p)}px, ${y * (1 - p)}px) scale(${lerp(s, 1, p)})`; el.style.transformOrigin = '512px 512px'; };
-    a('#ic-bg', 4.0, 0, 0, 0.8); a('#ic-big', 4.08, -560, 170, 1); a('#ic-s1', 4.24, -460, 210, 1); a('#ic-s2', 4.32, -460, 210, 1);
+    a('#ic-bg', 4.0, 0, 0, 0.8); a('#ic-big', 4.1, 0, 620, 1); a('#ic-s1', 4.26, 0, 420, 1); a('#ic-s2', 4.33, 0, 420, 1);
     const wp = eo5(pr(t, 4.3, 0.5)); $('#wordmark').style.opacity = wp; $('#wordmark').style.transform = `translateY(${(1 - wp) * 36}px)`; $('#wordmark').style.letterSpacing = `${lerp(-0.02, -0.042, wp)}em`;
     const sp = eo5(pr(t, 4.5, 0.45)); $('#sub').style.opacity = sp; $('#sub').style.transform = `translateY(${(1 - sp) * 22}px)`;
     const out = eio(pr(t, 6.7, 0.3));
