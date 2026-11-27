@@ -90,7 +90,7 @@ There is no uninstall command. Remove the files by hand. The paths below are in 
 
 A native macOS app (macOS 15 or later) with the same reading view, outside the Herdr app. It also has remote access from your phone over Tailscale, phone notifications, queued messages and an embedded terminal. It has the "Since you left" card, Summaries and the Resources panel too.
 
-**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.13.1)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
+**[Download for macOS](https://github.com/minchenlee/flockbook/releases/tag/v0.15.0)** · [Website](https://flockbook.mclee.dev) · [Features, remote access and build](docs/mac-app.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/conversation-dark.png">
