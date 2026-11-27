@@ -3,6 +3,8 @@ work/stills*/
 work/music.wav
 work/sfx/
 work/sfx44/
+work/track/
+work/*.log
 work/check*.jpg
 work/chk_*.jpg
 work/final_sheet.jpg
