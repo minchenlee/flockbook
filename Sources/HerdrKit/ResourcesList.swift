@@ -134,17 +134,17 @@ extension Resources {
             var e = low
             var r = Reader(base: s)
             r.read(data.prefix(e))
+            // A tool call open at the cut: this chunk is read again with the next one.
+            if r.parser.hasOpenToolUse, let n = neighbor {
+                e = n.end
+                r = Reader(base: s); r.read(data.prefix(e))
+                neighbor = nil
+            }
+            // Still open (its result is further on, or never comes): read from here to the end as the live part.
             if r.parser.hasOpenToolUse {
-                // A tool call open at the cut: this chunk is read again with the next one.
-                if let n = neighbor {
-                    e = n.end
-                    r = Reader(base: s); r.read(data.prefix(e))
-                    neighbor = nil
-                } else {
-                    live = Reader(base: s); live.file = id; live.read(data)
-                    low = s
-                    return true
-                }
+                live = Reader(base: s); live.file = id; live.read(data)
+                neighbor = nil; rest = Acc(); low = s
+                return true
             }
             if let n = neighbor { rest = n.acc.appending(rest) }
             neighbor = (s, e, r.acc(home: home))
@@ -194,22 +194,28 @@ extension Resources {
 
     /// A Claude Code line with a typed prompt (not a tool's result, a note or a subagent's line).
     static func isPrompt(_ line: Data) -> Bool {
-        guard line.first == 0x7B, contains(line, promptMark), contains(line, userMark) else { return false }
+        guard line.first == 0x7B, let m = find(line, promptMark), contains(line, userMark) else { return false }
+        // Text that starts with "<" is a command, a reminder or a hook's note, which the parser does not count as a prompt.
+        let after = m + promptMark.count
+        guard after < line.endIndex, line[after] != 0x3C else { return false }
         return !contains(line, sidechainMark) && !contains(line, metaMark)
     }
 
-    static func contains(_ d: Data, _ pat: [UInt8]) -> Bool {
-        guard let f = pat.first, d.count >= pat.count else { return false }
+    static func contains(_ d: Data, _ pat: [UInt8]) -> Bool { find(d, pat) != nil }
+
+    /// Where `pat` first starts in `d` (an index of `d`).
+    static func find(_ d: Data, _ pat: [UInt8]) -> Int? {
+        guard let f = pat.first, d.count >= pat.count else { return nil }
         var i = d.startIndex
         let last = d.endIndex - pat.count
         while i <= last {
-            guard let j = d[i...last].firstIndex(of: f) else { return false }
+            guard let j = d[i...last].firstIndex(of: f) else { return nil }
             var k = 1
             while k < pat.count, d[j + k] == pat[k] { k += 1 }
-            if k == pat.count { return true }
+            if k == pat.count { return j }
             i = j + 1
         }
-        return false
+        return nil
     }
 
 

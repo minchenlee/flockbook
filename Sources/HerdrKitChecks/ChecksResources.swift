@@ -122,6 +122,16 @@ func checksResources() throws {
         }
         var one = Resources.Progressive(split: false)
         check(one.update(tmp) && one.done && one.items(home: "/home/me") == want3, "resources: split false reads the whole log at once")
+        // A tool call whose result comes several parts later: the parts are read again until it closes.
+        var gap = log.split(separator: "\n").map(String.init)
+        gap.insert(contentsOf: (0..<12).map { #"{"type":"user","uuid":"p\#($0)","timestamp":"2026-11-03T01:40:06.500Z","message":{"role":"user","content":"wait \#($0)"}}"# }, at: 3)
+        try Data((gap.joined(separator: "\n") + "\n").utf8).write(to: tmp)
+        let wantGap = Resources.collect(file: tmp, home: "/home/me") ?? []
+        var g = Resources.Progressive(chunk: 150)
+        var gok = g.update(tmp), gn = 0
+        while gok, !g.done, gn < 1000 { gok = g.older(tmp, home: "/home/me"); gn += 1 }
+        check(gok && g.done && !wantGap.isEmpty && g.items(home: "/home/me") == wantGap,
+              "resources: a tool call with its result \(gn) parts later gives what one read gives")
     } catch { check(false, "resources: reader temp file (\(error))") }
     // Two reads joined (the older first) give what one read of both gives.
     do {
@@ -142,6 +152,7 @@ func checksResources() throws {
         (#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]}}"#, false),
         (#"{"isSidechain":true,"type":"user","message":{"role":"user","content":"hi"}}"#, false),
         (#"{"isMeta":true,"type":"user","message":{"role":"user","content":"note"}}"#, false),
+        (#"{"type":"user","message":{"role":"user","content":"<system-reminder>x</system-reminder>"}}"#, false),
         (#"{"type":"assistant","message":{"role":"assistant","content":"\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"x"}}"#, false),
     ]
     check(promptLines.allSatisfy { Resources.isPrompt(Data($0.0.utf8)) == $0.1 }, "resources: a chunk ends only at a typed prompt")
