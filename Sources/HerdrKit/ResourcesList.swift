@@ -83,8 +83,8 @@ extension Resources {
     /// A log read newest first, a chunk at a time, so a big log shows its newest resources at once (`start`), then the
     /// older ones as `older` reads them. Each cut is at the start of a typed prompt, where no tool call and no reply is
     /// open, and each chunk is parsed alone; their lists join in file order, so the whole read gives what one read
-    /// gives. The newest chunk is a `Reader`: later reads parse only what the log grew by. `split` false (logs of other
-    /// agents, a remote copy): one chunk, the whole log.
+    /// gives. The newest chunk is a `Reader`: later reads parse only what the log grew by. `split` false (logs other than
+    /// Claude Code's and Codex's, a remote copy): one chunk, the whole log.
     public struct Progressive: Sendable {
         /// The size of the first chunk (the mod reads the same); each older one is twice the last, up to `chunkMax`.
         public static let chunk = 8 << 20, chunkMax = 64 << 20
@@ -159,8 +159,8 @@ extension Resources {
         }
     }
 
-    /// Where a chunk ends: the start of the first typed prompt from `near` on, before `below`; else the last one
-    /// before `near`; else 0 (the log's start). A typed prompt is a Claude Code user line whose content is a string.
+    /// Where a chunk ends: the start of the first cut line (`isPrompt`) from `near` on, before `below`; else the last
+    /// one before `near`; else 0 (the log's start).
     static func cut(_ data: Data, near: Int, below: Int) -> Int {
         guard near > 0 else { return 0 }
         let base = data.startIndex
@@ -192,9 +192,25 @@ extension Resources {
     static let promptMark = Array(#""message":{"role":"user","content":""#.utf8), userMark = Array(#""type":"user""#.utf8)
     static let sidechainMark = Array(#""isSidechain":true"#.utf8), metaMark = Array(#""isMeta":true"#.utf8)
 
-    /// A Claude Code line with a typed prompt (not a tool's result, a note or a subagent's line).
+    static let codexMark = Array(#""type":"response_item""#.utf8), messageMark = Array(#""type":"message""#.utf8)
+
+    /// A line a chunk may start at: a Claude Code typed prompt (not a tool's result, a note or a subagent's line), or a
+    /// Codex message line that, parsed alone, gives a text item (a Codex line is whole on its own, and a message ends the
+    /// run of tool calls before it; one the reader does not show, as AGENTS.md, would join the runs on both sides).
     static func isPrompt(_ line: Data) -> Bool {
-        guard line.first == 0x7B, let m = find(line, promptMark), contains(line, userMark) else { return false }
+        guard line.first == 0x7B else { return false }
+        if contains(line, codexMark) {
+            guard contains(line, messageMark), let s = String(data: line, encoding: .utf8),
+                  let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  o["type"] as? String == "response_item", o["payload"] is [String: Any] else { return false }
+            var p = ConversationParser()
+            p.feed(line: s, offset: 0)
+            switch p.items().first?.kind {
+            case .userText?, .assistantText?: return true
+            default: return false
+            }
+        }
+        guard let m = find(line, promptMark), contains(line, userMark) else { return false }
         // Text that starts with "<" is a command, a reminder or a hook's note, which the parser does not count as a prompt.
         let after = m + promptMark.count
         guard after < line.endIndex, line[after] != 0x3C else { return false }

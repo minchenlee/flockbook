@@ -262,7 +262,7 @@ extension AppModel {
                                 state: log == nil ? store.conversationState(for: sid) : .ready,
                                 home: machine == nil ? NSHomeDirectory() : nil, agentDir: machine == nil ? pane.cwd : nil,
                                 // Newest first: a local Claude log (where a chunk may end is a Claude prompt line).
-                                split: machine == nil && pane.agent?.kind == "claude", force: force)
+                                split: machine == nil && ["claude", "codex"].contains(pane.agent?.kind ?? ""), force: force)
     }
 
     /// Show in chat: the tab's pane scrolls to the row.

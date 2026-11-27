@@ -132,6 +132,59 @@ func checksResources() throws {
         while gok, !g.done, gn < 1000 { gok = g.older(tmp, home: "/home/me"); gn += 1 }
         check(gok && g.done && !wantGap.isEmpty && g.items(home: "/home/me") == wantGap,
               "resources: a tool call with its result \(gn) parts later gives what one read gives")
+        // Codex: a rollout read newest first in chunks gives what one read gives, field by field. Its cuts are message
+        // lines with text; a call whose result comes after the next message, and a message the reader does not show
+        // between two runs of calls, are not cut at.
+        func cx(_ t: Int, _ payload: String) -> String {
+            #"{"timestamp":"2026-11-03T02:\#(String(format: "%02d", t % 60)):00.000Z","type":"response_item","payload":"# + payload + "}"
+        }
+        func say(_ role: String, _ t: String) -> String {
+            #"{"type":"message","role":"\#(role)","content":[{"type":"\#(role == "user" ? "input_text" : "output_text")","text":"\#(t)"}]}"#
+        }
+        func call(_ id: String, _ name: String, _ args: String) -> String {
+            #"{"type":"function_call","name":"\#(name)","arguments":"\#(args)","call_id":"\#(id)"}"#
+        }
+        func out(_ id: String) -> String { #"{"type":"function_call_output","call_id":"\#(id)","output":"ok"}"# }
+        var cxl = [#"{"timestamp":"2026-11-03T02:00:00.000Z","type":"session_meta","payload":{"id":"s","cwd":"/home/me/repo"}}"#,
+                   cx(0, say("user", "# AGENTS.md instructions")), cx(0, say("user", "<environment_context>x</environment_context>"))]
+        for i in 0..<8 {
+            cxl.append(cx(i, say("user", "round \(i): see docs/plan-\(i).md")))
+            cxl.append(cx(i, call("c\(i)a", "exec_command", #"{\"cmd\":\"cd /home/me/repo && ls\"}"#)))
+            cxl.append(cx(i, out("c\(i)a")))
+            cxl.append(cx(i, call("c\(i)b", "write_file", #"{\"file_path\":\"/home/me/repo/docs/plan-\#(i).md\"}"#)))
+            cxl.append(cx(i, out("c\(i)b")))
+            if i % 3 == 1 {   // a result after the next message
+                cxl.append(cx(i, call("c\(i)c", "exec_command", #"{\"cmd\":\"sleep 1\"}"#)))
+                cxl.append(cx(i, say("assistant", "still working on round \(i)")))
+                cxl.append(cx(i, out("c\(i)c")))
+            }
+            if i % 3 == 2 {   // two runs of calls with a message not shown between them
+                cxl.append(cx(i, call("c\(i)d", "exec_command", #"{\"cmd\":\"ls\"}"#)))
+                cxl.append(cx(i, out("c\(i)d")))
+                cxl.append(cx(i, say("user", "<environment_context>y</environment_context>")))
+                cxl.append(cx(i, call("c\(i)e", "Artifact", #"{\"action\":\"publish\",\"title\":\"Page \#(i)\"}"#)))
+                cxl.append(cx(i, #"{"type":"function_call_output","call_id":"c\#(i)e","output":"https://claude.ai/artifact/a\#(i)"}"#))
+            }
+            cxl.append(cx(i, say("assistant", "Wrote [plan](docs/plan-\(i).md). See https://github.com/o/r/pull/\(i) and run `npm test -- r\(i)`.")))
+        }
+        try Data((cxl.joined(separator: "\n") + "\n").utf8).write(to: tmp)
+        let wantCx = Resources.collect(file: tmp, home: "/home/me") ?? []
+        for size in [150, 400, 1000, 3000] {
+            var p = Resources.Progressive(chunk: size)
+            var ok = p.update(tmp)
+            let first = p.items(home: "/home/me")
+            var n = 0
+            while ok, !p.done, n < 10_000 { ok = p.older(tmp, home: "/home/me"); n += 1 }
+            check(ok && p.done && wantCx.count >= 18 && (size > 1000 || n > 0) && first.first == wantCx.first && p.items(home: "/home/me") == wantCx,
+                  "resources: a Codex rollout read newest first in \(size)-byte chunks gives what one read gives (\(n) older chunks)")
+        }
+        let cutLines: [(String, Bool)] = [
+            (cx(0, say("user", "hi")), true), (cx(0, say("assistant", "done")), true),
+            (cx(0, say("user", "# AGENTS.md instructions")), false), (cx(0, say("user", "<environment_context>x</environment_context>")), false),
+            (cx(0, call("c", "exec_command", "{}")), false), (cx(0, out("c")), false),
+            (#"{"timestamp":"2026-11-03T02:00:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}"#, false),
+        ]
+        check(cutLines.allSatisfy { Resources.isPrompt(Data($0.0.utf8)) == $0.1 }, "resources: a Codex chunk ends only at a message line with text")
     } catch { check(false, "resources: reader temp file (\(error))") }
     // Two reads joined (the older first) give what one read of both gives.
     do {
