@@ -38,8 +38,6 @@ final class ResourcesModel {
     /// Runs a click's plan; returns a note (nil: done, nothing to say). Checks put their own.
     var perform: @MainActor (Resources.Plan) -> (text: String, ok: Bool)? = ResourcesModel.run
     private var reading: Set<String> = []
-    /// Agents whose first seen came from the newest part of the log: set again when the whole log is read.
-    private var seenFromPart: Set<String> = []
     /// Why an agent has no list (nil: its first read has not ended, and the panel says it is reading).
     private(set) var problem: [String: Resources.Problem] = [:]
     /// Each agent's log as read so far, newest part first: a later read parses only what the log grew by.
@@ -159,13 +157,7 @@ final class ResourcesModel {
         touch(key)
         // The first look at an agent: what is there is seen (an old conversation does not light the badge). The newest
         // part has the newest items; when it has none, wait for the whole log, so older parts never count as new.
-        if seen[key] == nil, whole || !e.items.isEmpty {
-            setSeen(key, Resources.newest(e.items))
-            if !whole { seenFromPart.insert(key) }
-        } else if whole, seenFromPart.remove(key) != nil, (seen[key] ?? 0) < Resources.newest(e.items) {
-            // An older part had a later time than the newest part (times are not always in order): still old.
-            setSeen(key, Resources.newest(e.items))
-        }
+        if seen[key] == nil, whole || !e.items.isEmpty { setSeen(key, Resources.newest(e.items)) }
         // Only the list the panel shows: a read of another agent that ends while the panel is open stays unseen.
         if open, key == shownKey { markSeen(key) }
     }
