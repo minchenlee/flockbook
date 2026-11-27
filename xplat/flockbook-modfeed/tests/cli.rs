@@ -262,3 +262,79 @@ fn resources_keeps_a_state_beside_the_cache() {
     let again: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).expect("written whole again");
     assert!(again["at"].as_u64().unwrap() > 0, "{again}");
 }
+
+
+/// `--chunk`: a log read the first time in parts, newest first; the end line says how far (`more`, `read`, `size`)
+/// and the next call with its cursor reads the part before. The load's state is a file of its own, gone when done.
+#[test]
+fn resources_in_parts_with_chunk() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache.json");
+    let cache_s = cache.to_string_lossy().to_string();
+    let fake = FakeHc::start();
+    fake.set_terminals(vec![claude("t1", "idle", "idle")]);
+    run(&fake.path, &["glance", "--cache", &cache_s]);
+    let log = dir.path().join("s.jsonl");
+    let say = |id: &str, text: &str| serde_json::json!({"type":"assistant","uuid":id,"timestamp":format!("2026-11-03T01:40:{:02}.000Z", id[1..].parse::<u32>().unwrap() % 60),"message":{"role":"assistant","content":[{"type":"text","text":text}]}}).to_string();
+    let lines: Vec<String> = (0..40).map(|i| say(&format!("a{i}"), &format!("Step {i}: https://s{i}.example.com"))).collect();
+    std::fs::write(&log, lines.join("\n") + "\n").unwrap();
+    let size = std::fs::metadata(&log).unwrap().len();
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+    c["entries"]["t1"]["path"] = serde_json::json!(log);
+    std::fs::write(&cache, c.to_string()).unwrap();
+    let res = |v: &[Value]| -> Vec<Value> { v.iter().filter(|l| l["type"] == "res").cloned().collect() };
+    let kept_dir = dir.path().join("resources");
+    let (mut since, mut calls, mut read) = (None::<String>, 0, 0);
+    let last = loop {
+        let mut args = vec!["resources", "--terminal", "t1", "--cache", &cache_s, "--chunk", "600"];
+        if let Some(s) = since.as_deref() {
+            args.extend(["--since", s]);
+        }
+        let out = run(&fake.path, &args);
+        let end = out.last().unwrap().clone();
+        assert_eq!(end["ok"], true, "{out:?}");
+        assert_eq!(end["full"], true, "each answer: the whole list so far");
+        calls += 1;
+        since = end["cursor"].as_str().map(String::from);
+        if end["more"] != true {
+            assert!(end.get("read").is_none() && end.get("size").is_none(), "{end}");
+            break out;
+        }
+        assert_eq!(end["size"], size);
+        let r = end["read"].as_u64().unwrap();
+        assert!(r > read && r < size, "{end}");
+        read = r;
+        assert!(!res(&out).is_empty() && res(&out).len() < 40, "a part: some of them, the newest");
+        assert_eq!(std::fs::read_dir(&kept_dir).unwrap().count(), 1, "the load's state");
+    };
+    assert!(calls > 2, "{calls} calls");
+    let whole = modfeedkit::resources::answer(&log, None, Some(std::path::Path::new("/nonexistent-home"))).unwrap();
+    let want: Vec<Value> = whole.items.iter().map(|r| serde_json::to_value(r).unwrap()).collect();
+    assert_eq!(res(&last), want);
+    assert_eq!(last.last().unwrap()["cursor"], serde_json::json!(whole.cursor));
+    let files: Vec<_> = std::fs::read_dir(&kept_dir).unwrap().flatten().map(|e| e.path()).collect();
+    assert_eq!(files.len(), 1, "the load's state gone, the kept one there: {files:?}");
+    let state: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+    assert!(state["at"].as_u64().unwrap() > 0 && state.get("from").is_none(), "{state}");
+    // Then a delta, as before; the end line of an answer without --chunk has no `more`.
+    let again = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s, "--since", since.as_deref().unwrap()]);
+    assert_eq!(again.last().unwrap()["full"], false);
+    assert!(again.last().unwrap().get("more").is_none());
+
+    // Where the load's state cannot be kept (no --cache, or its folder cannot be written): one read, no `more`
+    // (a cursor of a part no one kept would ask for the same part again and again).
+    let one = run(&fake.path, &["resources", "--terminal", "t1", "--chunk", "600"]);
+    assert!(one.last().unwrap().get("more").is_none(), "{:?}", one.last());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for f in std::fs::read_dir(&kept_dir).unwrap().flatten() {
+            std::fs::remove_file(f.path()).unwrap();
+        }
+        std::fs::set_permissions(&kept_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let ro = run(&fake.path, &["resources", "--terminal", "t1", "--cache", &cache_s, "--chunk", "600"]);
+        std::fs::set_permissions(&kept_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(ro.last().unwrap().get("more").is_none(), "{:?}", ro.last());
+        assert_eq!(res(&ro), want);
+    }
+}

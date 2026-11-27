@@ -100,8 +100,9 @@ test("no helper there: its own hint; another error keeps what was there and is n
   await R.pollResources(fakeCx(), true);
   assert.equal(R.dataFor("box/t1")?.error, "missing");
   assert.deepEqual(log.shared.filter(([k]) => k === R.KEY_DATA), [], "the same hint again: not written again");
-  // On this machine an error never gets the remote hint.
-  assert.equal(R.applyAnswer(null, "t1", { error: { code: "read" }, lines: [] }), null);
+  // On this machine an error never gets the remote hint (a log that cannot be read, with no list yet, says so).
+  assert.equal(R.applyAnswer(null, "t1", { error: { code: "read" }, lines: [] }).error, "unreadable");
+  assert.equal(R.applyAnswer(null, "t1", { error: { code: "remote_failed" }, lines: [] }), null);
 });
 
 // A chat whose tail starts at 9000; `older(before)` answers each --before read: [start, rows].
