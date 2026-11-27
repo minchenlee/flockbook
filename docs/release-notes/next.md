@@ -16,4 +16,5 @@ One short line: what this release is about.
 - Herdr app sidecar on Windows: Claude panes find their log, so Glance and the chat show them. It reads the start time and the program name as Claude Code writes them on Windows.
 
 ### ⚙️ Changes
+- herdr-app/README.md is now a short landing page: what Flockbook is, a screenshot, the one-line install and the main features. The developer notes are below "For developers". The root README shows the new features and screenshots too.
 - README: how to uninstall the Herdr app mod by hand, and what Summaries send and keep.
