@@ -14,6 +14,7 @@ One short line: what this release is about.
 ### 🐛 Bug Fixes
 - A chat no longer shows "No messages yet" when the end of the agent's log is filled with large lines that are not messages (a request record, a message with pictures). The Herdr mod, its glance, cards and summaries, and the Mac app now read further back until they find the last messages.
 - Herdr app sidecar on Windows: Claude panes find their log, so Glance and the chat show them. It reads the start time and the program name as Claude Code writes them on Windows.
+- Herdr mod: Resources lists the files an Antigravity CLI (agy) agent links in its replies (`file://` links), and finds its relative paths by the files its tools named.
 
 ### ⚙️ Changes
 - herdr-app/README.md is now a short landing page: what Flockbook is, a screenshot, the one-line install and the main features. The developer notes are below "For developers". The root README shows the new features and screenshots too.

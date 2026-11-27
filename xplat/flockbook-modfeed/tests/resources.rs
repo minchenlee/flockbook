@@ -1257,6 +1257,67 @@ fn a_state_or_a_cursor_of_the_rules_before_is_all_again() {
 }
 
 
+// agy (Antigravity CLI): one step a line; it points to files as Markdown links with a file:// address, and its file
+// tools name the path in `Path` (synthetic lines of the same shape as agy 1.5's transcript_full.jsonl).
+fn agy(step: u32, ty: &str, extra: Value) -> String {
+    let mut v = json!({"step_index": step, "source": if ty == "USER_INPUT" { "USER_EXPLICIT" } else { "MODEL" }, "type": ty, "status": "DONE", "created_at": ts(step)});
+    v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    v.to_string()
+}
+
+// Unix only: the paths start with "/".
+#[test]
+#[cfg(unix)]
+fn an_agy_reply_lists_the_files_it_links_with_file_urls() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("proj/docs/shots")).unwrap();
+    std::fs::write(d.join("proj/docs/plan.md"), "# The plan").unwrap();
+    std::fs::write(d.join("proj/docs/shots/My Shot.png"), "png").unwrap();
+    std::fs::write(d.join("proj/docs/guide.md"), "# Guide").unwrap();
+    let p = d.join("proj").to_string_lossy().to_string();
+    let log = d.join("transcript_full.jsonl");
+    write(&log, &[
+        agy(0, "USER_INPUT", json!({"content": "<USER_REQUEST>\nwrite the plan\n</USER_REQUEST>"})),
+        agy(1, "PLANNER_RESPONSE", json!({"tool_calls": [{"name": "write_file", "args": {"Path": format!("{p}/docs/plan.md"), "Content": "# The plan"}}]})),
+        agy(2, "GENERIC", json!({"content": "Created At: 2026-11-03T01:40:02Z\nwrote"})),
+        agy(3, "PLANNER_RESPONSE", json!({"content": format!(
+            "Done.\n\n- [plan.md](file://{p}/docs/plan.md)\n- [My Shot.png](file://{p}/docs/shots/My%20Shot.png)\n- [guide.md](file://localhost{p}/docs/guide.md#L3)\n- [steps.ts](file://{p}/src/steps.ts)\n- [other](file://otherhost{p}/docs/plan.md)"
+        )})),
+    ], false);
+    let docs: Vec<resources::Resource> = resources::answer_in(&log, None, Some(Path::new(HOME)), None, None, false).unwrap().0.items.into_iter().filter(|r| r.kind == "doc").collect();
+    let mut got: Vec<(String, Option<bool>)> = docs.iter().map(|r| (r.target.clone(), r.exists)).collect();
+    got.sort();
+    let want = vec![
+        (format!("{p}/docs/guide.md"), Some(true)),
+        (format!("{p}/docs/plan.md"), Some(true)),
+        (format!("{p}/docs/shots/My Shot.png"), Some(true)),
+    ];
+    assert_eq!(got, want, "file:// docs on this machine, decoded; not a .ts file, not another host");
+    assert_eq!(docs.iter().find(|r| r.target.ends_with("plan.md")).unwrap().title, "The plan");
+}
+
+// Unix only: a relative doc opens only from a working folder that starts with "/".
+#[test]
+#[cfg(unix)]
+fn an_agy_relative_doc_is_found_by_the_path_its_file_tool_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = real(dir.path());
+    std::fs::create_dir_all(d.join("notes/reports")).unwrap();
+    std::fs::create_dir_all(d.join("repos")).unwrap();
+    let file = d.join("notes/reports/y.md");
+    std::fs::write(&file, "# Y").unwrap();
+    let log = d.join("transcript_full.jsonl");
+    write(&log, &[
+        agy(0, "USER_INPUT", json!({"content": "<USER_REQUEST>\ngo\n</USER_REQUEST>"})),
+        agy(1, "PLANNER_RESPONSE", json!({"tool_calls": [{"name": "read_file", "args": {"Path": file}}]})),
+        agy(2, "GENERIC", json!({"content": "# Y"})),
+        agy(3, "PLANNER_RESPONSE", json!({"content": "See `reports/y.md`."})),
+    ], false);
+    let docs: Vec<resources::Resource> = resources::answer_in(&log, None, Some(Path::new(HOME)), Some(&d.join("repos")), None, false).unwrap().0.items.into_iter().filter(|r| r.kind == "doc").collect();
+    assert_eq!(docs.iter().map(|r| r.target.as_str()).collect::<Vec<_>>(), vec![file.to_str().unwrap()]);
+}
+
 // --- Progressive loading (`--chunk`): newest part first, the list so far after each part. ---
 
 /// Asks with `--chunk` until the load is done, with the states kept between calls as the helper keeps them: the
