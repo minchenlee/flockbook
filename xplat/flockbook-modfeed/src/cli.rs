@@ -312,18 +312,37 @@ pub fn run(argv: &[String]) -> String {
                     let linear = matches!(kind.as_str(), "claude" | "codex" | "cursor" | "grok");
                     // The pane's folder: where a relative doc path in a reply opens (when the log names none that has it).
                     let cwd = Some(found.pane.cwd.as_str()).filter(|c| !c.is_empty()).map(PathBuf::from);
-                    return match crate::resources::answer_in(path, opt("--since").as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), linear) {
-                        Ok((a, next, _)) => {
+                    // `--chunk <bytes>` (optional): a long log read for the first time is read in parts, newest first.
+                    // The load's state is a file of its own beside the kept one (another name: a helper before this one
+                    // never reads it as a kept state).
+                    let chunk = opt("--chunk").and_then(|c| c.parse::<u64>().ok()).filter(|&c| c > 0);
+                    let part_at = cache_url.and_then(crate::resources::state_dir).map(|d| d.join(format!("{}.json", crate::protocol::fnv1a(&format!("part:{}", found.pane.terminal_id)))));
+                    let part: Option<crate::resources::Part> = match chunk {
+                        Some(_) => part_at.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok()),
+                        None => None,
+                    };
+                    return match crate::resources::answer_parts(path, opt("--since").as_deref(), user_home.as_deref(), cwd.as_deref(), kept.as_ref(), part.as_ref(), linear, chunk) {
+                        Ok((a, next, next_part)) => {
                             if let Some(at) = kept_at.as_deref().filter(|_| next.as_ref().map(|k| (k.size, k.at)) != kept.as_ref().map(|k| (k.size, k.at))) {
                                 match &next {
                                     Some(k) => crate::resources::keep(k, at),
                                     None => _ = std::fs::remove_file(at),
                                 }
                             }
+                            if let Some(at) = part_at.as_deref().filter(|_| chunk.is_some()) {
+                                match &next_part {
+                                    Some(p) => crate::locate::write_json(p, Some(at)),
+                                    None if part.is_some() || at.exists() => _ = std::fs::remove_file(at),
+                                    None => {}
+                                }
+                            }
                             for it in &a.items {
                                 r.out.emit(it);
                             }
-                            r.finish_with(json!({"cursor": a.cursor, "full": a.full}))
+                            match a.more {
+                                Some((read, size)) => r.finish_with(json!({"cursor": a.cursor, "full": a.full, "more": true, "read": read, "size": size})),
+                                None => r.finish_with(json!({"cursor": a.cursor, "full": a.full})),
+                            }
                         }
                         Err(e) => r.fail("read", &format!("cannot read the log: {e}")),
                     };
