@@ -174,7 +174,24 @@ fn whole(tok: &str) -> Option<(&'static str, String)> {
     if (tok.starts_with('/') && !tok.starts_with("//") || tok.starts_with("~/")) && doc_end(tok, 0, tok.len()) == Some(tok.len()) {
         return Some(("doc", tok.to_string()));
     }
-    None
+    // A `file:` URL on this machine (agy links its files so): the doc at its path.
+    file_url(tok).filter(|p| doc_end(p, 0, p.len()) == Some(p.len())).map(|p| ("doc", p))
+}
+
+/// The absolute path a `file:` URL on this machine names (`file:///a/b.md`, `file://localhost/a/b.md`), without its
+/// `?…` and `#…` and percent-decoded (it may then hold a space). None: another host, not UTF-8, not a full path.
+fn file_url(tok: &str) -> Option<String> {
+    let rest = tok.get(..7).filter(|s| s.eq_ignore_ascii_case("file://")).map(|_| &tok[7..])?;
+    let path = match rest.get(..9) {
+        Some(h) if h.eq_ignore_ascii_case("localhost") => &rest[9..],
+        _ => rest,
+    };
+    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+    if !path.starts_with('/') {
+        return None; // the path starts with a written `/`, not an encoded one
+    }
+    let p = crate::paste::percent_decode(path)?;
+    (p.starts_with('/') && !p.starts_with("//") && !p.contains(['\n', '\r', '\0'])).then_some(p)
 }
 
 /// `whole`, and with `rel` a relative doc path too.
@@ -685,16 +702,18 @@ impl Acc {
     }
 
     /// The folders and doc paths a tool call that worked names (see `cwds`): the doc path of a file tool
-    /// (`file_path`, `path`, `notebook_path`) and the folders of a command's `cd /…` (`command`, `cmd`). Not any other
+    /// (`file_path`, `path`, `notebook_path`; agy: `Path`…) and the folders of a command's `cd /…` (`command`, `cmd`,
+    /// `CommandLine`). Not any other
     /// string: a command's text or a description names paths it did not open.
     fn places(&mut self, input: &str, home: Option<&Path>) {
         let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(input) else { return };
-        for k in ["file_path", "path", "notebook_path"] {
+        // agy's file tools name it `Path` (older: `AbsolutePath`, `TargetFile`) and its commands `CommandLine`.
+        for k in ["file_path", "path", "notebook_path", "Path", "AbsolutePath", "TargetFile"] {
             if let Some(("doc", t)) = o.get(k).and_then(|v| v.as_str()).and_then(|s| whole(s.trim())) {
                 self.files.insert(normal("doc", &t, home).2);
             }
         }
-        for k in ["command", "cmd"] {
+        for k in ["command", "cmd", "CommandLine"] {
             let cmds: Vec<&str> = match o.get(k) {
                 Some(serde_json::Value::String(s)) => vec![s],
                 Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.as_str()).collect(),
@@ -816,6 +835,47 @@ impl Acc {
 
     fn known(&self) -> bool {
         self.held.iter().all(|h| kind_of(&h.kind).is_some())
+    }
+
+    /// `self` (the items of earlier lines) with `newer` (those of the lines right after) added: what `add` gives for
+    /// all of them at once.
+    pub fn under(mut self, newer: &Acc) -> Acc {
+        self.under_mut(newer);
+        self
+    }
+
+    fn under_mut(&mut self, newer: &Acc) {
+        let base = self.seq;
+        let mut at: HashMap<String, usize> = self.held.iter().enumerate().map(|(i, h)| (h.key.clone(), i)).collect();
+        for n in &newer.held {
+            match at.get(&n.key) {
+                Some(&i) => {
+                    let h = &mut self.held[i];
+                    h.mentions += n.mentions;
+                    h.first_ts = h.first_ts.or(n.first_ts);
+                    h.last_ts = n.last_ts.or(h.last_ts);
+                    (h.row, h.target, h.seq) = (n.row.clone(), n.target.clone(), base + n.seq);
+                    // A given title makes the older ones no matter; files: the newer mention of one moves it last.
+                    if n.titles.iter().any(|t| matches!(t, Title::Given(_))) {
+                        h.titles = n.titles.clone();
+                    } else {
+                        h.titles.retain(|t| !n.titles.contains(t));
+                        h.titles.extend(n.titles.iter().cloned());
+                    }
+                }
+                None => {
+                    at.insert(n.key.clone(), self.held.len());
+                    let mut h = n.clone();
+                    h.seq += base;
+                    self.held.push(h);
+                }
+            }
+        }
+        self.seq = base + newer.seq;
+        self.cwds.extend(newer.cwds.iter().cloned());
+        self.dirs.extend(newer.dirs.iter().cloned());
+        self.files.extend(newer.files.iter().cloned());
+        self.at = at;
     }
 }
 
@@ -1118,7 +1178,7 @@ fn file_title(p: &Path) -> Option<String> {
 
 /// Bump when what is collected changes (`detect`, `commands`, `normal`, `Acc`): a state kept with another number is
 /// not used.
-pub const RULES: u32 = 3;
+pub const RULES: u32 = 4;
 
 /// What one log's last `resources` call keeps, so the next reads only from `at`: the resources of the lines before
 /// it. `at` is a line start where no tool call waits for its result and no run of tool calls goes on (see
@@ -1283,6 +1343,8 @@ pub struct Answer {
     pub items: Vec<Resource>,
     pub cursor: String,
     pub full: bool,
+    /// A load in parts not done yet (`answer_parts`): the bytes read so far (from the end) and the log's size.
+    pub more: Option<(u64, u64)>,
 }
 
 /// `answer_kept` with the agent's folder (the pane's), for relative doc paths.
@@ -1329,18 +1391,13 @@ pub fn answer_in(log: &Path, since: Option<&str>, home: Option<&Path>, cwd: Opti
     let path = log.to_string_lossy().to_string();
     let home_s = home.map(|h| h.to_string_lossy().to_string());
     let file = identity(log).unwrap_or_default();
-    let base = match kept {
-        Some(k) if linear && k.rules == RULES && k.home == home_s && k.path == path && k.file == file && k.at <= k.size && k.size <= size && k.acc.known() => {
-            Some(k).filter(|_| print(log, k.at).ok() == Some((k.head.clone(), k.near.clone())))
-        }
-        _ => None,
-    };
+    let base = fitting(log, kept, linear, &home_s, &path, &file, size);
     // A kept state that does not fit: the log changed under it (or the rules did), so the old list may not hold.
     let mut whole = linear && kept.is_some() && base.is_none();
     // Unchanged (and a kept state, if any, that fits): nothing is read or parsed.
     if let (Some(c), Some((n, _, _)), false) = (since, &was, whole) {
         if *n == size {
-            return Ok((Answer { items: vec![], cursor: c.to_string(), full: false }, kept.cloned(), size));
+            return Ok((Answer { items: vec![], cursor: c.to_string(), full: false, more: None }, kept.cloned(), size));
         }
     }
     let (mut from, mut acc) = match base {
@@ -1374,26 +1431,10 @@ pub fn answer_in(log: &Path, since: Option<&str>, home: Option<&Path>, cwd: Opti
         break (crate::tail::without_pictures(p.items()), starts, end);
     };
     // The next start: the latest line start that passes, else this one (`items[..k]` are then the final ones).
-    let (mut at, mut k) = (from, 0usize);
-    if linear {
-        let mut checks = 0;
-        for &(s, len) in starts.iter().rev().take(LOOK).filter(|x| x.0 > from) {
-            // Cheap first: the line alone must start with text.
-            if !starts_clean(items_in(log, s, s + len as u64 + 1)?.0.first()) {
-                continue;
-            }
-            // No result after it for a call before it: that call's item could still change.
-            let (b, late) = items_in(log, s, end)?;
-            if late == 0 && starts_clean(b.first()) && b.len() <= items.len() && items[items.len() - b.len()..] == b[..] {
-                (at, k) = (s, items.len() - b.len());
-                break;
-            }
-            checks += 1;
-            if checks == CHECKS {
-                break;
-            }
-        }
-    }
+    let (at, k) = match linear {
+        true => next_start(log, &items, &starts, from, end)?,
+        false => (from, 0),
+    };
     acc.add(&items[..k], home);
     let next = match linear {
         true => {
@@ -1409,10 +1450,242 @@ pub fn answer_in(log: &Path, since: Option<&str>, home: Option<&Path>, cwd: Opti
     let res = crate::protocol::fnv1a(&format!("{:?}", acc.resolved(agent)));
     let cursor = format!("r4.{hash}.{size}.{newest}.{}.{res}", mark_of(log, size).unwrap_or_default());
     let answer = match was {
-        Some((n, ts, r)) if n < size && !whole && r == res => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false },
-        _ => Answer { items: all, cursor, full: true },
+        Some((n, ts, r)) if n < size && !whole && r == res => Answer { items: all.into_iter().filter(|r| r.last_ts.is_some_and(|t| t >= ts)).collect(), cursor, full: false, more: None },
+        _ => Answer { items: all, cursor, full: true, more: None },
     };
     Ok((answer, next, from))
+}
+
+/// The kept state when it fits this log (see `answer_in`).
+fn fitting<'a>(log: &Path, kept: Option<&'a Kept>, linear: bool, home: &Option<String>, path: &str, file: &str, size: u64) -> Option<&'a Kept> {
+    match kept {
+        Some(k) if linear && k.rules == RULES && &k.home == home && k.path == path && k.file == file && k.at <= k.size && k.size <= size && k.acc.known() => {
+            Some(k).filter(|_| print(log, k.at).ok() == Some((k.head.clone(), k.near.clone())))
+        }
+        _ => None,
+    }
+}
+
+/// The latest line start in `starts` (after `from`) whose lines to `end`, parsed on their own, give the same items
+/// as the end of `items` (parsed from `from`), the first one text, with no result for a call before it; and how many
+/// of `items` come before it. None passes: `from` and 0.
+fn next_start(log: &Path, items: &[ConversationItem], starts: &[(u64, usize)], from: u64, end: u64) -> std::io::Result<(u64, usize)> {
+    let mut checks = 0;
+    for &(s, len) in starts.iter().rev().take(LOOK).filter(|x| x.0 > from) {
+        // Cheap first: the line alone must start with text.
+        if !starts_clean(items_in(log, s, s + len as u64 + 1)?.0.first()) {
+            continue;
+        }
+        // No result after it for a call before it: that call's item could still change.
+        let (b, late) = items_in(log, s, end)?;
+        if late == 0 && starts_clean(b.first()) && b.len() <= items.len() && items[items.len() - b.len()..] == b[..] {
+            return Ok((s, items.len() - b.len()));
+        }
+        checks += 1;
+        if checks == CHECKS {
+            break;
+        }
+    }
+    Ok((from, 0))
+}
+
+/// Whether an agent's log loads in parts (`--chunk`): only where each line is whole on its own and read line after
+/// line (Claude Code, Codex). A Grok reply streams in pieces over several lines (a cut between two would split a URL);
+/// pi and agy logs are trees; Cursor's is not tested in parts. Those are read whole.
+pub fn in_parts(kind: &str) -> bool {
+    matches!(kind, "claude" | "codex")
+}
+
+/// A load in parts, newest first (`answer_parts`): what is read so far, `from..size` of the log as it was when the
+/// load began. `acc`: the items of `from..at` (older parts are put under it); `tail`: those of `at..size`, read
+/// again by the next delta. Done (`from` 0), `acc` and `at` are the `Kept` state.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Part {
+    pub rules: u32,
+    pub home: Option<String>,
+    pub path: String,
+    file: String,
+    pub size: u64,
+    pub from: u64,
+    /// How many bytes the next part reads (it doubles, up to 8 times the first).
+    step: u64,
+    cap: u64,
+    pub at: u64,
+    head: String,
+    near: String,
+    acc: Acc,
+    tail: Acc,
+}
+
+/// The line start at or after `at` (the end when there is none).
+fn line_start(log: &Path, at: u64, end: u64) -> std::io::Result<u64> {
+    use std::io::{BufRead, Seek, SeekFrom};
+    if at == 0 {
+        return Ok(0);
+    }
+    let mut f = std::fs::File::open(log)?;
+    f.seek(SeekFrom::Start(at - 1))?;
+    let mut r = std::io::BufReader::new(f.take(end.saturating_sub(at - 1)));
+    let mut skip = vec![];
+    let n = r.read_until(b'\n', &mut skip)?;
+    Ok(if skip.last() == Some(&b'\n') { at - 1 + n as u64 } else { end })
+}
+
+/// The first line start in `from..end` whose line, parsed alone, starts with text (a cheap first test of a part's start).
+fn next_text_line(log: &Path, from: u64, end: u64) -> std::io::Result<Option<u64>> {
+    use std::io::{BufRead, Seek, SeekFrom};
+    let mut f = std::fs::File::open(log)?;
+    f.seek(SeekFrom::Start(from))?;
+    let mut r = std::io::BufReader::with_capacity(1 << 20, f.take(end.saturating_sub(from)));
+    let (mut at, mut buf) = (from, Vec::new());
+    loop {
+        buf.clear();
+        let n = r.read_until(b'\n', &mut buf)?;
+        if n == 0 || buf.last() != Some(&b'\n') {
+            return Ok(None);
+        }
+        if n > 1 {
+            let mut p = herdr_core::ConversationParser::new();
+            p.feed_at(&String::from_utf8_lossy(&buf[..n - 1]), Some(at));
+            if starts_clean(p.items().first()) {
+                return Ok(Some(at));
+            }
+        }
+        at += n as u64;
+    }
+}
+
+/// What a part's lines give, parsed on their own: the items, the line starts with no tool call waiting, the working
+/// folders its lines name, where it ended, and how many results came for a call before it.
+struct Parsed {
+    items: Vec<ConversationItem>,
+    starts: Vec<(u64, usize)>,
+    cwds: Vec<String>,
+    end: u64,
+    late: usize,
+}
+
+fn part_items(log: &Path, from: u64, to: u64) -> std::io::Result<Parsed> {
+    let mut p = herdr_core::ConversationParser::new();
+    let (mut starts, mut cwds): (Vec<(u64, usize)>, Vec<String>) = (vec![], vec![]);
+    let end = crate::tail::each_line(log, from, to, |l, at| {
+        if !p.has_open_tool_use() {
+            starts.push((at, l.len()));
+        }
+        if let Some(c) = line_cwd(l) {
+            if cwds.last() != Some(&c) {
+                cwds.push(c);
+            }
+        }
+        p.feed_at(l, Some(at));
+    })?;
+    Ok(Parsed { items: crate::tail::without_pictures(p.items()), starts, cwds, end, late: p.late_results() })
+}
+
+/// The part that ends at `end`, about `want` bytes long, and what its lines give: it starts at a line that is text,
+/// from which the lines to `end`, parsed on their own, have no result for a call before it (so no run of tool calls is
+/// cut, and nothing before it changes what is after). None near: twice as far back, and so on; at last the log's start.
+fn part_before(log: &Path, want: u64, end: u64) -> std::io::Result<(u64, Parsed)> {
+    let mut span = want.max(1);
+    while span < end {
+        let mut at = line_start(log, end - span, end)?;
+        for _ in 0..CHECKS {
+            let Some(s) = next_text_line(log, at, end)? else { break };
+            let p = part_items(log, s, end)?;
+            if p.late == 0 && starts_clean(p.items.first()) {
+                return Ok((s, p));
+            }
+            at = line_start(log, s + 1, end)?;
+        }
+        span = span.saturating_mul(2);
+    }
+    Ok((0, part_items(log, 0, end)?))
+}
+
+/// `answer_in`, with `chunk` (the mod's `--chunk`): a log that would be read whole from its start (no kept state that
+/// fits) and is longer than `chunk` is read in parts, newest first: about `chunk` bytes from the end, then the bytes
+/// before, each next part twice as long (at most 8 times `chunk`). Each answer has all the items found so far
+/// (`full`), `more` (bytes read, the log's size) while older parts are left, and a cursor "p1.<hash of the path>.
+/// <size>.<from>.<mark>" that asks for the next part (with `part`, the state the last answer returned). The last part's
+/// answer has no `more`, an "r4" cursor of the log's size when the load began, and the `Kept` state: lines written
+/// during the load come in the next delta. The list at the end is the one a single read gives.
+///
+/// A part's cursor whose state is not there or does not fit (another file, a log cut) begins the load again. Without
+/// `chunk`, or for a log that is not `linear`: `answer_in`. Returns the answer, the `Kept` state, the `Part` state.
+#[allow(clippy::too_many_arguments)]
+pub fn answer_parts(log: &Path, since: Option<&str>, home: Option<&Path>, cwd: Option<&Path>, kept: Option<&Kept>, part: Option<&Part>, linear: bool, chunk: Option<u64>) -> std::io::Result<(Answer, Option<Kept>, Option<Part>)> {
+    let one = |since: Option<&str>| answer_in(log, since, home, cwd, kept, linear).map(|(a, k, _)| (a, k, None));
+    let Some(chunk) = chunk.filter(|_| linear).map(|c| c.max(1)) else { return one(since) };
+    let agent = cwd.map(|c| normal("doc", &c.to_string_lossy(), home).2);
+    let agent = agent.as_deref();
+    let hash = crate::protocol::fnv1a(&log.to_string_lossy());
+    let size = std::fs::metadata(log)?.len();
+    let path = log.to_string_lossy().to_string();
+    let home_s = home.map(|h| h.to_string_lossy().to_string());
+    let file = identity(log).unwrap_or_default();
+    // The part a "p1" cursor asks for, when its state is here and fits.
+    let going = since.and_then(|c| c.strip_prefix("p1.")).and_then(|c| {
+        let p = part?;
+        let v: Vec<&str> = c.split('.').collect();
+        let [h, n, f, m] = v.as_slice() else { return None };
+        let ok = *h == hash
+            && n.parse::<u64>().ok() == Some(p.size)
+            && f.parse::<u64>().ok() == Some(p.from)
+            && p.rules == RULES
+            && p.home == home_s
+            && p.path == path
+            && p.file == file
+            && p.size <= size
+            && p.from > 0
+            && mark_of(log, p.size).as_deref() == Some(*m)
+            && print(log, p.at).ok() == Some((p.head.clone(), p.near.clone()));
+        ok.then(|| p.clone())
+    });
+    let since = since.filter(|c| !c.starts_with("p1."));
+    let p = match going {
+        Some(mut p) => {
+            // The part before the one read last.
+            let (from, got) = part_before(log, p.step, p.from)?;
+            let mut older = Acc::default();
+            got.cwds.iter().for_each(|c| older.cwd(c));
+            older.add(&got.items, home);
+            p.acc = older.under(&p.acc);
+            p.from = from;
+            p.step = p.step.saturating_mul(2).min(p.cap);
+            p
+        }
+        None => {
+            // A load only where one read would start at the log's start.
+            if size <= chunk || fitting(log, kept, linear, &home_s, &path, &file, size).is_some() {
+                return one(since);
+            }
+            let (from, got) = part_before(log, chunk, size)?;
+            if from == 0 {
+                return one(since);
+            }
+            let Parsed { items, starts, cwds, end, .. } = got;
+            let (at, k) = next_start(log, &items, &starts, from, end)?;
+            let (mut acc, mut tail) = (Acc::default(), Acc::default());
+            cwds.iter().for_each(|c| acc.cwd(c));
+            acc.add(&items[..k], home);
+            tail.add(&items[k..], home);
+            let (head, near) = print(log, at)?;
+            Part { rules: RULES, home: home_s, path, file, size, from, step: chunk.saturating_mul(2), cap: chunk.saturating_mul(8), at, head, near, acc, tail }
+        }
+    };
+    let both = p.acc.clone().under(&p.tail);
+    let all = both.finish_in(home, agent);
+    if p.from > 0 {
+        let cursor = format!("p1.{hash}.{}.{}.{}", p.size, p.from, mark_of(log, p.size).unwrap_or_default());
+        let more = Some((p.size - p.from, p.size));
+        return Ok((Answer { items: all, cursor, full: true, more }, kept.cloned(), Some(p)));
+    }
+    // Done: the state a single read of the log, as it was when the load began, would keep.
+    let newest = all.iter().filter_map(|r| r.last_ts).max().unwrap_or(0);
+    let res = crate::protocol::fnv1a(&format!("{:?}", both.resolved(agent)));
+    let cursor = format!("r4.{hash}.{}.{newest}.{}.{res}", p.size, mark_of(log, p.size).unwrap_or_default());
+    let k = Kept { rules: RULES, home: p.home, path: p.path, size: p.size, at: p.at, head: p.head, near: p.near, file: p.file, acc: p.acc };
+    Ok((Answer { items: all, cursor, full: true, more: None }, Some(k), None))
 }
 
 #[cfg(test)]
@@ -1452,6 +1725,18 @@ mod tests {
         assert_eq!(one("http://192.168.1.5:8080/x").2, "local");
         assert_eq!(one("http://127.0.0.1:8787").2, "local");
         assert_eq!(one("http://box.local:9000").2, "local");
+    }
+
+    #[test]
+    fn file_urls_on_this_machine_are_docs() {
+        let t = "[a](file:///home/me/My%20Notes/plan.md)";
+        assert_eq!(one(t), (4, u16len(t) - 1, "doc", "/home/me/My Notes/plan.md".to_string()));
+        assert_eq!(one("[a](file:///home/me/%E7%AD%86%E8%A8%98/r.md)").3, "/home/me/筆記/r.md");
+        assert_eq!(one("[a](file:///home/me/r.md#L12)").3, "/home/me/r.md");
+        assert_eq!(one("[a](FILE://localhost/home/me/r.png)").3, "/home/me/r.png");
+        for t in ["[a](file://otherhost/home/me/r.md)", "[a](file:///home/me/src/main.ts)", "[a](file:///home/me/r.md%)", "[a](file:////srv/r.md)", "[a](file://%2Fhome/me/r.md)", "[a](file://localhost%2Fhome/me/r.md)", "[a](file:///home/me/r%+9.md)", "[a](file:///home/me/r%0A.md)"] {
+            assert!(kinds(t).is_empty(), "{t}: {:?}", detect(t));
+        }
     }
 
     #[test]

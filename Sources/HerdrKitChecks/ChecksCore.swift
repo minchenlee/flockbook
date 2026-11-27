@@ -215,6 +215,42 @@ import Foundation
     }
 }
 
+// Big lines that are not chat fill the last 2 MB (an api-request-blob after the chat): the first view steps back
+// until a message is in, instead of showing nothing.
+@MainActor func checksBigLineTail() async throws {
+    let root = NSTemporaryDirectory() + "hkbl-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: root + "/p", withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    var ls: [String] = (0..<3).map { _ in #"{"type":"api-request-blob","sessionId":"s","blob":""# + String(repeating: "q", count: 1_000_000) + #""}"# }
+    for i in 0..<5 {
+        ls.append(#"{"type":"user","uuid":"u\#(i)","message":{"content":"question \#(i)"}}"#)
+        ls.append(#"{"type":"assistant","uuid":"a\#(i)","message":{"content":[{"type":"text","text":"answer \#(i)"}]}}"#)
+    }
+    // As in the log seen: a big blob, a small one, then the one that fills the end (the backfill finds whole lines).
+    for n in [600_000, 1_200, 1_700_000] {
+        ls.append(#"{"type":"api-request-blob","sessionId":"s","blob":""# + String(repeating: "q", count: n) + #""}"#)
+    }
+    ls.append(#"{"type":"api-request","sessionId":"s","request":"r"}"#)
+    ls.append(#"{"type":"last-prompt","sessionId":"s","lastPrompt":"x"}"#)
+    try (ls.joined(separator: "\n") + "\n").write(toFile: root + "/p/bl1.jsonl", atomically: true, encoding: .utf8)
+    final class Box: @unchecked Sendable { let lock = NSLock(); var items: [ConversationItem] = [] }
+    let box = Box()
+    let log = SessionLog(sessionId: "bl1")
+    // No new snapshot comes when nothing changes: read the stream beside, look at the latest items for up to 5 s.
+    let feed = Task.detached { for await s in log.snapshots(projectsDir: root, pollInterval: .milliseconds(20)) { box.lock.withLock { box.items = s.items } } }
+    defer { feed.cancel() }
+    func last(_ items: [ConversationItem]) -> Bool {
+        items.contains { if case .assistantText(let t) = $0.kind { return t == "answer 4" } else { return false } }
+    }
+    var items: [ConversationItem] = []
+    for _ in 0..<250 {
+        items = box.lock.withLock { box.items }
+        if last(items) { break }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    check(last(items), "big line tail: the last reply shows (\(items.count) items)")
+}
+
 // Timestamps
 @MainActor func checksTimestamps() async throws {
     do {

@@ -307,6 +307,11 @@ fn unlinked(s: &str) -> String {
 }
 
 /// The facts of the last turn in `items` (one agent's conversation, oldest first). `agent`: its kind ("claude").
+/// `facts` of the log's end, as the chat shows it first.
+pub fn facts_at(path: &Path, agent: &str) -> Facts {
+    tail::read_last(path, tail::items_of).map(|(_, items)| facts(&items, agent)).unwrap_or_default()
+}
+
 pub fn facts(items: &[ConversationItem], agent: &str) -> Facts {
     let from = items.iter().rposition(|it| matches!(it.kind, ItemKind::UserText(_)));
     let turn = &items[from.map_or(0, |i| i + 1)..];
@@ -399,7 +404,7 @@ pub fn all(ws: &[Workspace], resolver: &mut SessionResolver, cache: Option<&Path
         let l = match kept.get(&tid).filter(|k| k.v == KEPT_VERSION && k.path == path && k.size == size && k.modified == modified && k.line["agent"] == json!(agent)) {
             Some(k) => k.line.clone(),
             None => {
-                let f = tail::read(Path::new(&path), None, tail::BYTES).map(|r| facts(&tail::items(&r.lines), &agent)).unwrap_or_default();
+                let f = facts_at(Path::new(&path), &agent);
                 line(&tid, &agent, Some(&path), &f)
             }
         };

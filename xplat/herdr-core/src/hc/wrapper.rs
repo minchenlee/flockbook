@@ -219,7 +219,7 @@ mod tests {
     }
 
     fn proc_(pid: i32, ppid: i32, start: DateTime<Utc>, line: &str) -> Proc {
-        Proc { pid, ppid, start, line: line.into() }
+        Proc { pid, ppid, start, line: line.into(), argv: vec![] }
     }
 
     fn ask(addr: &str, fg_pid: i32, status_ms: i64) -> WrapperAsk {

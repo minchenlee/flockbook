@@ -126,13 +126,18 @@ pub fn uri_list(s: &str) -> Vec<String> {
         .collect()
 }
 
-fn percent_decode(s: &str) -> Option<String> {
+pub(crate) fn percent_decode(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            let h = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())?;
+            // Two hex digits (`from_str_radix` alone also takes a sign: `%+9`).
+            let hex = &b[i + 1..i + 3];
+            if !hex.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            let h = std::str::from_utf8(hex).ok().and_then(|h| u8::from_str_radix(h, 16).ok())?;
             out.push(h);
             i += 3;
         } else {

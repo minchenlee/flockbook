@@ -22,10 +22,11 @@ impl ProcessSource for WindowsProcessSource {
             .values()
             .filter_map(|p| {
                 let start = DateTime::<Utc>::from_timestamp(p.start_time() as i64, 0)?;
-                let cmd = join(p.cmd());
+                let argv: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+                let cmd = argv.join(" ");
                 let env = join(p.environ());
                 let line = if env.is_empty() { cmd } else { format!("{cmd} {env}") };
-                Some(Proc { pid: p.pid().as_u32() as i32, ppid: p.parent().map_or(0, |q| q.as_u32() as i32), start, line })
+                Some(Proc { pid: p.pid().as_u32() as i32, ppid: p.parent().map_or(0, |q| q.as_u32() as i32), start, line, argv })
             })
             .collect()
     }

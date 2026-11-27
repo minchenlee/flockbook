@@ -319,7 +319,7 @@ the helper (`resources.rs`). Each: `start` and `end`, UTF-16 offsets into `text`
 
 | `res` | What | Example |
 |---|---|---|
-| `doc` | An absolute path (`/…`, `~/…`) ending `.md .html .htm .pdf .png .svg` | `/home/me/plan.md` |
+| `doc` | An absolute path (`/…`, `~/…`) ending `.md .html .htm .pdf .png .svg`; also a link's or autolink's `file:` URL on this machine (`file:///…`, `file://localhost/…`: the path, percent-decoded, without `?…` `#…`) | `/home/me/plan.md`, `file:///home/me/My%20Plan.md` |
 | `artifact` | A claude.ai artifact | `https://claude.ai/artifact/…`, also without `https://` |
 | `pr` / `issue` / `ci` | A GitHub PR, issue or Actions run | `github.com/o/r/pull/12`, `/issues/7`, `/actions/runs/1870` |
 | `local` | localhost, 127.0.0.1, a LAN address or `.local` host | `http://localhost:5173`, `localhost:3000` |
@@ -549,7 +549,7 @@ one reply, the later target first). Read only.
 - Docs also come from relative paths in a reply (`docs/a.md`, `./a.md`, in text, a code span or a link; not a bare
   file name, an address without its scheme, a pattern or a placeholder). Where it opens: the one file under the
   folders the log names (`cwd`) or the pane's folder; else the one under a folder a command went to (`cd /…`) or the
-  one doc path a tool call named that ends in it. None, or more than one: not listed (once its file is there, a
+  one doc path a tool call named (`file_path`, `path`, `notebook_path`; agy's `Path`, `AbsolutePath`, `TargetFile`) that ends in it. None, or more than one: not listed (once its file is there, a
   later read lists it). Found, it is the item of that file: one `id` with the absolute mentions of it. Feed `row`
   `links` do not carry relative paths. `local`: one per host:port, `target` the newest URL. PR, issue, CI run: their
   GitHub page (`/pull/12/files` is `/pull/12`). Other URLs: host lowercase, without `#…` and a trailing `/`. A
@@ -576,9 +576,24 @@ one reply, the later target first). Read only.
   (a log written again, of the same size or bigger) is another log. A kept state of other rules also gives them all, and so does a relative doc path that now
   opens another file (or opens one now): its item has another `id`. An older cursor (`r1.`, `r2.`, `r3.`) gives them all once. A result that comes for a tool call
   before the kept start also gives them all.
+- `--chunk <bytes>` (optional; the mod sends 8 MiB): a log that would be read whole from its start (no kept state that
+  fits it) and is longer than that is read in parts, newest first: about that many bytes from the end, then the bytes
+  before it, each part twice as long as the one before, up to 8 times the first. A part starts at a line whose first
+  item is text and after which no result comes for a call before it, so no run of tool calls is cut; with none near,
+  the part grows. Each answer has all the resources found so far (`full` true: replace), and while older parts are
+  left `end` also has `"more": true`, `read` (the bytes read so far, from the end) and `size` (the log's size when
+  the load began). Its cursor (`p1.…`), passed back as `--since` with `--chunk`, reads the next part. The last part's
+  answer has no `more`, the list a single read gives, and an `r4.…` cursor of the log as it was when the load began:
+  lines written during the load come in the next delta. The load's state is a file of its own in `resources/` (another
+  name than the kept state's, so an older helper never reads it), gone once the load is done. A `p1.…` cursor whose
+  state is gone, or no longer fits the log, begins the load again; one without `--chunk` reads the log whole. Agents
+  other than Claude Code and Codex are read whole (a Grok reply streams over several lines; pi and agy logs are
+  trees), and so is a log whose load state cannot be kept (no `--cache`, or a folder that cannot be written). A helper before `--chunk` reads the log whole and
+  answers without `more`: the mod takes that as done.
 
 ```json
 {"type":"end","ok":true,"ms":4,"cursor":"r4.af63…ce1.48213.1793670020000.9c1e…07.5d2a…e4","full":false}
+{"type":"end","ok":true,"ms":130,"cursor":"p1.af63…ce1.1115403525.1098626301.9c1e…07","full":true,"more":true,"read":16777224,"size":1115403525}
 ```
 
 ### `openable` (`open-check`)

@@ -24,7 +24,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, shared, setShared, openOverlay, closeOverlay, exec, window } from "herdr";
-import { currentAgent, machineOf, icon, showScreen, sidebarShown } from "./state.js";
+import { currentAgent, machineOf, icon, showScreen, sidebarShown, SPIN_MS } from "./state.js";
 import * as sidecar from "./sidecar.js";
 import { GUTTER, columnWidth } from "./estimate.js";
 
@@ -105,13 +105,22 @@ export function applyAnswer(prev, terminal, answer, at = Date.now()) {
   const code = answer?.error?.code;
   const hint = HELPER_HINT[code] ?? (code === "usage" && machineOf(terminal) ? "old" : undefined);
   if (hint) return prev?.terminal === terminal && prev.error === hint ? prev : { terminal, cursor: null, items: [], at, error: hint };
+  // The log cannot be read: what was there stays; with nothing there, the window says so.
+  // A load in parts keeps its place (its cursor), also with nothing found yet.
+  if (code === "read") return prev?.terminal === terminal && (prev.items.length || prev.loading || prev.error === "unreadable") ? prev : { terminal, cursor: null, items: [], at, error: "unreadable" };
   if (answer?.error || !answer?.end) return prev ?? null;
   const lines = (answer.lines ?? []).filter((l) => l.type === "res" && l.id);
   const full = answer.end.full !== false || !prev || prev.terminal !== terminal;
+  // No log for this agent (no cursor, nothing listed).
+  if (full && !lines.length && (answer.end.cursor ?? null) === null) {
+    return prev?.terminal === terminal && prev.error === "nolog" ? prev : { terminal, cursor: null, items: [], at, error: "nolog" };
+  }
+  // A load in parts not done: the bytes read so far (from the end) and the log's size.
+  const more = answer.end.more === true && answer.end.size > 0 ? { loading: { read: Number(answer.end.read) || 0, size: Number(answer.end.size) } } : {};
   // Nothing new: the same list (the same array, so a compare is one ===).
   if (!full && !lines.length) {
     const cursor = answer.end.cursor ?? null;
-    return cursor === prev.cursor && !prev.error ? prev : { terminal, cursor, items: prev.items, at };
+    return cursor === prev.cursor && !prev.error && !prev.loading ? prev : { terminal, cursor, items: prev.items, at };
   }
   let items;
   if (full) items = lines;
@@ -121,7 +130,7 @@ export function applyAnswer(prev, terminal, answer, at = Date.now()) {
     items = [...by.values()];
   }
   items = items.map(({ type: _t, ...rest }) => rest).sort(byNewest);
-  return { terminal, cursor: answer.end.cursor ?? null, items, at };
+  return { terminal, cursor: answer.end.cursor ?? null, items, at, ...more };
 }
 
 // Whether two lists draw the same: the same items, in the same order, with the same fields.
@@ -277,43 +286,63 @@ export function badgeFor(address) {
 
 // One `resources` for the shown agent, at most each RES_MS over every copy (`force`: now). Redraws
 // only when something changed.
-// `busy`: when the ask now running started (0: none). The task that asks can be dropped while it waits (the
-// window that spawned it closed to fit), and then its `finally` never runs: an ask older than BUSY_MS no longer counts.
+// `busy`: when the ask now running started (0: none); `busyAt`: when it last heard back (a load in parts asks again
+// and again in one ask). The task that asks can be dropped while it waits (the window that spawned it closed to fit),
+// and then its `finally` never runs: an ask not heard from for BUSY_MS no longer counts.
 // An ask that comes back after a newer one started drops its answer: it would write older data over the newer.
 export const BUSY_MS = 15000;
+// While a part of a load is read (a remote one can take longer): a poll waits this long before it asks again, so two
+// asks never read the same part at once.
+export const PART_MS = 60000;
+// The bytes of a long log the helper reads at a time the first time, newest first (owner 11-27: the newest items show
+// at once, "Loading earlier… N%" while older parts come). The same in the Mac app.
+export const CHUNK = 8 * 1024 * 1024;
 // `wantFull`: a full read was asked while another ask ran; it runs when that one ends (the window opened during
 // the bar's delta: docs are looked at again all the same).
-let busy = 0, last = 0, lastT = null, wantFull = false;
-export const forgetResources = () => { busy = 0; last = 0; lastT = null; wantFull = false; };
+let busy = 0, busyAt = 0, busyMs = BUSY_MS, last = 0, lastT = null, wantFull = false;
+export const forgetResources = () => { busy = 0; busyAt = 0; busyMs = BUSY_MS; last = 0; lastT = null; wantFull = false; };
 // The lists in memory gone, as after a restart (tests).
 export const forgetCache = () => cache.clear();
-// `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title).
+// `full`: no cursor, so docs are looked at again (a file written after it was mentioned, a new title). A load in
+// parts not done goes on from its cursor instead (its answers are all of the list so far, docs looked at again).
 export async function pollResources(cx, force = false, full = false) {
   const address = currentAgent()?.address ?? null;
   if (!address) return;
-  if (busy && Date.now() - busy < BUSY_MS) { if (full) wantFull = true; return; }
+  if (busy && Date.now() - busyAt < busyMs) { if (full) wantFull = true; return; }
   if (full) wantFull = false;
   const t = term(address);
   // The cursor only with the list it belongs to: after a restart, a full read.
-  const was = cache.get(t) ?? null;
-  const same = Boolean(was);
-  if (!force && same && lastT === t && Date.now() - last < RES_MS) return;
-  const mine = Date.now(); busy = mine; last = mine; lastT = t;
+  let was = cache.get(t) ?? null;
+  if (!force && was && lastT === t && Date.now() - last < RES_MS) return;
+  const mine = Date.now(); busy = mine; busyAt = mine; busyMs = BUSY_MS; last = mine; lastT = t;
   try {
     const on = await sidecar.hasCommand("resources");
     if (busy !== mine) return;
     if (shared(KEY_ON) !== on) { setShared(KEY_ON, on); cx?.notify?.(); }
     if (!on) return;
-    const r = await sidecar.resources(address, same && !full ? was.cursor : null);
-    if (busy !== mine) return;
-    const next = applyAnswer(same && !full ? was : null, t, r);
-    if (!next) return;
-    if (!next.error && (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null)) setShared(seenKey(t), newest(next.items));
-    // Drawn again only when the list or the hint changed: a new cursor alone is kept quietly.
-    if (!same || (was.error ?? null) !== (next.error ?? null) || !sameItems(was.items, next.items)) {
-      putData(next); cx?.notify?.();
-    } else if (next !== was) remember(next);
-    else remember(was);
+    let since = was && (!full || was.loading) ? was.cursor : null;
+    for (;;) {
+      // A part of a load: PART_MS (a first read keeps BUSY_MS, so a dropped one does not hold the next asks long). Asked
+      // twice, a part is read twice: harmless, at worst the load starts again.
+      busyMs = since && was?.loading ? PART_MS : BUSY_MS;
+      const r = await sidecar.resources(address, since, CHUNK);
+      if (busy !== mine) return;
+      const next = applyAnswer(since ? was : null, t, r);
+      if (!next) return;
+      // Seen: the newest there the first time; not from a first part with nothing in it (an older part's items would
+      // be "new").
+      if (!next.error && (next.items.length || !next.loading) && (shared(seenKey(t)) === undefined || shared(seenKey(t)) === null)) setShared(seenKey(t), newest(next.items));
+      // Drawn again only when the list, the hint or how far a load is changed: a new cursor alone is kept quietly.
+      if (!was || (was.error ?? null) !== (next.error ?? null) || was.loading?.read !== next.loading?.read || !sameItems(was.items, next.items)) {
+        putData(next); cx?.notify?.();
+      } else if (next !== was) remember(next);
+      else remember(was);
+      // The next part at once, while this agent is shown (another one: it goes on when this one is shown again).
+      if (!next.loading || next === was || term(currentAgent()?.address) !== t) return;
+      // No further than the last part (the helper could not keep its state): not again and again; a later poll tries.
+      if (was?.loading && next.cursor === was.cursor && next.loading.read <= was.loading.read) return;
+      was = next; since = next.cursor; busyAt = Date.now(); last = busyAt;
+    }
   } finally {
     if (busy === mine) busy = 0;
     // Also after an early return above. An ask a newer one replaced leaves it to that one.
@@ -399,13 +428,21 @@ export function toggleResources() {
 }
 
 // The empty window's title and line: no agent, the helper there cannot list them (`error`), or nothing yet.
-export function emptyText(address, error = null) {
+// `d`: the agent's list (null: no answer yet). "No resources yet" only once all of the log is read.
+export function emptyText(address, error = null, d = undefined) {
   const m = machineOf(address) ?? "this machine";
   if (!address) return ["No agent here", "Open an agent's tab to see what it pointed you to."];
   if (error === "old") return ["Helper too old", `The Flockbook helper on ${m} is too old to list resources. Update it to see them here.`];
   if (error === "missing") return ["No helper there", `${m} has no Flockbook helper yet. Install it from the chat to see resources here.`];
+  if (error === "nolog") return ["Can't find this chat's log", "Resources show up here once the agent's conversation has a log."];
+  if (error === "unreadable") return ["Can't read this chat's log", "Flockbook could not open the agent's log. It tries again in a moment."];
+  if (d?.loading) return ["Reading this chat…", loadingText(d.loading)];
+  if (d === null) return ["Reading this chat…", "Docs, artifacts and links show up here as they are found."];
   return ["No resources yet", "Docs, artifacts and links the agent mentions in its replies show up here."];
 }
+
+// How far a load in parts is: "Loading earlier… 35%" (bytes read of the log, rounded down).
+export const loadingText = (loading) => `Loading earlier… ${Math.min(99, Math.floor((loading.read * 100) / loading.size))}%`;
 
 export class ResourcesView {
   constructor(cx) {
@@ -534,9 +571,13 @@ export class ResourcesView {
         .child(title(g))
         .children(g.shown.map(row))
         .when(g.rest > 0, (el) => el.child(more(g)))))
+        // Older parts still coming: a quiet line at the end (drawn only then: a hidden spinner still costs frames).
+        .when(Boolean(d?.loading), (el) => el.child(h_flex().id("res-loading").px(14).py(8).gap(6).items_center().text_size(11.5).text_color(t.muted)
+          .child(svg(icon("spinner")).size(11).flex_none().spin(SPIN_MS)).child(loadingText(d.loading))))
       : v_flex().id("res-empty").flex_1().px(24).py(28).gap(6).items_center().justify_center()
-        .child(div().text_size(13).font_weight(600).text_color(t.foreground).child(emptyText(address, d?.error)[0]))
-        .child(div().text_size(12).text_color(t.muted).text_center().child(emptyText(address, d?.error)[1]));
+        .when(Boolean(address) && (d === null || Boolean(d?.loading)), (el) => el.child(svg(icon("spinner")).size(14).text_color(t.muted).spin(SPIN_MS)))
+        .child(div().text_size(13).font_weight(600).text_color(t.foreground).child(emptyText(address, d?.error, d)[0]))
+        .child(div().text_size(12).text_color(t.muted).text_center().child(emptyText(address, d?.error, d)[1]));
 
     const root = v_flex().id("res-root").size_full().bg(t.background).border(1).border_color(t.border).shadow_lg()
       .when(props()?.drawer !== true, (el) => el.rounded(14))
