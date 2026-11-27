@@ -2,7 +2,10 @@
 
 Read each Herdr agent as a chat, and see at once which agent needs you.
 
-<img src="preview-chat.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="preview-chat-light.png">
+  <img src="preview-chat.png" alt="Flockbook in the Herdr app: the sidebar, a conversation with tool chips, and the reply box" width="800">
+</picture>
 
 ## Install
 
@@ -17,12 +20,12 @@ Then, in the Herdr app, run `layout.switch {"name": "flockbook"}`. `ctrl-shift-l
 Each agent shows as a chat: Markdown replies with code boxes and tables, and tool calls folded into short chips.
 
 <table>
-<tr><td width="50%" valign="top"><!-- TODO(owner): add a Herdr app still of the Since you left card. --><b>Since you left</b>: come back to a chat after 5 minutes or more, and a card says how long you were away, how many messages came, and what the log shows. Turn on Summaries (off by default) and, for Claude Code, Codex and pi agents, a model adds two lines: the state of the work, and what it needs from you.</td>
+<tr><td width="50%" valign="top"><img src="preview-since.png" alt="The Since you left card above the reply box: time away, new messages, and a link to your last message"><br><b>Since you left</b>: come back to a chat after 5 minutes or more, and a card says how long you were away, how many messages came, and what the log shows. Turn on Summaries (off by default) and, for Claude Code, Codex and pi agents, a model adds two lines: the state of the work, and what it needs from you.</td>
 <td width="50%" valign="top"><img src="preview-needs.png" alt="Needs you: the agents that wait, and the question one of them asks"><br><b>Needs you</b>: every agent that waits for you, with its question or approval card.</td></tr>
 <tr><td width="50%" valign="top"><img src="preview-approval.png" alt="An approval card above the reply box: the command, Allow once and Deny"><br><b>Approval cards</b>: allow or deny a permission prompt, or answer a question, above the reply box.</td>
 <td width="50%" valign="top"><!-- TODO(owner): add a Herdr app still of the "/" list. --><b>"/" commands</b>: type <code>/</code> in the reply box to pick from the agent's commands and skills. It works for Claude Code, Codex, pi, oh-my-pi, Antigravity CLI and Grok Build.</td></tr>
-<tr><td width="50%" valign="top"><!-- TODO(owner): add a Herdr app still or a short recording of the Resources window. --><b>Resources (⌘⇧R)</b>: coming 12/1. One panel lists the docs, links, artifacts, PRs and commands that the session touched.</td>
-<td width="50%" valign="top"><!-- TODO(owner): add a still of the Herdr app mod's Phone page (not the Mac app phone shots in docs/media). --><b>Phone page</b>: read your agents on your phone, allow or answer them, and reply with text and images. It goes through Tailscale, so only your own devices reach it. It can notify you when an agent needs you or is done (on iPhone, add the page to the Home Screen first). Off by default; turn it on in the Flockbook settings.</td></tr>
+<tr><td width="50%" valign="top"><img src="preview-resources.png" alt="The Resources panel beside the chat: Markdown, web pages, PDFs, images, artifacts and PRs the session touched"><br><b>Resources (⌘⇧R)</b>: coming 12/1. One panel lists the docs, links, artifacts, PRs and commands that the session touched.</td>
+<td width="50%" valign="top"><img src="preview-phone.png" alt="The Phone page: the agents that need you, then each workspace" width="220"><br><b>Phone page</b>: read your agents on your phone, allow or answer them, and reply with text and images. It goes through Tailscale, so only your own devices reach it. It can notify you when an agent needs you or is done (on iPhone, add the page to the Home Screen first). Off by default; turn it on in the Flockbook settings.</td></tr>
 <tr><td width="50%" valign="top"><img src="preview-overview-status.png" alt="Overview grouped by status: the agents that need you first, then the ones done and resting"><br><b>Overview</b>: every tab as a card, by status or by workspace.</td>
 <td width="50%" valign="top"><img src="preview-terminal.png" alt="The agent's real terminal in a floating window over the chat"><br><b>Terminal</b>: ⌃` opens the agent's real terminal over the chat.</td></tr>
 <tr><td width="50%" valign="top"><img src="preview-attach.png" alt="Two attached files above the reply box"><br><b>Reply box</b>: drop files on it, or paste an image.</td>
