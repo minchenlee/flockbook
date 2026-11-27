@@ -3,6 +3,13 @@
 import sys, os, subprocess, wave, numpy as np
 track, start, bpm, dur = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
 here = os.path.dirname(os.path.abspath(__file__)); SR = 44100; K = bpm / 120; N = int(SR * dur)
+import json
+TM = json.load(open(os.path.join(here, sys.argv[5]))) if len(sys.argv) > 5 else None
+def to_video(t):   # composition time -> video seconds
+    if not TM: return t / K
+    p = TM['points']; i = 0
+    while i < len(p) - 2 and t >= p[i + 1][1]: i += 1
+    return (p[i][0] + (t - p[i][1]) * (p[i + 1][0] - p[i][0]) / (p[i + 1][1] - p[i][1])) * 60 / bpm
 raw = subprocess.run(['ffmpeg', '-loglevel', 'error', '-ss', str(start), '-t', str(dur), '-i', track, '-f', 's16le', '-ac', '2', '-ar', str(SR), '-'], capture_output=True, check=True).stdout
 m = np.frombuffer(raw, '<i2').astype(float).reshape(-1, 2) / 32768
 m = np.vstack([m, np.zeros((max(0, N - len(m)), 2))])[:N]
@@ -23,7 +30,7 @@ def sample(name):
     w = wave.open(os.path.join(here, 'sfx44', name + '.wav')); x = np.frombuffer(w.readframes(w.getnframes()), '<i2').astype(float) / 32768; w.close(); return x.reshape(-1, 2)
 PEAK = {'swoop': .25, 'drawer': .17, 'swish': .07, 'whip': .10, 'arrive': .25, 'bloom': .09, 'emblem': .05}
 def sfx(name, t, gain=1.0, pan=0.0):   # t is on the composition's timeline
-    x = sample(name) ; i = int(round((t / K - PEAK.get(name, 0.0)) * SR))
+    x = sample(name) ; i = int(round((to_video(t) - PEAK.get(name, 0.0)) * SR))
     if i < 0: x = x[-i:]; i = 0
     x = x[:N - i]
     L[i:i + len(x)] += x[:, 0] * gain * (1 - max(pan, 0) * 0.5); R[i:i + len(x)] += x[:, 1] * gain * (1 + min(pan, 0) * 0.5)

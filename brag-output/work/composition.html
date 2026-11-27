@@ -525,6 +525,8 @@ function camAt(t) {
   let i = 0; while (i < camKeys.length - 2 && t >= camKeys[i + 1][0]) i++;
   const a = camKeys[i], b = camKeys[i + 1], p = eio(pr(t, a[0], b[0] - a[0])), o = [];
   for (let k = 1; k < 8; k++) o.push(k === 3 ? Math.exp(lerp(Math.log(a[3]), Math.log(b[3]), p)) : lerp(a[k], b[k], p));   // zoom in log space
+  // gentler angles and a little more distance, so the action and its result can be followed
+  o[2] = o[2] > 1.6 ? 1.6 + (o[2] - 1.6) * 0.62 : o[2]; o[3] *= 0.58; o[4] *= 0.55; o[5] *= 0.5; o[6] *= 0.7;
   return o;
 }
 // pointer path: [time, x, y]; eased; clicks listed separately

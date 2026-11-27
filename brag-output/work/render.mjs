@@ -9,6 +9,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // SCALE maps video time to the composition's own timeline (written at 120 BPM): SCALE = track BPM / 120.
 const FPS = 30, SCALE = Number(process.env.SCALE || 1), DUR = Number(process.env.DUR || 24);
 const [mode, ...rest] = process.argv.slice(2);
+// TIMEMAP=timemap.json: video seconds -> composition seconds through beat-aligned points (see the file); else SCALE.
+import { readFileSync } from 'node:fs';
+const tm = process.env.TIMEMAP ? JSON.parse(readFileSync(path.join(here, process.env.TIMEMAP), 'utf8')) : null;
+function toComp(sec) {
+  if (!tm) return sec * SCALE;
+  const b = sec * tm.bpm / 60, p = tm.points; let i = 0; while (i < p.length - 2 && b >= p[i + 1][0]) i++;
+  return p[i][1] + (b - p[i][0]) * (p[i + 1][1] - p[i][1]) / (p[i + 1][0] - p[i][0]);
+}
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: Number(process.env.DSF || 1) });
 page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text()); });
@@ -27,7 +35,7 @@ if (mode === 'stills') {
 } else {
   mkdirSync(path.join(here, process.env.FRAMES || 'frames2'), { recursive: true });
   for (let f = Number(process.env.START || 0); f < Number(process.env.END || FPS * DUR); f++) {
-    await page.evaluate((t) => window.seek(t), f / FPS * SCALE);
+    await page.evaluate((t) => window.seek(t), toComp(f / FPS));
     await page.screenshot({ path: path.join(here, process.env.FRAMES || 'frames2', `f${String(f).padStart(4, '0')}.jpg`), type: 'jpeg', quality: 96 });
     if (f % 90 === 0) console.log('frame', f);
   }
