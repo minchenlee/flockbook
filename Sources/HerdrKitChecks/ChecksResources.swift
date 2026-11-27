@@ -156,6 +156,48 @@ func checksResources() throws {
         (#"{"type":"assistant","message":{"role":"assistant","content":"\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"x"}}"#, false),
     ]
     check(promptLines.allSatisfy { Resources.isPrompt(Data($0.0.utf8)) == $0.1 }, "resources: a chunk ends only at a typed prompt")
+    // A file: URL on this machine is a doc (agy links its files so), as the helper reads it.
+    func docs(_ t: String) -> [String] { Resources.detect(t).filter { $0.kind == "doc" }.map(\.target) }
+    check(docs("[a](file:///home/me/My%20Notes/plan.md)") == ["/home/me/My Notes/plan.md"], "resources: a file URL, percent-decoded")
+    check(docs("[a](file:///home/me/%E7%AD%86%E8%A8%98/r.md)") == ["/home/me/筆記/r.md"], "resources: a file URL, UTF-8 decoded")
+    check(docs("[a](file:///home/me/r.md#L12)") == ["/home/me/r.md"], "resources: a file URL without its #…")
+    check(docs("[a](FILE://localhost/home/me/r.png)") == ["/home/me/r.png"], "resources: a file://localhost URL")
+    for t in ["[a](file://otherhost/home/me/r.md)", "[a](file:///home/me/src/main.ts)", "[a](file:///home/me/r.md%)", "[a](file:////srv/r.md)",
+              "[a](file://%2Fhome/me/r.md)", "[a](file://localhost%2Fhome/me/r.md)", "[a](file:///home/me/r%+9.md)", "[a](file:///home/me/r%0A.md)"] {
+        check(docs(t).isEmpty, "resources: no doc in \(t) (\(Resources.detect(t).map(\.target)))")
+    }
+    // agy: a reply's file:// links and the Path its file tool named (synthetic lines of agy's transcript shape).
+    do {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("res-agy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try FileManager.default.createDirectory(atPath: tmp.path + "/proj/docs/shots", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: tmp.path + "/notes/reports", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: tmp.path + "/repos", withIntermediateDirectories: true)
+        let root = tmp.path.withCString { Darwin.realpath($0, nil) }.map { p in defer { free(p) }; return String(cString: p) } ?? tmp.path
+        for (f, s) in [("proj/docs/plan.md", "# The plan"), ("proj/docs/shots/My Shot.png", "png"), ("proj/docs/guide.md", "# Guide"), ("notes/reports/y.md", "# Y")] {
+            try Data(s.utf8).write(to: URL(fileURLWithPath: "\(root)/\(f)"))
+        }
+        func agy(_ step: Int, _ ty: String, _ extra: [String: Any]) -> String {
+            var o: [String: Any] = ["step_index": step, "source": ty == "USER_INPUT" ? "USER_EXPLICIT" : "MODEL", "type": ty, "status": "DONE",
+                                    "created_at": "2026-11-03T01:40:0\(step).000Z"]
+            o.merge(extra) { $1 }
+            return String(decoding: try! JSONSerialization.data(withJSONObject: o), as: UTF8.self)
+        }
+        let p = "\(root)/proj"
+        let lines = [
+            agy(0, "USER_INPUT", ["content": "<USER_REQUEST>\nwrite the plan\n</USER_REQUEST>"]),
+            agy(1, "PLANNER_RESPONSE", ["tool_calls": [["name": "write_file", "args": ["Path": "\(p)/docs/plan.md", "Content": "# The plan"]]]]),
+            agy(2, "GENERIC", ["content": "wrote"]),
+            agy(3, "PLANNER_RESPONSE", ["content": "Done.\n\n- [plan.md](file://\(p)/docs/plan.md)\n- [My Shot.png](file://\(p)/docs/shots/My%20Shot.png)\n- [guide.md](file://localhost\(p)/docs/guide.md#L3)\n- [steps.ts](file://\(p)/src/steps.ts)\n- [other](file://otherhost\(p)/docs/plan.md)"]),
+            agy(4, "USER_INPUT", ["content": "<USER_REQUEST>\ngo\n</USER_REQUEST>"]),
+            agy(5, "PLANNER_RESPONSE", ["tool_calls": [["name": "read_file", "args": ["Path": "\(root)/notes/reports/y.md"]]]]),
+            agy(6, "GENERIC", ["content": "# Y"]),
+            agy(7, "PLANNER_RESPONSE", ["content": "See `reports/y.md`."]),
+        ]
+        let got = Resources.collect(lines: lines, home: "/home/me", agent: "\(root)/repos").filter { $0.kind == "doc" }.map(\.target).sorted()
+        check(got == ["\(p)/docs/guide.md", "\(p)/docs/plan.md", "\(p)/docs/shots/My Shot.png", "\(root)/notes/reports/y.md"].sorted(),
+              "resources: agy's file:// docs and a relative doc found by its tool's Path (\(got.map { ($0 as NSString).lastPathComponent }))")
+    } catch { check(false, "resources: agy temp files (\(error))") }
     let cwds: [(String, String?)] = [
         (#"{"type":"user","cwd":"/a/b//","x":1}"#, "/a/b"), (#"{"cwd":"/"}"#, nil), (#"{"cwd":"rel/x"}"#, nil),
         (#"{"cwd":"/a\b"}"#, nil), (#"{"cwd":""}"#, nil), (#"{"cwd":"/a"#, nil), (#"{"c":1,"cwd":"/é/ü","cwd":"/z"}"#, "/é/ü"),

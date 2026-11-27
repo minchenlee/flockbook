@@ -159,10 +159,11 @@ extension Resources {
         /// The doc path of a file tool and the folders of a command's \`cd /…\`.
         mutating func places(_ input: String, _ home: String?) {
             guard let o = (try? JSONSerialization.jsonObject(with: Data(input.utf8))) as? [String: Any] else { return }
-            for k in ["file_path", "path", "notebook_path"] {
+            // agy's file tools name it Path (older: AbsolutePath, TargetFile) and its commands CommandLine.
+            for k in ["file_path", "path", "notebook_path", "Path", "AbsolutePath", "TargetFile"] {
                 if let s = o[k] as? String, let (kind, t) = whole(trimWS(s)), kind == "doc" { files.insert(normal("doc", t, home).2) }
             }
-            for k in ["command", "cmd"] {
+            for k in ["command", "cmd", "CommandLine"] {
                 var cmds: [String] = []
                 if let s = o[k] as? String { cmds = [s] } else if let a = o[k] as? [Any] { cmds = a.compactMap { $0 as? String } }
                 for d in cmds.flatMap(cdTargets) {

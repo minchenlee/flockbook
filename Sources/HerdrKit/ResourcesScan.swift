@@ -94,7 +94,47 @@ public enum Resources {
         if let t = bareHost(tok) { return (urlKind(t), t) }
         let tb = Array(tok.utf8)
         if (tok.hasPrefix("/") && !tok.hasPrefix("//") || tok.hasPrefix("~/")), docEnd(tb, 0, tb.count) == tb.count { return ("doc", tok) }
+        // A `file:` URL on this machine (agy links its files so): the doc at its path.
+        if let p = fileURLPath(tok) {
+            let pb = Array(p.utf8)
+            if docEnd(pb, 0, pb.count) == pb.count { return ("doc", p) }
+        }
         return nil
+    }
+
+    /// The absolute path a `file:` URL on this machine names (`file:///a/b.md`, `file://localhost/a/b.md`), without
+    /// its `?…` and `#…` and percent-decoded (it may then hold a space). Nil: another host, not UTF-8, not a full path.
+    static func fileURLPath(_ tok: String) -> String? {
+        var b = Array(tok.utf8)
+        func lower(_ s: ArraySlice<UInt8>) -> String { String(decoding: s.map { $0 >= 0x41 && $0 <= 0x5A ? $0 + 32 : $0 }, as: UTF8.self) }
+        guard b.count >= 7, lower(b[0..<7]) == "file://" else { return nil }
+        b.removeFirst(7)
+        if b.count >= 9, lower(b[0..<9]) == "localhost" { b.removeFirst(9) }
+        if let q = b.firstIndex(where: { $0 == 0x3F || $0 == 0x23 }) { b = Array(b[..<q]) }
+        // The path starts with a written "/", not an encoded one.
+        guard b.first == 0x2F, let p = percentDecode(b) else { return nil }
+        return p.hasPrefix("/") && !p.hasPrefix("//") && !p.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\0" || $0 == "\r\n" }) ? p : nil
+    }
+
+    /// `%XX` to its byte (two hex digits; anything else after "%" is not a URL path); a "%" too near the end stays.
+    static func percentDecode(_ b: [UInt8]) -> String? {
+        func hex(_ c: UInt8) -> UInt8? {
+            switch c {
+            case 0x30...0x39: c - 0x30
+            case 0x41...0x46: c - 0x37
+            case 0x61...0x66: c - 0x57
+            default: nil
+            }
+        }
+        var out: [UInt8] = [], i = 0
+        out.reserveCapacity(b.count)
+        while i < b.count {
+            if b[i] == 0x25, i + 2 < b.count {
+                guard let h = hex(b[i + 1]), let l = hex(b[i + 2]) else { return nil }
+                out.append(h << 4 | l); i += 3
+            } else { out.append(b[i]); i += 1 }
+        }
+        return String(validating: out, as: UTF8.self)
     }
 
     static func wholeRel(_ tok: String, _ rel: Bool) -> (String, String)? {
