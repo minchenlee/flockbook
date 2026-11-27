@@ -361,6 +361,7 @@ struct ResourcesPanel: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement(children: .combine)
+                if earlier, let key { LoadingEarlier(fraction: r.progress[key] ?? 0) }
             } else if let key, !items.isEmpty, let pane {
                 list(items, key: key, pane: pane)
                 if earlier { LoadingEarlier(fraction: r.progress[key] ?? 0) }
