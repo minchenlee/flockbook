@@ -1,0 +1,23 @@
+
+## House preferences
+
+These come from the owner's feedback on the Flockbook launch video (2026-11-27). They refine the rules above; where they conflict, these win. Lines marked (interpretation) are how the feedback was applied, not the owner's own words.
+
+**Product scenes**
+- Do not build product scenes from screenshots. Animated crops of screenshots "do not look good". Rebuild the UI as live markup from the project's own values (theme colours, sizes, radii, icons, motion constants) and use screenshots only as the reference for layout and text.
+- (interpretation) Keep one window and one camera across the product scenes: state changes inside the window (tabs, badges, cards, typing) and the camera pushes and pans to follow, instead of a hard cut per feature.
+- (interpretation) Things happen for a reason on screen: a pointer clicks before a view changes, buttons show a pressed state, text streams in, lists fill row by row.
+
+**Polish**
+- The owner asked for "more refined". (interpretation) Use the project's own spring or easing constants when it has them, bring headlines in word by word, capture at 2× and scale down, and check zoomed stills for soft text (a 3D transform or CSS `scale` on a text layer blurs it; use `zoom` or re-lay it out).
+- Logo and icon entrances move on one axis: parts rise straight up from below. No diagonal fly-ins.
+- Device mock-ups must look like a real device: metal band, bezel, side buttons, island, status bar, glass highlight. A plain rounded rectangle is not enough.
+
+**Sound**
+- Effects come from the owner's sound pack, not from synthesis: Google Drive, folder "sounds" in My Drive (200 WAV files from React Bits; a `sounds.zip` sits beside it). Names describe the use: `tab`, `thock`, `keycap`, `chiclet`, `popover`, `check`, `dispatch`, `drawer`, `swoop`, `swish`, `emblem`, `arrive` and so on. Download only the ones the storyboard needs, measure each (length, loudest moment, dominant pitch), and place it so its loudest moment lands on the event. Do not commit the files to a public repository.
+- Music: the owner picks a track on Pixabay. If a track file is supplied, use it and move the cuts onto its beat; otherwise synthesise a placeholder and say that it is one.
+- The agent cannot hear. Say so when delivering, and report what was measured (levels, timing), not how it sounds.
+
+**Content**
+- Look at the repository's open pull requests for features that are about to ship and include the ones worth showing, labelled with their date ("Coming 12/1"). Do not show UI that a PR says has not been seen in a real window.
+- On-screen copy is English, taken from the project's own README or site. Talk to the owner in Traditional Chinese.

@@ -74,21 +74,33 @@ for b,(root,pn,ar) in enumerate(bars):
 # final chord rings out
 add(pad([48,55,60,64,67,72],2.0),22.0,0.07); add(pluck(84,.9),22.0,0.07); add(pluck(79,.9),22.0,0.06,.3); add(kick(),22.0,0.5); add(bass(36,1.2),22.0,0.22)
 
-# effects, in key and on the grid
-for t,g in ((4.0,.05),(7.0,.05),(10.5,.022),(12.0,.02),(16.5,.025),(19.0,.05),(20.5,.05)): add(whoosh(),t-.45,g)
-add(blip(69,.12),2.0,0.10); add(blip(76,.16),2.0,0.07)            # the prompt appears
-add(pluck(72,.6),4.0,0.10); add(pluck(79,.6),4.0,0.09,.3); add(pluck(84,.7),4.25,0.07,-.3)   # logo
-for i,t in enumerate([7.5,7.75,7.875,8.0,8.125,8.25,8.5,8.75,9.25,9.875]): add(blip([76,72,74,76,79,81,76,79,81,84][i],.05),t,0.032,(-1)**i*.3)
-add(blip(76,.1),10.75,0.06); add(blip(81,.14),10.875,0.045)          # an agent starts to wait
-add(blip(79,.1),11.25,0.07); add(blip(84,.16),11.375,0.05)
-add(tick(),12.0,0.2); add(blip(72,.08),12.25,0.04); add(blip(79,.1),12.375,0.035)   # tab, card
-add(tick(),13.0,0.22); add(blip(88,.14),13.0,0.07); add(blip(84,.2),13.125,0.05)    # Allow once
-for k in range(6): add(tick(),14.25+k*.125,0.05+0.02*(k%2),(-1)**k*.2)              # typing on 16ths
-add(tick(),15.0,0.2); add(blip(81,.1),15.0,0.06); add(blip(76,.08),15.25,0.035); add(blip(79,.1),15.5,0.04)
-add(tick(),16.5,0.18); add(tick(),17.0,0.2); add(pluck(72,.5),17.0,0.07); add(pluck(76,.5),17.0,0.06,.3); add(pluck(79,.5),17.125,0.05,-.3)
-for k in range(5): add(blip([72,76,79,81,84][k],.04),17.25+k*.125,0.022,(-1)**k*.3)
-for i in range(4): add(blip([72,76,79,84][i],.06),19.25+i*.125,0.04,(-1)**i*.3)
-add(pluck(76,.5),21.0,0.06); add(pluck(79,.5),21.25,0.05)
+# effects: samples from the user's own sound pack (work/sfx, not committed), each placed so its loudest moment
+# lands on the event, on the same beat grid as the music
+import os
+def sample(name):
+    w=wave.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),'sfx44',name+'.wav')); x=np.frombuffer(w.readframes(w.getnframes()),'<i2').astype(float)/32768; w.close()
+    return x.reshape(-1,2)
+PEAK={'swoop':.25,'drawer':.17,'swish':.07,'whip':.10,'arrive':.25,'bloom':.09,'emblem':.05}
+def sfx(name,t,gain=1.0,pan=0.0):
+    x=sample(name); i=int(round((t-PEAK.get(name,0.0))*SR))
+    if i<0: x=x[-i:]; i=0
+    x=x[:N-i]
+    L[i:i+len(x)]+=x[:,0]*gain*(1-max(pan,0)*0.5); R[i:i+len(x)]+=x[:,1]*gain*(1+min(pan,0)*0.5)
+sfx('hint',2.0,.55)                                   # the prompt appears
+sfx('swoop',4.0,.40); sfx('emblem',4.1,.75)            # into the logo
+sfx('swish',7.0,.40)                                  # the window rises
+sfx('appear',7.5,.30)
+for k in range(5): sfx('tab',7.75+k*.125,.13,(-1)**k*.3)   # tool calls open
+sfx('appear',8.5,.14)
+sfx('dot',10.75,.45,-.2); sfx('dot',11.25,.55,.2)      # two more agents wait
+sfx('tab',12.0,.50); sfx('popover',12.25,.55)          # tab click, approval card
+sfx('thock',13.0,.45); sfx('check',13.0,.55); sfx('glide',13.25,.20)   # Allow once
+for k in range(12): sfx('keycap' if k%3 else 'chiclet',14.25+k*.0625,.15+.05*(k%2),(-1)**k*.25)   # typing
+sfx('enter',15.0,.40); sfx('dispatch',15.0,.50); sfx('bubble',15.125,.22); sfx('appear',15.5,.14)
+sfx('tab',16.5,.45); sfx('thock',17.0,.35); sfx('drawer',17.125,.55,.3); sfx('tally',17.25,.30,.3)   # workspace, Resources
+sfx('swoop',19.125,.45)                                # the phone rises
+for k in range(5): sfx('stack',19.25+k*.125,.20,(-1)**k*.2)
+sfx('swish',20.5,.35); sfx('arrive',21.0,.55); sfx('bloom',21.5,.30)
 
 mix=np.stack([L,R],1)
 mix=np.tanh(mix*1.5)/np.tanh(1.5)
