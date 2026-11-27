@@ -181,6 +181,9 @@ fn file_url(tok: &str) -> Option<String> {
         _ => rest,
     };
     let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+    if !path.starts_with('/') {
+        return None; // the path starts with a written `/`, not an encoded one
+    }
     let p = crate::paste::percent_decode(path)?;
     (p.starts_with('/') && !p.starts_with("//") && !p.contains(['\n', '\r', '\0'])).then_some(p)
 }
@@ -1471,7 +1474,7 @@ mod tests {
         assert_eq!(one("[a](file:///home/me/%E7%AD%86%E8%A8%98/r.md)").3, "/home/me/筆記/r.md");
         assert_eq!(one("[a](file:///home/me/r.md#L12)").3, "/home/me/r.md");
         assert_eq!(one("[a](FILE://localhost/home/me/r.png)").3, "/home/me/r.png");
-        for t in ["[a](file://otherhost/home/me/r.md)", "[a](file:///home/me/src/main.ts)", "[a](file:///home/me/r.md%)", "[a](file:////srv/r.md)", "[a](file:///home/me/r%0A.md)"] {
+        for t in ["[a](file://otherhost/home/me/r.md)", "[a](file:///home/me/src/main.ts)", "[a](file:///home/me/r.md%)", "[a](file:////srv/r.md)", "[a](file://%2Fhome/me/r.md)", "[a](file://localhost%2Fhome/me/r.md)", "[a](file:///home/me/r%+9.md)", "[a](file:///home/me/r%0A.md)"] {
             assert!(kinds(t).is_empty(), "{t}: {:?}", detect(t));
         }
     }
