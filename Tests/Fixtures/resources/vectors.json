@@ -1,0 +1,2314 @@
+{
+  "_about": "Shared by the helper (xplat/flockbook-modfeed/tests/resources_vectors.rs), the Mac app (Sources/HerdrKitChecks/ChecksResources.swift) and the mod (herdr-app/test/resources-vectors.test.mjs, groups only). Synthetic. The wants are what the helper gives: after a rule change there, run `FLOCKBOOK_WRITE_VECTORS=1 cargo test -p flockbook-modfeed --test resources_vectors` and every other side's checks fail until they match. detect: [start, end, kind, target] in UTF-16, `feed` as chat rows link them, `collect` with relative doc paths too. collect: `$ROOT` is a fresh real folder holding `files`; `agent` is the pane's folder; ids are given only when no target is under `$ROOT`.",
+  "collect": [
+    {
+      "home": "/home/me",
+      "lines": [
+        "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Look at https://pasted.example.com/x and ~/pasted/a.md\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Bash\",\"input\":{\"command\":\"curl https://tool.example.com\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"see https://tool-output.example.com/y\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Plan: ~/plans/plan.md and PR https://github.com/o/r/pull/12 and http://localhost:5173/\"}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Artifact\",\"input\":{\"action\":\"publish\",\"file_path\":\"/tmp/p.html\",\"title\":\"Launch plan\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:07.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"Published: https://claude.ai/code/artifact/0f3a-11\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a4\",\"timestamp\":\"2026-11-03T01:40:08.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Artifact\",\"input\":{\"action\":\"publish\",\"file_path\":\"/tmp/q.html\",\"title\":\"Broken\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r4\",\"timestamp\":\"2026-11-03T01:40:09.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"Failed: https://claude.ai/code/artifact/dead-1\",\"is_error\":true}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a5\",\"timestamp\":\"2026-11-03T01:40:10.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c4\",\"name\":\"Artifact\",\"input\":{\"action\":\"read\",\"url\":\"https://claude.ai/code/artifact/read-1\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r5\",\"timestamp\":\"2026-11-03T01:40:11.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c4\",\"content\":\"Read https://claude.ai/code/artifact/read-1\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a6\",\"timestamp\":\"2026-11-03T01:40:20.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Again ~/plans/plan.md, files https://github.com/o/r/pull/12/files, app localhost:5173/settings, docs https://Docs.Example.com/guide/#intro, CI https://github.com/o/r/actions/runs/1870\"}]}}",
+        "{\"type\":\"user\",\"uuid\":\"u2\",\"timestamp\":\"2026-11-03T01:40:30.000Z\",\"message\":{\"role\":\"user\",\"content\":\"thanks\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a7\",\"timestamp\":\"2026-11-03T01:40:40.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Also https://docs.example.com/guide and the issue github.com/o/r/issues/7\"}]}}"
+      ],
+      "name": "replies and artifact results only",
+      "want": [
+        {
+          "detail": "o/r",
+          "exists": null,
+          "first_ts": 1793670040000,
+          "id": "64e36a1bcd2f5ab8",
+          "kind": "issue",
+          "last_ts": 1793670040000,
+          "mentions": 1,
+          "row": "a7-0",
+          "target": "https://github.com/o/r/issues/7",
+          "title": "o/r#7"
+        },
+        {
+          "detail": "docs.example.com",
+          "exists": null,
+          "first_ts": 1793670020000,
+          "id": "49c92d810fae43c1",
+          "kind": "link",
+          "last_ts": 1793670040000,
+          "mentions": 2,
+          "row": "a7-0",
+          "target": "https://docs.example.com/guide",
+          "title": "docs.example.com/guide"
+        },
+        {
+          "detail": "o/r",
+          "exists": null,
+          "first_ts": 1793670020000,
+          "id": "c166b622831a93a7",
+          "kind": "ci",
+          "last_ts": 1793670020000,
+          "mentions": 1,
+          "row": "a6-0",
+          "target": "https://github.com/o/r/actions/runs/1870",
+          "title": "CI run 1870"
+        },
+        {
+          "detail": "localhost",
+          "exists": null,
+          "first_ts": 1793670005000,
+          "id": "6d361cde8f8a171f",
+          "kind": "local",
+          "last_ts": 1793670020000,
+          "mentions": 2,
+          "row": "a6-0",
+          "target": "http://localhost:5173/settings",
+          "title": "localhost:5173"
+        },
+        {
+          "detail": "o/r",
+          "exists": null,
+          "first_ts": 1793670005000,
+          "id": "35f1baa6fad985ad",
+          "kind": "pr",
+          "last_ts": 1793670020000,
+          "mentions": 2,
+          "row": "a6-0",
+          "target": "https://github.com/o/r/pull/12",
+          "title": "o/r#12"
+        },
+        {
+          "detail": "~/plans",
+          "exists": false,
+          "first_ts": 1793670005000,
+          "id": "9b6c1a4f62e268a2",
+          "kind": "doc",
+          "last_ts": 1793670020000,
+          "mentions": 2,
+          "row": "a6-0",
+          "target": "/home/me/plans/plan.md",
+          "title": "plan.md"
+        },
+        {
+          "detail": "claude.ai",
+          "exists": null,
+          "first_ts": 1793670006000,
+          "id": "ad3799233ef3572f",
+          "kind": "artifact",
+          "last_ts": 1793670006000,
+          "mentions": 1,
+          "row": "tools-a3-0",
+          "target": "https://claude.ai/code/artifact/0f3a-11",
+          "title": "Launch plan"
+        }
+      ]
+    },
+    {
+      "lines": [
+        "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"```sh\\nrm -rf /tmp/pasted\\n```\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Run:\\n\\n```sh\\nnpm test\\n```\\n\\nSee https://x.com/a\"}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Again:\\n\\n```bash\\n  npm test  \\n```\"}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"```sh\\nmake \\\\\\n  all\\n```\"}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a4\",\"timestamp\":\"2026-11-03T01:40:07.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\\n\\n試用（一行）：\\n\\n```\\ncd ~/x && ./run demo/README.md\\n```\\n\\nThen:\\n\\n```sh\\nmake check\\n```\"}]}}"
+      ],
+      "name": "commands once per command",
+      "want": [
+        {
+          "detail": "make check",
+          "exists": null,
+          "first_ts": 1793670007000,
+          "id": "b850b35f8cb77e25",
+          "kind": "cmd",
+          "last_ts": 1793670007000,
+          "mentions": 1,
+          "row": "a4-0",
+          "target": "make check",
+          "title": "Then"
+        },
+        {
+          "detail": "cd ~/x && ./run demo/README.md",
+          "exists": null,
+          "first_ts": 1793670007000,
+          "id": "53d7ca4553cffc7c",
+          "kind": "cmd",
+          "last_ts": 1793670007000,
+          "mentions": 1,
+          "row": "a4-0",
+          "target": "cd ~/x && ./run demo/README.md",
+          "title": "試用（一行）"
+        },
+        {
+          "detail": "make all",
+          "exists": null,
+          "first_ts": 1793670006000,
+          "id": "bc393d039b2f301c",
+          "kind": "cmd",
+          "last_ts": 1793670006000,
+          "mentions": 1,
+          "row": "a3-0",
+          "target": "make \\\n  all",
+          "title": "make all"
+        },
+        {
+          "detail": "npm test",
+          "exists": null,
+          "first_ts": 1793670001000,
+          "id": "7eeee78ecf8e6a6c",
+          "kind": "cmd",
+          "last_ts": 1793670005000,
+          "mentions": 2,
+          "row": "a2-0",
+          "target": "npm test",
+          "title": "Again"
+        },
+        {
+          "detail": "x.com",
+          "exists": null,
+          "first_ts": 1793670001000,
+          "id": "284219ac0c647bb9",
+          "kind": "link",
+          "last_ts": 1793670001000,
+          "mentions": 1,
+          "row": "a1-0",
+          "target": "https://x.com/a",
+          "title": "x.com/a"
+        }
+      ]
+    },
+    {
+      "files": {
+        "home/n/notes.txt": "x",
+        "home/n/page.html": "<html><head><TITLE>\n  The   page </title>",
+        "home/n/pic.png": "x",
+        "home/n/plan.md": "intro\n# Weekly plan\n"
+      },
+      "home": "$ROOT/home",
+      "lines": [
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"See ~/n/plan.md and ~/n/page.html and ~/n/pic.png and ~/n/gone.md\"}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Artifact\",\"input\":{\"action\":\"publish\",\"file_path\":\"$ROOT/home/n/page.html\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"Published at https://claude.ai/artifact/abc\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Artifact\",\"input\":{\"action\":\"publish\",\"file_path\":\"/nonexistent/q.html\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"Published at https://claude.ai/artifact/def\",\"is_error\":false}]}}"
+      ],
+      "name": "titles from the files",
+      "want": [
+        {
+          "detail": "claude.ai",
+          "exists": null,
+          "first_ts": 1793670002000,
+          "id": "d64c90dbb3c5c59f",
+          "kind": "artifact",
+          "last_ts": 1793670002000,
+          "mentions": 1,
+          "row": "tools-a2-0",
+          "target": "https://claude.ai/artifact/def",
+          "title": "Artifact"
+        },
+        {
+          "detail": "claude.ai",
+          "exists": null,
+          "first_ts": 1793670002000,
+          "id": "b9c640dba2e4ff48",
+          "kind": "artifact",
+          "last_ts": 1793670002000,
+          "mentions": 1,
+          "row": "tools-a2-0",
+          "target": "https://claude.ai/artifact/abc",
+          "title": "The page"
+        },
+        {
+          "detail": "~/n",
+          "exists": false,
+          "first_ts": 1793670001000,
+          "kind": "doc",
+          "last_ts": 1793670001000,
+          "mentions": 1,
+          "row": "a1-0",
+          "target": "$ROOT/home/n/gone.md",
+          "title": "gone.md"
+        },
+        {
+          "detail": "~/n",
+          "exists": true,
+          "first_ts": 1793670001000,
+          "kind": "doc",
+          "last_ts": 1793670001000,
+          "mentions": 1,
+          "row": "a1-0",
+          "target": "$ROOT/home/n/pic.png",
+          "title": "pic.png"
+        },
+        {
+          "detail": "~/n",
+          "exists": true,
+          "first_ts": 1793670001000,
+          "kind": "doc",
+          "last_ts": 1793670001000,
+          "mentions": 1,
+          "row": "a1-0",
+          "target": "$ROOT/home/n/page.html",
+          "title": "The page"
+        },
+        {
+          "detail": "~/n",
+          "exists": true,
+          "first_ts": 1793670001000,
+          "kind": "doc",
+          "last_ts": 1793670001000,
+          "mentions": 1,
+          "row": "a1-0",
+          "target": "$ROOT/home/n/plan.md",
+          "title": "Weekly plan"
+        }
+      ]
+    },
+    {
+      "files": {
+        "proj/docs/a.md": "# Plan A"
+      },
+      "home": "/home/me",
+      "lines": [
+        "{\"type\":\"user\",\"uuid\":\"u0\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"cwd\":\"$ROOT/proj\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"cwd\":\"$ROOT/proj\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Saved in `docs/a.md`.\"}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"cwd\":\"$ROOT/proj\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Also ./docs/a.md and [the plan](docs/a.md). Missing: docs/none.md\"}]}}"
+      ],
+      "name": "relative docs from the working folder",
+      "want": [
+        {
+          "detail": "$ROOT/proj/docs",
+          "exists": true,
+          "first_ts": 1793670001000,
+          "kind": "doc",
+          "last_ts": 1793670002000,
+          "mentions": 3,
+          "row": "a2-0",
+          "target": "$ROOT/proj/docs/a.md",
+          "title": "Plan A"
+        }
+      ]
+    },
+    {
+      "agent": "$ROOT/proj",
+      "files": {
+        "proj/docs/a.md": "# Plan A"
+      },
+      "home": "/home/me",
+      "lines": [
+        "{\"type\":\"user\",\"uuid\":\"u0\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Saved in `docs/a.md`.\"}]}}"
+      ],
+      "name": "relative docs from the pane folder",
+      "want": [
+        {
+          "detail": "$ROOT/proj/docs",
+          "exists": true,
+          "first_ts": 1793670001000,
+          "kind": "doc",
+          "last_ts": 1793670001000,
+          "mentions": 1,
+          "row": "a1-0",
+          "target": "$ROOT/proj/docs/a.md",
+          "title": "Plan A"
+        }
+      ]
+    },
+    {
+      "files": {
+        "lib/x/c.md": "# C",
+        "other/notes/b.md": "# B",
+        "w/one.md": "1"
+      },
+      "home": "/home/me",
+      "lines": [
+        "{\"type\":\"user\",\"uuid\":\"u0\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"cwd\":\"$ROOT/w\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"cwd\":\"$ROOT/w\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"Bash\",\"input\":{\"command\":\"cd $ROOT/other && ls\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c1\",\"content\":\"notes\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-11-03T01:40:03.000Z\",\"cwd\":\"$ROOT/w\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c2\",\"name\":\"Read\",\"input\":{\"file_path\":\"$ROOT/lib/x/c.md\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r2\",\"timestamp\":\"2026-11-03T01:40:04.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c2\",\"content\":\"# C\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a3\",\"timestamp\":\"2026-11-03T01:40:05.000Z\",\"cwd\":\"$ROOT/w\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"c3\",\"name\":\"Bash\",\"input\":{\"command\":\"echo cd $ROOT/lib\"}}]}}",
+        "{\"type\":\"user\",\"uuid\":\"r3\",\"timestamp\":\"2026-11-03T01:40:06.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"c3\",\"content\":\"cd\",\"is_error\":false}]}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a4\",\"timestamp\":\"2026-11-03T01:40:07.000Z\",\"cwd\":\"$ROOT/w\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Wrote notes/b.md and x/c.md; also $ROOT/other/notes/b.md\"}]}}"
+      ],
+      "name": "relative docs through a cd and a file tool, and joined with the absolute path",
+      "want": [
+        {
+          "detail": "$ROOT/other/notes",
+          "exists": true,
+          "first_ts": 1793670007000,
+          "kind": "doc",
+          "last_ts": 1793670007000,
+          "mentions": 2,
+          "row": "a4-0",
+          "target": "$ROOT/other/notes/b.md",
+          "title": "B"
+        },
+        {
+          "detail": "$ROOT/lib/x",
+          "exists": true,
+          "first_ts": 1793670007000,
+          "kind": "doc",
+          "last_ts": 1793670007000,
+          "mentions": 1,
+          "row": "a4-0",
+          "target": "$ROOT/lib/x/c.md",
+          "title": "C"
+        }
+      ]
+    },
+    {
+      "files": {
+        "p1/d/a.md": "a",
+        "p2/d/a.md": "b"
+      },
+      "home": "/home/me",
+      "lines": [
+        "{\"type\":\"user\",\"uuid\":\"u0\",\"timestamp\":\"2026-11-03T01:40:00.000Z\",\"cwd\":\"$ROOT/p1\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+        "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-11-03T01:40:01.000Z\",\"cwd\":\"$ROOT/p2\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+        "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-11-03T01:40:02.000Z\",\"cwd\":\"$ROOT/p2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"See d/a.md\"}]}}"
+      ],
+      "name": "relative docs with two matches are not listed",
+      "want": []
+    }
+  ],
+  "commands": [
+    {
+      "text": "Try:\n\n```\nnpm test\n```\n",
+      "want": [
+        [
+          6,
+          "Try",
+          "npm test"
+        ]
+      ]
+    },
+    {
+      "text": "Try:\n\n```sh title=x\nnpm test\n```\n",
+      "want": [
+        [
+          6,
+          "Try",
+          "npm test"
+        ]
+      ]
+    },
+    {
+      "text": "Try:\n\n```Bash\nnpm test\n```\n",
+      "want": [
+        [
+          6,
+          "Try",
+          "npm test"
+        ]
+      ]
+    },
+    {
+      "text": "Try:\n\n```console\nnpm test\n```\n",
+      "want": [
+        [
+          6,
+          "Try",
+          "npm test"
+        ]
+      ]
+    },
+    {
+      "text": "```\n$ cargo build --release\n```",
+      "want": [
+        [
+          0,
+          "cargo build --release",
+          "cargo build --release"
+        ]
+      ]
+    },
+    {
+      "text": "~~~sh\nls -la\n~~~",
+      "want": [
+        [
+          0,
+          "ls -la",
+          "ls -la"
+        ]
+      ]
+    },
+    {
+      "text": "- step:\n\n  ```sh\n  make\n  ```",
+      "want": [
+        [
+          11,
+          "step",
+          "make"
+        ]
+      ]
+    },
+    {
+      "text": "```bash\ncd ~/x && \\\n  ./run.sh --fast \\\n  demo/README.md\n```",
+      "want": [
+        [
+          0,
+          "cd ~/x && ./run.sh --fast demo/README.md",
+          "cd ~/x && \\\n  ./run.sh --fast \\\n  demo/README.md"
+        ]
+      ]
+    },
+    {
+      "text": "```sh\nnpm ci\nnpm test\n```",
+      "want": []
+    },
+    {
+      "text": "```console\n$ ls\nREADME.md\n```",
+      "want": []
+    },
+    {
+      "text": "```text\nnpm test\n```",
+      "want": []
+    },
+    {
+      "text": "```log\nerror: x\n```",
+      "want": []
+    },
+    {
+      "text": "```json\n{\"a\": 1}\n```",
+      "want": []
+    },
+    {
+      "text": "```python\nprint(1)\n```",
+      "want": []
+    },
+    {
+      "text": "Run `npm test` now.",
+      "want": []
+    },
+    {
+      "text": "Run:\n\n    npm test\n",
+      "want": []
+    },
+    {
+      "text": "```sh\n\n```",
+      "want": []
+    },
+    {
+      "text": "```sh\n# npm test\n```",
+      "want": []
+    },
+    {
+      "text": "```sh\nnpm test \\\n```",
+      "want": []
+    },
+    {
+      "text": "```sh\necho aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n```",
+      "want": []
+    },
+    {
+      "text": "```sh\necho aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n```",
+      "want": [
+        [
+          0,
+          "echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…",
+          "echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      ]
+    },
+    {
+      "text": "Done.\n\n試用（一行）：\n\n```\ncd ~/x && ./run demo/README.md\n```\n\nThen:\n\n```sh\nmake check\n```",
+      "want": [
+        [
+          16,
+          "試用（一行）",
+          "cd ~/x && ./run demo/README.md"
+        ],
+        [
+          63,
+          "Then",
+          "make check"
+        ]
+      ]
+    },
+    {
+      "text": "Build it with this:\n```sh\nmake\n```",
+      "want": [
+        [
+          20,
+          "Build it with this",
+          "make"
+        ]
+      ]
+    },
+    {
+      "text": "First line.\nSecond line, the one that says it:\n\n```sh\nmake\n```",
+      "want": [
+        [
+          48,
+          "Second line, the one that says it",
+          "make"
+        ]
+      ]
+    },
+    {
+      "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word :\n\n```sh\nmake\n```",
+      "want": [
+        [
+          203,
+          "word word word word word word word word word word word word word word word word…",
+          "make"
+        ]
+      ]
+    },
+    {
+      "text": "```sh\nnpm run build -- --mode production --watch\n```",
+      "want": [
+        [
+          0,
+          "npm run build -- --mode production --watch",
+          "npm run build -- --mode production --watch"
+        ]
+      ]
+    },
+    {
+      "text": "# Heading\n\n- a list\n\n```sh\nmake\n```",
+      "want": [
+        [
+          21,
+          "make",
+          "make"
+        ]
+      ]
+    },
+    {
+      "text": "```sh\nnpm xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n```",
+      "want": [
+        [
+          0,
+          "npm xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…",
+          "npm xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ]
+      ]
+    },
+    {
+      "text": "Use **this** one:\n\n```zsh\nopen https://x.com\n```",
+      "want": [
+        [
+          19,
+          "Use this one",
+          "open https://x.com"
+        ]
+      ]
+    },
+    {
+      "text": "> quoted:\n>\n> ```sh\n> make q\n> ```",
+      "want": [
+        [
+          14,
+          "quoted",
+          "make q"
+        ]
+      ]
+    }
+  ],
+  "detect": [
+    {
+      "collect": [
+        [
+          8,
+          32,
+          "doc",
+          "/home/me/reports/plan.md"
+        ]
+      ],
+      "feed": [
+        [
+          8,
+          32,
+          "doc",
+          "/home/me/reports/plan.md"
+        ]
+      ],
+      "text": "Report: /home/me/reports/plan.md"
+    },
+    {
+      "collect": [
+        [
+          0,
+          34,
+          "artifact",
+          "https://claude.ai/artifact/abc-123"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          34,
+          "artifact",
+          "https://claude.ai/artifact/abc-123"
+        ]
+      ],
+      "text": "https://claude.ai/artifact/abc-123"
+    },
+    {
+      "collect": [
+        [
+          0,
+          36,
+          "artifact",
+          "https://claude.ai/code/artifact/0f3a"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          36,
+          "artifact",
+          "https://claude.ai/code/artifact/0f3a"
+        ]
+      ],
+      "text": "https://claude.ai/code/artifact/0f3a"
+    },
+    {
+      "collect": [
+        [
+          6,
+          28,
+          "artifact",
+          "https://claude.ai/artifact/xyz"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          28,
+          "artifact",
+          "https://claude.ai/artifact/xyz"
+        ]
+      ],
+      "text": "page: claude.ai/artifact/xyz"
+    },
+    {
+      "collect": [
+        [
+          0,
+          30,
+          "pr",
+          "https://github.com/o/r/pull/12"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          30,
+          "pr",
+          "https://github.com/o/r/pull/12"
+        ]
+      ],
+      "text": "https://github.com/o/r/pull/12"
+    },
+    {
+      "collect": [
+        [
+          0,
+          36,
+          "pr",
+          "https://github.com/o/r/pull/12/files"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          36,
+          "pr",
+          "https://github.com/o/r/pull/12/files"
+        ]
+      ],
+      "text": "https://github.com/o/r/pull/12/files"
+    },
+    {
+      "collect": [
+        [
+          0,
+          31,
+          "issue",
+          "https://github.com/o/r/issues/7"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          31,
+          "issue",
+          "https://github.com/o/r/issues/7"
+        ]
+      ],
+      "text": "https://github.com/o/r/issues/7"
+    },
+    {
+      "collect": [
+        [
+          0,
+          40,
+          "ci",
+          "https://github.com/o/r/actions/runs/1870"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          40,
+          "ci",
+          "https://github.com/o/r/actions/runs/1870"
+        ]
+      ],
+      "text": "https://github.com/o/r/actions/runs/1870"
+    },
+    {
+      "collect": [
+        [
+          0,
+          22,
+          "link",
+          "https://github.com/o/r"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          22,
+          "link",
+          "https://github.com/o/r"
+        ]
+      ],
+      "text": "https://github.com/o/r"
+    },
+    {
+      "collect": [
+        [
+          4,
+          25,
+          "pr",
+          "https://github.com/o/r/pull/3"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          25,
+          "pr",
+          "https://github.com/o/r/pull/3"
+        ]
+      ],
+      "text": "PR: github.com/o/r/pull/3"
+    },
+    {
+      "collect": [
+        [
+          0,
+          27,
+          "link",
+          "https://example.com/a?b=1#c"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          27,
+          "link",
+          "https://example.com/a?b=1#c"
+        ]
+      ],
+      "text": "https://example.com/a?b=1#c"
+    },
+    {
+      "collect": [
+        [
+          0,
+          22,
+          "local",
+          "http://localhost:5173/"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          22,
+          "local",
+          "http://localhost:5173/"
+        ]
+      ],
+      "text": "http://localhost:5173/"
+    },
+    {
+      "collect": [
+        [
+          5,
+          19,
+          "local",
+          "http://localhost:3000"
+        ]
+      ],
+      "feed": [
+        [
+          5,
+          19,
+          "local",
+          "http://localhost:3000"
+        ]
+      ],
+      "text": "open localhost:3000 now"
+    },
+    {
+      "collect": [
+        [
+          0,
+          25,
+          "local",
+          "http://192.168.1.5:8080/x"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          25,
+          "local",
+          "http://192.168.1.5:8080/x"
+        ]
+      ],
+      "text": "http://192.168.1.5:8080/x"
+    },
+    {
+      "collect": [
+        [
+          0,
+          21,
+          "local",
+          "http://127.0.0.1:8787"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          21,
+          "local",
+          "http://127.0.0.1:8787"
+        ]
+      ],
+      "text": "http://127.0.0.1:8787"
+    },
+    {
+      "collect": [
+        [
+          0,
+          21,
+          "local",
+          "http://box.local:9000"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          21,
+          "local",
+          "http://box.local:9000"
+        ]
+      ],
+      "text": "http://box.local:9000"
+    },
+    {
+      "collect": [
+        [
+          1,
+          16,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          1,
+          16,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "見https://x.com/a的說明"
+    },
+    {
+      "collect": [
+        [
+          3,
+          20,
+          "doc",
+          "/home/me/筆記/計畫.md"
+        ]
+      ],
+      "feed": [
+        [
+          3,
+          20,
+          "doc",
+          "/home/me/筆記/計畫.md"
+        ]
+      ],
+      "text": "檔案：/home/me/筆記/計畫.md的內容"
+    },
+    {
+      "collect": [
+        [
+          6,
+          21,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          21,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "Done: https://x.com/a。"
+    },
+    {
+      "collect": [
+        [
+          5,
+          20,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          5,
+          20,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "(see https://x.com/a)"
+    },
+    {
+      "collect": [
+        [
+          0,
+          39,
+          "link",
+          "https://en.wikipedia.org/wiki/Foo_(bar)"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          39,
+          "link",
+          "https://en.wikipedia.org/wiki/Foo_(bar)"
+        ]
+      ],
+      "text": "https://en.wikipedia.org/wiki/Foo_(bar)"
+    },
+    {
+      "collect": [
+        [
+          0,
+          15,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          15,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "https://x.com/a, and more"
+    },
+    {
+      "collect": [
+        [
+          6,
+          21,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          21,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "It is https://x.com/a."
+    },
+    {
+      "collect": [
+        [
+          2,
+          17,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          2,
+          17,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "**https://x.com/a**"
+    },
+    {
+      "collect": [
+        [
+          6,
+          19,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          19,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "text": "Wrote /home/me/a.md."
+    },
+    {
+      "collect": [
+        [
+          1,
+          14,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "feed": [
+        [
+          1,
+          14,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "text": "(/home/me/a.md)"
+    },
+    {
+      "collect": [
+        [
+          0,
+          13,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          13,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "text": "/home/me/a.md, /x"
+    },
+    {
+      "collect": [
+        [
+          1,
+          16,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "feed": [
+        [
+          1,
+          16,
+          "link",
+          "https://x.com/a"
+        ]
+      ],
+      "text": "<https://x.com/a>"
+    },
+    {
+      "collect": [
+        [
+          7,
+          23,
+          "doc",
+          "/home/me/plan.md"
+        ]
+      ],
+      "feed": [
+        [
+          7,
+          23,
+          "doc",
+          "/home/me/plan.md"
+        ]
+      ],
+      "text": "[plan](/home/me/plan.md)"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "![shot](/home/me/a.png)"
+    },
+    {
+      "collect": [
+        [
+          6,
+          19,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          19,
+          "doc",
+          "/home/me/a.md"
+        ]
+      ],
+      "text": "Open `/home/me/a.md` now"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "Run `curl https://x.com`"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "```sh\nopen https://x.com /tmp/a.md\n```"
+    },
+    {
+      "collect": [
+        [
+          15,
+          28,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          15,
+          28,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "```\nx\n```\nthen https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "See [the docs][1].\n\n[1]: https://x.com/docs"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "   [a]: <https://x.com> \"t\""
+    },
+    {
+      "collect": [
+        [
+          24,
+          37,
+          "link",
+          "https://y.com"
+        ]
+      ],
+      "feed": [
+        [
+          24,
+          37,
+          "link",
+          "https://y.com"
+        ]
+      ],
+      "text": "[1]: https://x.com\nthen https://y.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "[1]:\n  https://x.com/docs"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "See [https://x.com][ref].\n\n[ref]: https://y.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "See [https://x.com][].\n\n[https://x.com]: https://y.com"
+    },
+    {
+      "collect": [
+        [
+          5,
+          25,
+          "link",
+          "https://x.com][draft"
+        ]
+      ],
+      "feed": [
+        [
+          5,
+          25,
+          "link",
+          "https://x.com][draft"
+        ]
+      ],
+      "text": "See [https://x.com][draft]."
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "See [https://x.com].\n\n[https://x.com]: https://y.com"
+    },
+    {
+      "collect": [
+        [
+          5,
+          18,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          5,
+          18,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "See [https://x.com] there"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "Run:\n\n    curl https://x.com\n    open /tmp/a.md"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "    https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "\thttps://x.com"
+    },
+    {
+      "collect": [
+        [
+          9,
+          22,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          9,
+          22,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "Text\n    https://x.com"
+    },
+    {
+      "collect": [
+        [
+          12,
+          25,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          12,
+          25,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "- item\n\n    https://x.com"
+    },
+    {
+      "collect": [
+        [
+          16,
+          29,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          16,
+          29,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "    code\n\nafter https://x.com"
+    },
+    {
+      "collect": [
+        [
+          0,
+          16,
+          "link",
+          "https://x.com/a_"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          16,
+          "link",
+          "https://x.com/a_"
+        ]
+      ],
+      "text": "https://x.com/a_"
+    },
+    {
+      "collect": [
+        [
+          4,
+          29,
+          "link",
+          "https://x.com/snake_case_"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          29,
+          "link",
+          "https://x.com/snake_case_"
+        ]
+      ],
+      "text": "see https://x.com/snake_case_ now"
+    },
+    {
+      "collect": [
+        [
+          13,
+          26,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          13,
+          26,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "```x``` then https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "```sh\nhttps://x.com\n```"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "~~~ a`b\nhttps://x.com\n~~~"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "> [1]: https://x.com/docs"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "> > [1]:\n> https://x.com/docs"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "See [a [https://x.com] b][ref].\n\n[ref]: https://y.com"
+    },
+    {
+      "collect": [
+        [
+          8,
+          21,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          8,
+          21,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "> quote https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "- item\n\n      curl https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "# Title\n    https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "1. step\n\n   - sub\n\n         https://x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "see https://x.com/?a=1&amp;b=2 now"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "see https://x.com/a\\_b now"
+    },
+    {
+      "collect": [
+        [
+          4,
+          26,
+          "link",
+          "https://x.com/?a=1&b=2"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          26,
+          "link",
+          "https://x.com/?a=1&b=2"
+        ]
+      ],
+      "text": "see https://x.com/?a=1&b=2 now"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "<a href=\"https://x.com\">x</a>"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "<div>\nhttps://x.com\n</div>"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "see <code>curl https://x.com</code> now"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "<a href=\"https://y.com\">https://x.com</a>"
+    },
+    {
+      "collect": [
+        [
+          4,
+          17,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          17,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "see https://x.com <b>bold</b>"
+    },
+    {
+      "collect": [
+        [
+          17,
+          30,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          17,
+          30,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "a <b>x</b>\n\nnext https://x.com"
+    },
+    {
+      "collect": [
+        [
+          0,
+          21,
+          "link",
+          "https://x.com/a/b.png"
+        ]
+      ],
+      "feed": [
+        [
+          0,
+          21,
+          "link",
+          "https://x.com/a/b.png"
+        ]
+      ],
+      "text": "https://x.com/a/b.png"
+    },
+    {
+      "collect": [
+        [
+          2,
+          15,
+          "link",
+          "https://a.com"
+        ],
+        [
+          18,
+          27,
+          "doc",
+          "/tmp/x.md"
+        ],
+        [
+          30,
+          61,
+          "issue",
+          "https://github.com/o/r/issues/2"
+        ],
+        [
+          64,
+          78,
+          "local",
+          "http://localhost:8080"
+        ]
+      ],
+      "feed": [
+        [
+          2,
+          15,
+          "link",
+          "https://a.com"
+        ],
+        [
+          18,
+          27,
+          "doc",
+          "/tmp/x.md"
+        ],
+        [
+          30,
+          61,
+          "issue",
+          "https://github.com/o/r/issues/2"
+        ],
+        [
+          64,
+          78,
+          "local",
+          "http://localhost:8080"
+        ]
+      ],
+      "text": "a https://a.com b /tmp/x.md c https://github.com/o/r/issues/2 d localhost:8080"
+    },
+    {
+      "collect": [
+        [
+          4,
+          17,
+          "doc",
+          "/home/me/r.md"
+        ],
+        [
+          23,
+          52,
+          "pr",
+          "https://github.com/o/r/pull/3"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          17,
+          "doc",
+          "/home/me/r.md"
+        ],
+        [
+          23,
+          52,
+          "pr",
+          "https://github.com/o/r/pull/3"
+        ]
+      ],
+      "text": "報告在 /home/me/r.md，PR 在 https://github.com/o/r/pull/3。"
+    },
+    {
+      "collect": [
+        [
+          9,
+          38,
+          "pr",
+          "https://github.com/o/r/pull/1"
+        ]
+      ],
+      "feed": [
+        [
+          9,
+          38,
+          "pr",
+          "https://github.com/o/r/pull/1"
+        ]
+      ],
+      "text": "[the PR](https://github.com/o/r/pull/1)"
+    },
+    {
+      "collect": [
+        [
+          16,
+          29,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          16,
+          29,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "[https://x.com](https://x.com)"
+    },
+    {
+      "collect": [
+        [
+          3,
+          16,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          3,
+          16,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "🎉 https://x.com 👍"
+    },
+    {
+      "collect": [
+        [
+          9,
+          18,
+          "doc",
+          "/tmp/a.md"
+        ]
+      ],
+      "feed": [
+        [
+          9,
+          18,
+          "doc",
+          "/tmp/a.md"
+        ]
+      ],
+      "text": "👨‍👩‍👧 /tmp/a.md"
+    },
+    {
+      "collect": [
+        [
+          26,
+          39,
+          "link",
+          "https://y.com"
+        ]
+      ],
+      "feed": [
+        [
+          26,
+          39,
+          "link",
+          "https://y.com"
+        ]
+      ],
+      "text": "See [a [b] https://x.com](https://y.com)."
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "[https://example.com/guide Guide \\[draft][ref]\n\n[ref]: https://y.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "- [ref]: https://example.com/guide\n\n[Guide][ref]"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "```\ncode\n```\n    curl https://example.com/guide"
+    },
+    {
+      "collect": [
+        [
+          0,
+          9,
+          "doc",
+          "docs/a.md"
+        ]
+      ],
+      "feed": [],
+      "text": "docs/a.md"
+    },
+    {
+      "collect": [
+        [
+          0,
+          6,
+          "doc",
+          "./a.md"
+        ]
+      ],
+      "feed": [],
+      "text": "./a.md"
+    },
+    {
+      "collect": [
+        [
+          0,
+          7,
+          "doc",
+          "../a.md"
+        ]
+      ],
+      "feed": [],
+      "text": "../a.md"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "/usr/bin/env"
+    },
+    {
+      "collect": [
+        [
+          0,
+          8,
+          "doc",
+          "a/b/c.md"
+        ]
+      ],
+      "feed": [],
+      "text": "a/b/c.md"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "//comment.md"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "https://"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "mail@x.com"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "/tmp/a.md5"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "/tmp/a.mdx"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "/tmp/a.md/b"
+    },
+    {
+      "collect": [
+        [
+          4,
+          18,
+          "doc",
+          "~/notes/a.html"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          18,
+          "doc",
+          "~/notes/a.html"
+        ]
+      ],
+      "text": "See ~/notes/a.html now"
+    },
+    {
+      "collect": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/b.htm"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/b.htm"
+        ]
+      ],
+      "text": "See /tmp/b.htm now"
+    },
+    {
+      "collect": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/c.pdf"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/c.pdf"
+        ]
+      ],
+      "text": "See /tmp/c.pdf now"
+    },
+    {
+      "collect": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/d.png"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/d.png"
+        ]
+      ],
+      "text": "See /tmp/d.png now"
+    },
+    {
+      "collect": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/e.svg"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/e.svg"
+        ]
+      ],
+      "text": "See /tmp/e.svg now"
+    },
+    {
+      "collect": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/F.PDF"
+        ]
+      ],
+      "feed": [
+        [
+          4,
+          14,
+          "doc",
+          "/tmp/F.PDF"
+        ]
+      ],
+      "text": "See /tmp/F.PDF now"
+    },
+    {
+      "collect": [
+        [
+          10,
+          19,
+          "doc",
+          "docs/a.md"
+        ]
+      ],
+      "feed": [],
+      "text": "Saved in `docs/a.md`."
+    },
+    {
+      "collect": [
+        [
+          5,
+          16,
+          "doc",
+          "./docs/a.md"
+        ],
+        [
+          32,
+          41,
+          "doc",
+          "docs/a.md"
+        ]
+      ],
+      "feed": [],
+      "text": "Also ./docs/a.md and [the plan](docs/a.md)."
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "see coord/*.md and contracts/<id>.md"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "README.md alone"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "x.com/a.png is no path"
+    },
+    {
+      "collect": [
+        [
+          0,
+          10,
+          "doc",
+          "../up/a.md"
+        ]
+      ],
+      "feed": [],
+      "text": "../up/a.md"
+    },
+    {
+      "collect": [
+        [
+          0,
+          16,
+          "doc",
+          ".claude/notes.md"
+        ]
+      ],
+      "feed": [],
+      "text": ".claude/notes.md here"
+    },
+    {
+      "collect": [
+        [
+          0,
+          9,
+          "doc",
+          "a_b/c.pdf"
+        ]
+      ],
+      "feed": [],
+      "text": "a_b/c.pdf ok"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "**https://x.com/*a*"
+    },
+    {
+      "collect": [],
+      "feed": [],
+      "text": "~~https://x.com~~"
+    },
+    {
+      "collect": [
+        [
+          6,
+          19,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          19,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "- [ ] https://x.com task"
+    },
+    {
+      "collect": [
+        [
+          8,
+          21,
+          "doc",
+          "/home/me/a.md"
+        ],
+        [
+          61,
+          69,
+          "doc",
+          "~/c.html"
+        ]
+      ],
+      "feed": [
+        [
+          8,
+          21,
+          "doc",
+          "/home/me/a.md"
+        ],
+        [
+          61,
+          69,
+          "doc",
+          "~/c.html"
+        ]
+      ],
+      "text": "Plan at /home/me/a.md\n\n```sh\nopen /home/me/b.md\n```\n\n> quote ~/c.html"
+    },
+    {
+      "collect": [
+        [
+          6,
+          21,
+          "link",
+          "https://x.com/t"
+        ],
+        [
+          36,
+          45,
+          "doc",
+          "/tmp/x.md"
+        ]
+      ],
+      "feed": [
+        [
+          6,
+          21,
+          "link",
+          "https://x.com/t"
+        ],
+        [
+          36,
+          45,
+          "doc",
+          "/tmp/x.md"
+        ]
+      ],
+      "text": "| a | https://x.com/t |\n|---|---|\n| /tmp/x.md | b |"
+    },
+    {
+      "collect": [
+        [
+          7,
+          20,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "feed": [
+        [
+          7,
+          20,
+          "link",
+          "https://x.com"
+        ]
+      ],
+      "text": "Setext https://x.com\n==="
+    },
+    {
+      "collect": [
+        [
+          29,
+          42,
+          "link",
+          "https://y.com"
+        ]
+      ],
+      "feed": [
+        [
+          29,
+          42,
+          "link",
+          "https://y.com"
+        ]
+      ],
+      "text": "<!-- https://x.com -->\nafter https://y.com"
+    },
+    {
+      "collect": [
+        [
+          9,
+          22,
+          "link",
+          "https://a.com"
+        ],
+        [
+          34,
+          47,
+          "link",
+          "https://b.com"
+        ]
+      ],
+      "feed": [
+        [
+          9,
+          22,
+          "link",
+          "https://a.com"
+        ],
+        [
+          34,
+          47,
+          "link",
+          "https://b.com"
+        ]
+      ],
+      "text": "Line one https://a.com  \nline two https://b.com\\\nthree"
+    }
+  ],
+  "groups": [
+    [
+      "doc",
+      "/p/Plan.MD",
+      "markdown"
+    ],
+    [
+      "doc",
+      "/p/a.html",
+      "web"
+    ],
+    [
+      "doc",
+      "/p/a.HTM",
+      "web"
+    ],
+    [
+      "doc",
+      "/p/a.pdf",
+      "pdfs"
+    ],
+    [
+      "doc",
+      "/p/a.png",
+      "images"
+    ],
+    [
+      "doc",
+      "/p/a.svg",
+      "images"
+    ],
+    [
+      "doc",
+      "/p/a.txt",
+      "otherdocs"
+    ],
+    [
+      "doc",
+      "/p/.md",
+      "otherdocs"
+    ],
+    [
+      "doc",
+      "/p.d/noext",
+      "otherdocs"
+    ],
+    [
+      "artifact",
+      "https://claude.ai/artifact/x",
+      "artifacts"
+    ],
+    [
+      "pr",
+      "https://github.com/o/r/pull/1",
+      "github"
+    ],
+    [
+      "issue",
+      "https://github.com/o/r/issues/1",
+      "github"
+    ],
+    [
+      "ci",
+      "https://github.com/o/r/actions/runs/1",
+      "github"
+    ],
+    [
+      "cmd",
+      "make",
+      "commands"
+    ],
+    [
+      "link",
+      "https://x.com",
+      "links"
+    ],
+    [
+      "local",
+      "http://localhost:3000",
+      "links"
+    ]
+  ]
+}

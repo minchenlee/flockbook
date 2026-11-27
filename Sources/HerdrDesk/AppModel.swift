@@ -14,6 +14,8 @@ final class AppModel {
     /// The Since you left card and Summaries (`Since.swift`).
     let since = SinceModel(dir: SinceModel.defaultDir())
     let summaryModels = SummaryModels()
+    /// The Resources panel (`ResourcesPanel.swift`).
+    let resources = ResourcesModel()
     /// Remote access; nil in checks and previews (they never listen).
     var remote: RemoteHub?
     var screen: Screen = .tab { didSet { if screen != .tab { showTerminal = false }; updateVisibleSessions() } }

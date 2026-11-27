@@ -24,6 +24,7 @@ OFFLINE=(
     "snapshot-remote|snapshot-remote: PASS|--snapshot-remote $OUT/snapshot-remote"
     "snapshot-statusline|snapshot-statusline: PASS|--snapshot-statusline $OUT/snapshot-statusline"
     "snapshot-since|snapshot-since: PASS|--snapshot-since $OUT/snapshot-since"
+    "snapshot-resources|snapshot-resources: PASS|--snapshot-resources $OUT/snapshot-resources"
     "hittest|hittest: overflow check PASS|--hittest"
     "chrome|chrome-test: PASS|--test-chrome"
     "table|table-test: PASS|--test-table"

@@ -95,6 +95,10 @@ struct HerdrDeskApp: App {
             let dir = args[i + 1]
             DispatchQueue.main.async { SnapshotRunner.runSince(dir: dir) }
         }
+        if let i = args.firstIndex(of: "--snapshot-resources"), args.indices.contains(i + 1) {
+            let dir = args[i + 1]
+            DispatchQueue.main.async { SnapshotRunner.runResources(dir: dir) }
+        }
         if let i = args.firstIndex(of: "--snapshot-queued"), args.indices.contains(i + 1) {
             let dir = args[i + 1]
             DispatchQueue.main.async { SnapshotRunner.runQueued(dir: dir) }
@@ -303,6 +307,7 @@ struct DeskCommands: Commands {
             Button("Show in Overview") { model.screen = .overview }.keyboardShortcut("\\", modifiers: [.command, .shift])
             Button("Search…") { model.screen = .search }.keyboardShortcut("k")
             Button("Needs You") { model.screen = .inbox }.keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Resources") { model.toggleResources() }.keyboardShortcut("r", modifiers: [.command, .shift])
         }
         // The app has no Help book: the Help menu's item opens the shortcuts panel instead (the menu keeps its search field).
         CommandGroup(replacing: .help) {

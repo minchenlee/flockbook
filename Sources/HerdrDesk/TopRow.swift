@@ -448,7 +448,7 @@ struct PlusButton<Content: View>: View {
 /// capsule, pressed, focus, disabled and Increase Contrast looks.
 struct TopRowActions: ToolbarContent {
     /// Room the two buttons take beside the island (for the island's width cap).
-    static let width: CGFloat = 84
+    static let width: CGFloat = 126
     let model: AppModel
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .principal) {
@@ -456,6 +456,11 @@ struct TopRowActions: ToolbarContent {
             Toggle(isOn: Bindable(model).showTerminal) { Label("Show Terminal", systemImage: "apple.terminal") }
                 .help("Show terminal (⌃`)")
                 .disabled(model.screen != .tab)
+            Toggle(isOn: Binding(get: { model.resources.open }, set: { _ in model.toggleResources() })) {
+                Label { Text("Resources") } icon: { ResourcesButtonLabel(count: model.resources.open ? 0 : model.resources.badge(model.resourcesKey)) }
+            }
+            .help("Resources (⌘⇧R)")
+            .accessibilityValue(model.resources.badge(model.resourcesKey) > 0 ? "\(model.resources.badge(model.resourcesKey)) new" : "")
         }
     }
 }
@@ -516,6 +521,13 @@ struct FullScreenTopRow: View {
                 .help("Show terminal (⌃`)")
                 .accessibilityLabel("Show Terminal")
                 .disabled(model.screen != .tab)
+                Toggle(isOn: Binding(get: { model.resources.open }, set: { _ in model.toggleResources() })) {
+                    ResourcesButtonLabel(count: model.resources.open ? 0 : model.resources.badge(model.resourcesKey))
+                        .frame(width: 36, height: TopRow.height).contentShape(Rectangle())
+                }
+                .toggleStyle(.button)
+                .help("Resources (⌘⇧R)")
+                .accessibilityLabel("Resources")
             }
             .buttonStyle(.borderless)
             .font(.system(size: 15, weight: .medium))

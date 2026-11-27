@@ -50,6 +50,12 @@ pub fn detect(text: &str) -> Vec<Found> {
     scan(text, false)
 }
 
+/// `detect` with relative doc paths too: what `collect` finds in a reply (for the shared vectors).
+#[doc(hidden)]
+pub fn detect_collect(text: &str) -> Vec<Found> {
+    scan(text, true)
+}
+
 /// `detect`, and with `rel` also relative doc paths (`docs/a.md`, `./a.md`): what Resources collects. Feed rows
 /// do not link them (the mod could not open them).
 fn scan(text: &str, rel: bool) -> Vec<Found> {
