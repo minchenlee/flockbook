@@ -30,7 +30,7 @@ svg.i { width: 15px; height: 15px; flex: none; display: block; }
 #scrim { position: absolute; inset: 0; }
 .hl { position: absolute; left: 0; right: 0; top: 50%; text-align: center; font-size: 104px; font-weight: 700; letter-spacing: -0.038em; line-height: 1; margin-top: -52px; }
 .w { display: inline-block; white-space: pre; }
-.hl .w, #o-h .w, .capline > span:first-child .w, #wordmark { background: linear-gradient(180deg, #ffffff 28%, #b4b4ba 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hl .w, #o-h .w, .capline > span:first-child .w, #wordmark { background: linear-gradient(180deg, #ffffff 40%, #d6d6da 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .uglow { position: absolute; border-radius: 50%; background: radial-gradient(closest-side, rgba(255,255,255,.075), transparent); }
 
 /* ---------- reveal / outro ---------- */
@@ -52,17 +52,19 @@ svg.i { width: 15px; height: 15px; flex: none; display: block; }
 .glow { position: absolute; border-radius: 50%; filter: blur(120px); }
 #cap { position: absolute; left: 120px; top: 60px; right: 400px; height: 100px; }
 .capline { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 22px; white-space: nowrap; font-size: 66px; font-weight: 650; letter-spacing: -0.034em; line-height: 100px; }
-.capline .tag { font: 600 25px 'Inter', sans-serif; letter-spacing: 0; color: #1a1304; background: linear-gradient(180deg, #ffbd62, #f09a2a); box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 8px 24px rgba(244,162,54,.28); padding: 0 16px; line-height: 44px; border-radius: 22px; margin-top: 8px; }
+.capline .tag { font: 600 25px 'Inter', sans-serif; letter-spacing: 0; color: #1a1304; background: #f4a236; padding: 0 16px; line-height: 44px; border-radius: 22px; margin-top: 8px; }
 #brand { position: absolute; right: 120px; top: 78px; display: flex; align-items: center; gap: 8px; font-size: 32px; font-weight: 650; letter-spacing: -0.025em; color: #d6d6da; }
 #brand img { width: 64px; height: 64px; }
-#world { position: absolute; left: 0; top: 190px; width: 1920px; height: 890px; overflow: hidden; perspective: 2600px; perspective-origin: 50% 40%;
+#world { position: absolute; left: 0; top: 190px; width: 1920px; height: 890px; overflow: hidden; perspective: 1500px; perspective-origin: 50% 50%;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 46px); mask-image: linear-gradient(to bottom, transparent 0, #000 46px); }
-#win { position: absolute; left: 0; top: 0; width: 1470px; height: 923px; transform-origin: 0 0; border-radius: 14px; overflow: hidden;
+#cam { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* depth of field: three blur layers, each clear inside a band around the focus line and blurred outside it */
+.dof { position: absolute; left: 0; top: 190px; width: 1920px; height: 890px; pointer-events: none; }
+#win { position: absolute; left: 0; top: 0; width: 1470px; height: 923px; zoom: 2.5; border-radius: 14px; overflow: hidden;
   background: radial-gradient(120% 85% at 62% 0%, #262626 0%, #202020 52%, #1c1c1c 100%);
   box-shadow: 0 0 0 1px rgba(255,255,255,.11), 0 2px 5px rgba(0,0,0,.45), 0 26px 52px rgba(0,0,0,.5), 0 90px 170px rgba(0,0,0,.8); }
 #win::after { content: ''; position: absolute; inset: 0; border-radius: 14px; pointer-events: none; z-index: 40;
-  background: linear-gradient(118deg, rgba(255,255,255,.055) 0%, rgba(255,255,255,.018) 19%, transparent 31%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), inset 0 0 0 1px rgba(255,255,255,.05), inset 0 -40px 80px rgba(0,0,0,.18); }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), inset 0 0 0 1px rgba(255,255,255,.04); }
 
 /* sidebar (side.js) */
 .side { position: absolute; left: 0; top: 0; bottom: 0; width: 250px; background: linear-gradient(180deg, #1f1f1f 0%, #1a1a1a 100%); box-shadow: inset -1px 0 0 rgba(255,255,255,.035); padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
@@ -70,7 +72,7 @@ svg.i { width: 15px; height: 15px; flex: none; display: block; }
 .nav { height: 30px; padding: 0 10px; display: flex; align-items: center; gap: 9px; border-radius: 7px; font-size: 13px; position: relative; }
 .nav .ic { width: 22px; display: flex; justify-content: center; color: var(--muted); }
 .nav .lb { flex: 1; }
-#badge { height: 18px; min-width: 18px; padding: 0 6px; border-radius: 9px; background: linear-gradient(180deg, #ffb655, #f09a2a); box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 0 14px rgba(244,162,54,.45), 0 2px 5px rgba(0,0,0,.4); color: #1c1403; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+#badge { height: 18px; min-width: 18px; padding: 0 6px; border-radius: 9px; background: #f4a236; box-shadow: 0 1px 3px rgba(0,0,0,.4); color: #1c1403; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .wsh { margin: 14px 0 2px; padding: 0 10px; display: flex; align-items: center; font-size: 11.5px; font-weight: 600; color: var(--muted); height: 20px; }
 .wsh span { flex: 1; }
 .ws { position: relative; height: 34px; padding: 0 10px; display: flex; align-items: center; gap: 9px; border-radius: 7px; font-size: 13px; color: var(--muted); z-index: 1; }
@@ -83,16 +85,16 @@ svg.i { width: 15px; height: 15px; flex: none; display: block; }
 .st { width: 13px; height: 13px; position: relative; flex: none; }
 .st > * { position: absolute; inset: 0; }
 .st .idle { margin: .5px; border-radius: 6px; border: 1.3px solid var(--dim); }
-.st .blk { margin: 2px; border-radius: 5px; background: radial-gradient(circle at 35% 30%, #ffc56e, #f09a2a 70%); box-shadow: 0 0 9px rgba(244,162,54,.65); }
+.st .blk { margin: 2px; border-radius: 5px; background: #f4a236; }
 .st .pulse { border-radius: 50%; border: 1.5px solid var(--amber); }
 .st svg { width: 13px; height: 13px; }
 .st .done { color: var(--green); } .st .work { color: var(--muted); }
 
 /* top bar (top.js) */
 .bar { position: absolute; left: 250px; right: 0; top: 0; height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; z-index: 6; }
-.capsule { height: 38px; padding: 0 4px; display: flex; align-items: center; gap: 2px; border-radius: 19px; background: linear-gradient(180deg, #262626, #1b1b1b); border: 1px solid #3a3a3a; box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 8px 22px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.5); position: relative; }
+.capsule { height: 38px; padding: 0 4px; display: flex; align-items: center; gap: 2px; border-radius: 19px; background: linear-gradient(180deg, #262626, #1b1b1b); border: 1px solid #3a3a3a; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.4); position: relative; }
 .tab { position: relative; height: 30px; padding: 0 14px 0 13px; display: flex; align-items: center; gap: 8px; border-radius: 15px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-.tab .fill { position: absolute; inset: 0; border-radius: 15px; background: linear-gradient(180deg, #414141, #353535); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 3px rgba(0,0,0,.4); }
+.tab .fill { position: absolute; inset: 0; border-radius: 15px; background: #393939; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 3px rgba(0,0,0,.35); }
 .tab > :not(.fill) { position: relative; }
 .tab.on { color: var(--fg); }
 .tools { padding: 0 5px; gap: 4px; }
@@ -123,13 +125,13 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
 /* approval card (cards.js) */
 #cardslot { flex: none; overflow: hidden; }
 #card { padding: 14px; display: flex; flex-direction: column; gap: 10px; border-radius: 14px; background: linear-gradient(180deg, #303030, #262626); transform-origin: 50% 100%;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 0 0 1px rgba(244,162,54,.26), 0 0 40px rgba(244,162,54,.08), 0 22px 50px rgba(0,0,0,.55), 0 3px 8px rgba(0,0,0,.4); }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 0 0 1px rgba(244,162,54,.16), 0 22px 50px rgba(0,0,0,.5), 0 3px 8px rgba(0,0,0,.35); }
 #card .h { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
-#card .h i { width: 8px; height: 8px; border-radius: 4px; background: radial-gradient(circle at 35% 30%, #ffc56e, #f09a2a 70%); box-shadow: 0 0 10px rgba(244,162,54,.7); }
+#card .h i { width: 8px; height: 8px; border-radius: 4px; background: #f4a236; }
 #card .cmd { padding: 8px 10px; border-radius: 8px; background: #1b1b1b; box-shadow: inset 0 1px 3px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.05); font: 12.5px 'JetBrains Mono', monospace; }
 #card .btns { display: flex; gap: 8px; }
 .btn { height: 30px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border-radius: 8px; font-size: 13px; border: 1px solid var(--border); }
-.btn.pri { background: linear-gradient(180deg, #3b9dff, #0a78ee); border-color: #0a78ee; color: #fff; font-weight: 500; box-shadow: inset 0 1px 0 rgba(255,255,255,.38), 0 6px 16px rgba(10,132,255,.38), 0 1px 2px rgba(0,0,0,.4); }
+.btn.pri { background: linear-gradient(180deg, #1c8cff, #0a7cf2); border-color: #0a7cf2; color: #fff; font-weight: 500; box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 3px 8px rgba(0,0,0,.35); }
 .btn:not(.pri) { background: linear-gradient(180deg, #2f2f2f, #272727); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
 .btn u { text-decoration: none; opacity: .7; }
 /* composer (composer.js) */
@@ -143,7 +145,7 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
 #box .row { display: flex; align-items: center; height: 28px; color: var(--muted); }
 #send { margin-left: auto; width: 28px; height: 28px; border-radius: 14px; background: #333; display: flex; align-items: center; justify-content: center; color: #8a8a8a; }
 /* resources panel (resources.js) */
-#res { position: absolute; right: 12px; top: 60px; width: 318px; height: 724px; border-radius: 14px; background: linear-gradient(180deg, rgba(46,46,46,.88), rgba(32,32,32,.9)); border: 1px solid #3c3c3c; box-shadow: 0 30px 70px rgba(0,0,0,.6), 0 4px 10px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.14); backdrop-filter: blur(24px); z-index: 7; overflow: hidden; }
+#res { position: absolute; right: 12px; top: 60px; width: 318px; height: 724px; border-radius: 14px; background: rgba(36,36,36,.9); border: 1px solid #3a3a3a; box-shadow: 0 30px 70px rgba(0,0,0,.55), 0 4px 10px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.07); backdrop-filter: blur(24px); z-index: 7; overflow: hidden; }
 #res .rh { height: 46px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #2c2c2c; font-size: 13px; font-weight: 600; }
 #res .scope { height: 22px; padding: 0 8px; display: flex; align-items: center; border-radius: 11px; background: var(--selected); font-size: 11.5px; font-weight: 400; color: var(--muted); }
 #res .cnt { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--muted); }
@@ -204,7 +206,7 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
   <div class="uglow" id="rglow" style="left:660px;top:70px;width:600px;height:560px"></div>
   <svg id="icon" viewBox="100 100 824 824">
     <defs><linearGradient id="mdBg" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#2C2C2E"/><stop offset="1" stop-color="#0B0B0C"/></linearGradient>
-      <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".42"/><stop offset=".35" stop-color="#fff" stop-opacity=".1"/><stop offset="1" stop-color="#fff" stop-opacity=".04"/></linearGradient>
+      <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".24"/><stop offset=".35" stop-color="#fff" stop-opacity=".07"/><stop offset="1" stop-color="#fff" stop-opacity=".04"/></linearGradient>
       <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".11"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
     <g id="ic-bg"><rect x="100" y="100" width="824" height="824" rx="185" fill="url(#mdBg)"/><rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#rim)" stroke-width="3"/></g>
     <clipPath id="icClip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
@@ -223,11 +225,8 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
 <div class="scene" id="app">
   <div class="glow" id="glow1" style="left:-200px;top:300px;width:900px;height:700px;background:rgba(255,255,255,.055)"></div>
   <div class="glow" id="glow2" style="left:1200px;top:100px;width:900px;height:800px;background:rgba(244,162,54,.035)"></div>
-  <div id="vig"></div>
-  <div id="cap" class="disp"></div>
-  <div id="brand" class="disp"><img src="flockbook-dark.svg">Flockbook</div>
   <div id="world">
-    <div id="win">
+    <div id="cam"><div id="win">
       <div class="side" id="side"></div>
       <div class="bar" id="bar"></div>
       <div class="col" id="col">
@@ -243,6 +242,7 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
       <div id="res"></div>
       <div id="ripple"></div>
       <svg id="ptr" viewBox="0 0 26 26"><path d="M5 2.5 L5 21 L10 16.6 L13.4 24 L16.6 22.5 L13.2 15.4 L20 15 Z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg>
+    </div>
     </div>
     <div id="phone">
       <div class="btn-l" style="top:150px;height:30px"></div><div class="btn-l" style="top:208px;height:58px"></div><div class="btn-l" style="top:280px;height:58px"></div>
@@ -265,6 +265,10 @@ table.t th { text-align: left; font-weight: 500; background: #262626; } table.t 
       </div>
     </div>
   </div>
+  <div class="dof" id="dof0"></div><div class="dof" id="dof1"></div><div class="dof" id="dof2"></div>
+  <div id="vig"></div>
+  <div id="cap" class="disp"></div>
+  <div id="brand" class="disp"><img src="flockbook-dark.svg">Flockbook</div>
 </div>
 
 <div class="scene" id="outro">
@@ -475,12 +479,12 @@ const birds = Array.from({ length: NB }, (_, k) => {
 });
 
 // ---------- measured geometry (window coordinates), taken once with everything laid out ----------
-const geo = {};
+const geo = {}, ZOOM = 2.5;
 function measure() {
-  const wr = $('#win').getBoundingClientRect();
-  const c = (el) => { const r = el.getBoundingClientRect(); return { x: r.left - wr.left + r.width / 2, y: r.top - wr.top + r.height / 2, w: r.width, h: r.height, l: r.left - wr.left, t: r.top - wr.top }; };
-  for (const b of Object.values(blocks)) b.h = b.g.getBoundingClientRect().height;
-  geo.card = $('#cardslot').getBoundingClientRect().height;
+  const Z = ZOOM, wr0 = $('#win').getBoundingClientRect(), wr = { left: wr0.left, top: wr0.top };
+  const c = (el) => { const r = el.getBoundingClientRect(); return { x: (r.left - wr.left + r.width / 2) / Z, y: (r.top - wr.top + r.height / 2) / Z, w: r.width / Z, h: r.height / Z, l: (r.left - wr.left) / Z, t: (r.top - wr.top) / Z }; };
+  for (const b of Object.values(blocks)) b.h = b.g.getBoundingClientRect().height / Z;
+  geo.card = $('#cardslot').getBoundingClientRect().height / Z;
   $('#caps-atlas').style.display = 'none';
   geo.allow = c($('#allow')); geo.send = c($('#send')); geo.tabTr = c($('#tab-test-runner')); geo.tabApi = c($('#tab-api-dev'));
   geo.wsShop = c($('#ws-shop')); geo.wsAtlas = c($('#ws-atlas')); $('#caps-atlas').style.display = 'flex'; $('#caps-shop').style.display = 'none'; geo.link = c($('#linkbtn')); geo.badge = c($('#badge'));
@@ -496,17 +500,32 @@ function grow(id, t, t0, d = 0.3, stream = 0) {   // a block grows in (height sp
 }
 const show = (id) => { const b = blocks[id]; b.g.style.height = ''; b.g.style.opacity = 1; b.words.forEach(w => w.style.opacity = 1); };
 const hide = (id) => { const b = blocks[id]; b.g.style.height = '0px'; b.g.style.opacity = 0; };
-// camera keyframes: [time, cx, cy, scale] in window coordinates; eased between
-const camKeys = [
-  [7.0, 735, 470, 0.90], [7.55, 735, 470, 0.90], [9.6, 840, 560, 1.34], [10.5, 846, 566, 1.37],
-  [11.05, 505, 196, 1.62], [12.0, 520, 200, 1.66], [12.75, 860, 655, 1.46], [13.9, 866, 660, 1.5],
-  [14.5, 860, 640, 1.42], [16.5, 866, 632, 1.46], [17.05, 742, 452, 1.0], [19.0, 800, 402, 1.12], [19.5, 770, 430, 1.0], [20.5, 770, 430, 0.98],
-];
+// camera keyframes, built once the click targets are measured:
+// [time, focus x, focus y (window units), magnification, tilt (rotateX), pan (rotateY), roll, depth of field 0..1]
+let camKeys = [];
+function buildCam() {
+  const P = geo;
+  camKeys = [
+    [7.0, 735, 470, 0.90, 0, 0, 0, 0], [7.5, 735, 470, 0.92, 0, 0, 0, 0],
+    [8.15, 650, 655, 2.3, 26, -10, -1.5, 1], [9.0, 770, 695, 2.15, 24, -6, -1, 1],          // macro: tool calls, then the words as they arrive
+    [9.4, 860, 640, 1.45, 10, 0, 0, 0.35], [10.5, 860, 652, 1.5, 9, 0, 0, 0.35],              // back off to read the answer
+    [10.95, 300, 236, 2.2, 20, 14, 1.5, 0.9], [11.45, 322, 226, 2.35, 20, 12, 1.5, 0.9],      // macro: the badge and the status dots
+    [12.0, P.tabTr.x - 40, 62, 2.5, 16, -8, -1, 0.8],                                          // rack over to the waiting tab
+    [12.6, 740, 700, 1.9, 18, -8, 0, 0.7],                                                     // crane down to the card
+    [13.0, P.allow.x + 70, P.allow.y - 18, 2.9, 26, -14, -1.5, 1], [13.4, P.allow.x + 84, P.allow.y - 18, 2.95, 26, -14, -1.5, 1],
+    [14.05, 800, 782, 2.0, 22, 8, 1, 0.9], [15.0, 930, 800, 2.05, 22, 8, 1, 0.9],              // macro: typing, along the line to the send button
+    [15.5, 860, 690, 1.55, 10, 0, 0, 0.4], [16.05, 860, 690, 1.6, 9, 0, 0, 0.4],
+    [16.5, 330, 300, 1.7, 14, 10, 1, 0.6],                                                     // sidebar: another workspace
+    [17.0, P.link.x - 60, 92, 2.1, 16, -10, -1, 0.8],
+    [17.5, 1290, 172, 2.3, 20, -16, -1.5, 1], [18.9, 1290, 470, 2.3, 20, -16, -1.5, 1],       // glide down the Resources rows
+    [19.5, 770, 430, 1.0, 0, 0, 0, 0], [20.5, 770, 430, 0.98, 0, 0, 0, 0],
+  ];
+}
 function camAt(t) {
   let i = 0; while (i < camKeys.length - 2 && t >= camKeys[i + 1][0]) i++;
-  const a = camKeys[i], b = camKeys[i + 1], p = eio(pr(t, a[0], b[0] - a[0]));
-  // interpolate zoom in log space so pushes feel even
-  return [lerp(a[1], b[1], p), lerp(a[2], b[2], p), Math.exp(lerp(Math.log(a[3]), Math.log(b[3]), p))];
+  const a = camKeys[i], b = camKeys[i + 1], p = eio(pr(t, a[0], b[0] - a[0])), o = [];
+  for (let k = 1; k < 8; k++) o.push(k === 3 ? Math.exp(lerp(Math.log(a[3]), Math.log(b[3]), p)) : lerp(a[k], b[k], p));   // zoom in log space
+  return o;
 }
 // pointer path: [time, x, y]; eased; clicks listed separately
 let ptrKeys = [], clicks = [];
@@ -544,7 +563,7 @@ window.seek = function (t) {
     const a = (id, t0, x, y, s) => { const p = clamp(spring(t - t0, 0.5, 0.78), 0, 1.5); const el = $(id);
       el.style.opacity = clamp((t - t0) / 0.12); el.style.transform = `translate(${x * (1 - p)}px, ${y * (1 - p)}px) scale(${lerp(s, 1, p)})`; el.style.transformOrigin = '512px 512px'; };
     a('#ic-bg', 4.0, 0, 0, 0.8); a('#ic-big', 4.1, 0, 620, 1); a('#ic-s1', 4.26, 0, 420, 1); a('#ic-s2', 4.33, 0, 420, 1);
-    $('#glint').setAttribute('x', lerp(-260, 1500, eio(pr(t, 4.75, 0.9)))); $('#glint').style.opacity = t < 4.75 || t > 5.65 ? 0 : 1;
+    $('#glint').setAttribute('x', lerp(-260, 1500, eio(pr(t, 4.75, 0.9)))); $('#glint').style.opacity = 0;
     $('#rglow').style.opacity = eo(pr(t, 4.0, 0.8));
     const wp = eo5(pr(t, 4.3, 0.5)); $('#wordmark').style.opacity = wp; $('#wordmark').style.transform = `translateY(${(1 - wp) * 36}px)`; $('#wordmark').style.letterSpacing = `${lerp(-0.02, -0.042, wp)}em`;
     const sp = eo5(pr(t, 4.5, 0.45)); $('#sub').style.opacity = sp; $('#sub').style.transform = `translateY(${(1 - sp) * 22}px)`;
@@ -625,11 +644,19 @@ window.seek = function (t) {
     $('#ripple').style.transform = `translate(${rx}px, ${ry}px) scale(${0.25 + eo(rpz) * 0.95})`;
 
     // ---- camera ----
-    const [cx, cy, s] = camAt(t);
+    const [cx, cy, S, tiltX, panY, rz, dof] = camAt(t);
     const inn = clamp(spring(t - 7.0, 0.6, 0.86), 0, 1.2), ph = clamp(spring(t - 19.0, 0.5, 0.8), 0, 1.3), phc = clamp(ph);
-    const rise = (1 - inn) * 150, tilt = (1 - clamp(inn)) * 14;
-    $('#win').style.transform = `translate(${960 - cx * s}px, ${445 - cy * s + rise}px) scale(${s})` + (tilt > 0.01 ? ` rotateX(${tilt}deg)` : '');
-    $('#win').style.opacity = clamp((t - 7.0) / 0.25) * lerp(1, 0.42, phc); $('#win').style.filter = phc > 0.01 ? `blur(${phc * 7}px)` : 'none';
+    const rise = (1 - inn) * 150, tilt = tiltX + (1 - clamp(inn)) * 14;
+    const breathe = Math.sin(t * 0.9) * 0.35;   // a hand-held drift, a fraction of a degree
+    $('#cam').style.transform = `translate(960px, ${445 + rise}px) rotateX(${tilt}deg) rotateY(${panY + breathe}deg) rotateZ(${rz}deg) scale(${S / ZOOM}) translate(${-cx * ZOOM}px, ${-cy * ZOOM}px)`;
+    $('#cam').style.opacity = clamp((t - 7.0) / 0.25) * lerp(1, 0.42, phc); $('#cam').style.filter = phc > 0.01 ? `blur(${phc * 7}px)` : 'none';
+    // depth of field around the focus line (the middle of the frame); off while the phone is up
+    const d = dof * (1 - phc);
+    [[1.6, 120], [4.5, 215], [10, 320]].forEach(([r, w], i) => { const el = $('#dof' + i);
+      if (d < 0.02) { el.style.display = 'none'; return; }
+      el.style.display = 'block'; el.style.backdropFilter = `blur(${r * d}px)`;
+      const m = `linear-gradient(to bottom, #000 0, #000 ${445 - w - 110}px, transparent ${445 - w}px, transparent ${445 + w}px, #000 ${445 + w + 110}px, #000 100%)`;
+      el.style.webkitMaskImage = m; el.style.maskImage = m; });
     // phone rises in front of the window
     $('#phone').style.display = t >= 19.0 ? 'block' : 'none';
     $('#phone').style.transform = `translateY(${(1 - ph) * 640}px)` + (phc < 0.999 ? ` rotateX(${(1 - phc) * 10}deg)` : '');
@@ -662,7 +689,7 @@ window.seek = function (t) {
 };
 window.ready = Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode().catch(() => {}))]).then(() => {
   // lay the app scene out once, untransformed, to measure blocks and click targets
-  scenes.app.style.display = 'block'; $('#win').style.transform = 'none'; measure(); window.seek(0); return true;
+  scenes.app.style.display = 'block'; $('#cam').style.transform = 'none'; measure(); buildCam(); window.seek(0); return true;
 });
 </script>
 </body>
