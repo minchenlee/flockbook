@@ -13,6 +13,8 @@ We appreciate all contributions, big and small. Thank you to the following peopl
 ### Platform Support
 
 - **Agustín Díaz** ([@AgustinRamiroDiaz](https://github.com/AgustinRamiroDiaz)) - Claude Code chats show their messages on Linux: the helper reads the Linux start time in Claude's pid file ([#3](https://github.com/minchenlee/flockbook/pull/3))
+- **Christopher Sands** ([@MisterSands](https://github.com/MisterSands)) - The Herdr app sidecar on Windows reaches herdr-core on its named pipe ([#19](https://github.com/minchenlee/flockbook/pull/19))
+- **Christopher Sands** ([@MisterSands](https://github.com/MisterSands)) - Claude panes on Windows find their log, so Glance and the chat show them ([#22](https://github.com/minchenlee/flockbook/pull/22))
 
 ### Code
 

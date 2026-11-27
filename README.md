@@ -143,6 +143,7 @@ Thanks to everyone who has contributed to Flockbook:
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/AgustinRamiroDiaz"><img src="https://github.com/AgustinRamiroDiaz.png?s=100" width="100px;" alt="Agustín Díaz"/><br /><sub><b>Agustín Díaz</b></sub></a><br /><a href="https://github.com/minchenlee/flockbook/commits?author=AgustinRamiroDiaz" title="Code">💻</a> <a href="#platform-AgustinRamiroDiaz" title="Packaging/porting to new platform">📦</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/choru-k"><img src="https://github.com/choru-k.png?s=100" width="100px;" alt="Cheol Kang"/><br /><sub><b>Cheol Kang</b></sub></a><br /><a href="https://github.com/minchenlee/flockbook/commits?author=choru-k" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/OMKE"><img src="https://github.com/OMKE.png?s=100" width="100px;" alt="Omar Iriskic"/><br /><sub><b>Omar Iriskic</b></sub></a><br /><a href="https://github.com/minchenlee/flockbook/commits?author=OMKE" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/MisterSands"><img src="https://github.com/MisterSands.png?s=100" width="100px;" alt="Christopher Sands"/><br /><sub><b>Christopher Sands</b></sub></a><br /><a href="https://github.com/minchenlee/flockbook/commits?author=MisterSands" title="Code">💻</a> <a href="#platform-MisterSands" title="Packaging/porting to new platform">📦</a></td>
     </tr>
   </tbody>
 </table>
