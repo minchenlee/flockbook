@@ -29,7 +29,7 @@ extension HCClient {
             var taken = claimed
             for (p, e) in remoteLogs where !due.contains(where: { $0.0.paneId == p }) { if let path = e.path { taken.insert(path) } }
             for machine in Set(due.map(\.1)).sorted() {
-                guard let (home, procs) = try? await remoteProcesses(on: machine) else { continue }
+                guard let (home, clock, procs) = try? await remoteProcesses(on: machine) else { continue }
                 func agentOf(_ a: String, _ kind: String) -> (SessionResolver.Proc, [Int32])? {
                     let rec = byAddr[a] ?? [:]
                     let fg = (rec["foreground"] as? [String: Any])?["pid"] as? Int
@@ -55,7 +55,7 @@ extension HCClient {
                     let cwd = (n.cwd as NSString).standardizingPath
                     let rivals = piStarts.filter { $0.pane != n.paneId && $0.kind == n.kind && $0.cwd == cwd }.map(\.start)
                     let previous = old?.pid == agent.pid && old?.machine == machine ? old?.path : nil
-                    var path = await remoteLog(n, agent: agent, pids: pids, procs: procs, home: home, on: machine, claimed: taken,
+                    var path = await remoteLog(n, agent: agent, pids: pids, procs: procs, home: home, clock: clock, on: machine, claimed: taken,
                                                rivals: rivals, previous: previous)
                     // The same agent and nothing found: a failed exec or listing. Keep the last path until the pane goes
                     // or another agent runs in it; dropping it would delete the mirror and copy it again.
@@ -102,18 +102,19 @@ extension HCClient {
         return String(decoding: Data(base64Encoded: r["stdout"] as? String ?? "") ?? Data(), as: UTF8.self)
     }
 
-    /// The machine's home and processes (one exec).
-    func remoteProcesses(on machine: String) async throws -> (home: String, procs: [SessionResolver.Proc]) {
-        let out = try await exec(on: machine, #"printf '%s\n' "$HOME"; ps -A -ww -o pid=,ppid=,lstart=,args="#)
-        let lines = out.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-        guard let home = lines.first.map(String.init), home.hasPrefix("/") else { throw HerdrError.protocolError("no home on \(machine)") }
-        return (home, SessionResolver.parsePS(lines.count > 1 ? String(lines[1]) : "", timeZone: TimeZone(identifier: "UTC")!))
+    /// The machine's home, process clock (Linux only) and processes (one exec). The clock line is empty where there
+    /// is no `/proc/stat` (a Mac): `ProcClock.parse` gives nil there.
+    func remoteProcesses(on machine: String) async throws -> (home: String, clock: SessionResolver.ProcClock?, procs: [SessionResolver.Proc]) {
+        let out = try await exec(on: machine, SessionResolver.remoteProcessesLine)
+        guard let r = SessionResolver.parseRemoteProcesses(out) else { throw HerdrError.protocolError("no home on \(machine)") }
+        return r
     }
 
     /// `SessionResolver.find` on another machine: Claude's pid file, else the one log its tree holds open, else (Codex)
     /// the one unclaimed rollout of its cwd that started after it, (pi, omp) the newest file of its cwd's session folder.
+    /// `clock`: the machine's process clock, for Claude's Linux `procStart`.
     private func remoteLog(_ n: SessionResolver.Need, agent: SessionResolver.Proc, pids: [Int32], procs: [SessionResolver.Proc],
-                           home: String, on machine: String, claimed: Set<String>,
+                           home: String, clock: SessionResolver.ProcClock?, on machine: String, claimed: Set<String>,
                            rivals: [Date] = [], previous: String? = nil) async -> String? {
         // Claims are session ids, remote paths, or (another remote pane's) mirror paths.
         func taken(_ p: String) -> Bool { SessionResolver.isClaimed(p, claimed) || claimed.contains(mirrorPath(machine, p)) }
@@ -128,7 +129,7 @@ extension HCClient {
                 let parts = l.split(separator: "\t", maxSplits: 1)
                 if parts.count == 2, let pid = Int32(parts[0]) { files[pid] = Data(parts[1].utf8) }
             }
-            guard let hit = SessionResolver.claudeSessionSource(pids: [agent.pid] + pids, procs: procs, read: { files[$0] }),
+            guard let hit = SessionResolver.claudeSessionSource(pids: [agent.pid] + pids, procs: procs, clock: clock, read: { files[$0] }),
                   hit.sid.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." }), !hit.sid.hasPrefix("."),
                   let ls = try? await exec(on: machine, #"ls -1 "$HOME"/.claude/projects/*/"# + "'\(hit.sid).jsonl' 2>/dev/null") else { return nil }
             let paths = ls.split(separator: "\n").map(String.init).filter { $0.hasPrefix(home + "/.claude/projects/") }

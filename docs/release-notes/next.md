@@ -8,5 +8,6 @@ One short line: what this release is about.
 ### 🔒 Security
 
 ### 🐛 Bug Fixes
+- Mac app: Claude Code agents on a Linux machine connected to herdr-core show their conversation instead of "No conversation log". The app reads the start time as Claude Code writes it on Linux, with that machine's clock (#32).
 
 ### ⚙️ Changes
