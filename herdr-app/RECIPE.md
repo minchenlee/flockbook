@@ -145,10 +145,12 @@ reply that mentioned it, when loaded; a speech-bubble icon), **Copy** (a copy ic
 a one-line shell command in a fenced block of a reply is one (docs/protocol.md `res`). A click opens a web address in
 the browser, or a doc (md, html, htm, pdf, png, svg; there now; an agent on this computer) with
 `open` (`xdg-open` off macOS). The header's count: "N items · M removed". Empty: "No resources yet" and "Docs,
-artifacts and links the agent mentions in its replies show up here." (only once all of the log is read). A long log
-read the first time comes in parts, newest first (`--chunk` 8 MiB, as the Mac app): until the first part is in, a
-spinner and "Reading this chat…"; then the items found so far (they can be clicked, folded and opened) and, at the end
-of the list, a small spinner and "Loading earlier… 35%" (bytes read of the log, rounded down) until the last part. An
+artifacts and links the agent mentions in its replies show up here." (only once all of the log is read). A long Claude Code or Codex log
+read the first time comes in parts, newest first (`--chunk` 8 MiB, as the Mac app; other agents' logs are read
+whole): until the first part is in, a spinner and "Reading this chat…" (with "Loading earlier… N%" once a part found
+nothing yet); then the items found so far (they can be clicked, folded and opened) and, at the end
+of the list, a small spinner and "Loading earlier… 35%" (bytes read of the log, rounded down) until the last part. While a part is read, a poll waits up to 60 s (PART_MS) before it asks
+again (15 s otherwise). An
 older part's items are never new (no dot, no badge). No log: "Can't find this chat's log"; a log that cannot be read
 (and no list yet): "Can't read this chat's log".
 
