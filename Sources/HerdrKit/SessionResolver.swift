@@ -479,12 +479,69 @@ public actor SessionResolver {
         return order
     }
 
-    /// `read`: the contents of `<pid>.json` (here, or fetched from another machine).
-    public static func claudeSessionSource(pids: [Int32], procs: [Proc], read: (Int32) -> Data?) -> (sid: String, pid: Int32)? {
-        let byPid = Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
-        let order = claudeSearchOrder(pids: pids, procs: procs)
+    /// A Linux machine's process clock: its boot time (`btime` in `/proc/stat`, Unix seconds) and `CLK_TCK`. Claude
+    /// Code on Linux writes `procStart` as `/proc/<pid>/stat` starttime, clock ticks after that machine's boot, so
+    /// reading it needs the clock of the machine the agent runs on. Twin of herdr-core `resolver::linux::ticks_to_date`.
+    public struct ProcClock: Sendable, Equatable {
+        public var bootTime: Int64
+        public var ticksPerSecond: UInt64
+        public init(bootTime: Int64, ticksPerSecond: UInt64) { self.bootTime = bootTime; self.ticksPerSecond = ticksPerSecond }
+
+        /// `"<btime> <CLK_TCK>"`, as `awk '/^btime /{print $2}' /proc/stat` and `getconf CLK_TCK` print them. Nil when
+        /// either is missing or not a positive whole number (not Linux, or nothing printed).
+        public static func parse(_ line: String) -> ProcClock? {
+            let w = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard w.count == 2, let b = Int64(w[0]), b > 0, let hz = UInt64(w[1]), hz > 0 else { return nil }
+            return ProcClock(bootTime: b, ticksPerSecond: hz)
+        }
+    }
+
+    /// Starts the clock line of `remoteProcessesLine`. A `ps` line never does (it starts with a pid).
+    static let procClockTag = "procclock "
+
+    /// The one shell line `HCClient.remoteProcesses` runs on another machine: its home, its process clock
+    /// (`procclock <btime> <CLK_TCK>`; the numbers are empty where there is no `/proc/stat`), then `ps` with `lstart`
+    /// (run with `TZ=UTC0`).
+    public static let remoteProcessesLine = #"printf '%s\n' "$HOME"; "#
+        + #"printf 'procclock %s %s\n' "$(awk '/^btime /{print $2}' /proc/stat 2>/dev/null)" "$(getconf CLK_TCK 2>/dev/null)"; "#
+        + #"ps -A -ww -o pid=,ppid=,lstart=,args="#
+
+    /// The output of `remoteProcessesLine`: home, clock (nil without one), processes (`lstart` in UTC). Output with no
+    /// clock line at all (home, then `ps`) reads too. Nil when the first line is not an absolute path.
+    public static func parseRemoteProcesses(_ out: String) -> (home: String, clock: ProcClock?, procs: [Proc])? {
+        let lines = out.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let home = lines.first.map(String.init), home.hasPrefix("/") else { return nil }
+        var rest = lines.count > 1 ? String(lines[1]) : ""
+        var clock: ProcClock?
+        if rest.hasPrefix(procClockTag) {
+            let parts = rest.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            clock = ProcClock.parse(String(parts[0].dropFirst(procClockTag.count)))
+            rest = parts.count > 1 ? String(parts[1]) : ""
+        }
+        return (home, clock, parsePS(rest, timeZone: TimeZone(identifier: "UTC")!))
+    }
+
+    /// A pid file's `procStart` as a date. `ps lstart` text (UTC) on macOS. All digits: a FILETIME (100 ns after
+    /// 1601-01-01 UTC, Windows) when at least 10^16, else Linux clock ticks after boot, read with `clock` (nil: no
+    /// date, the file does not count). Twin of herdr-core `resolver::proc_start`.
+    public static func claudeProcStart(_ s: String, clock: ProcClock?) -> Date? {
+        if !s.isEmpty, s.utf8.allSatisfy({ (0x30...0x39).contains($0) }) {
+            guard let n = UInt64(s) else { return nil }
+            if n >= 10_000_000_000_000_000 { return Date(timeIntervalSince1970: Double(n / 10_000_000) - 11_644_473_600) }
+            guard let clock else { return nil }
+            return Date(timeIntervalSince1970: Double(clock.bootTime) + Double(n / clock.ticksPerSecond))
+        }
         let utc = DateFormatter()
         utc.locale = Locale(identifier: "en_US_POSIX"); utc.timeZone = TimeZone(identifier: "UTC"); utc.dateFormat = "EEE MMM d HH:mm:ss yyyy"
+        return utc.date(from: s.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " "))
+    }
+
+    /// `read`: the contents of `<pid>.json` (here, or fetched from another machine). `clock`: that machine's process
+    /// clock, for a Linux `procStart` (`ProcClock`); nil here on the Mac, where Claude Code writes `ps lstart` text.
+    public static func claudeSessionSource(pids: [Int32], procs: [Proc], clock: ProcClock? = nil,
+                                           read: (Int32) -> Data?) -> (sid: String, pid: Int32)? {
+        let byPid = Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
+        let order = claudeSearchOrder(pids: pids, procs: procs)
         var found = Set<String>()
         var source: Int32?
         for pid in order {
@@ -493,7 +550,7 @@ public actor SessionResolver {
                   let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   (o["pid"] as? NSNumber)?.int32Value == pid,
                   let sid = o["sessionId"] as? String, !sid.isEmpty, !sid.contains("/"),
-                  let ps = (o["procStart"] as? String).flatMap({ utc.date(from: $0.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")) }),
+                  let ps = (o["procStart"] as? String).flatMap({ claudeProcStart($0, clock: clock) }),
                   abs(ps.timeIntervalSince(proc.start)) <= 2 else { continue }
             found.insert(sid)
             if source == nil { source = pid }
