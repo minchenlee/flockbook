@@ -106,4 +106,6 @@ export const summary = (terminal) => call("summary", ["--terminal", terminal, "-
 // What the agent pointed to (Rust helper only; ask hasCommand("resources") first). `since`: the last `end` cursor.
 // The real file a doc path opens (links followed), or why not: one `openable` line. Ask hasCommand("open-check") first.
 export const openCheck = (path) => call("open-check", ["--path", path]);
-export const resources = (terminal, since = null) => call("resources", ["--terminal", terminal, "--cache", cachePath(), ...(since ? ["--since", since] : [])]);
+// `chunk`: a long log read the first time comes in parts of about that many bytes, newest first (an older helper reads it
+// whole: its answer has no `more`).
+export const resources = (terminal, since = null, chunk = null) => call("resources", ["--terminal", terminal, "--cache", cachePath(), ...(since ? ["--since", since] : []), ...(chunk ? ["--chunk", String(chunk)] : [])]);
