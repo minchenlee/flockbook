@@ -17,26 +17,30 @@ extension Resources {
     }
 
     /// A log read in steps: each `read` parses only what the file grew by since the last one, so a live agent's big
-    /// log is not parsed again every poll. A file that shrank or was replaced is read again from its start. The last
-    /// line without its newline is parsed with the rest, and again in full once the newline comes.
+    /// log is not parsed again every poll. A file that shrank or was replaced is read again from `base`. The last line
+    /// without its newline is parsed with the rest, and again in full once the newline comes.
     public struct Reader: Sendable {
         var parser = ConversationParser()
         var cwds = Set<String>()
-        var last: String?
+        /// Where this reader starts in the file (a line's start; `Progressive` reads what is before it).
+        public private(set) var base = 0
         /// The byte after the last whole line parsed.
         public private(set) var offset = 0
         var file: UInt64?
         /// Bytes after the last newline at the last read (a line being written).
         var pending: String?
 
-        public init() {}
+        public init(base: Int = 0) { self.base = base; offset = base }
 
         /// False: the file cannot be read (what was read before is kept).
         public mutating func read(_ url: URL) -> Bool {
-            let a = try? FileManager.default.attributesOfItem(atPath: url.path)
-            let id = (a?[.systemFileNumber] as? NSNumber)?.uint64Value
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
-            if data.count < offset || id != file { self = Reader(); file = id }
+            guard let (data, id) = Resources.mapped(url) else { return false }
+            if data.count < offset || id != file { self = Reader(base: data.count < base ? 0 : base); file = id }
+            read(data)
+            return true
+        }
+
+        mutating func read(_ data: Data) {
             var start = data.startIndex + offset
             pending = nil
             while start < data.endIndex {
@@ -45,16 +49,16 @@ extension Resources {
                     break
                 }
                 if end > start, let line = String(data: data[start..<end], encoding: .utf8) {
-                    if let c = lineCwd(line), c != last { cwds.insert(c); last = c }
+                    if let c = lineCwd(line) { cwds.insert(c) }
                     parser.feed(line: line, offset: UInt64(start - data.startIndex))
                 }
                 start = end + 1
                 offset = start - data.startIndex
             }
-            return true
         }
 
-        public func items(home: String?, agent: String? = nil) -> [Item] {
+        /// What is read so far, as the list's raw material (`finish` makes the list).
+        public func acc(home: String?) -> Acc {
             var p = parser, cs = cwds
             if let l = pending, !l.isEmpty {
                 if let c = lineCwd(l) { cs.insert(c) }
@@ -63,8 +67,149 @@ extension Resources {
             var acc = Acc()
             for c in cs { acc.cwd(c) }
             acc.add(p.items(), home: home)
-            return acc.finish(home: home, agent: agent)
+            return acc
         }
+
+        public func items(home: String?, agent: String? = nil) -> [Item] { acc(home: home).finish(home: home, agent: agent) }
+    }
+
+    /// The file mapped, and its file number (a replaced log has another).
+    static func mapped(_ url: URL) -> (Data, UInt64?)? {
+        let a = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return (data, (a?[.systemFileNumber] as? NSNumber)?.uint64Value)
+    }
+
+    /// A log read newest first, a chunk at a time, so a big log shows its newest resources at once (`start`), then the
+    /// older ones as `older` reads them. Each cut is at the start of a typed prompt, where no tool call and no reply is
+    /// open, and each chunk is parsed alone; their lists join in file order, so the whole read gives what one read
+    /// gives. The newest chunk is a `Reader`: later reads parse only what the log grew by. `split` false (logs of other
+    /// agents, a remote copy): one chunk, the whole log.
+    public struct Progressive: Sendable {
+        /// The size of the first chunk (the mod reads the same); each older one is twice the last, up to `chunkMax`.
+        public static let chunk = 8 << 20, chunkMax = 64 << 20
+        /// Older chunks read so far (each one twice the last, up to `chunkMax`, as the helper's).
+        var steps = 0
+        public private(set) var live = Reader()
+        /// The chunk read last and the ones newer than it, up to `live` (kept apart: a chunk that ends in an open tool
+        /// call is read again with the one after it).
+        var neighbor: (start: Int, end: Int, acc: Acc)?
+        var rest = Acc()
+        /// Bytes before `low` are not read yet; `size`: the log's size when the read began.
+        public private(set) var low = 0
+        public private(set) var size = 0
+        public private(set) var started = false
+        let split: Bool
+        let chunk: Int
+
+        public init(split: Bool = true, chunk: Int = Progressive.chunk) { self.split = split; self.chunk = max(1, chunk) }
+
+        public var done: Bool { started && low == 0 }
+        /// The part of the log read, 0...1.
+        public var fraction: Double { size == 0 ? (started ? 1 : 0) : Double(size - low) / Double(size) }
+
+        /// Reads the newest chunk (and, after that, what the log grew by; a log that shrank or was replaced starts over).
+        /// False: the file cannot be read.
+        public mutating func update(_ url: URL) -> Bool {
+            guard let (data, id) = Resources.mapped(url) else { return false }
+            if started, data.count >= live.offset, id == live.file {
+                live.read(data)
+                return true
+            }
+            self = Progressive(split: split, chunk: chunk)
+            started = true
+            size = data.count
+            let b = split ? Resources.cut(data, near: data.count - chunk, below: data.count) : 0
+            live = Reader(base: b); live.file = id
+            live.read(data)
+            low = b
+            return true
+        }
+
+        /// Reads the next older chunk. False: the file cannot be read, or it changed (`update` starts over then).
+        public mutating func older(_ url: URL, home: String?) -> Bool {
+            guard !done, let (data, id) = Resources.mapped(url), id == live.file, data.count >= live.offset else { return false }
+            steps += 1
+            let s = Resources.cut(data, near: low - max(chunk, min(chunk << min(steps, 16), Progressive.chunkMax)), below: low)
+            var e = low
+            var r = Reader(base: s)
+            r.read(data.prefix(e))
+            if r.parser.hasOpenToolUse {
+                // A tool call open at the cut: this chunk is read again with the next one.
+                if let n = neighbor {
+                    e = n.end
+                    r = Reader(base: s); r.read(data.prefix(e))
+                    neighbor = nil
+                } else {
+                    live = Reader(base: s); live.file = id; live.read(data)
+                    low = s
+                    return true
+                }
+            }
+            if let n = neighbor { rest = n.acc.appending(rest) }
+            neighbor = (s, e, r.acc(home: home))
+            low = s
+            return true
+        }
+
+        /// The list as read so far, newest first.
+        public func items(home: String?, agent: String? = nil) -> [Item] {
+            let old = (neighbor?.acc ?? Acc()).appending(rest)
+            return old.appending(live.acc(home: home)).finish(home: home, agent: agent)
+        }
+    }
+
+    /// Where a chunk ends: the start of the first typed prompt from `near` on, before `below`; else the last one
+    /// before `near`; else 0 (the log's start). A typed prompt is a Claude Code user line whose content is a string.
+    static func cut(_ data: Data, near: Int, below: Int) -> Int {
+        guard near > 0 else { return 0 }
+        let base = data.startIndex
+        func lineStart(_ i: Int) -> Int {   // the start of the line holding byte i
+            var j = i
+            while j > 0, data[base + j - 1] != 0x0A { j -= 1 }
+            return j
+        }
+        func prompt(_ s: Int) -> Bool {
+            let end = data[(base + s)...].firstIndex(of: 0x0A) ?? data.endIndex
+            return Resources.isPrompt(data[(base + s)..<end])
+        }
+        // Forward from `near`.
+        var s = near == lineStart(near) ? near : (data[(base + near)...].firstIndex(of: 0x0A).map { $0 - base + 1 } ?? below)
+        while s < below {
+            if prompt(s) { return s }
+            guard let nl = data[(base + s)..<(base + below)].firstIndex(of: 0x0A) else { break }
+            s = nl - base + 1
+        }
+        // Back from `near`.
+        s = lineStart(near)
+        while s > 0 {
+            if prompt(s) { return s }
+            s = lineStart(s - 1)
+        }
+        return 0
+    }
+
+    static let promptMark = Array(#""message":{"role":"user","content":""#.utf8), userMark = Array(#""type":"user""#.utf8)
+    static let sidechainMark = Array(#""isSidechain":true"#.utf8), metaMark = Array(#""isMeta":true"#.utf8)
+
+    /// A Claude Code line with a typed prompt (not a tool's result, a note or a subagent's line).
+    static func isPrompt(_ line: Data) -> Bool {
+        guard line.first == 0x7B, contains(line, promptMark), contains(line, userMark) else { return false }
+        return !contains(line, sidechainMark) && !contains(line, metaMark)
+    }
+
+    static func contains(_ d: Data, _ pat: [UInt8]) -> Bool {
+        guard let f = pat.first, d.count >= pat.count else { return false }
+        var i = d.startIndex
+        let last = d.endIndex - pat.count
+        while i <= last {
+            guard let j = d[i...last].firstIndex(of: f) else { return false }
+            var k = 1
+            while k < pat.count, d[j + k] == pat[k] { k += 1 }
+            if k == pat.count { return true }
+            i = j + 1
+        }
+        return false
     }
 
 

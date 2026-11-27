@@ -167,6 +167,45 @@ extension SnapshotRunner {
              && Resources.problemText(.noLog).0 == "Can't find this chat's log")
         await r.refresh(key: uk, log: URL(fileURLWithPath: "/nonexistent-dir/x.jsonl"), state: .ready, home: nil, agentDir: nil)
         step("a log that cannot be read: said so", !r.loading(uk) && r.problem[uk] == .unreadable)
+        // A long log, read newest first in small chunks; its newest part has no resources. The whole read gives what
+        // one read gives, and nothing in the older parts counts as new.
+        func prompt(_ t: String) -> String {
+            #"{"type":"user","message":{"role":"user","content":"\#(t)"},"uuid":"p-\#(t)","timestamp":"\#(f.string(from: now.addingTimeInterval(-60)))"}"#
+        }
+        var long = lines
+        for i in 0..<40 { long += [prompt("step \(i)"), says("b\(i)", 20 - Double(i) * 0.4, "See https://example.com/older/\(i).")] }
+        long += [prompt("last"), says("z", 0.1, "Done, nothing to open.")]
+        let longLog = tmp.appendingPathComponent("long.jsonl")
+        try? Data((long.joined(separator: "\n") + "\n").utf8).write(to: longLog)
+        var pp = pane; pp.agent?.sessionId = "progressive"
+        let pk = ResourcesModel.key(pp, session: model.store.session.name ?? "")
+        let wantLong = Resources.collect(file: longLog, home: "/nonexistent-home", agent: root) ?? []
+        r.chunk = 300
+        await r.refresh(key: pk, log: longLog, home: "/nonexistent-home", agentDir: root, split: true)
+        r.chunk = Resources.Progressive.chunk
+        step("newest first in chunks: the whole read gives what one read gives (\(r.items(pk).count) items)",
+             !wantLong.isEmpty && r.lists[pk]?.items == wantLong && !r.readingEarlier(pk) && !r.stillReading(pk))
+        step("the newest part had none: older ones are seen, no badge (\(r.badge(pk)))", r.badge(pk) == 0 && r.seen[pk] == Resources.newest(wantLong))
+        // While the older parts are read: the list so far and how much is read; an empty first part still says reading.
+        step("the footer's words", LoadingEarlier.text(0.357) == "Loading earlier… 35%" && LoadingEarlier.text(1) == "Loading earlier… 100%")
+        r.put(pk, .init(items: Array(wantLong.prefix(3)), stamp: nil), whole: false); r.progress[pk] = 0.357
+        do {
+            let (win, host) = ContentTests.offscreen(ResourcesPanel(pane: pp).frame(width: 320, height: 420).padding(20)
+                .environment(model).environment(\.flatGlass, true).environment(\.colorScheme, .light), NSSize(width: 360, height: 460))
+            win.appearance = NSAppearance(named: .aqua)
+            for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(150)); host.layoutSubtreeIfNeeded(); host.displayIfNeeded() }
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/resources-loading-earlier.png"))
+            }
+            win.orderOut(nil)
+        }
+        step("reading older parts: the list so far, not 'reading'", r.readingEarlier(pk) && !r.stillReading(pk) && r.items(pk).count == 3)
+        let ek = "s|empty-so-far"
+        r.put(ek, .init(items: [], stamp: nil), whole: false); r.progress[ek] = 0.2
+        step("nothing found yet, log not all read: still reading, nothing seen yet", r.stillReading(ek) && r.seen[ek] == nil)
+        r.put(ek, .init(items: [], stamp: nil)); r.progress[ek] = nil
+        step("all read and none: No resources yet", !r.stillReading(ek) && r.items(ek).isEmpty && Resources.emptyText(agent: true).0 == "No resources yet")
         // Kept in memory: the last eight agents.
         for i in 0..<9 { r.put("s|other\(i)", .init(items: [], stamp: nil)) }
         step("the lists of the last \(Resources.cacheMax) agents stay in memory", r.lists.count == Resources.cacheMax && r.lists[key] == nil)

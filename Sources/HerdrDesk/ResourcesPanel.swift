@@ -40,8 +40,12 @@ final class ResourcesModel {
     private var reading: Set<String> = []
     /// Why an agent has no list (nil: its first read has not ended, and the panel says it is reading).
     private(set) var problem: [String: Resources.Problem] = [:]
-    /// Each agent's log as read so far: a read parses only what the log grew by.
-    private var readers: [String: Resources.Reader] = [:]
+    /// Each agent's log as read so far, newest part first: a later read parses only what the log grew by.
+    private var progs: [String: Resources.Progressive] = [:]
+    /// How much of the log is read (0…1) while its older parts are still being read; nil: all of it is read.
+    var progress: [String: Double] = [:]
+    /// The first chunk's size (checks put a small one).
+    var chunk = Resources.Progressive.chunk
     /// When each agent's last read ended, and how long it took: a slow log is not read again at once.
     private var lastRead: [String: (end: Date, took: TimeInterval)] = [:]
 
@@ -75,8 +79,11 @@ final class ResourcesModel {
     /// Reads the agent's log when it changed (`force`: also when not, so docs are looked at again). Off the main
     /// actor; one read an agent at a time; only what the log grew by is parsed. `state` is the store's word on the
     /// log while it has no URL: still being found (the panel keeps saying it is reading), or not there.
+    ///
+    /// The first read is newest first (`split`: a local Claude log; else at once): the last `chunk` bytes, then the
+    /// parts before them, the list growing after each. A read cancelled before the start is reached goes on next time.
     func refresh(key: String, log: URL?, state: ConversationLoadState = .loading, home: String?, agentDir: String?,
-                 force: Bool = false) async {
+                 split: Bool = true, force: Bool = false) async {
         guard let log else {
             switch state {
             case .loading: problem[key] = nil
@@ -89,38 +96,68 @@ final class ResourcesModel {
         guard !reading.contains(key) else { return }
         let a = try? FileManager.default.attributesOfItem(atPath: log.path)
         let stamp = Stamp(size: (a?[.size] as? NSNumber)?.intValue ?? -1, date: a?[.modificationDate] as? Date ?? .distantPast)
-        if !force, let was = lists[key], was.stamp == stamp { touch(key); return }
+        let was = progs[key]
+        let whole = was?.done == true
+        if !force, whole, let l = lists[key], l.stamp == stamp { touch(key); return }
         // A log that takes long to read waits 10× that before a background read (a live agent's log changes all the time).
-        if !force, lists[key] != nil, let l = lastRead[key], Date().timeIntervalSince(l.end) < 10 * l.took { return }
+        if !force, whole, let l = lastRead[key], Date().timeIntervalSince(l.end) < 10 * l.took { return }
         reading.insert(key)
         defer { reading.remove(key) }
         // The first read is waited on (the panel says so): not behind background work. Later reads are background.
-        let first = lists[key] == nil
-        let was = readers[key] ?? Resources.Reader()
+        let first = !whole
+        let size = chunk
         let t0 = Date()
-        let (reader, got) = await Task.detached(priority: first ? .userInitiated : .utility) { () -> (Resources.Reader, [Resources.Item]?) in
-            var r = was
-            guard r.read(log) else { return (r, nil) }
-            return (r, r.items(home: home, agent: agentDir))
+        let (p0, got) = await Task.detached(priority: first ? .userInitiated : .utility) { () -> (Resources.Progressive, [Resources.Item]?) in
+            var p = was ?? Resources.Progressive(split: split, chunk: size)
+            guard p.update(log) else { return (p, nil) }
+            return (p, p.items(home: home, agent: agentDir))
         }.value
         lastRead[key] = (Date(), Date().timeIntervalSince(t0))
         guard let got else {
             if lists[key] == nil { problem[key] = .unreadable }
             return
         }
-        readers[key] = reader
+        var p = p0
+        progs[key] = p
         problem[key] = nil
-        put(key, Entry(items: got, stamp: stamp))
+        progress[key] = p.done ? nil : p.fraction
+        put(key, Entry(items: got, stamp: stamp), whole: p.done)
+        // The older parts, newest first. The list (slow to build for a long log) is put at most once a second, and at the end.
+        var shown = Date()
+        while !p.done, !Task.isCancelled {
+            let q = p, since = shown
+            let (next, ok, list) = await Task.detached(priority: .userInitiated) { () -> (Resources.Progressive, Bool, [Resources.Item]?) in
+                var q = q
+                guard q.older(log, home: home) else { return (q, false, nil) }
+                return (q, true, q.done || Date().timeIntervalSince(since) >= 1 ? q.items(home: home, agent: agentDir) : nil)
+            }.value
+            // Gone from memory meanwhile (eight other agents read), or the log went: stop (a later refresh goes on).
+            guard progs[key] != nil, ok else { return }
+            p = next
+            progs[key] = p
+            progress[key] = p.done ? nil : p.fraction
+            if let list {
+                put(key, Entry(items: list, stamp: stamp), whole: p.done)
+                shown = Date()
+            }
+        }
     }
+
+    /// The agent's list is not all there yet: the panel shows how much of the log is read.
+    func readingEarlier(_ key: String) -> Bool { progress[key] != nil }
+    /// Nothing found yet and the log not all read: the panel says it is reading ("No resources yet" only after the whole log).
+    func stillReading(_ key: String) -> Bool { loading(key) || (readingEarlier(key) && (lists[key]?.items.isEmpty ?? true)) }
 
     /// The agent's first read has not ended (and nothing says it cannot be read): the panel says it is reading.
     func loading(_ key: String) -> Bool { lists[key] == nil && problem[key] == nil }
     /// Keeps a list (checks put theirs).
-    func put(_ key: String, _ e: Entry) {
+    /// `whole`: the whole log is read (else the newest part so far).
+    func put(_ key: String, _ e: Entry, whole: Bool = true) {
         if lists[key]?.items != e.items || lists[key] == nil { lists[key] = e } else { lists[key]?.stamp = e.stamp }
         touch(key)
-        // The first look at an agent: what is there is seen (an old conversation does not light the badge).
-        if seen[key] == nil { setSeen(key, Resources.newest(e.items)) }
+        // The first look at an agent: what is there is seen (an old conversation does not light the badge). The newest
+        // part has the newest items; when it has none, wait for the whole log, so older parts never count as new.
+        if seen[key] == nil, whole || !e.items.isEmpty { setSeen(key, Resources.newest(e.items)) }
         // Only the list the panel shows: a read of another agent that ends while the panel is open stays unseen.
         if open, key == shownKey { markSeen(key) }
     }
@@ -128,7 +165,7 @@ final class ResourcesModel {
     private func touch(_ key: String) {
         order.removeAll { $0 == key }; order.append(key)
         while order.count > Resources.cacheMax {
-            let k = order.removeFirst(); lists[k] = nil; readers[k] = nil; lastRead[k] = nil; problem[k] = nil
+            let k = order.removeFirst(); lists[k] = nil; progs[k] = nil; progress[k] = nil; lastRead[k] = nil; problem[k] = nil
         }
     }
 
@@ -223,7 +260,9 @@ extension AppModel {
         let log = store.logURL(for: sid)
         await resources.refresh(key: ResourcesModel.key(pane, session: store.session.name ?? ""), log: log,
                                 state: log == nil ? store.conversationState(for: sid) : .ready,
-                                home: machine == nil ? NSHomeDirectory() : nil, agentDir: machine == nil ? pane.cwd : nil, force: force)
+                                home: machine == nil ? NSHomeDirectory() : nil, agentDir: machine == nil ? pane.cwd : nil,
+                                // Newest first: a local Claude log (where a chunk may end is a Claude prompt line).
+                                split: machine == nil && pane.agent?.kind == "claude", force: force)
     }
 
     /// Show in chat: the tab's pane scrolls to the row.
@@ -299,7 +338,8 @@ struct ResourcesPanel: View {
         let key = pane.map { ResourcesModel.key($0, session: model.store.session.name ?? "") }
         let items = key.map(r.items) ?? []
         let hidden = key.map(r.hidden) ?? 0
-        let loading = pane != nil && key.map(r.loading) == true
+        let earlier = key.map(r.readingEarlier) == true
+        let loading = pane != nil && key.map(r.stillReading) == true
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text("Resources").font(.headline)
@@ -323,6 +363,7 @@ struct ResourcesPanel: View {
                 .accessibilityElement(children: .combine)
             } else if let key, !items.isEmpty, let pane {
                 list(items, key: key, pane: pane)
+                if earlier { LoadingEarlier(fraction: r.progress[key] ?? 0) }
             } else {
                 let t = key.flatMap { r.problem[$0] }.map(Resources.problemText) ?? Resources.emptyText(agent: pane != nil)
                 VStack(spacing: 6) {
@@ -366,6 +407,21 @@ struct ResourcesPanel: View {
             .padding(.vertical, 4)
         }
         .scrollIndicators(.automatic)
+    }
+}
+
+/// Under the list while the log's older parts are read: a small spinner and how much is read (rounded down).
+struct LoadingEarlier: View {
+    let fraction: Double
+    static func text(_ f: Double) -> String { "Loading earlier… \(Int((max(0, min(1, f)) * 100).rounded(.down)))%" }
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text(Self.text(fraction)).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .frame(maxWidth: .infinity).frame(height: 30)
+        .overlay(alignment: .top) { Divider().opacity(0.5) }
+        .accessibilityElement(children: .combine)
     }
 }
 

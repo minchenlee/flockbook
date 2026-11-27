@@ -108,7 +108,43 @@ func checksResources() throws {
         try whole[0..<cuts[0]].write(to: tmp)
         check(r.read(tmp) && r.items(home: "/home/me") == Resources.collect(file: tmp, home: "/home/me") && r.offset == cuts[0],
               "resources: a log that shrank is read again from its start")
+        // Read newest first in small chunks: the whole read gives what one read gives; the first step reads the end.
+        let three = whole + whole + whole   // a typed prompt in the middle, so the read can cut
+        try three.write(to: tmp)
+        let want3 = Resources.collect(file: tmp, home: "/home/me") ?? []
+        for size in [200, 1000, 2000] {
+            var p = Resources.Progressive(chunk: size)
+            var ok = p.update(tmp) && !p.done && p.fraction > 0 && p.fraction < 1
+            var n = 0
+            while ok, !p.done, n < 10_000 { ok = p.older(tmp, home: "/home/me"); n += 1 }
+            check(ok && p.done && p.fraction == 1 && !want3.isEmpty && p.items(home: "/home/me") == want3,
+                  "resources: a log read newest first in \(size)-byte chunks gives what one read gives (\(n) older chunks)")
+        }
+        var one = Resources.Progressive(split: false)
+        check(one.update(tmp) && one.done && one.items(home: "/home/me") == want3, "resources: split false reads the whole log at once")
     } catch { check(false, "resources: reader temp file (\(error))") }
+    // Two reads joined (the older first) give what one read of both gives.
+    do {
+        let parsed = SessionLog.parse(lines: log.split(separator: "\n").map(String.init))
+        var whole = Resources.Acc(); whole.add(parsed, home: "/home/me")
+        var same = true
+        for i in 1..<parsed.count {
+            if case .toolChips = parsed[i].kind, case .toolChips = parsed[i - 1].kind { continue }   // a run of chips is one item
+            var a = Resources.Acc(), b = Resources.Acc()
+            a.add(Array(parsed[..<i]), home: "/home/me"); b.add(Array(parsed[i...]), home: "/home/me")
+            if a.appending(b).finish(home: "/home/me") != whole.finish(home: "/home/me") { same = false; print("  join differs at \(i)") }
+        }
+        check(same, "resources: two reads joined give what one read gives (\(parsed.count) cuts)")
+    }
+    // Where a chunk may end: a typed prompt, not a tool's result, a subagent's line or a note.
+    let promptLines: [(String, Bool)] = [
+        (#"{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1"}"#, true),
+        (#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]}}"#, false),
+        (#"{"isSidechain":true,"type":"user","message":{"role":"user","content":"hi"}}"#, false),
+        (#"{"isMeta":true,"type":"user","message":{"role":"user","content":"note"}}"#, false),
+        (#"{"type":"assistant","message":{"role":"assistant","content":"\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"x"}}"#, false),
+    ]
+    check(promptLines.allSatisfy { Resources.isPrompt(Data($0.0.utf8)) == $0.1 }, "resources: a chunk ends only at a typed prompt")
     let cwds: [(String, String?)] = [
         (#"{"type":"user","cwd":"/a/b//","x":1}"#, "/a/b"), (#"{"cwd":"/"}"#, nil), (#"{"cwd":"rel/x"}"#, nil),
         (#"{"cwd":"/a\b"}"#, nil), (#"{"cwd":""}"#, nil), (#"{"cwd":"/a"#, nil), (#"{"c":1,"cwd":"/é/ü","cwd":"/z"}"#, "/é/ü"),

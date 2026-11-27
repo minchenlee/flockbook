@@ -50,9 +50,9 @@ extension Resources {
         return acc.finish(home: home, agent: agent)
     }
 
-    enum Title: Equatable { case given(String), file(String) }
+    enum Title: Equatable, Sendable { case given(String), file(String) }
 
-    struct Held {
+    struct Held: Sendable {
         var key, kind, target, row: String
         var firstTs, lastTs: Int64?
         var mentions: Int
@@ -61,7 +61,7 @@ extension Resources {
     }
 
     /// The resources of a log read so far: \`add\` the items, \`finish\` makes the list.
-    public struct Acc {
+    public struct Acc: Sendable {
         var held: [Held] = []
         var seq = 0
         var cwds = Set<String>()
@@ -72,6 +72,32 @@ extension Resources {
         public init() {}
 
         public mutating func cwd(_ c: String) { cwds.insert(c) }
+
+        /// This read, then `next` (what the log has after it, read alone): as one read of both.
+        public func appending(_ next: Acc) -> Acc {
+            var a = self
+            a.cwds.formUnion(next.cwds); a.dirs.formUnion(next.dirs); a.files.formUnion(next.files)
+            for h in next.held {
+                guard let i = a.at[h.key] else {
+                    a.at[h.key] = a.held.count
+                    var n = h; n.seq += seq
+                    a.held.append(n)
+                    continue
+                }
+                a.held[i].mentions += h.mentions
+                a.held[i].lastTs = h.lastTs ?? a.held[i].lastTs
+                a.held[i].firstTs = a.held[i].firstTs ?? h.firstTs
+                a.held[i].row = h.row
+                a.held[i].target = h.target
+                a.held[i].seq = h.seq + seq
+                // A given title replaces what came before it; a file's title moves to the end.
+                if case .given? = h.titles.first { a.held[i].titles = h.titles } else {
+                    for t in h.titles { a.held[i].titles.removeAll { $0 == t }; a.held[i].titles.append(t) }
+                }
+            }
+            a.seq += next.seq
+            return a
+        }
 
         public mutating func add(_ items: [ConversationItem], home: String?) {
             for it in merged(items) {
